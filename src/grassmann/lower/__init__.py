@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from .choose import choose, score_basis
 from .cob import CobError, cob, realize_basis
+from .represent import Rep, RepresentError, represent
 from .space_basis import (
     FfsRealization,
     candidate_bases,
@@ -41,4 +42,7 @@ __all__ = [
     "realize_ffs_basis",
     "FfsRealization",
     "CobError",
+    "represent",
+    "Rep",
+    "RepresentError",
 ]
