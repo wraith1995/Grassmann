@@ -25,7 +25,8 @@ arities respected). Full *type* checking (dims/properties matching) is IW3.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import itertools
+from dataclasses import dataclass, field
 
 
 class SpaceError(Exception):
@@ -116,11 +117,23 @@ class DimProd:
         return f"DimProd({_tuple_repr(self.terms)})"
 
 
-Dim = DimLit | DimVar | DimOf | DimAtomRef | DimSum | DimProd
+@dataclass(frozen=True)
+class DimNeg:
+    """``-d`` (negated dim) — appears only inside a ``DimSum`` to express subtraction,
+    e.g. ``|Ker f| = |dom| + (-rank)``. Keeps the ``Dim`` algebra closed under the
+    differences the FFS dimension laws require (`20 §5`)."""
+
+    term: Dim
+
+    def __repr__(self) -> str:
+        return f"DimNeg({self.term!r})"
+
+
+Dim = DimLit | DimVar | DimOf | DimAtomRef | DimSum | DimProd | DimNeg
 
 
 def is_dim(d: object) -> bool:
-    return isinstance(d, (DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd))
+    return isinstance(d, (DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd, DimNeg))
 
 
 def as_dim(d: object) -> Dim:
@@ -351,8 +364,28 @@ class App:
         return f"App({self.g!r}, {_tuple_repr(self.positions)}, {_tuple_repr(self.args)})"
 
 
+_meta_counter = itertools.count()
+
+
+@dataclass(frozen=True)
+class SpaceMeta:
+    """A space metavariable ``?α`` — an unsolved space hole used during elaboration
+    (`25 §0`). A first-class Space node so it can sit inside ``Dual``/``OProd``/… while
+    inference resolves it; the resolution store ``Θ`` lives in
+    :mod:`grassmann.infer.unify`. ``uid`` is identity; ``hint`` a name for messages."""
+
+    uid: int = field(default_factory=lambda: next(_meta_counter))
+    hint: str = "α"
+
+    def __repr__(self) -> str:
+        return f"?{self.hint}{self.uid}"
+
+
 # A Space is any of the node types above.
-Space = Scalar | Base | SVar | Dual | OPlus | OProd | OPlusRep | Ker | Img | CoKer | CoImg | WithInner | App
+Space = (
+    Scalar | Base | SVar | Dual | OPlus | OProd | OPlusRep
+    | Ker | Img | CoKer | CoImg | WithInner | App | SpaceMeta
+)
 
 _SPACE_TYPES = (
     Scalar,
@@ -368,6 +401,7 @@ _SPACE_TYPES = (
     CoImg,
     WithInner,
     App,
+    SpaceMeta,
 )
 
 
@@ -487,12 +521,14 @@ __all__ = [
     "DimAtomRef",
     "DimSum",
     "DimProd",
+    "DimNeg",
     "is_dim",
     "as_dim",
     "dim_sum",
     "dim_prod",
     # Space nodes
     "Space",
+    "SpaceMeta",
     "Scalar",
     "Base",
     "SVar",
