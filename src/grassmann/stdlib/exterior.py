@@ -107,28 +107,6 @@ def alt(V: Expr, k: int) -> Expr:
     return G.scale(1.0 / math.factorial(k), lifted)
 
 
-def _alt_blocked(V: Expr, blocks: tuple[int, ...]) -> Expr:
-    """A ``(Σblocks)``-linear antisymmetrizer whose *input* is grouped into ``len(blocks)``
-    tensor slots of sizes ``blocks`` (rather than one fused ``V⊗ᵐ`` slot).
-
-    Same map as ``alt(V, Σblocks)`` mathematically (it antisymmetrizes over every
-    individual ``V`` factor), but its domain is ``V⊗ᵇ⁰ ⊸ V⊗ᵇ¹ ⊸ … ⊸ V⊗ᵐ`` so it can be
-    applied directly to several already-tensored operands (used by :func:`wedge`,
-    sidestepping the need to flatten a nested ``(V⊗ᵏ)⊗(V⊗ˡ)`` product).
-    """
-    m = sum(blocks)
-    doms = [V] * m
-
-    def body(*vs: Expr) -> Expr:
-        return _alt_body(vs, tuple(range(m)))
-
-    cur = G.scale(1.0 / math.factorial(m), G.llam(*doms, body))
-    # Fuse each block of input slots into a single V⊗ᵇ slot, left to right.
-    for block_index, block_size in enumerate(blocks):
-        cur = G.lift(cur, list(range(block_index, block_index + block_size)), block_index)
-    return cur
-
-
 # ===========================================================================
 # The exterior power Λᵏ(V) = Img(Alt) (26 §2).
 # ===========================================================================
@@ -160,9 +138,12 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
 
     A *derived* library function (`26 §2`, F5), not a core primitive. ``a : Λᵏ(V)`` and
     ``b : Λˡ(V)`` are embedded back into ``V⊗ᵏ`` / ``V⊗ˡ`` (FFS ``⊑`` ambient, `26 §6`),
-    antisymmetrized over all ``k + l`` factors by the blocked antisymmetrizer
-    ``Alt_{k+l}`` applied to the two operands, projected onto ``Λ^{k+l}(V)``, and scaled
-    by ``C(k+l, k)``. Synthesizes to ``Λ^{k+l}(V)``.
+    tensored to the **nested** product ``(V⊗ᵏ) ⊗ (V⊗ˡ)``, then **explicitly reassociated**
+    into the flat ``V⊗^{k+l}`` via :func:`grassmann.embed.unlift` (an ``InvLift`` the core
+    lowers as a reshape — the core never silently flattens a nested ``⊗``, `26 §2`/F2).
+    The flat tensor is antisymmetrized over all ``k + l`` factors by the single-slot
+    ``Alt_{k+l} = alt(V, k+l)``, projected onto ``Λ^{k+l}(V)``, and scaled by ``C(k+l, k)``.
+    Synthesizes to ``Λ^{k+l}(V)``.
 
     The ambient base space ``V`` is recovered from ``a``/``b`` via their exterior power's
     underlying ``Alt`` so the caller need not re-thread it.
@@ -174,8 +155,11 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
     A = G.embed(a, tensor_power(V, k))  # Λᵏ ⊑ V⊗ᵏ
     B = G.embed(b, tensor_power(V, l))  # Λˡ ⊑ V⊗ˡ
 
-    Alt_kl = _alt_blocked(V, (k, l))  # antisymmetrize over all k+l factors
-    antisym = Alt_kl.at([0, 1])(A, B)  # ⇒ V⊗^{k+l}
+    AB = A * B  # nested (V⊗ᵏ) ⊗ (V⊗ˡ)  (the core does NOT flatten ⊗)
+    AB_flat = G.unlift(AB, [0, 1])  # explicit reassociation ⇒ flat V⊗^{k+l} (reshape)
+
+    Alt_kl = alt(V, k + l)  # the single-slot antisymmetrizer V⊗^{k+l} ⊸ V⊗^{k+l}
+    antisym = Alt_kl.at([0])(AB_flat)  # ⇒ V⊗^{k+l}
 
     target = exterior_power(V, k + l)  # Λ^{k+l}(V)
     projected = G.project(antisym, target)  # onto Λ^{k+l}

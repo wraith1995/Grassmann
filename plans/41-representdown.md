@@ -11,6 +11,10 @@
   array `A`, **emitting `Stmt`s** into the current `Program`. Shape of `A` mirrors `s`:
   `Scalar→()`, `⊕(sᵢ)→` concat-dim `Σ|sᵢ|`, `⊗(sᵢ)→` axes `(|s₀|,…)`, `Dual s→` a
   covariant axis of size `|s|`. A map `s0⊸s1 = ~s0*s1` ⇒ shape `(|s0|,|s1|)`.
+  **Canonical storage is this `(dom,cod)` order** (the leading `Dual` is the input). The
+  `§7` pullback einsum and the FFS substrate use the *transposed* `(cod,dom)` view at
+  their boundary, so `represent` transposes `(dom,cod)→(cod,dom)` before the FFS seam;
+  the two views are consistent (the pullback verifiably equals `TᵀBT`, `§7`).
 - `spaceBasis(s)` — the default standard basis (§1). Program-supplied first-class bases
   override.
 - `cob(b→b') ⇒ M` — change-of-basis matrix `Stmt`s for two bases of the same space (§2).
@@ -243,6 +247,12 @@ bases of `x,y`, giving the n×n array directly.
   `x=eᵢ` this is just `T[:,i]`. Likewise `T(y)`.
 - `b(Tx,Ty)` = `Eval(b,[0,1],[Tx,Ty])`: contracts `b`'s two `~W` axes ⇒
   `result[i,j] = Σ_{a,b} B[a,b] T[a,i] T[b,j]` = `(TᵀBT)[i,j]`.
+
+> **Storage note (`§0`).** The einsum `"ab,ai,bj->ij"` indexes `T` as `(cod,dom)` —
+> `T[a,i]` has `a` a `W`(cod) index and `i` a `V`(dom) index — i.e. the **transposed**
+> `(cod,dom)` view, not `§0`'s canonical `(dom,cod)` storage. These are the same data
+> across one transpose: `§0` stores `(|dom|,|cod|)`, the FFS substrate / this einsum read
+> `(cod,dom)`, so `represent` transposes at that boundary and the pullback equals `TᵀBT`.
 
 ```
 Program "pullback_form":

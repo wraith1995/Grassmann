@@ -528,8 +528,15 @@ def _synth_lift(e: Lift | InvLift, ctx: Ctx) -> Space:
         ]
         block: Space = dual(oprod(*inner)) if inner else oprod()
     else:
-        # InvLift: split a fused Dual(⊗) back — but structurally we just fuse primally.
-        block = oprod(*fused_factors) if len(fused_factors) != 1 else fused_factors[0]
+        # InvLift: fuse the listed factors primally, *reassociating* — a fused factor
+        # that is itself an ⊗ (a nested ``OProd``, e.g. ``V⊗ᵏ``) flattens into the
+        # block, so ``InvLift((V⊗ᵏ)⊗(V⊗ˡ), [0,1])`` reassociates to the flat
+        # ``V⊗^{k+l}`` rather than keeping the nesting (`26 §2`, the explicit wedge
+        # reassociation: the core never silently flattens nested ⊗).
+        flat: list[Space] = []
+        for f in fused_factors:
+            flat.extend(_as_factors(f))
+        block = oprod(*flat) if len(flat) != 1 else flat[0]
 
     out: list[Space] = [f for _, f in rest]
     out.insert(min(insert_at, len(out)), block)
