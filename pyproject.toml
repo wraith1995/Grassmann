@@ -17,6 +17,13 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+# chartlib is the modern geometry/manifold oracle used to cross-check Grassmann's
+# coordinate-free exterior algebra against an independent geometric setting
+# (charts, tangent frames, Jacobian volume). Test-only — never a runtime dep.
+test = [
+    "pytest>=8.0",
+    "chartlib",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -30,6 +37,7 @@ where = ["src"]
 
 [tool.uv.sources]
 polyarray = { path = "../polyarray", editable = true }
+chartlib = { path = "../chartlib", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
