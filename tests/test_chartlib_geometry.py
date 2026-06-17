@@ -28,14 +28,10 @@ the d tangent vectors are fed as the ``d`` rank-1 operands of the wedge.  The
 wedge thus computes ``t₁ ∧ … ∧ t_d`` with the frame's chartlib Jacobian
 columns as its numeric basis — exactly the volume form of that tangent space.
 
-Lowering gap (degree ≥ 3, see module-end note): the stdlib ``wedge`` cannot
-consume the *result* of another ``wedge`` as an operand (the result node is a
-``Scale`` with no resolved ``Img`` space, so ``_base_space_of_exterior``
-rejects it), and ``embed→project→wedge`` re-wrapping lowers to a broken
-einsum.  So the d=3 top form is built as ``wedge(Λ², Λ¹)`` where the ``Λ²``
-operand is fed the precomputed ambient ``t₁ ∧ t₂`` — still Grassmann's wedge
-doing the antisymmetrization, just staged through ``polyarray`` for the Λ²
-factor.
+Degree ≥ 3 is now native: the stdlib ``wedge`` consumes the *result* of another
+``wedge`` directly — the d=3 top form is the genuine nested wedge
+``wedge(wedge(t₁,t₂), t₃)``, with Grassmann's ``alt`` antisymmetrizer doing all
+the work at both levels and no numerically-staged inner Λ².
 """
 
 from __future__ import annotations
@@ -122,16 +118,17 @@ def _volume_form_via_grassmann(frame: np.ndarray) -> float:
         return float(tensor[0, 1])
 
     if d == 3:
-        # Λ² operand fed the precomputed ambient t₁ ∧ t₂, Λ¹ operand fed t₃.
-        a2 = G.project(
-            G.var("a2_amb", tensor_power(V, 2)), exterior_power(V, 2),
-        )
+        # Native 3-fold wedge: t₁ ∧ t₂ ∧ t₃ as wedge(wedge(t₁,t₂), t₃) — the Λ² operand is
+        # itself a Grassmann wedge (no precomputed/numerically-staged inner Λ²).
+        a = G.project(G.var("a_amb", tensor_power(V, 1)), exterior_power(V, 1))
+        b = G.project(G.var("b_amb", tensor_power(V, 1)), exterior_power(V, 1))
         c = G.project(G.var("c_amb", tensor_power(V, 1)), exterior_power(V, 1))
-        w = wedge(a2, c, 2, 1)
+        ab = wedge(a, b, 1, 1)        # Λ² = t₁ ∧ t₂  (Grassmann antisymmetrization)
+        w = wedge(ab, c, 2, 1)        # Λ³ = (t₁ ∧ t₂) ∧ t₃
         prog = represent(G.embed(w, tensor_power(V, 3)).node)
-        t1, t2, t3 = frame[0], frame[1], frame[2]
-        a2_val = np.outer(t1, t2) - np.outer(t2, t1)  # ambient t₁ ∧ t₂
-        feed = _feed_by_prefix(prog, {"a2": a2_val, "c": t3})
+        feed = _feed_by_prefix(
+            prog, {"a": frame[0], "b": frame[1], "c": frame[2]},
+        )
         tensor = prog.run(feed)["result"].reshape(3, 3, 3)
         return float(tensor[0, 1, 2])
 

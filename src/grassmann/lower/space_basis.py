@@ -275,7 +275,7 @@ def _realize_via_gsvd(
             note=f"ffs-basis(metric):{which}=first-δ({label})",
         )
     else:
-        comp = pa.DimAtom(name=f"comp(rank:{label},{ambient})", source=(gsvd_idx, 3))
+        comp = _comp_dim(program, rank, ambient, label)
         [block] = program.emit_stmt(
             _LastColsOp(), [factor, rank],
             [pa.OutSpec("ffs_" + which + "_" + label, (ambient, comp))],
@@ -314,11 +314,12 @@ def _take_ffs_block(
             note=f"ffs-basis:{which}=first-δ({label})",
         )
     else:  # coker / ker: last (ambient - δ) cols
+        comp = _comp_dim(program, rank, ambient, label)
         [cols] = program.emit_stmt(
             _LastColsOp(),
             [factor, rank],
             [pa.OutSpec("ffs_" + which + "_" + label,
-                        (factor_rows(factor, ambient), _CompDim(delta, ambient)))],
+                        (factor_rows(factor, ambient), comp))],
             note=f"ffs-basis:{which}=last-(n-δ)({label})",
         )
     return cols
@@ -328,12 +329,21 @@ def factor_rows(factor: pa.SymArray, ambient: int) -> int:
     return ambient
 
 
-# A complement dimension n-δ is itself dynamic; represent with a DimAtom keyed to a
-# dedicated complement-rank Stmt would be cleaner, but for the substrate we re-key the
-# same δ DimAtom and let the op produce the right (numeric) width at run time.  We wrap
-# it in a fresh DimAtom name so is_dynamic sees a runtime axis.
-def _CompDim(delta: pa.DimAtom, ambient: int) -> pa.DimAtom:  # noqa: N802
-    return pa.DimAtom(name=f"comp({delta.name},{ambient})", source=delta.source)
+# A complement dimension n−δ is itself a runtime axis.  A ``DimAtom`` resolves from its
+# ``source``'s run-time binding, so it must reference a Stmt that *actually produces n−δ*,
+# not the SVD ``rank`` output (which produces δ).  We therefore emit a tiny ``_CompRankOp``
+# Stmt computing ``ambient − rank`` as a fresh 0-d int output and source the complement
+# ``DimAtom`` from THAT, so the dynamic axis resolves to ``ambient − δ`` at run time.
+def _comp_dim(
+    program: pa.Program, rank: pa.SymArray, ambient: int, label: str,
+) -> pa.DimAtom:
+    [comp_rank] = program.emit_stmt(
+        _CompRankOp(ambient), [rank],
+        [pa.OutSpec(f"comp_rank_{label}", ())],
+        note=f"ffs-basis:comp-rank({ambient}−δ)({label})",
+    )
+    comp_idx = len(program.statements) - 1
+    return pa.DimAtom(name=f"comp(rank:{label},{ambient})", source=(comp_idx, 0))
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +367,21 @@ class _FirstColsOp:
 class _LastColsOp:
     def __call__(self, A: np.ndarray, rank: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A)[:, int(rank):]
+
+
+@dataclass(frozen=True)
+class _CompRankOp:
+    """The complement rank ``ambient − δ`` as a 0-d int — sizes the FFS complement axis.
+
+    A ``DimAtom`` resolves from its ``source`` Stmt's run-time value, so the complement
+    (Ker/CoKer) axis must be sourced from a Stmt that produces ``ambient − δ`` rather than
+    the SVD ``rank`` (which produces δ).  This op is that Stmt (`41 §1`).
+    """
+
+    ambient: int
+
+    def __call__(self, rank: np.ndarray) -> np.ndarray:
+        return np.asarray(self.ambient - int(rank))
 
 
 @dataclass(frozen=True)

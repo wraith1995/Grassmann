@@ -168,7 +168,7 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
         return
     if isinstance(a, WithInner) and isinstance(b, WithInner):
         unify(a.space, b.space, store)
-        if a.metric != b.metric:
+        if not _metric_eq(a.metric, b.metric):
             raise UnifyError(f"WithInner metric mismatch: {a.metric!r} ≠ {b.metric!r}")
         return
     if isinstance(a, (Ker, Img, CoKer, CoImg)) and type(a) is type(b):
@@ -191,6 +191,22 @@ def _solve_meta(m: SpaceMeta, s: Space, store: MetaStore) -> None:
     if _occurs(store, m, s):
         raise UnifyError(f"occurs-check: {m!r} occurs in {s!r}")
     store.solve(m, s)
+
+
+def _metric_eq(a: object, b: object) -> bool:
+    """Structural equality of two ``WithInner`` metrics, array-safe.
+
+    A metric may be a numpy array (a numeric ``G_s``), for which ``a != b`` is element-wise
+    and ambiguous in a boolean context; fall back to ``np.array_equal`` then.
+    """
+    if a is b:
+        return True
+    try:
+        return bool(a == b)
+    except (ValueError, TypeError):
+        import numpy as np
+
+        return bool(np.array_equal(np.asarray(a), np.asarray(b)))
 
 
 def _unify_seq(

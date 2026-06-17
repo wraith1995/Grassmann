@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import numpy as np
 import polyarray as pa
-import pytest
 
 import grassmann.core as C
 from grassmann.lower import represent
@@ -116,26 +115,8 @@ def test_antisymmetrizer_image_basis_rank_and_orthonormal() -> None:
     np.testing.assert_allclose(cols.T @ cols, np.eye(1), atol=1e-9)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "represent/substrate GAP (same root cause as test_algorithm_corpus' Ker/CoKer "
-        "xfails): the kernel of alt(V,2) is the last |V⊗²|−δ = 4−1 = 3 columns of the SVD "
-        "V-factor, realized by realize_ffs_basis._take_ffs_block via _LastColsOp whose "
-        "complement DimAtom (_CompDim) still sources the SVD `rank` output ⇒ the dynamic "
-        "axis resolves to δ (=1) not ambient−δ (=3).  Program.run rejects it: "
-        "'bulk Stmt output ffs_ker_f: expected shape (4,1); got (4,3)'.  This is exactly "
-        "the rank-3 symmetric-forms kernel the old test_basisKern asserted.  Fix owner: "
-        "the represent.py / space_basis hardening pass."
-    ),
-    raises=ValueError,
-    strict=True,
-)
 def test_antisymmetrizer_kernel_basis_rank_and_orthonormal() -> None:
-    """``Ker(alt(V, 2))`` — the rank-3 symmetric forms (the old ``test_basisKern`` target).
-
-    XFAIL: the complement-block (last-(n−δ)) FFS realization is mis-sized in the substrate
-    (see the marker).  The assertions are the intended contract once it is fixed.
-    """
+    """``Ker(alt(V, 2))`` — the rank-3 symmetric forms (the old ``test_basisKern`` target)."""
     import grassmann.embed as G
 
     V = G.space("V", 2)
