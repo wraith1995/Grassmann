@@ -1,0 +1,35 @@
+[project]
+name = "grassman"
+version = "0.1.0"
+description = "Grassman — typed, coordinate-free linear-algebra core IR (kinds/spaces/types/terms/bases), lowered to polyarray."
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [
+    { name = "teocollin1995", email = "teoc@mit.edu" },
+]
+# polyarray is the IW4 lowering target; the IW1 core datatypes do not import it
+# at runtime, but we declare the dependency now so the package graph is correct.
+dependencies = [
+    "polyarray",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+polyarray = { path = "../polyarray", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
