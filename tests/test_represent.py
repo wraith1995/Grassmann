@@ -23,7 +23,9 @@ import polyarray as pa
 
 import grassmann.core as C
 import grassmann.core.props as P
+from grassmann.core.kinds import SpaceSort
 from grassmann.lower import represent
+from grassmann.lower.provenance import PROV_KINDS
 
 
 def _var_key(v: C.Var) -> str:
@@ -272,3 +274,161 @@ def test_provenance_pullback_notes() -> None:
     assert all(n for n in notes)
     assert any(n.startswith("llam:basis") for n in notes)
     assert any(n.startswith("eval:contract") for n in notes)
+
+
+# ===========================================================================
+# (1) NEval → sub-Program / CallOp packaging (`41 §3` "Lam → sub-Program").
+# ===========================================================================
+
+
+def _eval_lam(V: C.Space, W: C.Space) -> tuple[C.Term, C.Var, C.Var]:
+    """A Lam ``λ x:V. f(x)`` (f : V ⊸ W a free var) — a dependent function."""
+    f = C.var("f", C.linear_map_space(V, W))
+    x = C.var("x", V)
+    lam = C.lam(((x.name, SpaceSort(V)),), C.eval_(f, (0,), x), (x,))
+    return lam, f, x
+
+
+def test_neval_lowers_via_subprogram_and_runs() -> None:
+    # An NEval of a Lam now lowers via the §3 Lam→sub-Program path (a Stmt whose fn is the
+    # body's own sub-Program), and runs to the right numbers.
+    V, W = C.base("V", 2), C.base("W", 3)
+    lam, f, _x = _eval_lam(V, W)
+    a = C.var("a", V)
+    prog = represent(C.neval(lam, (0,), a))
+
+    # the body was packaged as a sub-Program invoked by a CallOp Stmt.
+    call_stmts = [s for s in prog.statements if isinstance(s.fn, pa.CallOp)]
+    assert len(call_stmts) == 1
+    assert isinstance(call_stmts[0].fn.fn, pa.Program)
+    assert any(s.note.startswith("neval:call-subprogram") for s in prog.statements)
+
+    fv = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])  # f stored (|V|,|W|)
+    av = np.array([2.0, -1.0])
+    res = prog.run({_var_key(f): fv, _var_key(a): av})["result"]
+    np.testing.assert_allclose(res, fv.T @ av)
+
+
+def test_reused_dependent_function_shares_one_subprogram() -> None:
+    # A reused Lam (the "reused dependent function" case the inline path can't package
+    # cleanly) is lowered ONCE into a shared sub-Program and *called* twice.
+    V, W = C.base("V", 2), C.base("W", 3)
+    lam, f, _x = _eval_lam(V, W)
+    a, b = C.var("a", V), C.var("b", V)
+    prog = represent(C.sum_(C.neval(lam, (0,), a), C.neval(lam, (0,), b)))
+
+    call_stmts = [s for s in prog.statements if isinstance(s.fn, pa.CallOp)]
+    assert len(call_stmts) == 2
+    # both calls target the SAME sub-Program object (body lowered once, not duplicated).
+    assert len({id(s.fn.fn) for s in call_stmts}) == 1
+
+    fv = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    av, bv = np.array([1.0, 0.0]), np.array([0.0, 1.0])
+    res = prog.run({_var_key(f): fv, _var_key(a): av, _var_key(b): bv})["result"]
+    np.testing.assert_allclose(res, fv.T @ av + fv.T @ bv)
+
+
+# ===========================================================================
+# (2) Structured Provenance — every emitted Stmt carries node+basis+why (`41 §6b`).
+# ===========================================================================
+
+
+def test_stmts_carry_structured_provenance() -> None:
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W))
+    x = C.var("x", V)
+    prog = represent(C.eval_(f, (0,), x))
+
+    # every emitted Stmt carries a *structured* polyarray Provenance (not just a string).
+    provs = [s.provenance for s in prog.statements]
+    assert all(p is not None for p in provs)
+    assert all(isinstance(p, pa.Provenance) for p in provs)
+    # the algebra-centric kind vocabulary (`41 §6b`), NOT the FEM sampler vocabulary.
+    assert all(p.kind in PROV_KINDS for p in provs)
+    # the eval contraction's provenance records the node kind + the contraction reason.
+    eval_provs = [p for p in provs if p.kind == "eval"]
+    assert eval_provs
+    ep = eval_provs[0]
+    assert ep.origin == "Eval"
+    assert "contract" in ep.label  # the "why" rides in the label.
+
+
+def test_structured_provenance_records_basis_choice() -> None:
+    # An FFS realization Stmt's provenance records the basis CHOICE (+ why), the `41 §6b`
+    # auditable "which coordinate choice produced this code".
+    V, W = C.base("V", 2), C.base("W", 4)
+    f = C.var("f", C.linear_map_space(V, W), props=P.inj)
+    imgf = C.img(f, source=V, target=W)
+    w = C.var("w", W)
+    prog = represent(C.project(w, imgf))
+
+    ffs = [s.provenance for s in prog.statements if s.provenance.kind == "ffs-basis"]
+    assert ffs
+    # the basis choice ("ImageBasis(...)") and why ("inj=>QrOp") are recorded in the label.
+    assert any("ImageBasis" in p.label and "QrOp" in p.label for p in ffs)
+
+
+def test_provenance_survives_post_pass_partial_eval() -> None:
+    # Structured provenance must survive the `41 §5` partial_eval post-pass (which copies
+    # the program); a regression here would silently drop traceability.
+    V = C.base("V", 3)
+    f = C.var("f", C.linear_map_space(V, V), props=P.bij)
+    prog = represent(C.solve(f))
+    assert all(s.provenance is not None for s in prog.statements)
+    assert any(s.provenance.kind == "solve" for s in prog.statements)
+
+
+# ===========================================================================
+# (3) Static-axis per-contraction runtime AssertOp (`41 §4`, belt-and-suspenders).
+# ===========================================================================
+
+
+def _axis_len_op():  # noqa: ANN202 - test helper
+    from grassmann.lower.represent import _AxisLenOp
+
+    return _AxisLenOp
+
+
+def test_static_contraction_emits_runtime_rank_eq_assert() -> None:
+    # A purely-STATIC Eval contraction now also emits a runtime rank_eq AssertOp (`41 §4`),
+    # not only the lowering-time static check.
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W))
+    x = C.var("x", V)
+    prog = represent(C.eval_(f, (0,), x))
+    rank_asserts = [
+        s for s in prog.statements
+        if isinstance(s.fn, pa.AssertOp) and s.fn.kind == "rank_eq"
+    ]
+    assert rank_asserts, "static Eval should still emit a runtime rank_eq AssertOp"
+    # the emitted AssertOp trips on mismatched axis lengths (deliberate mismatch).
+    op = rank_asserts[0].fn
+    op(np.zeros((2,)), np.asarray(2), np.asarray(2))  # match: passes, returns first input
+    with np.testing.assert_raises(AssertionError):
+        op(np.zeros((2,)), np.asarray(2), np.asarray(3))  # mismatch: trips
+
+
+def test_runtime_contraction_assert_trips_through_run() -> None:
+    # End-to-end: the same _AxisLenOp + rank_eq machinery emitted at a contraction trips at
+    # Program.run time on a deliberately mismatched (hand-built) bulk input.
+    AxisLenOp = _axis_len_op()
+    da = pa.DimAtom.from_input("da", "a", 0)
+    db = pa.DimAtom.from_input("db", "b", 0)
+    prov = pa.Provenance(kind="param_dof", origin="x", index=(), label="x")
+    sa = pa.SymInput(name="a", shape=(da,), provenance=prov)
+    sb = pa.SymInput(name="b", shape=(db,), provenance=prov)
+    p = pa.Program("contract", inputs=(sa, sb))
+    A, B = p.input("a"), p.input("b")
+    [la] = p.emit_stmt(AxisLenOp(0), [A], [pa.OutSpec("la", ())])
+    [lb] = p.emit_stmt(AxisLenOp(0), [B], [pa.OutSpec("lb", ())])
+    p.emit_stmt(
+        pa.AssertOp(kind="rank_eq", msg="assert:eval-dim@0"),
+        [A, la, lb], [pa.OutSpec("ok", (da,))],
+    )
+    p.add_output("out", p.statements[-1].out[0])
+
+    # matched contracted axes: runs fine.
+    np.testing.assert_allclose(p.run({"a": np.ones(3), "b": np.ones(3)})["out"], np.ones(3))
+    # mismatched: the runtime AssertOp trips.
+    with np.testing.assert_raises(AssertionError):
+        p.run({"a": np.ones(3), "b": np.ones(4)})

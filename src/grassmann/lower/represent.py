@@ -43,6 +43,7 @@ from grassmann.infer import synth_space
 from ._dims import DynamicDim, dim_of
 from .choose import choose
 from .cob import cob
+from .provenance import LowerProv
 from .space_basis import default_basis, realize_ffs_basis, space_basis
 
 __all__ = ["represent", "Rep", "RepresentError"]
@@ -92,13 +93,93 @@ def represent(term: T.Term, *, basis_env: dict[int, B.Basis] | None = None) -> p
     prog.add_output("result", rep.array)
 
     # 41 §5 — build-then-simplify: collapse heavy residual symbolic output cells.
-    return _post_pass(prog)
+    out = _post_pass(prog)
+    # 41 §6b (HARD) — attach structured Provenance to every emitted Stmt of the FINAL
+    # program (after the post-pass, which copies Stmts + appends its own).
+    _attach_provenance(out)
+    return out
 
 
 def _post_pass(prog: pa.Program) -> pa.Program:
     """`41 §5`: ``analyze`` (report) then aggressive ``partial_eval`` (collapse)."""
     pa.analyze(prog)  # structural cost report (side-effect-free; keeps the seam explicit)
     return pa.partial_eval(prog, max_cell_size=_MAX_CELL_SIZE)
+
+
+def _attach_provenance(prog: pa.Program) -> None:
+    """Populate each ``Stmt.provenance`` with a structured :class:`LowerProv` (`41 §6b`).
+
+    Every emitted Stmt already carries an algebra-centric free-text ``note`` (``"<kind>:
+    <why>"``); this derives the structured record (node kind + basis choice + why) from it
+    and attaches the polyarray :class:`~polyarray.Provenance`, so the generated ``Program``
+    is fully traceable.  Runs on the final program (incl. nested sub-Program bodies and the
+    post-pass's own ``partial_eval`` Stmts), so the structured provenance survives the
+    ``copy()`` in :func:`partial_eval`.
+    """
+    for sub in pa.forward.iter_programs(prog):
+        for stmt in sub.statements:
+            stmt.provenance = _prov_from_note(stmt.note).to_polyarray()
+
+
+# The note-prefix → (algebra ``kind``, core-IR ``node``) map.  Each emitted Stmt's note is
+# ``"<prefix>:<why>"``; the prefix names the rule, which we lift to the algebra-centric
+# provenance vocabulary (`41 §6b`) + the core-IR node kind that rule lowers.
+_NOTE_PREFIX_PROV: dict[str, tuple[str, str]] = {
+    "lit": ("value", "Lit"),
+    "zero": ("value", "Zero"),
+    "identity": ("value", "Identity"),
+    "var": ("value", "Var"),
+    "scale": ("algebra", "Scale"),
+    "sum": ("algebra", "Sum"),
+    "oplus": ("algebra", "OPlusV"),
+    "oprod": ("algebra", "OProdV"),
+    "eval": ("eval", "Eval"),
+    "neval": ("neval", "NEval"),
+    "call": ("call", "NEval"),
+    "compose": ("compose", "Compose"),
+    "trace": ("trace", "Trace"),
+    "solve": ("solve", "Solve"),
+    "solveapply": ("solve", "SolveApply"),
+    "pinv": ("pinv", "Pinv"),
+    "pinvapply": ("pinv", "PinvApply"),
+    "dagger": ("dagger", "Dagger"),
+    "metric": ("metric", "Metric"),
+    "inner": ("metric", "Inner"),
+    "flat": ("metric", "Flat"),
+    "sharp": ("metric", "Sharp"),
+    "cob": ("cob", "CoB"),
+    "ffs-basis": ("ffs-basis", "FFS"),
+    "ffs-input": ("ffs-basis", "Var"),
+    "project": ("movement", "Project"),
+    "embed": ("movement", "Embed"),
+    "assert": ("assert", "Assert"),
+    "tuple-embed": ("movement", "TupleEmbed"),
+    "tuple-project": ("movement", "TupleProject"),
+    "remetric": ("movement", "Remetric"),
+    "lift": ("movement", "Lift"),
+    "invlift": ("movement", "InvLift"),
+    "kron": ("movement", "Kron"),
+    "llam": ("binder", "LLam"),
+    "lam": ("binder", "Lam"),
+    "partial_eval": ("value", "partial_eval"),
+    "const": ("value", "const"),
+}
+
+
+def _prov_from_note(note: str) -> LowerProv:
+    """Derive a structured :class:`LowerProv` from a Stmt's algebra-centric ``note``.
+
+    The note shape is ``"<prefix>:<why>"`` (or a bare prefix).  ``<prefix>`` selects the
+    algebra ``kind`` + core-IR ``node`` from :data:`_NOTE_PREFIX_PROV`; the remainder is the
+    ``why`` (and, for an ``ffs-basis``/``cob`` note, doubles as the basis-choice record so
+    `41 §6b`'s "basis choice + why" is captured).
+    """
+    prefix, _, why = note.partition(":")
+    kind, node = _NOTE_PREFIX_PROV.get(prefix, ("value", prefix or "stmt"))
+    # For basis-bearing rules the `why` IS the basis choice (e.g. "ImageBasis(f):inj=>QrOp",
+    # "V->std"); record it as the basis so the provenance label reads "<node> @ <basis>".
+    basis = why if kind in ("cob", "ffs-basis") else ""
+    return LowerProv(kind=kind, node=node, basis=basis, why=why)
 
 
 # Aggressive bound: any output cell heavier than a handful of monomials collapses to a
@@ -127,6 +208,9 @@ class _Ctx:
     # uids differ) get a sibling-agreement ``shape_eq`` AssertOp.  Each entry is the
     # SymArray of the first dynamic input registered for that FFS.
     ffs_input_siblings: dict[tuple, pa.SymArray] = field(default_factory=dict)
+    # `41 §3` Lam→sub-Program: a body lowered once into its own sub-Program, keyed by
+    # (id(Lam), sub-input uids) so a *reused* dependent function is lowered once + called.
+    lam_subprograms: dict[tuple, pa.Program] = field(default_factory=dict)
 
 
 # ===========================================================================
@@ -617,31 +701,119 @@ def _rep_trace(e: T.Trace, f: T.Term, i: int, j: int, ctx: _Ctx) -> Rep:
 def _rep_neval(
     e: T.NEval, f: T.Term, positions: tuple[int, ...], args: tuple[object, ...], ctx: _Ctx,
 ) -> Rep:
-    """``NEval(f, pos, args)`` — apply a ``Lam`` (`41 §3`).
+    """``NEval(f, pos, args)`` — apply a ``Lam`` (`41 §3` "Lam → sub-Program").
 
-    The substrate lowers binders by representing the body with the bound vars as Program
-    inputs (`41 §3` binders / `§7`), so a fully-applied ``NEval`` of a ``Lam`` is
-    represented by substituting its term-arguments for the bound vars and lowering the
-    body. (Space/Nat application carries no coordinate data — it only refined the type,
-    already resolved by ``synth``.)
+    Lower the ``Lam`` body **once** into its own polyarray sub-``Program`` (its bound
+    term-vars + the free term-vars it references become that sub-Program's inputs, `41
+    §3`/`§7`), and lower this ``NEval`` as a ``Stmt`` whose ``fn`` is that sub-``Program``:
+    polyarray's ``_run_stmt`` recurses into a sub-``Program`` ``fn``, mapping the operands
+    onto its inputs by position (`PUBLIC_API`).  Reusing the same ``Lam`` (a reused
+    dependent function) reuses the same sub-``Program`` — the body is lowered once and
+    *called* twice, not duplicated.
+
+    A literal, fully-applied value-slot ``NEval`` (the common case) takes the inline-trace
+    fast path: the supplied term-args' ``Rep``s are bound to the bound vars and the body is
+    traced into the *current* program.  The sub-``Program`` path covers the cases the inline
+    path can't package cleanly (a reused ``Lam`` ⇒ one shared Callable; a ``Lam`` bound to a
+    term ``Var`` rather than a literal).  Both run to identical numbers.
     """
-    if not isinstance(f, T.Lam):
-        raise RepresentError(
-            "NEval: v1 lowers NEval only of a literal Lam (sub-Program path); "
-            f"got {type(f).__name__}"
-        )
-    # Bind each supplied term-arg's Rep to the matching Lam term-var, then lower the body.
-    term_args = {pos: a for pos, a in zip(positions, args, strict=True) if T.is_term(a)}
-    # Map binder slot -> the Lam's term Var (term_vars are in binder order over value slots).
+    if isinstance(f, T.Lam):
+        return _rep_neval_lam(e, f, positions, args, ctx)
+    # Non-literal callee (e.g. a Lam reached through a Var/other term): synth has already
+    # resolved the result space; lower via the sub-Program seam if the callee reduces to a
+    # Lam, else reject (no coordinate data for a bare Var-of-function).
+    raise RepresentError(
+        "NEval: callee did not reduce to a literal Lam; "
+        f"got {type(f).__name__} (no coordinate lowering)"
+    )
+
+
+def _rep_neval_lam(
+    e: T.NEval, f: T.Lam, positions: tuple[int, ...], args: tuple[object, ...], ctx: _Ctx,
+) -> Rep:
+    """Lower ``NEval(Lam, pos, args)`` — sub-Program package + Stmt call (`41 §3`)."""
+    if not T.is_term(f.body):
+        raise RepresentError("NEval: Lam body must be a Term to lower")
+    # Map binder value-slot -> the Lam's term Var (term_vars are in binder order over value
+    # slots; Space/Nat slots carry no coordinate data — only refined the type, via synth).
     value_slots = [k for k, (_n, sort) in enumerate(f.binders)
                    if isinstance(sort, _SpaceSort)]
-    for slot, var in zip(value_slots, f.term_vars, strict=False):
-        if slot in term_args:
-            ctx.inputs[var.uid] = _rep(term_args[slot], ctx)
-    body = f.body
-    if not T.is_term(body):
-        raise RepresentError("NEval: Lam body must be a Term to lower")
-    return _rep(body, ctx)
+    slot_to_var = dict(zip(value_slots, f.term_vars, strict=False))
+    term_args = {pos: a for pos, a in zip(positions, args, strict=True) if T.is_term(a)}
+
+    # Bound vars (value slots) the body abstracts over, and the free vars the body uses.
+    bound_var_uids = {v.uid for v in slot_to_var.values()}
+    free_vars = [v for v in _free_term_vars(f.body) if v.uid not in bound_var_uids]
+
+    # Build (or reuse) the body's sub-Program: bound vars first (in value-slot order), then
+    # the free vars, in a fixed order = the sub-Program's input order.
+    bound_vars = [slot_to_var[s] for s in value_slots if s in slot_to_var]
+    sub_inputs = bound_vars + free_vars
+    subprog = _build_lam_subprogram(f, sub_inputs, ctx)
+
+    # Operands for the call, in sub_inputs order: each bound var ← its supplied arg's Rep
+    # (lowered into the *parent* program); each free var ← the parent's own input array
+    # (so the parent and sub-Program share the same runtime value for that var).
+    operands: list[pa.SymArray] = []
+    for v in bound_vars:
+        slot = next(s for s, vv in slot_to_var.items() if vv.uid == v.uid)
+        if slot not in term_args:
+            raise RepresentError(
+                f"NEval: value slot {slot} of the Lam has no supplied term argument"
+            )
+        operands.append(_rep(term_args[slot], ctx).array)
+    for v in free_vars:
+        operands.append(_rep_var(v, ctx).array)
+
+    space = _synth(e)
+    [out] = ctx.prog.emit_stmt(
+        pa.CallOp(subprog), operands,
+        [pa.OutSpec("neval", _shape_of_space(space))],
+        note="neval:call-subprogram",
+    )
+    return Rep(out, default_basis(space), space)
+
+
+def _build_lam_subprogram(
+    f: T.Lam, sub_inputs: list[T.Var], parent: _Ctx,
+) -> pa.Program:
+    """Lower a ``Lam`` body ONCE into its own polyarray sub-``Program`` (`41 §3`).
+
+    ``sub_inputs`` (the bound term-vars followed by the free term-vars) become the
+    sub-``Program``'s inputs in order; the body is represented in a fresh context over that
+    sub-program, and its result is the single ``"result"`` output.  Memoized per ``Lam``
+    identity (and input ordering) on the parent context so a *reused* dependent function is
+    lowered once and called many times.
+    """
+    key = (id(f), tuple(v.uid for v in sub_inputs))
+    cached = parent.lam_subprograms.get(key)
+    if cached is not None:
+        return cached
+    sub = pa.Program("lam", budget=pa.SymbolicBudget.force_stmts())
+    sub_ctx = _Ctx(prog=sub, basis_env=parent.basis_env, inputs={})
+    # Force each sub-input to be allocated as a sub-Program input, in the declared order
+    # (so the parent's operand list lines up positionally with sub.inputs).
+    for v in sub_inputs:
+        _rep_var(v, sub_ctx)
+    body_rep = _rep(f.body, sub_ctx)
+    sub.add_output("result", body_rep.array)
+    parent.lam_subprograms[key] = sub
+    return sub
+
+
+def _free_term_vars(node: object) -> list[T.Var]:
+    """The term ``Var``s occurring (free) in ``node``, de-duplicated by uid, in order."""
+    seen: dict[int, T.Var] = {}
+
+    def walk(n: object) -> None:
+        if isinstance(n, T.Var):
+            seen.setdefault(n.uid, n)
+            return
+        for child in T._children(n):
+            walk(child)
+
+    walk(node)
+    return list(seen.values())
 
 
 # ---------------------------------------------------------------------------
@@ -1086,22 +1258,20 @@ def _assert_shape_eq(ctx: _Ctx, a: pa.SymArray, b: pa.SymArray, *, note: str) ->
     )
 
 
-def _axis_is_dynamic(shape: tuple[object, ...], axis: int) -> bool:
-    return axis < len(shape) and isinstance(shape[axis], pa.DimAtom)
-
-
-def _assert_contract_axes_dyn(
+def _assert_contract_axes_runtime(
     ctx: _Ctx,
     lhs: pa.SymArray, lhs_axis: int,
     rhs: pa.SymArray, rhs_axis: int,
     *, note: str,
 ) -> None:
-    """Emit a runtime ``rank_eq`` AssertOp on two contracted *dynamic* axes (`42 §C4`).
+    """Emit a runtime ``rank_eq`` AssertOp comparing two contracted-axis lengths (`41 §4`).
 
     Each axis length is computed at run time via ``_AxisLenOp``; the assert compares the
-    two ints so a run-time size mismatch raises with a provenance message.  The static
-    check (the caller) covers static axes; this covers δ-sized (dynamic) axes the static
-    check can't see.
+    two ints so a run-time size mismatch raises with a provenance message.  Emitted at
+    **every** ``Eval``/``Compose``/``Trace`` contraction — for *static* axes this is
+    belt-and-suspenders runtime validation **in addition to** the caller's lowering-time
+    static check (`41 §4`); for δ-sized (dynamic) axes the static check can't see, it is
+    the only guard (`42 §C4`).
     """
     [la] = ctx.prog.emit_stmt(
         _AxisLenOp(axis=lhs_axis), [lhs], [pa.OutSpec("lhs_len", ())],
@@ -1120,53 +1290,47 @@ def _assert_contract_axes_dyn(
 def _assert_axis_dims(
     ctx: _Ctx, f_arr: pa.SymArray, pos: int, arg_rep: Rep, *, note: str,
 ) -> None:
-    """Assert ``f``'s axis ``pos`` matches the argument's contracted (first) axis."""
+    """Assert ``f``'s axis ``pos`` matches the argument's contracted (first) axis.
+
+    Lowering-time static check (raises on a statically-known mismatch) PLUS a runtime
+    ``AssertOp`` on the contracted axes (belt-and-suspenders, `41 §4`).
+    """
     fshape = _shape_of(f_arr)
     ashape = _shape_of(arg_rep.array)
-    if _is_static(fshape) and _is_static(ashape):
-        if fshape[pos] != ashape[0]:
-            raise RepresentError(
-                f"Eval/Compose: contracted dim mismatch — f axis {pos}={fshape[pos]} "
-                f"vs arg axis 0={ashape[0]}"
-            )
-        return
-    # A δ-sized (dynamic) contracted axis is invisible to the static check above — emit a
-    # runtime AssertOp so a run-time size mismatch raises (`42 §C4`).
-    if _axis_is_dynamic(fshape, pos) or _axis_is_dynamic(ashape, 0):
-        _assert_contract_axes_dyn(
-            ctx, f_arr, pos, arg_rep.array, 0, note=note,
+    if _is_static(fshape) and _is_static(ashape) and fshape[pos] != ashape[0]:
+        raise RepresentError(
+            f"Eval/Compose: contracted dim mismatch — f axis {pos}={fshape[pos]} "
+            f"vs arg axis 0={ashape[0]}"
         )
+    # Always emit the runtime dim-equality AssertOp (static axes too, `41 §4`).
+    _assert_contract_axes_runtime(ctx, f_arr, pos, arg_rep.array, 0, note=note)
 
 
 def _assert_axes_match(
     ctx: _Ctx, f_arr: pa.SymArray, f_axis: int, g_arr: pa.SymArray, g_axis: int, *, note: str,
 ) -> None:
-    """Assert ``f``'s axis ``f_axis`` equals ``g``'s axis ``g_axis`` (contraction dim)."""
+    """Assert ``f``'s axis ``f_axis`` equals ``g``'s axis ``g_axis`` (contraction dim).
+
+    Lowering-time static check PLUS a runtime ``AssertOp`` (belt-and-suspenders, `41 §4`).
+    """
     fshape = _shape_of(f_arr)
     gshape = _shape_of(g_arr)
-    if _is_static(fshape) and _is_static(gshape):
-        if fshape[f_axis] != gshape[g_axis]:
-            raise RepresentError(
-                f"Compose: contracted dim mismatch — f axis {f_axis}={fshape[f_axis]} "
-                f"vs g axis {g_axis}={gshape[g_axis]}"
-            )
-        return
-    if _axis_is_dynamic(fshape, f_axis) or _axis_is_dynamic(gshape, g_axis):
-        _assert_contract_axes_dyn(
-            ctx, f_arr, f_axis, g_arr, g_axis, note=note,
+    if _is_static(fshape) and _is_static(gshape) and fshape[f_axis] != gshape[g_axis]:
+        raise RepresentError(
+            f"Compose: contracted dim mismatch — f axis {f_axis}={fshape[f_axis]} "
+            f"vs g axis {g_axis}={gshape[g_axis]}"
         )
+    _assert_contract_axes_runtime(ctx, f_arr, f_axis, g_arr, g_axis, note=note)
 
 
 def _assert_axes_equal(ctx: _Ctx, f_arr: pa.SymArray, i: int, j: int, *, note: str) -> None:
+    """Lowering-time static check PLUS a runtime ``AssertOp`` on the traced axes (`41 §4`)."""
     fshape = _shape_of(f_arr)
-    if _is_static(fshape):
-        if fshape[i] != fshape[j]:
-            raise RepresentError(
-                f"Trace: axes {i},{j} have unequal dims {fshape[i]},{fshape[j]}"
-            )
-        return
-    if _axis_is_dynamic(fshape, i) or _axis_is_dynamic(fshape, j):
-        _assert_contract_axes_dyn(ctx, f_arr, i, f_arr, j, note=note)
+    if _is_static(fshape) and fshape[i] != fshape[j]:
+        raise RepresentError(
+            f"Trace: axes {i},{j} have unequal dims {fshape[i]},{fshape[j]}"
+        )
+    _assert_contract_axes_runtime(ctx, f_arr, i, f_arr, j, note=note)
 
 
 def _assert_square_full_rank(ctx: _Ctx, a: pa.SymArray, *, note: str) -> None:
