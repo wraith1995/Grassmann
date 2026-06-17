@@ -377,13 +377,16 @@ graph) — a reason `41 §0b` matters.
 
 ## OPEN QUESTIONS (for the user to drive)
 
-- **OQ1 — headliner algorithms.** Confirm **A1 (FFS/FSV) + A2 (pinv/least-squares) +
-  A4 (wedge basis-invariance)** as the three Phase-5 headliners, with A3 as the honest
-  foil and A5/A6 as build-as-needed substrate. Or reweight (e.g. promote A5 GSVD if the
-  metric-general path is the priority)? Resolves meta-plan **Q6** (`01 §5`).
-- **OQ2 — stdlib boundary.** Ship `wedge`/`Alt` (and other derived ops, `26 F5`) as a tiny
-  `grassmann.examples`/stdlib module, or inline per worked example? (Lean: a thin stdlib,
-  explicitly *not* core IR.)
+- **OQ1 — headliner algorithms. ✅ RESOLVED (2026-06-17):** headliners are
+  **A1 (FFS/FSV) + A2 (pinv/least-squares) + A4 (wedge basis-invariance)**, A3 (pullback)
+  the honest foil. Status: **A2 ✅** (gate G2 = `lstsq`/`solve`), **A4 ✅** (gate G3, incl.
+  bare-FFS inputs), **A3 ✅** (`represent` pullback test = `TᵀBT`); **A1** is exercised
+  *inside* G1/G3 but still needs a **standalone** acceptance test (→ B). **A5 GSVD is
+  ELEVATED into the corpus** (cheap now `GSvdOp` ships): a metric-pinv end-to-end test
+  (→ B). Resolves meta-plan **Q6** (`01 §5`).
+- **OQ2 — stdlib boundary. ✅ RESOLVED:** a thin **`grassmann.stdlib`** module (built in
+  IW5: `exterior` = `wedge`/`alt`/`exterior_power`; `linalg` = `dot`/`norm_sq`/
+  `orthogonal_projection`/`least_squares`), explicitly **not** core IR.
 - **OQ3 — GSVD realization. ✅ RESOLVED:** a dedicated **`GSvdOp`** in polyarray (user's
   call — the paper's named axiomatized boundary, `01 §1.4`). `42` adds it. *(Also: an
   injective map's image basis uses **`QrOp`**, recovering the old `IsoSpace` — A1.)*
@@ -393,10 +396,13 @@ graph) — a reason `41 §0b` matters.
   dynamic-shape support is deferred.
 - **OQ5 — second backend & PyArray siblings. ✅ RESOLVED:** target path is `Program.run`
   → **PyTorch**, **no jax**. PyArrayTarget/PyArrayBackend stay out of scope.
-- **OQ6 — acceptance corpus.** Per `01 §3` "what 'correct' means per algorithm": is the bar
-  **numpy/scipy agreement** (lstsq, svd, qr) for A1/A2/A5 + **basis-invariance self-consistency**
-  for A4, run on the B0 reference *and* (later) cross-checked B0≡B1? (Lean: yes — that is
-  the per-phase gate in `01 §4`.)
+- **OQ6 — acceptance corpus. ✅ RESOLVED:** the bar is **numpy/scipy agreement**
+  (`lstsq`/`svd`/`qr`) for A1/A2/A5 + **basis-invariance self-consistency** for A4, run on
+  the `Program.run` reference — PLUS a **ground-truth cross-check by importing the old
+  FEMOracle algebra tests** (`~/projects/fem/ElementForge2/FEMOracle/tests/baseTest/
+  test_rep.py`, `tests/extTest/test_forms.py`, …): the new Grassmann must reproduce the old
+  `representDown`/exterior-algebra results (→ B). (B0≡B1 cross-check deferred with the
+  PyTorch target.)
 
 ## Status
 Phase-5 design **opened**. Part A: six algorithms specified (math → Grassmann → `41`/`42`
@@ -405,6 +411,7 @@ lowering → test), lean headliners **A1/A2/A4**, each tagged with the ★ basis
 injective image basis = **`QrOp`** (recovers `IsoSpace`). Part B: `Program.run` reference
 (B0, exists, = B0+`42` for Grassmann); **PyTorch op-table interpreter over the same
 `Program`** proposed — **no jax** (user decision), and torch eager makes `DimAtom`
-dynamic shapes a non-issue (OQ4 moot). **OQ3/OQ4/OQ5 resolved**; OQ1 (headliners)/OQ2
-(stdlib boundary)/OQ6 (acceptance corpus) remain open. **Next:** confirm OQ1, write the A1
-end-to-end trace to a runnable `Program`, then stand up the torch target behind the B0 oracle.
+dynamic shapes a non-issue (OQ4 moot). **ALL OQs resolved (OQ1/OQ2/OQ6 on 2026-06-17).**
+A2/A3/A4 have acceptance tests (gates G2/G3 + pullback); **remaining (B):** standalone A1
+(FFS/FSV) + A5 (GSVD metric-pinv) tests, and the imported-FEMOracle-algebra cross-check
+corpus. PyTorch target deferred to a later session.

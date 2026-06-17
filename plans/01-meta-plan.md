@@ -163,9 +163,12 @@ just-in-time at its start, not all up front.
 - ~~**Q5 (WS1):** Polynomial backend / rational lane scope.~~ **Resolved:** keep
   *all* backends (sympy / native_py / native_value / cython cpp), rational lane in
   scope, no new options. (See `10-ir-extraction.md` §6.)
-- **Q6 (Phase 5):** Which 2–3 algorithms/targets are the headline deliverables.
-- **Q7 (Phase 2/3):** The big one — **how far up the paper↔implementation spectrum**
-  the type system goes (monomorphic spaces ↔ dependent typing). Gates 2 and 3.
+- ~~**Q6 (Phase 5):** Which 2–3 algorithms/targets are the headline deliverables.~~
+  **Resolved (`50 OQ1`):** headliners A1 (FFS/FSV) + A2 (pinv) + A4 (wedge invariance),
+  A3 (pullback) the foil, A5 (GSVD) elevated; target = `Program.run` then PyTorch (no jax).
+- ~~**Q7 (Phase 2/3):** how far up the paper↔implementation spectrum the type system goes.~~
+  **Resolved:** built as `20`/`25` — typed core (kinds/spaces/types/terms), parametric over
+  spaces, asserted map properties, bidirectional inference + first-order space unification.
 
 ## 6. Risks / watch-items
 
