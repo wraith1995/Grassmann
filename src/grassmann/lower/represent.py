@@ -119,8 +119,8 @@ class _Ctx:
     basis_env: dict[int, B.Basis]
     # Var.uid -> the Rep allocated for it (a Program input, or a binder-bound input).
     inputs: dict[int, Rep]
-    # next free-index einsum label for LLam coordinate-tensor binding (`41 §3`).
-    _free_label_next: int = ord("i")
+    # next free-index einsum label POOL INDEX for LLam coordinate-tensor binding (`41 §3`).
+    _free_label_next: int = 0
     # Stage C (`42 §C`): bare FFS-typed inputs (e.g. ``a : Λᵏ``) lowered to dynamic bulk
     # inputs.  Keyed by the defining FFS map's structural key (see ``_ffs_sibling_key``) so
     # two inputs that must share a runtime δ (e.g. ``a, b : Λᵏ``, even when their binder
@@ -663,6 +663,10 @@ def _rep_solve(e: T.Solve, f: T.Term, ctx: _Ctx) -> Rep:
 def _rep_pinv(e: T.Pinv, f: T.Term, ctx: _Ctx) -> Rep:
     f_rep = _rep(f, ctx)
     space = _synth(e)
+    metric = _map_metrics(f)
+    if metric is not None:
+        out = _gsvd_pinv_map(ctx, f_rep.array, *metric)
+        return Rep(out, default_basis(space), space)
     [out] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
         [pa.OutSpec("pinv", _shape_of_space(space))], note="pinv:PinvOp",
@@ -685,11 +689,15 @@ def _rep_solve_apply(e: T.SolveApply, f: T.Term, v: T.Term, ctx: _Ctx) -> Rep:
 def _rep_pinv_apply(e: T.PinvApply, f: T.Term, v: T.Term, ctx: _Ctx) -> Rep:
     f_rep = _rep(f, ctx)
     v_rep = _rep(v, ctx)
-    [fp] = ctx.prog.emit_stmt(
-        pa.PinvOp(), [f_rep.array],
-        [pa.OutSpec("pinv", _transpose_shape(_shape_of(f_rep.array)))],
-        note="pinvapply:PinvOp",
-    )
+    metric = _map_metrics(f)
+    if metric is not None:
+        fp = _gsvd_pinv_map(ctx, f_rep.array, *metric)  # stored (|cod|,|dom|)
+    else:
+        [fp] = ctx.prog.emit_stmt(
+            pa.PinvOp(), [f_rep.array],
+            [pa.OutSpec("pinv", _transpose_shape(_shape_of(f_rep.array)))],
+            note="pinvapply:PinvOp",
+        )
     space = _synth(e)
     # fp is the pinv map cod⊸dom stored (|cod|,|dom|); applying to v[cod] contracts the
     # input (cod) axis 0, mirroring the Eval contraction convention (`41 §3`).
@@ -698,6 +706,61 @@ def _rep_pinv_apply(e: T.PinvApply, f: T.Term, v: T.Term, ctx: _Ctx) -> Rep:
         [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
     )
     return Rep(out, default_basis(space), space)
+
+
+def _map_metrics(f: T.Term) -> tuple[S.Space, S.Space] | None:
+    """The ``(dom, cod)`` of ``f`` iff either is a metric (``WithInner``) space (`50 §A5`).
+
+    A ``Pinv``/``PinvApply`` whose map space carries a per-space metric lowers through the
+    metric-aware ``GSvdOp`` path; an identity (non-``WithInner``) metric returns ``None`` so
+    the lowering collapses to the plain ``PinvOp`` (the min-sym win, `41 §1`).
+    """
+    from grassmann.infer import map_domain_codomain
+
+    dom, cod = map_domain_codomain(f)
+    if isinstance(dom, S.WithInner) or isinstance(cod, S.WithInner):
+        return dom, cod
+    return None
+
+
+def _gsvd_pinv_map(
+    ctx: _Ctx, f_arr: pa.SymArray, dom: S.Space, cod: S.Space,
+) -> pa.SymArray:
+    """Assemble the metric pseudo-inverse map through ``GSvdOp`` (`50 §A5`).
+
+    ``f_arr`` is the map stored ``(|dom|,|cod|)``; the metric pinv ``f† = [V|VI]·S⁻¹·
+    [U|UI]ᵀ·M_W`` is built from the metric-orthonormal GSVD factors of ``A`` (the map in
+    ``(cod,dom)`` orientation), and the result is stored ``(|cod|,|dom|)`` to match the plain
+    ``PinvOp`` convention (the stored map is the transpose of the math ``(cod,dom)`` matrix).
+    Identity metrics make ``GSvdOp`` coincide numerically with plain pinv.
+    """
+    from .space_basis import _GSvdFullOp
+
+    n_dom, n_cod = _static_dim(dom), _static_dim(cod)
+    m_v = _metric_matrix(ctx, dom, n_dom, note="pinv:metric(dom)")
+    m_w = _metric_matrix(ctx, cod, n_cod, note="pinv:metric(cod)")
+    # A : the map in math (cod,dom) orientation = transpose of the stored (dom,cod).
+    [a_cd] = ctx.prog.emit_stmt(
+        _TransposeOp(), [f_arr],
+        [pa.OutSpec("pinv:A=(cod,dom)", (n_cod, n_dom))], note="pinv:to-(cod,dom)",
+    )
+    u_full, v_full, s, rank = ctx.prog.emit_stmt(
+        _GSvdFullOp(), [a_cd, m_v, m_w],
+        [pa.OutSpec("Ufull", (n_cod, n_cod)), pa.OutSpec("Vfull", (n_dom, n_dom)),
+         pa.OutSpec("S", (min(n_cod, n_dom),)), pa.OutSpec("rank", ())],
+        note="pinv:GSvdOp",
+    )
+    [s_inv] = ctx.prog.emit_stmt(
+        _SinvFullOp(n_dom, n_cod), [s, rank],
+        [pa.OutSpec("Sinv", (n_dom, n_cod))], note="pinv:Sinv-full",
+    )
+    # f† = Vfull · Sinv · Ufullᵀ · M_W  ⇒ math (|dom|,|cod|); store its transpose (|cod|,|dom|).
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("va,ab,wb,wc->cv"), [v_full, s_inv, u_full, m_w],
+        [pa.OutSpec("pinv:GSvd-assemble", (n_cod, n_dom))],
+        note="pinv:assemble=Vfull·S⁻¹·Ufullᵀ·M_W",
+    )
+    return out
 
 
 def _rep_dagger(e: T.Dagger, f: T.Term, ctx: _Ctx) -> Rep:
@@ -876,6 +939,13 @@ def _rep_llam(e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx) -> R
     # Bind each linear var to its FULL standard basis: the identity matrix eye(|sᵢ|),
     # whose axis 0 is the space coordinate (contracted by Eval) and whose axis 1 is the
     # surviving free basis-index. One body pass then yields the whole map tensor.
+    #
+    # Free labels are recycled with LLam scope discipline: an LLam fully consumes its own
+    # free labels (the returned Rep has ``free_labels=""``), so the counter is restored on
+    # exit and only *concurrently open* scopes hold labels.  This keeps the live free-label
+    # set tiny even for a deep nested wedge (`26 §2`), so labels never run off the valid
+    # einsum-symbol alphabet (the degree-≥3 wedge fix).
+    saved_next = ctx._free_label_next
     bound: list[int] = []
     for v in vars_:
         if v.uid in ctx.inputs:
@@ -883,17 +953,41 @@ def _rep_llam(e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx) -> R
         vspace = _synth(v)
         n = _static_dim(vspace)
         eye = _const(ctx, np.eye(n), note=f"llam:basis({v.name})")
-        free = chr(ctx._free_label_next)
+        free = _free_label(ctx._free_label_next)
         ctx._free_label_next += 1
         ctx.inputs[v.uid] = Rep(eye, _natural_basis(vspace, v, ctx), vspace, free_labels=free)
         bound.append(v.uid)
 
     body_rep = _rep(body, ctx)
     space = _synth(e)
-    # Drop the bindings so the vars don't leak as Program inputs of an outer scope.
+    # Drop the bindings so the vars don't leak as Program inputs of an outer scope, and
+    # recycle the free labels they consumed (stack discipline — see above).
     for uid in bound:
         ctx.inputs.pop(uid, None)
+    ctx._free_label_next = saved_next
     return Rep(body_rep.array, default_basis(space), space, free_labels="")
+
+
+# Free (basis-index) einsum labels live in a pool disjoint from the lowercase space labels
+# in practice: lowercase ``i``–``z`` (the historical choice, kept so existing spec strings are
+# byte-identical) then uppercase ``A``–``Z`` as overflow headroom — all valid numpy-einsum
+# symbols.  Scope recycling (see :func:`_rep_llam`) keeps the LIVE count tiny (a deep nested
+# wedge needs only a handful at once), so a free label never overflows into an invalid
+# character (e.g. ``'{'`` — the old degree-≥3 wedge bug from a non-recycled counter).
+_FREE_LABEL_POOL = (
+    [chr(ord("i") + i) for i in range(ord("z") - ord("i") + 1)]
+    + [chr(ord("A") + i) for i in range(26)]
+)
+
+
+def _free_label(idx: int) -> str:
+    """The ``idx``-th free (basis-index) einsum label from the pool (`41 §3`)."""
+    if idx >= len(_FREE_LABEL_POOL):
+        raise RepresentError(
+            f"represent: ran out of free einsum labels (idx={idx}); the term nests more "
+            "concurrent linear binders than the einsum alphabet supports"
+        )
+    return _FREE_LABEL_POOL[idx]
 
 
 def _rep_lam(e: T.Lam, ctx: _Ctx) -> Rep:
@@ -1409,6 +1503,25 @@ class _EmbedOp:
     def __call__(self, P: np.ndarray, vsub: np.ndarray) -> np.ndarray:  # noqa: N803
         out = np.asarray(P, dtype=float) @ np.asarray(vsub, dtype=float)
         return out.reshape(self.shape) if self.shape else out
+
+
+@dataclass(frozen=True)
+class _SinvFullOp:
+    """The ``|dom|×|cod|`` rectangular-diagonal ``S⁻¹`` (``1/Sᵢ`` for ``i < rank``, else 0).
+
+    Used to assemble the metric pseudo-inverse from ``GSvdOp``'s singular values (`50 §A5`).
+    """
+
+    nrows: int
+    ncols: int
+
+    def __call__(self, S: np.ndarray, rank: np.ndarray) -> np.ndarray:  # noqa: N803
+        r = int(rank)
+        out = np.zeros((self.nrows, self.ncols))
+        s = np.asarray(S, dtype=float)
+        for i in range(r):
+            out[i, i] = 1.0 / s[i]
+        return out
 
 
 @dataclass(frozen=True)

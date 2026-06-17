@@ -174,9 +174,12 @@ def _base_space_of_exterior(a: Expr, k: int) -> Expr:
     """
     from grassmann.core import space as _s
     from grassmann.core import term as _t
+    from grassmann.infer import synth_space
 
     node = a.node if isinstance(a, Expr) else a
-    space = getattr(node, "space", None)
+    # The operand may be a derived node (a ``Scale``/``Project`` result) whose ``.space`` is
+    # ``None``; recover its synthesized space instead of reading the (possibly absent) field.
+    space = synth_space(node)
     img = space if isinstance(space, _s.Img) else None
     if img is None:
         raise ValueError(
