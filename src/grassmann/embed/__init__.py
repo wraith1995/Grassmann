@@ -1,0 +1,158 @@
+"""IW2 — the Grassmann Python embedding (eDSL).
+
+Public surface (`25 §F4`, `27 §2`). Use either::
+
+    import grassmann.embed as G
+    V = G.space("V", 3)
+
+or the operator sugar on the returned :class:`~grassmann.embed.ops.Expr` handles
+(``&``=⊕, ``*``=⊗, ``@``=Compose, ``+``=Sum, ``~``=Dual, ``>>``=map space,
+``()``=apply, ``f[α]``=type application). Every operator desugars eagerly to the IW1
+core smart constructors (`grassmann.core`); no inference happens at this layer (IW3).
+"""
+
+from __future__ import annotations
+
+from .builders import (
+    Nat,
+    R,
+    Space,
+    Type,
+    assert_,
+    base_basis,
+    basis,
+    bfn,
+    bij,
+    bot,
+    coimg,
+    coker,
+    complete,
+    compose,
+    dagger,
+    dim_img,
+    dim_ker,
+    dot,
+    dual,
+    embed,
+    external,
+    flat,
+    fn,
+    frame,
+    id,
+    image_basis,
+    img,
+    inj,
+    inj_embed,
+    inner,
+    ker,
+    kron,
+    lam,
+    lift,
+    lit,
+    llam,
+    ostack,
+    osum,
+    osum_n,
+    pinv,
+    proj,
+    project,
+    projected_basis,
+    rank,
+    remetric,
+    scalar_basis,
+    scale,
+    sharp,
+    solve,
+    space,
+    spacefn,
+    sum,
+    surj,
+    svar,
+    tensor,
+    tr,
+    typefn,
+    unlift,
+    var,
+    with_inner,
+    with_inner_basis,
+    zero,
+)
+from .ops import EmbedError, Expr, wrap
+
+__all__ = [
+    # core handle / errors
+    "Expr",
+    "EmbedError",
+    "wrap",
+    # sorts
+    "Space",
+    "Nat",
+    "Type",
+    # spaces
+    "R",
+    "bot",
+    "space",
+    "svar",
+    "osum",
+    "osum_n",
+    "tensor",
+    "dual",
+    "with_inner",
+    "ker",
+    "img",
+    "coker",
+    "coimg",
+    "fn",
+    # term values & algebra
+    "var",
+    "external",
+    "zero",
+    "id",
+    "lit",
+    "scale",
+    "sum",
+    "ostack",
+    # application / composition / trace
+    "compose",
+    "tr",
+    # inverses & adjoint
+    "solve",
+    "pinv",
+    "dagger",
+    "dot",
+    "inner",
+    "flat",
+    "sharp",
+    # movement / coercion / reshape
+    "project",
+    "embed",
+    "assert_",
+    "inj_embed",
+    "proj",
+    "remetric",
+    "lift",
+    "unlift",
+    "kron",
+    # binders
+    "llam",
+    "lam",
+    "spacefn",
+    "typefn",
+    # bases & frames
+    "scalar_basis",
+    "base_basis",
+    "basis",
+    "image_basis",
+    "projected_basis",
+    "with_inner_basis",
+    "complete",
+    "frame",
+    "bfn",
+    # properties
+    "inj",
+    "surj",
+    "bij",
+    "rank",
+    "dim_ker",
+    "dim_img",
+]
