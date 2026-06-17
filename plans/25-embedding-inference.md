@@ -1,6 +1,6 @@
-# Grassman — Python embedding & inference/elaboration (design, in progress)
+# Grassmann — Python embedding & inference/elaboration (design, in progress)
 
-> Started 2026-06-16. The **embedding is the surface**: a Grassman program is Python
+> Started 2026-06-16. The **embedding is the surface**: a Grassmann program is Python
 > code that builds the core IR (`20-core-language.md`). **Inference** computes each
 > term's space as it's built; **elaboration** desugars surface sugar into core nodes.
 > Both source systems are Python eDSLs (FEMOracle `embed.py` operator overloading +
@@ -9,7 +9,7 @@
 ## Concrete sketch (to anchor the discussion — pullback of a bilinear form)
 
 ```python
-import grassman as G
+import grassmann as G
 
 R  = G.R                                   # Scalar ℝ
 R2 = R & R                                 # ⊕  (osum: space & space)

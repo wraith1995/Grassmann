@@ -1,4 +1,4 @@
-# Grassman — surface syntax (polish layer; PROPOSAL)
+# Grassmann — surface syntax (polish layer; PROPOSAL)
 
 > Started 2026-06-17. This doc **polishes the surface layer** on top of the embedding
 > & inference design (`25-embedding-inference.md`, "F4 operator scheme" + ruleset) and
@@ -19,7 +19,7 @@ question is which IR operation we hang on each operator slot (decided in `25 §F
 where Python's binding order **bites** (forces parens). The table below is Python's
 order, high→low, restricted to our overloaded operators.
 
-| op | Grassman meaning | level-poly over | Python prec (high→low) | assoc |
+| op | Grassmann meaning | level-poly over | Python prec (high→low) | assoc |
 |---|---|---|---|---|
 | `()` | **apply** (Eval/NEval by kind) | — (inherent) | 1 (tightest) | left |
 | `.attr` | method sugar (`.dual`,`.T`,`.pinv`,…) | — | 1 | left |
@@ -73,7 +73,7 @@ Key consequences (these are the **mathematically correct** defaults — see `25 
 
 ## 2. Builder / namespace API surface
 
-Everything hangs off a single import `import grassman as G`. Operators are sugar;
+Everything hangs off a single import `import grassmann as G`. Operators are sugar;
 `G.*` functions are **always available** and are the canonical form (the operators
 desugar to them). Naming conventions below.
 
@@ -247,7 +247,7 @@ Rendered fully in the proposed syntax — real, copy-pasteable eDSL.
 Non-linear (quadratic) in `T`, linear in the form `b`. Exercises the `llam`/`lam`
 split in one term.
 ```python
-import grassman as G
+import grassmann as G
 
 V, W = G.space("V", n), G.space("W", m)
 formW = W >> (W >> G.R)                       # ~W * ~W * R   (bilinear form on W)
@@ -329,7 +329,7 @@ costs that fall out:
 - **✅ Q3 (DECIDED — keep `G.scale`) — `G.scale(r, v)` vs `r * v`.** `*` is reserved for ⊗ (no scalar overload,
   to avoid type dispatch, `25 §F4`). So scalar multiply is the wordier `G.scale(r,v)`.
   **Lean:** keep `G.scale` (consistency > brevity). *Alt:* allow `float * vector`
-  *only* when the left operand is a Python number (no dispatch on Grassman kinds — the
+  *only* when the left operand is a Python number (no dispatch on Grassmann kinds — the
   number's type disambiguates). Mildly tempting; flag.
 
 - **✅ Q4 (DECIDED — style-lint, no syntax change) — `@` (Compose) vs `*` (⊗) co-precedence.** Same level, left-assoc;

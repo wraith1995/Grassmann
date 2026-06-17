@@ -25,8 +25,7 @@ arities respected). Full *type* checking (dims/properties matching) is IW3.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Tuple, Union
+from dataclasses import dataclass
 
 
 class SpaceError(Exception):
@@ -77,7 +76,7 @@ class DimVar:
 class DimOf:
     """``dim(s)`` — the dimension of a space (used for SVar / opaque spaces)."""
 
-    space: "Space"
+    space: Space
 
     def __repr__(self) -> str:
         return f"DimOf({self.space!r})"
@@ -101,7 +100,7 @@ class DimAtomRef:
 class DimSum:
     """``n + m + …`` (n-ary sum of dims)."""
 
-    terms: Tuple["Dim", ...]
+    terms: tuple[Dim, ...]
 
     def __repr__(self) -> str:
         return f"DimSum({_tuple_repr(self.terms)})"
@@ -111,13 +110,13 @@ class DimSum:
 class DimProd:
     """``n · m · …`` (n-ary product of dims)."""
 
-    terms: Tuple["Dim", ...]
+    terms: tuple[Dim, ...]
 
     def __repr__(self) -> str:
         return f"DimProd({_tuple_repr(self.terms)})"
 
 
-Dim = Union[DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd]
+Dim = DimLit | DimVar | DimOf | DimAtomRef | DimSum | DimProd
 
 
 def is_dim(d: object) -> bool:
@@ -192,7 +191,7 @@ class SVar:
 class Dual:
     """``s*`` — the dual of a space."""
 
-    space: "Space"
+    space: Space
 
     def __post_init__(self) -> None:
         _require_space(self.space, "Dual")
@@ -205,7 +204,7 @@ class Dual:
 class OPlus:
     """``⊕`` — n-ary direct sum. Nullary ``OPlus()`` is the bottom space ⊥."""
 
-    spaces: Tuple["Space", ...]
+    spaces: tuple[Space, ...]
 
     def __post_init__(self) -> None:
         for s in self.spaces:
@@ -219,7 +218,7 @@ class OPlus:
 class OProd:
     """``⊗`` — n-ary tensor product."""
 
-    spaces: Tuple["Space", ...]
+    spaces: tuple[Space, ...]
 
     def __post_init__(self) -> None:
         for s in self.spaces:
@@ -234,7 +233,7 @@ class OPlusRep:
     """``⊕ⁿ s`` — symbolic-count direct sum (`20 §5`). No ``OProdRep``."""
 
     count: Dim
-    space: "Space"
+    space: Space
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "count", as_dim(self.count))
@@ -252,8 +251,8 @@ class Ker:
     """``Ker(f)`` — kernel of a linear map. source = dom(f), target = cod(f)."""
 
     f: object  # a Term (linear map); object to avoid term.py import cycle
-    source: "Space | None" = None
-    target: "Space | None" = None
+    source: Space | None = None
+    target: Space | None = None
 
     def __post_init__(self) -> None:
         _check_ffs_endpoints(self)
@@ -267,8 +266,8 @@ class Img:
     """``Img(f)`` — image (range) of a linear map."""
 
     f: object
-    source: "Space | None" = None
-    target: "Space | None" = None
+    source: Space | None = None
+    target: Space | None = None
 
     def __post_init__(self) -> None:
         _check_ffs_endpoints(self)
@@ -282,8 +281,8 @@ class CoKer:
     """``CoKer(f)`` — cokernel of a linear map."""
 
     f: object
-    source: "Space | None" = None
-    target: "Space | None" = None
+    source: Space | None = None
+    target: Space | None = None
 
     def __post_init__(self) -> None:
         _check_ffs_endpoints(self)
@@ -297,8 +296,8 @@ class CoImg:
     """``CoImg(f)`` — coimage of a linear map."""
 
     f: object
-    source: "Space | None" = None
-    target: "Space | None" = None
+    source: Space | None = None
+    target: Space | None = None
 
     def __post_init__(self) -> None:
         _check_ffs_endpoints(self)
@@ -315,7 +314,7 @@ class WithInner:
     ``s`` is a space.
     """
 
-    space: "Space"
+    space: Space
     metric: object
 
     def __post_init__(self) -> None:
@@ -335,8 +334,8 @@ class App:
     """
 
     g: object
-    positions: Tuple[int, ...]
-    args: Tuple[object, ...]
+    positions: tuple[int, ...]
+    args: tuple[object, ...]
 
     def __post_init__(self) -> None:
         if len(self.positions) != len(self.args):
@@ -353,21 +352,7 @@ class App:
 
 
 # A Space is any of the node types above.
-Space = Union[
-    Scalar,
-    Base,
-    SVar,
-    Dual,
-    OPlus,
-    OProd,
-    OPlusRep,
-    Ker,
-    Img,
-    CoKer,
-    CoImg,
-    WithInner,
-    App,
-]
+Space = Scalar | Base | SVar | Dual | OPlus | OProd | OPlusRep | Ker | Img | CoKer | CoImg | WithInner | App
 
 _SPACE_TYPES = (
     Scalar,
@@ -482,7 +467,7 @@ def with_inner(s: Space, metric: object) -> WithInner:
     return WithInner(s, metric)
 
 
-def space_app(g: object, positions: Tuple[int, ...], *args: object) -> App:
+def space_app(g: object, positions: tuple[int, ...], *args: object) -> App:
     return App(g, tuple(positions), tuple(args))
 
 

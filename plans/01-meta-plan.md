@@ -1,4 +1,4 @@
-# Grassman — Meta-plan (plan of plans)
+# Grassmann — Meta-plan (plan of plans)
 
 > Status: **draft v1** (2026-06-15). This is the orchestrating roadmap. Read
 > `00-landscape.md` first for the source-system facts. WS1 has a concrete plan
@@ -6,7 +6,7 @@
 
 ## 0. One-paragraph vision
 
-Grassman is a **typed frontend language for coordinate-free linear algebra**:
+Grassmann is a **typed frontend language for coordinate-free linear algebra**:
 abstract spaces, duals, `⊕`/`⊗`, linear maps, the four fundamental subspaces
 (`Ker/CoKer/Img/CoImg`), inner products, and pseudo-inverse. Its design problem is
 to find a **midway point between the two existing "Grassmann"s** — the clean,
@@ -33,7 +33,7 @@ jax backend. The semantics and lowering algorithms are adapted from FEMOracle's
    by defaulting to either end.
 2. **Target = `polyarray`, a shared package extracted from chartLib.** The
    symbolic array IR is factored out of chartLib into a standalone package that
-   **both chartLib and Grassman depend on** — single source of truth, no vendoring,
+   **both chartLib and Grassmann depend on** — single source of truth, no vendoring,
    no drift. `polyarray` itself never imports chartLib. (See `10-ir-extraction.md`.)
 3. **Basis is first-class** (from the paper) and **basis-selection +
    change-of-basis is an explicit pass** (from FEMOracle `representDown`). Abstract
@@ -43,19 +43,19 @@ jax backend. The semantics and lowering algorithms are adapted from FEMOracle's
    frontend semantics. (The paper axiomatizes these; FEMOracle bundles them in
    `isomorphism` — we keep them as named target ops.)
 5. **Typed where the sources are not.** The paper types in Lean; FEMOracle infers
-   spaces in Python at rep-time. Grassman gets an explicit, checkable **surface
+   spaces in Python at rep-time. Grassmann gets an explicit, checkable **surface
    type system** over spaces, so errors surface at the frontend, not at NDArray
    time. *How much* type system is the central Design-Phase-2 question.
 6. **Structural lane choice carries through** (from chartLib): numeric vs. rational
-   vs. deferred is decided by shape/degree, deterministically, so a given Grassman
+   vs. deferred is decided by shape/degree, deterministically, so a given Grassmann
    program always lowers to the same statement schema.
 
 ## 2. Architecture — the layer stack
 
 ```
-  (A) Grassman surface syntax          <- Phase 2  frontend
+  (A) Grassmann surface syntax          <- Phase 2  frontend
         |  parse + typecheck
-  (B) Grassman Core IR (typed,         <- Phase 3  core IR
+  (B) Grassmann Core IR (typed,         <- Phase 3  core IR
         coordinate-free)                       (≈ FEMOracle base/algebra, but typed)
         |  normalize / rewrite (beta, eval-push)
         |  basis selection + change-of-basis  <- Phase 4 lowering
@@ -85,7 +85,7 @@ and (c) the threads to resolve. They are discussion scaffolds, not commitments.
 
 ### WS1 — Extract the standalone target IR from chartLib  ✅ planned
 → Full plan in **`plans/10-ir-extraction.md`**. Vendor the symbolic array IR into
-`grassman/ir/`, drop the sampler/geometry, freeze a public target API, verify it
+`grassmann/ir/`, drop the sampler/geometry, freeze a public target API, verify it
 runs hand-built programs. Lowest design risk; do first.
 
 ---
@@ -178,7 +178,7 @@ just-in-time at its start, not all up front.
 - **Type-system ambition:** the further toward the paper's dependent typing we go,
   the harder the frontend. De-risk by starting monomorphic and adding dependency
   only where a concrete program demands it.
-- **Two "Grassmann"s:** the paper already claims the name. Keep Grassman positioned
+- **Two "Grassmann"s:** the paper already claims the name. Keep Grassmann positioned
   as the *executable* sibling targeting chartLib. (Possibly settle naming early.)
 
 ## 7. Immediate next actions
