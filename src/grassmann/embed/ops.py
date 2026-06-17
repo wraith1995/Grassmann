@@ -10,10 +10,11 @@ Operator allocation (locked, `25 §F4` / `27 §1`):
 (auto right-re-associating, `27 Q1`) · ``()``=apply (Eval/NEval) · ``f[α]``=type
 application.
 
-There is no inference here (that is IW3): ``__call__`` picks ``Eval`` vs ``NEval`` by
-the *structural* kind of the callee (a ``Lam``/SpaceFunction ⇒ ``NEval``; anything else
-linear ⇒ ``Eval``), and ``>>``/``~`` etc. build the obvious core node. Mismatches that
-need real type checking surface in IW3, not here.
+``__call__`` picks ``Eval`` vs ``NEval`` by the callee's INFERRED type (`27 Q-b`): it
+runs IW3 synthesis — a value/linear map (a ``Space``) ⇒ ``Eval``, a ``Π``/dependent
+function (non-``Space``) ⇒ ``NEval`` — falling back to the structural guess (a literal
+``Lam``) only when synthesis can't run (see :func:`_callee_is_neval`). Other operators
+(``>>``/``~`` etc.) build the obvious core node; deeper mismatches still surface in IW3.
 """
 
 from __future__ import annotations
@@ -44,6 +45,23 @@ def _classify(node: object) -> str:
     if _ty.is_type(node):
         return TYPE
     raise EmbedError(f"not a Grassmann core node: {node!r}")
+
+
+def _callee_is_neval(node: object) -> bool:
+    """Decide ``Eval`` vs ``NEval`` for ``f(...)`` by the callee's INFERRED type (`27 Q-b`).
+
+    A value or linear map synthesizes to a ``Space`` ⇒ ``Eval`` (linear contraction); a
+    ``Π`` / dependent function (a non-``Space`` synth result — a ``Type`` or arrow ``Kind``)
+    ⇒ ``NEval``. Falls back to the old structural guess (a literal ``Lam`` node) when
+    inference can't run on a (possibly under-determined) callee — so dispatch is principled
+    where types are available and never worse than before.
+    """
+    try:
+        from grassmann.core.space import is_space
+        from grassmann.infer import synth
+        return not is_space(synth(node))
+    except Exception:
+        return isinstance(node, _t.Lam)
 
 
 class Expr:
@@ -137,10 +155,10 @@ class Expr:
             return wrap(result)
         return wrap(_s.linear_map_space(self.node, o.node))
 
-    # f(x, ...) : apply — Eval (linear) or NEval (a Lam), picked structurally.
+    # f(x, ...) : apply — Eval (linear) or NEval (dependent), picked by inferred type.
     def __call__(self, *args: object) -> Expr:
         positions = tuple(range(len(args)))
-        if isinstance(self.node, _t.Lam):
+        if _callee_is_neval(self.node):
             arg_nodes = tuple(_arg_node(a) for a in args)
             return wrap(_t.neval(self.node, positions, *arg_nodes))
         arg_terms = tuple(_term_node(a) for a in args)
@@ -292,7 +310,7 @@ class _AtHandle:
         self._positions = positions
 
     def __call__(self, *args: object) -> Expr:
-        if isinstance(self._f, _t.Lam):
+        if _callee_is_neval(self._f):
             return wrap(_t.neval(self._f, self._positions, *(_arg_node(a) for a in args)))
         return wrap(_t.eval_(self._f, self._positions, *(_term_node(a) for a in args)))
 
