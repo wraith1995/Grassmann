@@ -202,13 +202,28 @@ def _rep(e: T.Term, ctx: _Ctx) -> Rep:
 
 
 def _rep_var(e: T.Var, ctx: _Ctx) -> Rep:
-    """``Var x`` — the Program input for ``x``, in its natural basis (`41 §3`)."""
+    """``Var x`` — the Program input for ``x``, in its natural basis (`41 §3`).
+
+    A Var whose space is FFS-dimensioned (``Img``/``Ker``/…) is sized via the SVD/QR
+    rank of the FFS's defining map (`41 §1`, `42 §B`): an *injective* image realizes via
+    ``QrOp`` with a **static** ``rank = |dom|`` (the recovered ``IsoSpace``), so the input
+    is a plain static array; a generic SVD rank is a runtime ``DimAtom`` (`42 §B`), which
+    a polyarray *input* cannot be sized by — such a value must reach ``represent`` already
+    realized (e.g. as ``project(ambient, Λᵏ)``), not as a bare FFS input Var.
+    """
     cached = ctx.inputs.get(e.uid)
     if cached is not None:
         return cached
     space = _synth(e)
     basis = _natural_basis(space, e, ctx)
-    shape = _shape_of_space(space)
+    shape = _shape_of_space_dyn(space, ctx)
+    if not _is_static(shape):
+        raise RepresentError(
+            f"represent: Var {e.name!r} lives in the FFS-dimensioned space {space!r} "
+            "whose dimension is a runtime SVD rank (a DimAtom); a polyarray Program input "
+            "cannot be sized by a runtime dim. Supply it already realized — e.g. "
+            "project(ambient, Λᵏ) — so the dynamic axis is sourced from a Stmt's SVD/QR rank."
+        )
     arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
     rep = Rep(arr, basis, space)
     ctx.inputs[e.uid] = rep
@@ -243,29 +258,60 @@ def _rep_scale(e: T.Scale, scalar: object, vector: T.Term, ctx: _Ctx) -> Rep:
             [pa.OutSpec("scaled", _shape_of(inner.array))],
             note=f"scale:{float(scalar)}",
         )
-        return Rep(out, inner.basis, inner.space)
+        return Rep(out, inner.basis, inner.space, free_labels=inner.free_labels)
     s_rep = _rep(scalar, ctx)  # a scalar-valued term
     [out] = ctx.prog.emit_stmt(
         _ScaleByOp(), [inner.array, s_rep.array],
         [pa.OutSpec("scaled", _shape_of(inner.array))],
         note="scale:term",
     )
-    return Rep(out, inner.basis, inner.space)
+    return Rep(out, inner.basis, inner.space, free_labels=inner.free_labels)
 
 
 def _rep_sum(e: T.Sum, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
+    """``v1 + … + vn`` — coordinate-wise add (`41 §3`).
+
+    Summands may carry *free* (basis-index) labels in different axis orders (e.g. the
+    antisymmetrizer's ``x⊗y`` vs ``y⊗x``); each summand is aligned to the first's
+    free-label order with a transpose einsum before adding, so the sum is taken on
+    matching basis indices.
+    """
     reps = [_rep(v, ctx) for v in vectors]
     target = reps[0].basis
+    free = reps[0].free_labels
     arrays = [reps[0].array]
     for r in reps[1:]:
         a = _coerce_basis(ctx, r, target, note="sum:cob")
+        a = _align_free_labels(ctx, a, r, free)
         _assert_shape_eq(ctx, reps[0].array, a, note="assert:sum-shapes")
         arrays.append(a)
     [out] = ctx.prog.emit_stmt(
         _AddOp(len(arrays)), arrays,
         [pa.OutSpec("sum", _shape_of(reps[0].array))], note="sum:add",
     )
-    return Rep(out, target, reps[0].space)
+    return Rep(out, target, reps[0].space, free_labels=free)
+
+
+def _align_free_labels(
+    ctx: _Ctx, arr: pa.SymArray, rep: Rep, target_free: str,
+) -> pa.SymArray:
+    """Permute ``arr``'s free (basis-index) axes into ``target_free`` order (`41 §3`).
+
+    A summand built from a permuted variable order (``y⊗x``) carries the same free
+    labels as the first summand but in a different axis order; reorder them with a
+    transpose einsum so :func:`_rep_sum` adds matching basis indices.
+    """
+    if rep.free_labels == target_free or not target_free:
+        return arr
+    n_space = len(_shape_of(arr)) - len(rep.free_labels)
+    space_labels = "".join(chr(ord("a") + i) for i in range(n_space))
+    in_spec = space_labels + rep.free_labels
+    out_spec = space_labels + target_free
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp(in_spec + "->" + out_spec), [arr],
+        [pa.OutSpec("align", _shape_of(arr))], note="sum:align-free-axes",
+    )
+    return out
 
 
 def _rep_oplus(e: T.OPlusV, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
@@ -280,18 +326,51 @@ def _rep_oplus(e: T.OPlusV, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
 
 
 def _rep_oprod(e: T.OProdV, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
+    """``v1 * … * vn`` — the outer-product over the per-factor axes (`41 §3`).
+
+    Each factor's *space* axes (a factor may itself be tensored, e.g. ``V⊗ᵏ``) get fresh
+    einsum labels and stack into the output; any *free* (basis-index) labels a factor
+    carries — the ``LLam``→coordinate-tensor binding (`41 §3`) — ride through verbatim to
+    the output, so the outer product of LLam-bound matrix operands is the full map tensor.
+    """
     reps = [_rep(v, ctx) for v in vectors]
     space = _synth(e)
     basis = B.basis_prod(*(r.basis for r in reps))
     # outer product over the per-factor axes (b = BasisProd(bᵢ)).
-    n = len(reps)
-    in_specs = [chr(ord("a") + k) for k in range(n)]
-    spec = ",".join(in_specs) + "->" + "".join(in_specs)
+    next_label = ord("a")
+    operand_specs: list[str] = []
+    space_labels = ""
+    free_labels = ""
+    space_dims: list[int] = []
+    for r in reps:
+        ashape = _shape_of(r.array)
+        n_space = len(ashape) - len(r.free_labels)
+        these_space = "".join(chr(next_label + i) for i in range(n_space))
+        next_label += n_space
+        # the factor's array axes are its (possibly multi-axis) space axes followed by
+        # its free (basis) axes; the result keeps each factor's space axes unfused.
+        operand_specs.append(these_space + r.free_labels)
+        space_labels += these_space
+        free_labels += r.free_labels
+        space_dims.extend(ashape[:n_space])
+    out_labels = space_labels + free_labels
+    spec = ",".join(operand_specs) + "->" + out_labels
+    out_shape = tuple(space_dims) + tuple(_dim_of_free(reps))
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), [r.array for r in reps],
-        [pa.OutSpec("oprod", _shape_of_space(space))], note="oprod:outer-einsum",
+        [pa.OutSpec("oprod", out_shape)], note="oprod:outer-einsum",
     )
-    return Rep(out, basis, space)
+    return Rep(out, basis, space, free_labels=free_labels)
+
+
+def _dim_of_free(reps: list[Rep]) -> list[int]:
+    """The sizes of the free (basis-index) axes carried across ``reps`` (in order)."""
+    dims: list[int] = []
+    for r in reps:
+        shape = _shape_of(r.array)
+        n_space = len(shape) - len(r.free_labels)
+        dims.extend(shape[n_space:])
+    return dims
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +407,11 @@ def _rep_eval(
     for pos, arg_rep in zip(positions, arg_reps, strict=True):
         if pos >= len(f_factors):
             raise RepresentError(f"Eval: slot {pos} out of range for {len(f_factors)} factors")
+        # If ``f``'s slot ``pos`` is a *fused* (tensored) dual — its dim is the product of
+        # several factors, e.g. ``~(V⊗ᵏ)`` from an ``alt``/``Lift`` — and the arg presents
+        # that value over multiple (unfused) space axes, fuse the arg's space axes into one
+        # so the contraction matches (the explicit Lift/InvLift reassociation seam, `41 §3`).
+        arg_rep = _fuse_arg_to_slot(ctx, f_rep.array, pos, arg_rep)
         # dim-agreement assert at the contraction site (`41 §4`).
         _assert_axis_dims(ctx, f_rep.array, pos, arg_rep, note=f"assert:eval-dim@{pos}")
         operands.append(arg_rep.array)
@@ -353,6 +437,42 @@ def _rep_eval(
         note=f"eval:contract@{sorted(contracted)}",
     )
     return Rep(out, basis, space, free_labels=out_free_labels)
+
+
+def _fuse_arg_to_slot(
+    ctx: _Ctx, f_arr: pa.SymArray, pos: int, arg_rep: Rep,
+) -> Rep:
+    """Fuse ``arg_rep``'s space axes into one when ``f``'s slot ``pos`` is a fused dual.
+
+    A map produced by ``alt``/``Lift`` has a single fused input slot of dim ``nᵏ`` (`41
+    §3`); a value of ``V⊗ᵏ`` arrives over ``k`` separate axes. When the slot dim equals the
+    product of the arg's *space* axes (and doesn't already match its leading axis), reshape
+    those axes into one fused axis (the free/basis axes are untouched). No-op otherwise, so
+    the ordinary ``Eval`` path is byte-identical.
+    """
+    fshape = _shape_of(f_arr)
+    ashape = _shape_of(arg_rep.array)
+    if pos >= len(fshape) or not isinstance(fshape[pos], int):
+        return arg_rep
+    slot = fshape[pos]
+    n_free = len(arg_rep.free_labels)
+    n_space = len(ashape) - n_free
+    if n_space <= 1:
+        return arg_rep
+    space_dims = ashape[:n_space]
+    if not all(isinstance(d, int) for d in space_dims):
+        return arg_rep
+    prod = 1
+    for d in space_dims:
+        prod *= d
+    if space_dims[0] == slot or prod != slot:
+        return arg_rep
+    new_shape = (slot, *ashape[n_space:])
+    [fused] = ctx.prog.emit_stmt(
+        _ReshapeOp(tuple(new_shape)), [arg_rep.array],
+        [pa.OutSpec("fuse-arg", new_shape)], note=f"eval:fuse-arg-axes@{pos}",
+    )
+    return Rep(fused, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
 
 
 def _rep_compose(
@@ -575,13 +695,18 @@ def _rep_project(e: T.Project, vector: T.Term, sub: S.Space, ctx: _Ctx) -> Rep:
 
 
 def _rep_embed(e: T.Embed, vector: T.Term, big: S.Space, ctx: _Ctx) -> Rep:
-    """``embed(v, s)`` — pad ``⟦v⟧`` into the ambient via the sub-basis (`41 §3`)."""
+    """``embed(v, s)`` — pad ``⟦v⟧`` into the ambient via the sub-basis (`41 §3`).
+
+    The padded value is laid out over the ambient space's axes (``V⊗ᵏ`` ⇒ ``(n,…,n)``),
+    so it mirrors :func:`_shape_of_space` of the ambient and downstream nodes see the
+    expected multi-axis tensor.
+    """
     v_rep = _rep(vector, ctx)
     sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
-    # ambient dim = #rows of the sub-basis cols (static = |big|).
+    big_shape = _shape_of_space(big)  # ambient layout (static); P has rows = Σ|axes|.
     [out] = ctx.prog.emit_stmt(
-        _EmbedOp(), [P, v_rep.array],
-        [pa.OutSpec("embed", (_shape_of(P)[0],))],
+        _EmbedOp(tuple(big_shape)), [P, v_rep.array],
+        [pa.OutSpec("embed", big_shape)],
         note="embed:pad-zeros",
     )
     return Rep(out, default_basis(big), big)
@@ -769,24 +894,10 @@ def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.S
     its standard-basis selection columns.
     """
     if isinstance(sub, (S.Img, S.Ker, S.CoImg, S.CoKer)):
-        which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(sub)]
-        from grassmann.infer import map_domain_codomain
-        from grassmann.infer.properties import map_props
-
-        f = sub.f
-        dom, cod = map_domain_codomain(f)
-        f_rep = _rep(f, ctx)  # the operator's matrix, stored (|dom|,|cod|)
-        # The FFS substrate expects the map matrix as (cod, dom); transpose into it.
-        [f_cd] = ctx.prog.emit_stmt(
-            _TransposeOp(), [f_rep.array],
-            [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
-            note="ffs-basis:to-(cod,dom)",
-        )
-        real = realize_ffs_basis(
-            ctx.prog, which, f_cd,
-            dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
-            props=map_props(f), label=getattr(f, "name", "f"),
-        )
+        # The FFS substrate (SvdOp/QrOp/GSvdOp) realizes the columns in ambient coords;
+        # the column axis is rank-sized (static |dom| for an injective QrOp image, else
+        # the runtime DimAtom δ_f) — `41 §1`, threaded by `_realize_ffs_for_space`.
+        real = _realize_ffs_for_space(ctx, sub)
         sub_basis = default_basis(sub)
         return sub_basis, real.cols
     # Non-FFS subspace: realize its (standard) basis columns directly.
@@ -924,6 +1035,65 @@ def _shape_of_space(space: S.Space) -> tuple[int, ...]:
             return (_static_dim(space),)
 
 
+def _shape_of_space_dyn(
+    space: S.Space, ctx: _Ctx,
+) -> tuple[int | pa.DimAtom, ...]:
+    """``_shape_of_space`` with the bulk/``DimAtom`` lane threaded for FFS spaces (`42 §B`).
+
+    Identical to :func:`_shape_of_space` on every statically-sized space (so the static
+    path is byte-identical). For an FFS-dimensioned space (``Img``/``Ker``/``CoImg``/
+    ``CoKer``) it realizes the defining map's SVD/QR and sizes the axis by the **rank**:
+    a static ``rank = |dom|`` for an *injective* image (``QrOp``), else the runtime
+    ``DimAtom δ_f`` (`41 §1`, `50 §A1`). Polyarray gates on a dynamic shape, so a node
+    whose result lives in such a space carries a dynamic axis sourced from that rank.
+    """
+    match space:
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():
+            try:
+                return (_static_dim(space),)
+            except RepresentError:
+                pass
+            real = _realize_ffs_for_space(ctx, space)
+            cols_shape = _shape_of(real.cols)
+            # the FFS basis matrix is (ambient, rank); the value lives in the rank axis.
+            return (cols_shape[1],)
+        case S.OProd(spaces):
+            return tuple(_dyn_dim(s, ctx) for s in spaces)
+        case S.WithInner(s, _):
+            return _shape_of_space_dyn(s, ctx)
+        case _:
+            return _shape_of_space(space)
+
+
+def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
+    shp = _shape_of_space_dyn(space, ctx)
+    if len(shp) != 1:
+        # a tensored factor's fused dim must be static (the substrate sizes ⊗ statically).
+        return _static_dim(space)
+    return shp[0]
+
+
+def _realize_ffs_for_space(ctx: _Ctx, space: S.Space):
+    """Realize the FFS basis of an ``Img``/``Ker``/``CoImg``/``CoKer`` space (`41 §1`)."""
+    which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
+    from grassmann.infer import map_domain_codomain
+    from grassmann.infer.properties import map_props
+
+    f = space.f
+    dom, cod = map_domain_codomain(f)
+    f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
+    [f_cd] = ctx.prog.emit_stmt(
+        _TransposeOp(), [f_rep.array],
+        [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
+        note="ffs-basis:to-(cod,dom)",
+    )
+    return realize_ffs_basis(
+        ctx.prog, which, f_cd,
+        dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
+        props=map_props(f), label=getattr(f, "name", "f"),
+    )
+
+
 def _factors(space: S.Space) -> tuple[S.Space, ...]:
     if isinstance(space, S.OProd):
         return space.spaces
@@ -1053,18 +1223,29 @@ class _ReshapeOp:
 
 @dataclass(frozen=True)
 class _ProjectOp:
-    """``Pᵀ @ v`` — project ambient coords onto the orthonormal sub-basis (drop comp)."""
+    """``Pᵀ @ v`` — project ambient coords onto the orthonormal sub-basis (drop comp).
+
+    ``v`` may be a multi-axis ambient tensor (e.g. ``V⊗ᵏ`` stored ``(n,…,n)``); it is
+    raveled to the ambient (column) coordinate before the projection.
+    """
 
     def __call__(self, P: np.ndarray, v: np.ndarray) -> np.ndarray:  # noqa: N803
-        return np.asarray(P, dtype=float).T @ np.asarray(v, dtype=float)
+        return np.asarray(P, dtype=float).T @ np.asarray(v, dtype=float).reshape(-1)
 
 
 @dataclass(frozen=True)
 class _EmbedOp:
-    """``P @ vsub`` — pad sub-coords into the ambient (zeros in the complement)."""
+    """``P @ vsub`` — pad sub-coords into the ambient (zeros in the complement).
+
+    The ambient result is reshaped to the ambient space's multi-axis layout
+    (``shape``), e.g. ``V⊗ᵏ`` ⇒ ``(n,…,n)``.
+    """
+
+    shape: tuple[int, ...] = ()
 
     def __call__(self, P: np.ndarray, vsub: np.ndarray) -> np.ndarray:  # noqa: N803
-        return np.asarray(P, dtype=float) @ np.asarray(vsub, dtype=float)
+        out = np.asarray(P, dtype=float) @ np.asarray(vsub, dtype=float)
+        return out.reshape(self.shape) if self.shape else out
 
 
 @dataclass(frozen=True)
