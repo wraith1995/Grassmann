@@ -192,6 +192,65 @@ contracting a `δ`-sized axis runs on both; the static-shape suite + chartlib st
 
 ---
 
+## Stage C — dynamic INPUTS + runtime asserts (the FFS-input seam)
+
+**Goal.** A `Program` *input* may itself be **runtime-sized** (an FFS-typed Grassmann input
+like a `Λᵏ` vector, whose dimension `δ = C(n,k)` / `rank(Alt)` is only known at run time).
+Stage B sized *Stmt outputs* dynamically; Stage C does the same for *inputs*, and adds the
+**runtime `AssertOp`s** that make a runtime-sized input *safe* (without them a mis-sized
+array is silently accepted). Grassmann's dynamic inputs are **numeric bulk** arrays (never
+per-cell rational), so this rides entirely on the bulk lane.
+
+### C1. `SymInput.shape` accepts `DimAtom`; a dynamic input is **bulk**
+`shape: tuple[int | DimAtom, ...]` (was `tuple[int,...]`). A `SymInput` is *dynamic* if
+`is_dynamic(shape)`. `Program.__init__`/`allocate_input` for a dynamic input does **not**
+enumerate cells — it builds a **bulk** `SymArray` (whole-tensor handle; `_bulk` carries the
+symbolic shape), exactly like a Stage-B dynamic output. Static inputs are unchanged
+(byte-identical; gate on `is_dynamic`).
+
+### C2. `DimAtom` sourced from an input axis
+A dynamic input's axis is a `DimAtom` whose source is the **input**, not a Stmt output.
+Widen `DimAtom.source` to a tagged union: `("stmt", stmt_idx, out_idx)` (Stage B) **or**
+`("in", input_name, axis)` (Stage C). `source` stays a hashable tuple ⇒ it remains the
+`dim_bindings` key. (Keep B's 2-tuple form working, or migrate it to the tagged form with a
+compat shim — implementer's call; static path must stay green.)
+
+### C3. `Program.run` — bind input dims first, then assert
+Before walking statements (in `build_runtime_bindings`, the dynamic branch only):
+- For each **dynamic input**, read the provided array's actual shape and bind each
+  `DimAtom` axis: `dim_bindings[("in", name, axis)] := arr.shape[axis]`. Bind the array as
+  a whole-tensor (bulk) value.
+- Then proceed exactly as Stage B (Stmt-output dims fill in as statements run; later dynamic
+  shapes resolve via `_resolve_shape`).
+Static programs never enter this branch (`_has_dynamic_shape` already gates it, B5).
+
+### C4. Runtime `AssertOp`s — the "key to handling them"
+`AssertOp` already exists (Stage A). Stage C just *uses* it (no new op) at the points a
+runtime-sized value must be validated; `represent` emits these:
+- **rank-consistency:** an FFS input's bound `δ` must equal the FFS map's computed rank —
+  `AssertOp("rank_eq", svd_rank(Alt), δ_input)`. (When the defining map is also in the
+  program; else the input `δ` is taken on faith from its own shape.)
+- **sibling agreement:** two inputs that must share a `δ` (e.g. `a,b : Λᵏ`) —
+  `AssertOp("shape_eq", a, b)` on the relevant axis.
+- **per-contraction (`41 §4`) on dynamic axes:** at `Eval`/`Compose`/`Trace` contracting a
+  `δ`-sized axis, emit `AssertOp("shape_eq", lhs_axis, rhs_axis)` so a run-time size mismatch
+  raises with a message (the static path keeps its lowering-time check; this covers the
+  dynamic axes the static check can't see).
+
+### C5. wiring / tests
+- `is_dynamic` already covers `DimAtom`; `OutSpec`/`SymInput`/`_bulk` shapes all use the
+  same `tuple[int | DimAtom, ...]`.
+- **Stage-C tests:** a `Program` with a dynamic bulk input run on two arrays of different
+  size ⇒ both run, downstream shapes track the input; a mis-sized input trips the
+  rank-consistency / sibling `AssertOp`; the static suite + chartlib stay green.
+
+**Grassmann (`represent`) integration:** a bare FFS-typed input `Var` (e.g. `a : Λᵏ`) lowers
+to a **dynamic bulk input** (its δ from `_shape_of_space_dyn`), removing the G3 workaround of
+forcing `project(ambient, Λᵏ)`. `represent` emits the C4 asserts. Re-run G3 with bare FFS
+inputs to confirm.
+
+---
+
 ## Faithfulness / risk
 
 - **Stage A** is purely additive (new frozen ops + a budget preset) — zero risk to

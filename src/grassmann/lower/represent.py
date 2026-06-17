@@ -29,7 +29,7 @@ a different basis (`41 §0` strategy).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import polyarray as pa
@@ -121,6 +121,12 @@ class _Ctx:
     inputs: dict[int, Rep]
     # next free-index einsum label for LLam coordinate-tensor binding (`41 §3`).
     _free_label_next: int = ord("i")
+    # Stage C (`42 §C`): bare FFS-typed inputs (e.g. ``a : Λᵏ``) lowered to dynamic bulk
+    # inputs.  Keyed by the defining FFS map's structural key (see ``_ffs_sibling_key``) so
+    # two inputs that must share a runtime δ (e.g. ``a, b : Λᵏ``, even when their binder
+    # uids differ) get a sibling-agreement ``shape_eq`` AssertOp.  Each entry is the
+    # SymArray of the first dynamic input registered for that FFS.
+    ffs_input_siblings: dict[tuple, pa.SymArray] = field(default_factory=dict)
 
 
 # ===========================================================================
@@ -205,11 +211,18 @@ def _rep_var(e: T.Var, ctx: _Ctx) -> Rep:
     """``Var x`` — the Program input for ``x``, in its natural basis (`41 §3`).
 
     A Var whose space is FFS-dimensioned (``Img``/``Ker``/…) is sized via the SVD/QR
-    rank of the FFS's defining map (`41 §1`, `42 §B`): an *injective* image realizes via
-    ``QrOp`` with a **static** ``rank = |dom|`` (the recovered ``IsoSpace``), so the input
-    is a plain static array; a generic SVD rank is a runtime ``DimAtom`` (`42 §B`), which
-    a polyarray *input* cannot be sized by — such a value must reach ``represent`` already
-    realized (e.g. as ``project(ambient, Λᵏ)``), not as a bare FFS input Var.
+    rank of the FFS's defining map (`41 §1`): an *injective* image realizes via ``QrOp``
+    with a **static** ``rank = |dom|`` (the recovered ``IsoSpace``), so the input is a
+    plain static array.
+
+    A **generic FFS rank is a runtime δ** — only known at run time.  Stage C (`42 §C`)
+    lowers such a bare FFS-typed Var to a **dynamic bulk Program input** whose δ axis is an
+    input-sourced :class:`~polyarray.DimAtom` (read from the supplied array's shape at run
+    time), removing the old ``project(ambient, Λᵏ)`` workaround.  Two runtime
+    ``AssertOp``s guard it (`42 §C4`): (i) **rank-consistency** — the bound input δ must
+    equal the FFS map's computed ``svd_rank`` (when that map is realized in the program);
+    (ii) **sibling agreement** — inputs sharing a δ (e.g. ``a, b : Λᵏ``) get a ``shape_eq``
+    assert against the first sibling.
     """
     cached = ctx.inputs.get(e.uid)
     if cached is not None:
@@ -217,17 +230,77 @@ def _rep_var(e: T.Var, ctx: _Ctx) -> Rep:
     space = _synth(e)
     basis = _natural_basis(space, e, ctx)
     shape = _shape_of_space_dyn(space, ctx)
-    if not _is_static(shape):
-        raise RepresentError(
-            f"represent: Var {e.name!r} lives in the FFS-dimensioned space {space!r} "
-            "whose dimension is a runtime SVD rank (a DimAtom); a polyarray Program input "
-            "cannot be sized by a runtime dim. Supply it already realized — e.g. "
-            "project(ambient, Λᵏ) — so the dynamic axis is sourced from a Stmt's SVD/QR rank."
-        )
-    arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
+    if _is_static(shape):
+        arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
+        rep = Rep(arr, basis, space)
+        ctx.inputs[e.uid] = rep
+        return rep
+    # Dynamic (runtime-δ) FFS input — Stage C dynamic bulk input.
+    arr = _make_dynamic_ffs_input(ctx, e, space, shape)
     rep = Rep(arr, basis, space)
     ctx.inputs[e.uid] = rep
     return rep
+
+
+def _make_dynamic_ffs_input(
+    ctx: _Ctx, e: T.Var, space: S.Space, dyn_shape: tuple[int | pa.DimAtom, ...],
+) -> pa.SymArray:
+    """Allocate a bare FFS-typed Var as a dynamic bulk Program input (`42 §C`).
+
+    The input's runtime δ axes are input-sourced :class:`~polyarray.DimAtom`s; the
+    rank-consistency and sibling-agreement ``AssertOp``s (`42 §C4`) are emitted here.
+    """
+    name = _var_name(e)
+    # The input shape carries input-sourced DimAtoms for every dynamic axis (so the
+    # axis size is read from the supplied array's shape at run time, not a Stmt's rank).
+    in_shape: list[int | pa.DimAtom] = []
+    for axis, d in enumerate(dyn_shape):
+        if isinstance(d, int):
+            in_shape.append(d)
+        else:
+            in_shape.append(pa.DimAtom.from_input(f"δ:{name}@{axis}", name, axis))
+    arr = _make_input(ctx, name, tuple(in_shape), note=f"var:{e.name}")
+
+    # (i) rank-consistency: the FFS map's computed rank must equal the input's δ axis.
+    #     Only emitted for a single-axis FFS space whose map can be realized (the generic
+    #     SVD/GSVD case carries a `rank` SymArray; the static QrOp case never reaches here).
+    if isinstance(space, (S.Img, S.Ker, S.CoImg, S.CoKer)):
+        real = _realize_ffs_for_space(ctx, space)
+        if real.rank is not None:
+            [delta_in] = ctx.prog.emit_stmt(
+                _AxisLenOp(axis=0), [arr],
+                [pa.OutSpec("delta_in", ())],
+                note=f"ffs-input:δ({e.name})",
+            )
+            ctx.prog.emit_stmt(
+                pa.AssertOp(
+                    kind="rank_eq",
+                    msg=f"FFS input {e.name!r}: δ must equal svd_rank({space!r})",
+                ),
+                [arr, real.rank, delta_in],
+                [pa.OutSpec("rank_ok", tuple(in_shape))],
+                note=f"assert:ffs-input-rank-consistency({e.name})",
+            )
+
+    # (ii) sibling agreement: inputs that must share a δ (e.g. ``a, b : Λᵏ``) match shapes.
+    #      Keyed structurally by the defining FFS map's (which, |dom|, |cod|) so that two
+    #      *alpha-equivalent* spaces (whose binder uids differ ⇒ raw space objects are
+    #      unequal) are still recognised as the same FFS ⇒ same δ.
+    key = _ffs_sibling_key(space)
+    sibling = ctx.ffs_input_siblings.get(key) if key is not None else None
+    if key is not None and sibling is None:
+        ctx.ffs_input_siblings[key] = arr
+    elif sibling is not None:
+        ctx.prog.emit_stmt(
+            pa.AssertOp(
+                kind="shape_eq",
+                msg=f"FFS sibling inputs in {space!r} must share δ",
+            ),
+            [arr, sibling],
+            [pa.OutSpec("sibling_ok", tuple(in_shape))],
+            note=f"assert:ffs-input-sibling({e.name})",
+        )
+    return arr
 
 
 def _rep_const(
@@ -919,20 +992,56 @@ def _assert_shape_eq(ctx: _Ctx, a: pa.SymArray, b: pa.SymArray, *, note: str) ->
     )
 
 
+def _axis_is_dynamic(shape: tuple[object, ...], axis: int) -> bool:
+    return axis < len(shape) and isinstance(shape[axis], pa.DimAtom)
+
+
+def _assert_contract_axes_dyn(
+    ctx: _Ctx,
+    lhs: pa.SymArray, lhs_axis: int,
+    rhs: pa.SymArray, rhs_axis: int,
+    *, note: str,
+) -> None:
+    """Emit a runtime ``rank_eq`` AssertOp on two contracted *dynamic* axes (`42 §C4`).
+
+    Each axis length is computed at run time via ``_AxisLenOp``; the assert compares the
+    two ints so a run-time size mismatch raises with a provenance message.  The static
+    check (the caller) covers static axes; this covers δ-sized (dynamic) axes the static
+    check can't see.
+    """
+    [la] = ctx.prog.emit_stmt(
+        _AxisLenOp(axis=lhs_axis), [lhs], [pa.OutSpec("lhs_len", ())],
+        note=note + ":lhs-len",
+    )
+    [ra] = ctx.prog.emit_stmt(
+        _AxisLenOp(axis=rhs_axis), [rhs], [pa.OutSpec("rhs_len", ())],
+        note=note + ":rhs-len",
+    )
+    ctx.prog.emit_stmt(
+        pa.AssertOp(kind="rank_eq", msg=note), [lhs, la, ra],
+        [pa.OutSpec("ok", _shape_of(lhs))], note=note,
+    )
+
+
 def _assert_axis_dims(
     ctx: _Ctx, f_arr: pa.SymArray, pos: int, arg_rep: Rep, *, note: str,
 ) -> None:
     """Assert ``f``'s axis ``pos`` matches the argument's contracted (first) axis."""
     fshape = _shape_of(f_arr)
     ashape = _shape_of(arg_rep.array)
-    if _is_static(fshape) and _is_static(ashape) and fshape[pos] != ashape[0]:
-        raise RepresentError(
-            f"Eval/Compose: contracted dim mismatch — f axis {pos}={fshape[pos]} "
-            f"vs arg axis 0={ashape[0]}"
+    if _is_static(fshape) and _is_static(ashape):
+        if fshape[pos] != ashape[0]:
+            raise RepresentError(
+                f"Eval/Compose: contracted dim mismatch — f axis {pos}={fshape[pos]} "
+                f"vs arg axis 0={ashape[0]}"
+            )
+        return
+    # A δ-sized (dynamic) contracted axis is invisible to the static check above — emit a
+    # runtime AssertOp so a run-time size mismatch raises (`42 §C4`).
+    if _axis_is_dynamic(fshape, pos) or _axis_is_dynamic(ashape, 0):
+        _assert_contract_axes_dyn(
+            ctx, f_arr, pos, arg_rep.array, 0, note=note,
         )
-    # Runtime check: emit an AssertOp keyed on shape equality of the slices is overkill;
-    # the static check above covers the v1 (static-shape) tests. Dynamic-shape contraction
-    # is validated by einsum at run time.
 
 
 def _assert_axes_match(
@@ -941,18 +1050,29 @@ def _assert_axes_match(
     """Assert ``f``'s axis ``f_axis`` equals ``g``'s axis ``g_axis`` (contraction dim)."""
     fshape = _shape_of(f_arr)
     gshape = _shape_of(g_arr)
-    if (_is_static(fshape) and _is_static(gshape)
-            and fshape[f_axis] != gshape[g_axis]):
-        raise RepresentError(
-            f"Compose: contracted dim mismatch — f axis {f_axis}={fshape[f_axis]} "
-            f"vs g axis {g_axis}={gshape[g_axis]}"
+    if _is_static(fshape) and _is_static(gshape):
+        if fshape[f_axis] != gshape[g_axis]:
+            raise RepresentError(
+                f"Compose: contracted dim mismatch — f axis {f_axis}={fshape[f_axis]} "
+                f"vs g axis {g_axis}={gshape[g_axis]}"
+            )
+        return
+    if _axis_is_dynamic(fshape, f_axis) or _axis_is_dynamic(gshape, g_axis):
+        _assert_contract_axes_dyn(
+            ctx, f_arr, f_axis, g_arr, g_axis, note=note,
         )
 
 
 def _assert_axes_equal(ctx: _Ctx, f_arr: pa.SymArray, i: int, j: int, *, note: str) -> None:
     fshape = _shape_of(f_arr)
-    if _is_static(fshape) and fshape[i] != fshape[j]:
-        raise RepresentError(f"Trace: axes {i},{j} have unequal dims {fshape[i]},{fshape[j]}")
+    if _is_static(fshape):
+        if fshape[i] != fshape[j]:
+            raise RepresentError(
+                f"Trace: axes {i},{j} have unequal dims {fshape[i]},{fshape[j]}"
+            )
+        return
+    if _axis_is_dynamic(fshape, i) or _axis_is_dynamic(fshape, j):
+        _assert_contract_axes_dyn(ctx, f_arr, i, f_arr, j, note=note)
 
 
 def _assert_square_full_rank(ctx: _Ctx, a: pa.SymArray, *, note: str) -> None:
@@ -1094,6 +1214,26 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space):
     )
 
 
+def _ffs_sibling_key(space: S.Space) -> tuple | None:
+    """A structural sibling key for an FFS space (`42 §C4`).
+
+    Two inputs share a δ iff they live in the *same* FFS — but alpha-equivalent FFS maps
+    have differing binder uids, so the raw space objects compare unequal.  Keying by the
+    map's ``(which, |dom|, |cod|)`` recognises alpha-equivalent ``Λᵏ`` spaces as one FFS
+    (same ambient ⇒ same domain/codomain dims ⇒ same δ).  ``None`` for a non-FFS space.
+    """
+    if not isinstance(space, (S.Img, S.Ker, S.CoImg, S.CoKer)):
+        return None
+    which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
+    from grassmann.infer import map_domain_codomain
+
+    dom, cod = map_domain_codomain(space.f)
+    try:
+        return (which, _static_dim(dom), _static_dim(cod))
+    except RepresentError:
+        return None
+
+
 def _factors(space: S.Space) -> tuple[S.Space, ...]:
     if isinstance(space, S.OProd):
         return space.spaces
@@ -1132,17 +1272,30 @@ def _var_name(v: T.Var) -> str:
     return f"{v.name}_{v.uid}"
 
 
-def _make_input(ctx: _Ctx, name: str, shape: tuple[int, ...], *, note: str) -> pa.SymArray:
-    """Declare a fresh symbolic Program input of ``shape`` and return its SymArray."""
+def _make_input(
+    ctx: _Ctx, name: str, shape: tuple[int | pa.DimAtom, ...], *, note: str,
+) -> pa.SymArray:
+    """Declare a fresh symbolic Program input of ``shape`` and return its SymArray.
+
+    A *dynamic* (``DimAtom``-sized) shape allocates a single **bulk** SymArray (no
+    per-cell atoms; `42 §C1`); a static shape allocates per-cell atoms as before.
+    """
     spec = pa.SymInput(
         name=name, shape=shape,
         provenance=pa.Provenance(kind="param_dof", origin=note, index=(), label=name),
     )
-    cells = pa.allocate_input(ctx.prog.env, spec)
-    arr = pa.SymArray(cells, program=ctx.prog, name=name)
+    if pa.is_dynamic(shape):
+        cells = np.empty((), dtype=object)
+        arr = pa.SymArray(cells, program=ctx.prog, name=name)
+        arr._bulk = pa.ir.BulkOut(name=name, shape=tuple(shape))
+    else:
+        cells = pa.allocate_input(ctx.prog.env, spec)
+        arr = pa.SymArray(cells, program=ctx.prog, name=name)
     # Register so Program.run binds it (mirrors Program.__init__'s input wiring).
     ctx.prog.inputs = (*ctx.prog.inputs, spec)
     ctx.prog.input_arrays[name] = arr
+    # Invalidate the dynamic-shape memo since inputs changed after construction.
+    ctx.prog._dynamic_shape_memo = None
     return arr
 
 
@@ -1211,6 +1364,16 @@ class _TransposeOp:
 class _IdentityArrOp:
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A, dtype=float)
+
+
+@dataclass(frozen=True)
+class _AxisLenOp:
+    """The (runtime) length of ``x``'s axis ``axis`` as a 0-d int — the input's δ (`42 §C4`)."""
+
+    axis: int = 0
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        return np.asarray(int(np.asarray(x).shape[self.axis]))
 
 
 @dataclass(frozen=True)
