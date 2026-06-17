@@ -155,8 +155,10 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
     if isinstance(e, Dagger):
         return _synth_dagger(e, ctx)
     if isinstance(e, Inner):
-        # Inner(s) : the inner-product map s ⊗ s ⊸ R  ≡  ~(s⊗s) * R.
-        return linear_map_space(oprod(e.space, e.space), Scalar())
+        # Inner(s) is the metric bilinear form on s — an element of s* ⊗ s* (≡ ~s ⊗ ~s),
+        # with two covariant slots. Full contraction against two s-vectors ⇒ Scalar
+        # (same representation as Flat: a metric g is both the form and the map s→s*).
+        return oprod(dual(e.space), dual(e.space))
     if isinstance(e, Flat):
         return linear_map_space(e.space, dual(e.space))
     if isinstance(e, Sharp):

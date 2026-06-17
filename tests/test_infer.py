@@ -265,7 +265,9 @@ def test_oplus_stack_and_oprod():
 
 
 def test_inner_flat_sharp():
-    assert synth_space(G.inner(V)) == G.linear_map_space(G.oprod(V, V), R)
+    # Inner(s) is the metric bilinear form s* ⊗ s* (two covariant slots) — same
+    # representation as Flat (a metric is both the form and the map s→s*).
+    assert synth_space(G.inner(V)) == G.oprod(G.dual(V), G.dual(V))
     assert synth_space(G.flat(V)) == G.linear_map_space(V, G.dual(V))
     assert synth_space(G.sharp(V)) == G.linear_map_space(G.dual(V), V)
 
