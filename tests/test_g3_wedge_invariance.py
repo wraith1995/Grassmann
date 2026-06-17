@@ -66,11 +66,31 @@ def _wedge_operands(V: G.Expr, k: int, l: int):  # noqa: E741 - l matches the sp
     return a, b
 
 
+def _wedge_operands_bare(V: G.Expr, k: int, l: int):  # noqa: E741
+    """``a : Λᵏ``, ``b : Λˡ`` as **bare FFS-typed input vars** (Stage C, `42 §C`).
+
+    No ``project(ambient, Λᵏ)`` workaround: the operands live directly in ``Λᵏ``/``Λˡ`` and
+    lower to dynamic bulk Program inputs whose runtime δ axis is read from the supplied
+    array's shape (with the C4 rank-consistency / sibling AssertOps emitted by represent).
+    """
+    a = G.var("a", exterior_power(V, k))
+    b = G.var("b", exterior_power(V, l))
+    return a, b
+
+
 def _lower_two_bases(V: G.Expr, k: int, l: int):  # noqa: E741
     """Lower ``wedge(a, b)`` twice: in ``ImageBasis(Λ^{k+l})`` and the ambient standard."""
     a, b = _wedge_operands(V, k, l)
     w = wedge(a, b, k, l)  # result in Λ^{k+l} (the §1 default = ImageBasis(Alt))
     w_std = G.embed(w, tensor_power(V, k + l))  # same element, ambient V⊗^{k+l} std basis
+    return represent(w.node), represent(w_std.node)
+
+
+def _lower_two_bases_bare(V: G.Expr, k: int, l: int):  # noqa: E741
+    """As :func:`_lower_two_bases` but with **bare FFS-typed input** operands (`42 §C`)."""
+    a, b = _wedge_operands_bare(V, k, l)
+    w = wedge(a, b, k, l)
+    w_std = G.embed(w, tensor_power(V, k + l))
     return represent(w.node), represent(w_std.node)
 
 
@@ -107,6 +127,86 @@ def test_wedge_basis_invariance(n: int, k: int, l: int) -> None:  # noqa: E741
 
     # P's columns are orthonormal (the SVD/QR image basis is orthonormal, `41 §1`).
     np.testing.assert_allclose(P.T @ P, np.eye(rank), atol=1e-9)
+
+
+@pytest.mark.parametrize(("n", "k", "l"), [(3, 1, 1), (4, 1, 1), (4, 2, 1)])
+def test_wedge_basis_invariance_bare_ffs_inputs(n: int, k: int, l: int) -> None:  # noqa: E741
+    """`§7b` + Stage C: the same invariance with **bare FFS-typed input** operands.
+
+    ``a : Λᵏ``, ``b : Λˡ`` are bare FFS inputs (no ``project(ambient, Λᵏ)`` workaround);
+    they lower to dynamic bulk Program inputs (their δ read from the supplied array's shape)
+    with the C4 rank-consistency / sibling AssertOps.  The basis-invariance assertion still
+    holds: ``coords_std == P · coords_image``.
+    """
+    V = G.space("V", n)
+    prog_image, prog_std = _lower_two_bases_bare(V, k, l)
+
+    Pk = _image_basis_matrix(V, k)  # ImageBasis(Λᵏ): ambient -> Λᵏ coords
+    Pl = _image_basis_matrix(V, l)
+    P = _image_basis_matrix(V, k + l)  # the connecting cob (ImageBasis(Λ^{k+l}) -> std)
+
+    rank = math.comb(n, k + l)
+    assert P.shape == (n ** (k + l), rank)
+
+    rng = np.random.default_rng(0)
+    av = rng.standard_normal((n,) * k)
+    bv = rng.standard_normal((n,) * l)
+    # The bare operands live in Λᵏ/Λˡ coords: project the ambient tensors down.
+    a_coords = Pk.T @ av.reshape(-1)  # length C(n,k)
+    b_coords = Pl.T @ bv.reshape(-1)  # length C(n,l)
+    assert a_coords.shape == (math.comb(n, k),)
+    assert b_coords.shape == (math.comb(n, l),)
+
+    ka, kb = _input_names(prog_image)
+    feed = {ka: a_coords, kb: b_coords}
+
+    coords_image = prog_image.run(feed)["result"]
+    coords_std = prog_std.run(feed)["result"].reshape(-1)
+
+    assert coords_image.shape == (rank,)
+    assert coords_std.shape == (n ** (k + l),)
+
+    # THE §7b invariance assertion still holds with bare FFS inputs.
+    np.testing.assert_allclose(P @ coords_image, coords_std, atol=1e-9)
+    np.testing.assert_allclose(P.T @ P, np.eye(rank), atol=1e-9)
+
+    # Compare against the project(ambient) path: the two lowerings represent the SAME
+    # element, so their coordinate vectors agree.
+    prog_image_proj, _ = _lower_two_bases(V, k, l)
+    ka2, kb2 = _input_names(prog_image_proj)
+    coords_proj = prog_image_proj.run({ka2: av, kb2: bv})["result"]
+    np.testing.assert_allclose(coords_image, coords_proj, atol=1e-9)
+
+
+def test_bare_ffs_input_is_dynamic_bulk() -> None:
+    """A bare FFS-typed input lowers to a dynamic bulk Program input (`42 §C1`)."""
+    V = G.space("V", 4)
+    prog_image, _ = _lower_two_bases_bare(V, 1, 1)
+    # the two operand inputs are present and dynamic (bulk, DimAtom-sized).
+    dyn_inputs = [i for i in prog_image.inputs if pa.is_dynamic(i.shape)]
+    assert len(dyn_inputs) == 2
+    for inp in dyn_inputs:
+        sa = prog_image.input(inp.name)
+        assert sa._bulk is not None
+    # a rank-consistency AssertOp (rank_eq) was emitted for the FFS inputs.
+    notes = [s.note for s in prog_image.statements]
+    assert any("ffs-input-rank-consistency" in n for n in notes)
+
+
+def test_bare_ffs_sibling_mismatch_trips_assert() -> None:
+    """Two Λᵏ siblings fed mismatched δ trips the sibling-agreement AssertOp (`42 §C4`)."""
+    V = G.space("V", 4)
+    prog_image, _ = _lower_two_bases_bare(V, 1, 1)
+    notes = [s.note for s in prog_image.statements]
+    assert any("ffs-input-sibling" in n for n in notes)
+
+    ka, kb = _input_names(prog_image)
+    # a : Λ¹ has δ=4 (n=4); feeding b with the wrong length trips a runtime assert.
+    rng = np.random.default_rng(1)
+    good = rng.standard_normal(4)
+    bad = rng.standard_normal(5)
+    with pytest.raises((AssertionError, ValueError)):
+        prog_image.run({ka: good, kb: bad})
 
 
 def test_wedge_standard_basis_is_the_antisymmetric_tensor() -> None:
