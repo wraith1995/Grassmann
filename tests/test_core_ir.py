@@ -1,4 +1,4 @@
-"""IW1 acceptance tests for the Grassman core IR.
+"""IW1 acceptance tests for the Grassmann core IR.
 
 Constructs the core-IR forms of the `26-worked-examples.md` terms (pullback of a
 bilinear form; the k-linear antisymmetrizer as a multi-var LLam + Lift), asserts the
@@ -12,15 +12,22 @@ import math
 
 import pytest
 
-import grassman as G
-from grassman.core import (
+import grassmann as G
+from grassmann.core import (
     basis as B,
+)
+from grassmann.core import (
     kinds as K,
+)
+from grassmann.core import (
     space as S,
+)
+from grassmann.core import (
     term as T,
+)
+from grassmann.core import (
     types as Ty,
 )
-
 
 # ---------------------------------------------------------------------------
 # Worked example 1: pullback of a bilinear form (26 §1).
@@ -174,7 +181,6 @@ def test_antisymmetrizer_repr_roundtrip():
 def test_symmetric_algebra_via_asserted_rank():
     V = S.base("V", S.DimVar("n"))
     Vk = S.oprod(V, V, V)
-    n, k = S.DimVar("n"), S.DimVar("k")
     # Sym : Vk >> Vk, props = rank C(n+k-1, k)  (here just a symbolic placeholder dim).
     Sym = T.var("Sym", S.linear_map_space(Vk, Vk), props=G.core.rank(S.DimVar("binom_npk")))
     Symk = S.img(Sym)
@@ -282,7 +288,7 @@ def test_arrow_higher_order_domain_raises():
 
 
 def test_props_rank_dim_img_conflict_raises():
-    from grassman.core.props import PropError
+    from grassmann.core.props import PropError
 
     with pytest.raises(PropError):
         G.core.map_props(rank=3, dim_img=4)

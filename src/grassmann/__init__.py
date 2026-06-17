@@ -1,4 +1,4 @@
-"""Grassman — typed, coordinate-free linear-algebra core IR.
+"""Grassmann — typed, coordinate-free linear-algebra core IR.
 
 IW1 ships the ``core`` layer only: the Kind / Space / Type / Term / Basis towers as
 frozen dataclasses with smart constructors. The Python operator-overload embedding

@@ -1,4 +1,4 @@
-# Grassman — core language & type design (Phases 2–3)
+# Grassmann — core language & type design (Phases 2–3)
 
 > Consolidated design spec (started 2026-06-15). Covers the coordinate-free LA core:
 > the four-level tower (Term / Space / Type / Kind), the parallel **Basis** tower

@@ -7,7 +7,7 @@ Kind  κ ::= σ                            -- base kind
           | σ -> κ                       -- ARROW KIND (arity) — Space/Type Functions
 ```
 
-Term functions are classified by Pi-types (kind ``*``, see :mod:`grassman.core.types`);
+Term functions are classified by Pi-types (kind ``*``, see :mod:`grassmann.core.types`);
 Space/Type/Nat *functions* (which produce spaces/types/nats) are classified by **arrow
 kinds**. Simple (non-dependent) arrows suffice: a function's *result* kind is fixed
 (``space``/``nat``/``*``) even though the produced space/type value depends on the
@@ -17,8 +17,7 @@ argument, so no dependent kinds are needed. Arrow *domains* may be a space ``s``
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Union
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # Sorts (binder domains): the base kinds.
@@ -50,7 +49,7 @@ STAR = Sort("*")  # the kind of types
 class SpaceSort:
     """A value-domain sort: a binder ranges over the values of a space ``s``.
 
-    ``space`` is a :class:`~grassman.core.space.Space`; kept as ``object`` to
+    ``space`` is a :class:`~grassmann.core.space.Space`; kept as ``object`` to
     avoid an import cycle (space.py does not import kinds for its own nodes).
     """
 
@@ -70,8 +69,8 @@ class Arrow:
     function) are deferred per `20 §9`, so ``domain`` is never itself an ``Arrow``.
     """
 
-    domain: "Kind"
-    result: "Kind"
+    domain: Kind
+    result: Kind
 
     def __post_init__(self) -> None:
         if isinstance(self.domain, Arrow):
@@ -89,7 +88,7 @@ class Arrow:
 
 
 # A Kind is a base sort or an arrow.
-Kind = Union[Sort, SpaceSort, Arrow]
+Kind = Sort | SpaceSort | Arrow
 
 
 class KindError(Exception):

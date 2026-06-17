@@ -1,4 +1,4 @@
-"""Grassman core IR (IW1): the typed Kind / Space / Type / Term / Basis towers.
+"""Grassmann core IR (IW1): the typed Kind / Space / Type / Term / Basis towers.
 
 Faithful transcription of ``plans/20-core-language.md``. Nodes are frozen dataclasses;
 the module-level smart constructors enforce arity and structural kind well-formedness
@@ -11,12 +11,12 @@ from __future__ import annotations
 from . import basis, kinds, props, space, term, types
 from .basis import (
     BApp,
+    BaseBasis,
     Basis,
     BasisError,
     BasisProd,
     BasisRep,
     BasisSum,
-    BaseBasis,
     BLam,
     BVar,
     CompleteBasis,
@@ -62,9 +62,11 @@ from .props import (
     dim_img,
     dim_ker,
     inj,
-    props as map_props,
     rank,
     surj,
+)
+from .props import (
+    props as map_props,
 )
 from .space import (
     App,
@@ -136,9 +138,9 @@ from .term import (
     Remetric,
     Scale,
     Sharp,
-    Sum,
     Solve,
     SolveApply,
+    Sum,
     Term,
     TermError,
     Trace,

@@ -1,6 +1,6 @@
 # polyarray additions for Phase-4 lowering — implementation spec
 
-> 2026-06-16. Precise change-list to make polyarray a target for Grassman lowering
+> 2026-06-16. Precise change-list to make polyarray a target for Grassmann lowering
 > (`40`/`41`). All **additive, behind the frozen public API**; existing op behavior
 > unchanged; chartlib must stay green. Grounded in the real code (frozen-dataclass ops
 > with `__call__`; multi-output via tuple-return scattered in `_run_stmt`;
@@ -111,7 +111,7 @@ class AssertOp:
 
 ### A4. `SymbolicBudget.force_stmts()`  (the "no symbolic budget" preset)
 The opposite of `build_big_symbols`: drive **every modeled op to a `Stmt`** (no
-closed-form rational), so Grassman's symbolic inputs flow through as deferred Stmts.
+closed-form rational), so Grassmann's symbolic inputs flow through as deferred Stmts.
 ```python
 @classmethod
 def force_stmts(cls, **overrides):
@@ -121,7 +121,7 @@ def force_stmts(cls, **overrides):
 - `naive_inverse_max_size=0`/`inverse_max_degree=0` ⇒ every `det`/`inverse` emits a Stmt.
 - `einsum_bag_threshold=1` ⇒ every multi-operand symbolic einsum offloads to a Stmt.
 - `freeze=True` ⇒ cap any residual cell to an atom.
-(Grassman mostly emits Stmts directly via `representDown`; this preset covers any
+(Grassmann mostly emits Stmts directly via `representDown`; this preset covers any
 `SymArray`-method path uniformly.)
 
 ### A5. wiring
@@ -165,7 +165,7 @@ A shape is **dynamic** if any entry is a `DimAtom`.
 Per-cell atom allocation can't enumerate a `DimAtom`-sized axis. So: **if any
 `out_spec.shape` is dynamic ⇒ that output is `bulk=True`** (a whole-tensor handle, no
 per-cell atoms); its `SymArray._bulk` carries the (symbolic) shape. This matches
-Grassman's numeric lowering (dynamic-shaped values are never per-cell rational).
+Grassmann's numeric lowering (dynamic-shaped values are never per-cell rational).
 
 ### B4. `Program.run` — bind & resolve runtime dims
 - When a Stmt produces a value bound to a `DimAtom` output, record `δ := int(value)` in
@@ -202,7 +202,7 @@ contracting a `δ`-sized axis runs on both; the static-shape suite + chartlib st
 - Update `polyarray/PUBLIC_API.md` and run the full polyarray + chartlib suites.
 
 ## Status
-**IMPLEMENTED & GREEN** on branch `grassman-lowering-additions`: `SvdOp`, `QrOp`,
+**IMPLEMENTED & GREEN** on branch `grassmann-lowering-additions`: `SvdOp`, `QrOp`,
 `AssertOp`, `SymbolicBudget.force_stmts()` (Stage A) + `DimAtom` dynamic shapes (Stage B).
 38/38 polyarray tests + chartLib parity green; not pushed (user pushes manually).
 **IMPLEMENTED & GREEN (after that pass, per the GSVD decision):** **`GSvdOp`** (A2b) — a

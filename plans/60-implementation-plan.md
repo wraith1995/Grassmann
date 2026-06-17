@@ -1,9 +1,9 @@
-# Grassman — Implementation meta-plan (design → code)
+# Grassmann — Implementation meta-plan (design → code)
 
 > 2026-06-17. The **design is done** (`20` core IR, `25` embedding+inference, `26`
 > examples, `40`/`41`/`42` lowering, `50` algorithms/targets, `27` surface). The
-> **target is done** (`polyarray` + the Grassman additions `SvdOp`/`QrOp`/`AssertOp`/
-> `DimAtom`/`force_stmts`, branch `grassman-lowering-additions`, green). This doc is the
+> **target is done** (`polyarray` + the Grassmann additions `SvdOp`/`QrOp`/`AssertOp`/
+> `DimAtom`/`force_stmts`, branch `grassmann-lowering-additions`, green). This doc is the
 > **build plan**: package layout + dependency-ordered workstreams (fan-out points
 > marked) + acceptance gates. It **supersedes `01 §4`**, whose phasing predates the
 > converged design and is stale (it says "numeric only, no rational lane" — wrong;
@@ -17,17 +17,17 @@
 | (B) core IR (typed, coord-free) | `20` | ❌ none |
 | (B→) inference/elaboration | `25 §0–§7` | ❌ none |
 | (B→C→D) `representDown` lowering | `40`/`41`/`42` | ❌ none |
-| (D) `polyarray` target | extracted | ✅ done + Grassman additions green |
+| (D) `polyarray` target | extracted | ✅ done + Grassmann additions green |
 
-**Nothing in `grassman/` is code** — only `README.md` + `plans/`. This plan stands up the
-Python package `grassman/` (sibling of `polyarray/`, depends on it).
+**Nothing in `grassmann/` is code** — only `README.md` + `plans/`. This plan stands up the
+Python package `grassmann/` (sibling of `polyarray/`, depends on it).
 
 ## 1. Package layout (proposed)
 
 ```
-grassman/
+grassmann/
   pyproject.toml          # depends on polyarray (editable, like chartLib)
-  src/grassman/
+  src/grassmann/
     core/                 # IW1 — the typed IR (no Python-surface sugar)
       kinds.py            #   Kind tower + arrow kinds (20 §kinds)
       space.py            #   Space ADT: Scalar, ⊕, ⊗, Dual, Ker/Img/CoKer/CoImg, WithInner
@@ -134,4 +134,4 @@ IW5) the way we just did for the polyarray additions.
 
 ## Status
 Written 2026-06-17. Supersedes `01 §4` (stale). Design + target are done; this sequences
-the **Grassman package** build. Critical path: IW1 → IW4 → G3 (wedge invariance).
+the **Grassmann package** build. Critical path: IW1 → IW4 → G3 (wedge invariance).

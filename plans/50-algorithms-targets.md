@@ -2,7 +2,7 @@
 
 > 2026-06-17. Phase 5 of the meta-plan (`01 §3`): "design a few algorithms and
 > targets." Two halves: **(A)** a small set of concrete coordinate-free LA
-> **algorithms** written in the Grassman surface/core IR (`20`/`25`), traced through
+> **algorithms** written in the Grassmann surface/core IR (`20`/`25`), traced through
 > the `41` `representDown` rules + the `42` polyarray ops (`SvdOp`/`QrOp`/`AssertOp`
 > + `DimAtom` dynamic shapes); **(B)** **codegen targets** — `Program.run` (the
 > reference) and a proposed **PyTorch** path (`Program.run` → PyTorch; **no jax**, user decision).
@@ -41,7 +41,7 @@ hard-coded numbers, `41 §7b`). A3 is already traced and serves as the honest "b
 choice is not a panacea" foil. A5/A6 are the metric/CoB substrate A1–A4 lean on —
 build them as needed, not as headliners. **OQ1** asks the user to confirm.
 
-Each algorithm below is given as: **math → Grassman → lowering (cite `41`/`42`) →
+Each algorithm below is given as: **math → Grassmann → lowering (cite `41`/`42`) →
 why it's a good test**.
 
 ---
@@ -70,7 +70,7 @@ unacceptable for a deterministic semantics; FSV's spectral-projector + LexInd +
 GramSchmidt pin a canonical one given the input bases. The numerical **rank `r`** is the
 SVD "dimension oracle": `|Img|=|CoImg|=r`, `|Ker|=|V|−r`, `|CoKer|=|W|−r`.
 
-**Grassman.** FFS spaces are core nodes (`20 §5`); their **bases** are `ProjectedBasis`/
+**Grassmann.** FFS spaces are core nodes (`20 §5`); their **bases** are `ProjectedBasis`/
 `ImageBasis` (`20 §7`). No surface gymnastics — the user writes the map and asks for the
 subspace:
 ```python
@@ -126,7 +126,7 @@ different output shapes (`42 §B` test), and `K`-basis columns are orthonormal &
 `f†v = argmin_{w}{ ‖w‖ : ‖f w − v‖ minimized }` — min-norm least squares. GSVD form
 `f† = U·S⁻¹·Vᵀ` (`eq:gsvdpseudo`). Least squares `min_x ‖f x − v‖` *is* `x = f† v`.
 
-**Grassman.** Pinv is a core node in all four forms (`20 §6`): `Pinv(f)` (the map),
+**Grassmann.** Pinv is a core node in all four forms (`20 §6`): `Pinv(f)` (the map),
 `PinvApply(f,v)`; with metrics via `WithInner`/`Dagger`:
 ```python
 f = G.var("f", V >> W)                       # no props ⇒ rank deduced by SVD
@@ -161,7 +161,7 @@ A1's FFS machinery (pinv *is* the coker↔img iso) so it validates A1 compositio
 **Math.** A bilinear form `B` on `W` pulled back along `T : V ⊸ W` is `g_V = TᵀBT` on `V`
 (`26 §1`, `41 §7`). Linear in `B`, quadratic in `T` — exercises the `⊸`/`Lam` split.
 
-**Grassman.** Verbatim `26 §1`:
+**Grassmann.** Verbatim `26 §1`:
 ```python
 pullback = G.lam(V>>W, lambda T: G.llam(formW, lambda b: G.llam(V,V,
                        lambda x,y: b(T(x), T(y)))))     # formW = W>>(W>>R)
@@ -194,7 +194,7 @@ embed→tensor→antisymmetrize→project→scale. Exterior algebra is **only an
 test** here — never a built-in. A coordinate-free result is **basis-independent** (change
 of basis is a pullback; `T*(α∧β)=(T*α)∧(T*β)`), so realizing it in two bases must agree.
 
-**Grassman.** The derived `wedge(a,b,k,l)` of `26 §2` over the antisymmetrizer `Alt` (a
+**Grassmann.** The derived `wedge(a,b,k,l)` of `26 §2` over the antisymmetrizer `Alt` (a
 multi-var `LLam` + `Lift`, `26 F2`); `Λk = G.img(Alt)`, `|Λk| = C(n,k)` (asserted) or the
 runtime `δ_Alt` (`26 F3`, `25 §1`).
 
@@ -216,7 +216,7 @@ not a lookup.
 FEMOracle (which hard-coded numbers for both bases) by *computing* both through the
 lowering and demonstrating invariance. Validates the entire CoB/basis-choice subsystem in
 one assertion. **OQ2**: do we ship `wedge` (+ `Alt`) as a tiny **stdlib** (`26 F5`), or
-inline it per-test? (Lean: a `grassman.examples` module — not core IR.)
+inline it per-test? (Lean: a `grassmann.examples` module — not core IR.)
 
 ---
 
@@ -228,7 +228,7 @@ identification and `L† = U·S⁻¹·Vᵀ`. Reduces to plain SVD when metrics a
 is the metric-general version of A1/A2 — the paper's *axiomatized boundary* (`00 §1`,
 `01 §1.4`: hard numerics stay behind a named op).
 
-**Grassman.** Enter a metric space and the FFS/pinv read it (`20 §9`, `25 §3`):
+**Grassmann.** Enter a metric space and the FFS/pinv read it (`20 §9`, `25 §3`):
 ```python
 Vg = V.with_inner(gV)        # WithInner(V, gV) ;  gV : ~V * ~V, SPD
 fg = G.var("f", Vg >> Wg)
@@ -263,7 +263,7 @@ paper's named axiomatized boundary than reusing `SvdOp`; `42` adds it).
 value in any basis by converting toward a standard basis and back (`41 §2`). `Project`/
 `Embed` across `⊕`/`⊗`/`Dual`/subspaces; `TupleEmbed`/`TupleProject` for `⊕` components.
 
-**Grassman.** `G.project`/`G.embed`/`G.inj`/`G.proj`, and program-supplied first-class
+**Grassmann.** `G.project`/`G.embed`/`G.inj`/`G.proj`, and program-supplied first-class
 bases overriding `spaceBasis` (`25 F4`, `20 §7`).
 
 **Lowering (`41 §2`).** The `cob` rules: `BasisProd ⇒ Kron/Einsum`, `BasisSum ⇒
@@ -311,10 +311,10 @@ sub-Programs (`41 §3` binders) execute. Pure-Python + numpy, no jit; chartLib's
 pass in ~0.5s. **This is the spec the jax target must match numerically** and the only
 target Phases 1–3 need (`40 §5 E`, lean confirmed).
 
-For Grassman, B0 already handles everything **except** the `42` additions, which extend
+For Grassmann, B0 already handles everything **except** the `42` additions, which extend
 it: `SvdOp`/`QrOp`/`AssertOp` are new `fn`s `_run_stmt` calls with **zero core change**
 (`42 §A5`: `fn(*resolved)` + tuple scatter already exist); **dynamic shapes** add a
-`dim_bindings: dict[DimAtom,int]` resolved at run time (`42 §B4`). So B0-for-Grassman =
+`dim_bindings: dict[DimAtom,int]` resolved at run time (`42 §B4`). So B0-for-Grassmann =
 B0 + `42`. No new target work — it is the acceptance oracle for B1.
 
 ### B1. PyTorch codegen  (proposed; port FEMOracle `stmtize`→`execute`)
@@ -338,7 +338,7 @@ torch/jax backend can swap in their native `vmap`."
 trace-on-static-shapes jit, **PyTorch eager is dynamic like numpy**: a `δ_f`-sized axis is
 just a runtime int, resolved exactly as B0 does (`42 §B4`), and torch ops accept it
 directly. So the entire jax masked-dense / retrace tension that earlier drafts agonized
-over **simply disappears** — Grassman's true-dynamic-shape `Program` (`40 §5 B`) runs on
+over **simply disappears** — Grassmann's true-dynamic-shape `Program` (`40 §5 B`) runs on
 torch eager unchanged. **`torch.compile`** (the optional jit/fusion layer) supports
 dynamic shapes via `mark_dynamic`/`dynamic=True` *when* we later want fusion — deferred,
 not needed for the reference/perf path.
@@ -361,7 +361,7 @@ graph) — a reason `41 §0b` matters.
   outputs. A `Program`→`Program` simplification, **out of the codegen story** (not a third
   backend; it was floated as "optional (iii)" in `01 §3` — clarified here).
 - **PyArrayTarget / PyArrayBackend** (siblings under `~/projects/fem/`) — existing
-  numpy-IR codegen / distributed-array backends. **Out of scope** for Grassman v1 (different
+  numpy-IR codegen / distributed-array backends. **Out of scope** for Grassmann v1 (different
   IR + FEM/distributed stack); noted only to record they are *not* the path.
 
 ### B-summary
@@ -382,7 +382,7 @@ graph) — a reason `41 §0b` matters.
   foil and A5/A6 as build-as-needed substrate. Or reweight (e.g. promote A5 GSVD if the
   metric-general path is the priority)? Resolves meta-plan **Q6** (`01 §5`).
 - **OQ2 — stdlib boundary.** Ship `wedge`/`Alt` (and other derived ops, `26 F5`) as a tiny
-  `grassman.examples`/stdlib module, or inline per worked example? (Lean: a thin stdlib,
+  `grassmann.examples`/stdlib module, or inline per worked example? (Lean: a thin stdlib,
   explicitly *not* core IR.)
 - **OQ3 — GSVD realization. ✅ RESOLVED:** a dedicated **`GSvdOp`** in polyarray (user's
   call — the paper's named axiomatized boundary, `01 §1.4`). `42` adds it. *(Also: an
@@ -399,11 +399,11 @@ graph) — a reason `41 §0b` matters.
   the per-phase gate in `01 §4`.)
 
 ## Status
-Phase-5 design **opened**. Part A: six algorithms specified (math → Grassman → `41`/`42`
+Phase-5 design **opened**. Part A: six algorithms specified (math → Grassmann → `41`/`42`
 lowering → test), lean headliners **A1/A2/A4**, each tagged with the ★ basis-choice lever
 (A3 the honest foil where it doesn't apply). **Decided:** GSVD = dedicated **`GSvdOp`**;
 injective image basis = **`QrOp`** (recovers `IsoSpace`). Part B: `Program.run` reference
-(B0, exists, = B0+`42` for Grassman); **PyTorch op-table interpreter over the same
+(B0, exists, = B0+`42` for Grassmann); **PyTorch op-table interpreter over the same
 `Program`** proposed — **no jax** (user decision), and torch eager makes `DimAtom`
 dynamic shapes a non-issue (OQ4 moot). **OQ3/OQ4/OQ5 resolved**; OQ1 (headliners)/OQ2
 (stdlib boundary)/OQ6 (acceptance corpus) remain open. **Next:** confirm OQ1, write the A1

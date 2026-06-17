@@ -1,4 +1,4 @@
-# WS1 — `polyarray`: extract the shared array IR (used by Grassman *and* chartLib)
+# WS1 — `polyarray`: extract the shared array IR (used by Grassmann *and* chartLib)
 
 > Plan v2 (2026-06-15). Grounded in a direct read of
 > `~/projects/fem/chartLib/src/chartlib/_symbolic/`. See `00-landscape.md` §2.
@@ -11,7 +11,7 @@
 
 - This is **not** a one-way vendor copy. We **extract** the symbolic array IR out
   of chartLib into a **standalone shared package, `polyarray`**, and **both
-  Grassman and chartLib depend on it.** chartLib is refactored to import the core
+  Grassmann and chartLib depend on it.** chartLib is refactored to import the core
   from `polyarray`; its sampler/geometry code stays in chartLib. There is no
   "drift" to track — `polyarray` becomes the single source of truth.
 - **Keep all polynomial backends**, including the **Cython C++ backends**
@@ -26,7 +26,7 @@
 Stand up `polyarray` as an independent, installable package containing the
 symbolic-numeric array IR (`Program`/`Stmt`/`SymArray`/`RationalFunction` + all
 poly backends), with **zero dependency on chartLib**; repoint chartLib's
-`_symbolic` core at it; and make it the target both chartLib and Grassman emit
+`_symbolic` core at it; and make it the target both chartLib and Grassmann emit
 against.
 
 ## 1. The extraction boundary (verified against source)
@@ -72,7 +72,7 @@ builds `.so` in place next to the `.pyx`; deps = `numpy`, `Cython`, `sympy`; no
 ## 2. Package layout & how both consumers use it
 
 `polyarray` is a sibling project under `~/projects/fem/` (like `chartLib`,
-`grassman`, `PyArrayBackend`):
+`grassmann`, `PyArrayBackend`):
 
 ```
 ~/projects/fem/polyarray/
@@ -92,7 +92,7 @@ builds `.so` in place next to the `.pyx`; deps = `numpy`, `Cython`, `sympy`; no
   `interpreter.py`, `per_point.py`, `integrate.py`, and an `__init__.py` that
   imports the core from `polyarray` and re-exports the same names it exports today
   (back-compatible public API for chartLib users).
-- **Grassman** depends on `polyarray`; the Phase-4 lowering emits `Program`s
+- **Grassmann** depends on `polyarray`; the Phase-4 lowering emits `Program`s
   against it.
 
 **Packaging — ship wheels.** Build binary wheels with the Cython extensions
@@ -101,7 +101,7 @@ so `pip install polyarray` needs no local C++ toolchain. The pure-Python backend
 (sympy / native_py / native_value) remain a working fallback if a wheel is absent;
 `make cython` stays for local dev/editable installs.
 
-## 3. The public target API (what chartLib re-exports and Grassman emits against)
+## 3. The public target API (what chartLib re-exports and Grassmann emits against)
 
 Same surface chartLib exposes today, now homed in `polyarray`:
 
@@ -143,7 +143,7 @@ So the **three lanes** resolve at run time as: *numeric* cells are already float
 *deferred* work is exactly the `Stmt`s stepped in (2). The whole thing is data —
 build a `Program`, call `.run({...})`, get `{name: ndarray}`.
 
-For Grassman this means: **the reference target is runnable from day one** — Phase-1
+For Grassmann this means: **the reference target is runnable from day one** — Phase-1
 acceptance ("matrix program → numpy") just builds a `Program` and calls `.run`. A
 faster jax/codegen backend (FEMOracle's `stmtize`→`execute` idea) is optional, later
 Phase-5 work; it is **not** required to execute.
@@ -152,7 +152,7 @@ Phase-5 work; it is **not** required to execute.
 
 The IR simplification / partial-symbolic-evaluation work you asked about **lives in
 the extractable core and moves into `polyarray`** — making `polyarray` the single
-home where both chartLib and Grassman get these improvements. Inventory:
+home where both chartLib and Grassmann get these improvements. Inventory:
 
 - **In `forward.py` (the IR passes — now in the move-set):**
   - `analyze(program) -> IRReport` — post-build structural cost analysis (stmt
@@ -176,7 +176,7 @@ home where both chartLib and Grassman get these improvements. Inventory:
 
 Because these passes are in scope for the move, the shared package isn't just a
 dumb IR — it's the IR **plus** its analysis/partial-eval layer, which is precisely
-what Grassman's lowering will lean on (and what chartLib already uses).
+what Grassmann's lowering will lean on (and what chartLib already uses).
 
 ## 4. Faithful extraction — invariants
 
@@ -210,7 +210,7 @@ what Grassman's lowering will lean on (and what chartLib already uses).
 7. **Run chartLib's full test suite** — must stay green (this is the acceptance gate
    for the refactor).
 8. **Author `polyarray` golden tests** (§7) and `PUBLIC_API.md`.
-9. **Point Grassman** at `polyarray` (dependency only; lowering comes in Phase 4).
+9. **Point Grassmann** at `polyarray` (dependency only; lowering comes in Phase 4).
 
 ## 6. Backends — all of them, no new options
 
@@ -259,7 +259,7 @@ what `polyarray` selects.
   hashable/frozen as they already are, but no fingerprint/caching layer is added.)
 
 **Resolved (cont.):**
-- **Grassman emits against `polyarray` directly** — no thin wrapper layer. The
+- **Grassmann emits against `polyarray` directly** — no thin wrapper layer. The
   Phase-4 lowering calls `Program` / `emit_stmt` / the Op classes / `SymArray`
   directly.
 

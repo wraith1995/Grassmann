@@ -9,8 +9,8 @@ Type  τ ::= ⟦ Space ⟧                 -- a space as a type (vectors & linea
 - **Linear maps are spaces** (``s₀⊸s₁ = ⟦s₀*⊗s₁⟧``); the **only** non-space types are
   Π-types. ``s₀→s₁ = Π(_:s).⟦s₁⟧``.
 - **SpaceFunctions / TypeFunctions** are not modeled here: they are a ``Lam`` whose body
-  is a Space / a Type (see :mod:`grassman.core.term`), kinded by the arrow kinds in
-  :mod:`grassman.core.kinds`. This module models the *Type* level (Π / TypeApp) and the
+  is a Space / a Type (see :mod:`grassmann.core.term`), kinded by the arrow kinds in
+  :mod:`grassmann.core.kinds`. This module models the *Type* level (Π / TypeApp) and the
   ``SpaceAsType`` wrapper used when a Space is used in a type position.
 - No special dependent-output node: a dependent function's output type is just a
   :class:`TypeApp` of the right Space/Type Function (or substitution when concrete).
@@ -19,9 +19,8 @@ Type  τ ::= ⟦ Space ⟧                 -- a space as a type (vectors & linea
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple, Union
 
-from .kinds import Kind, SpaceSort, Sort, is_kind
+from .kinds import Kind, SpaceSort, is_kind
 from .space import Space, _tuple_repr, is_space
 
 
@@ -54,7 +53,7 @@ class Pi:
 
     binder: str
     domain: Kind
-    codomain: "Type"
+    codomain: Type
 
     def __post_init__(self) -> None:
         if not is_kind(self.domain):
@@ -71,8 +70,8 @@ class TypeApp:
     """``App(g, positions, args…)`` — apply a TypeFunction → a Type (`20 §4`)."""
 
     g: object  # a TypeFunction (a Lam whose body is a Type)
-    positions: Tuple[int, ...]
-    args: Tuple[object, ...]
+    positions: tuple[int, ...]
+    args: tuple[object, ...]
 
     def __post_init__(self) -> None:
         if len(self.positions) != len(self.args):
@@ -90,7 +89,7 @@ class TypeApp:
         return f"TypeApp({self.g!r}, {_tuple_repr(self.positions)}, {_tuple_repr(self.args)})"
 
 
-Type = Union[SpaceAsType, Pi, TypeApp]
+Type = SpaceAsType | Pi | TypeApp
 
 _TYPE_TYPES = (SpaceAsType, Pi, TypeApp)
 
@@ -132,7 +131,7 @@ def fn(s0: Space, s1: Space) -> Pi:
     return Pi("_", SpaceSort(s0), as_type(s1))
 
 
-def type_app(g: object, positions: Tuple[int, ...], *args: object) -> TypeApp:
+def type_app(g: object, positions: tuple[int, ...], *args: object) -> TypeApp:
     return TypeApp(g, tuple(positions), tuple(args))
 
 

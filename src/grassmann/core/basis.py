@@ -19,7 +19,7 @@ Basis  b ::=
 
 ``BLam``/``BApp`` mirror ``Lam``/``App`` across the whole tower. A ``BLam`` over a
 **value** is the **Frame** (the paper's frame; basis varies with a runtime value) — note
-:class:`grassman.core.term.Frame` is the dedicated Term-level frame node; here ``BLam``
+:class:`grassmann.core.term.Frame` is the dedicated Term-level frame node; here ``BLam``
 with a ``SpaceSort`` domain is the basis-tower spelling. A ``BLam`` over a **basis** is a
 **basis function** (mirror of a Space/Type Function); over a **nat**, a nat-parametric
 builder.
@@ -31,7 +31,6 @@ No stored ``coeffs`` (that was impl change-of-basis caching; recompute at loweri
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple, Union
 
 from .kinds import Kind, is_kind
 from .space import Dim, _tuple_repr, as_dim
@@ -80,7 +79,7 @@ class BVar:
 class DualBasis:
     """``DualBasis(b)`` — the dual basis."""
 
-    basis: "Basis"
+    basis: Basis
 
     def __post_init__(self) -> None:
         _require_basis(self.basis, "DualBasis")
@@ -93,7 +92,7 @@ class DualBasis:
 class PrimalBasis:
     """``PrimalBasis(b)`` — the primal basis of a dual basis."""
 
-    basis: "Basis"
+    basis: Basis
 
     def __post_init__(self) -> None:
         _require_basis(self.basis, "PrimalBasis")
@@ -106,7 +105,7 @@ class PrimalBasis:
 class BasisSum:
     """``BasisSum(b…)`` — n-ary ⊕ basis."""
 
-    bases: Tuple["Basis", ...]
+    bases: tuple[Basis, ...]
 
     def __post_init__(self) -> None:
         for b in self.bases:
@@ -120,7 +119,7 @@ class BasisSum:
 class BasisProd:
     """``BasisProd(b…)`` — n-ary ⊗ basis."""
 
-    bases: Tuple["Basis", ...]
+    bases: tuple[Basis, ...]
 
     def __post_init__(self) -> None:
         if not self.bases:
@@ -137,7 +136,7 @@ class BasisRep:
     """``BasisRep(n, b)`` — ⊕ⁿ basis (mirrors ``OPlusRep``)."""
 
     count: Dim
-    basis: "Basis"
+    basis: Basis
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "count", as_dim(self.count))
@@ -158,8 +157,8 @@ class ProjectedBasis:
 
     f: object  # a linear-map Term
     which: str
-    source: "Basis | None" = None
-    target: "Basis | None" = None
+    source: Basis | None = None
+    target: Basis | None = None
 
     def __post_init__(self) -> None:
         if self.f is None:
@@ -200,7 +199,7 @@ class ImageBasis:
 class WithInnerBasis:
     """``WithInnerBasis(b, g)`` — a ``g``-orthonormal basis."""
 
-    basis: "Basis"
+    basis: Basis
     metric: object
 
     def __post_init__(self) -> None:
@@ -216,7 +215,7 @@ class CompleteBasis:
     ambient. ``complement`` is user-supplied. embed = pad-zeros, project =
     drop-complement (realized FROM this; no Embed/ProjectBasis)."""
 
-    sub_basis: "Basis"
+    sub_basis: Basis
     complement: object
 
     def __post_init__(self) -> None:
@@ -232,14 +231,14 @@ class CompleteBasis:
 class BLam:
     """``BLam(b:σ̂. bodyBasis)`` — basis-level binder; machinery to BUILD a basis.
 
-    Domain ``σ`` (a :class:`~grassman.core.kinds.Kind`) decides the instance:
+    Domain ``σ`` (a :class:`~grassmann.core.kinds.Kind`) decides the instance:
     a value (``SpaceSort``) ⇒ a **Frame**; a basis ⇒ a **basis function**; a nat ⇒ a
     nat-parametric builder. ``body`` is the produced :class:`Basis`. ``term_var`` /
     ``basis_var`` hold the bound handle when applicable.
     """
 
-    binders: Tuple[Tuple[str, Kind], ...]
-    body: "Basis"
+    binders: tuple[tuple[str, Kind], ...]
+    body: Basis
     term_var: Var | None = None
     basis_var: BVar | None = None
 
@@ -265,9 +264,9 @@ class BLam:
 class BApp:
     """``BApp(f, positions, args…)`` — apply a ``BLam`` (mirrors ``App``/``Eval``)."""
 
-    f: "Basis"
-    positions: Tuple[int, ...]
-    args: Tuple[object, ...]
+    f: Basis
+    positions: tuple[int, ...]
+    args: tuple[object, ...]
 
     def __post_init__(self) -> None:
         _require_basis(self.f, "BApp.f")
@@ -284,22 +283,7 @@ class BApp:
         return f"BApp({self.f!r}, {_tuple_repr(self.positions)}, {_tuple_repr(self.args)})"
 
 
-Basis = Union[
-    ScalarBasis,
-    BaseBasis,
-    BVar,
-    DualBasis,
-    PrimalBasis,
-    BasisSum,
-    BasisProd,
-    BasisRep,
-    ProjectedBasis,
-    ImageBasis,
-    WithInnerBasis,
-    CompleteBasis,
-    BLam,
-    BApp,
-]
+Basis = ScalarBasis | BaseBasis | BVar | DualBasis | PrimalBasis | BasisSum | BasisProd | BasisRep | ProjectedBasis | ImageBasis | WithInnerBasis | CompleteBasis | BLam | BApp
 
 _BASIS_TYPES = (
     ScalarBasis,
@@ -385,7 +369,7 @@ def complete_basis(sub_basis: Basis, complement: object) -> CompleteBasis:
 
 
 def blam(
-    binders: Tuple[Tuple[str, Kind], ...],
+    binders: tuple[tuple[str, Kind], ...],
     body: Basis,
     term_var: Var | None = None,
     basis_var: BVar | None = None,
@@ -393,7 +377,7 @@ def blam(
     return BLam(tuple(binders), body, term_var, basis_var)
 
 
-def bapp(f: Basis, positions: Tuple[int, ...], *args: object) -> BApp:
+def bapp(f: Basis, positions: tuple[int, ...], *args: object) -> BApp:
     return BApp(f, tuple(positions), tuple(args))
 
 

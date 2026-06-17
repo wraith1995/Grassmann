@@ -1,4 +1,4 @@
-# Grassman
+# Grassmann
 
 A typed frontend language for **coordinate-free linear algebra** — abstract
 spaces, duals, `⊕`/`⊗`, linear maps, the four fundamental subspaces
@@ -20,7 +20,7 @@ then to a numeric / jax backend.
 
 **Out of scope:** exterior algebra / differential forms, polynomial-basis /
 quadrature machinery, FEM assembly, and formal verification. Those exist in the
-source systems but are not what Grassman is.
+source systems but are not what Grassmann is.
 
 ## Status
 

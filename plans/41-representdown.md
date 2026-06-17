@@ -203,7 +203,7 @@ everything else becomes a numeric `Stmt`. A separate pass, not part of `represen
 `inj`/IsoSpace case), `GSvdOp` (metric-aware, `42 §A2b`), `AssertOp`; **dynamic shapes**
 (`δ_f`-valued axes propagate through `Einsum`/`Stmt`/reshape); per-space metric arrays
 `G_s`. **Status:** `SvdOp`/`QrOp`/`AssertOp` + dynamic shapes **DONE & green** (branch
-`grassman-lowering-additions`); **`GSvdOp` pending** (small additive op).
+`grassmann-lowering-additions`); **`GSvdOp` pending** (small additive op).
 **Already present (the ⟨min-sym⟩ machinery — reused, not built):** the force-`Stmt`
 budget config, `freeze_array`/`einsum_bag_threshold` (degree capping), and
 `forward.analyze`/`partial_eval` (the simplify-later pass). This is the payoff of having

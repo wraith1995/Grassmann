@@ -26,12 +26,11 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
-from typing import Tuple, Union
 
-from .kinds import NAT, SPACE, STAR, Kind, SpaceSort, Sort, is_kind
+from .kinds import Kind, SpaceSort, is_kind
 from .props import MapProps
 from .space import Space, _tuple_repr, is_space
-from .types import Type, is_type
+from .types import is_type
 
 
 class TermError(Exception):
@@ -78,7 +77,7 @@ class External:
 
     space: Space
     data: object
-    args: Tuple["Term", ...] = ()
+    args: tuple[Term, ...] = ()
 
     def __post_init__(self) -> None:
         if not is_space(self.space):
@@ -135,7 +134,7 @@ class Scale:
     """``Scale(r, v)`` — scalar multiple. ``r`` is a real or a scalar-valued Term."""
 
     scalar: object
-    vector: "Term"
+    vector: Term
 
     def __post_init__(self) -> None:
         if not isinstance(self.scalar, (int, float)) and not is_term(self.scalar):
@@ -150,7 +149,7 @@ class Scale:
 class Sum:
     """``Sum(v…)`` — n-ary vector addition (all summands share a space; checked IW3)."""
 
-    vectors: Tuple["Term", ...]
+    vectors: tuple[Term, ...]
 
     def __post_init__(self) -> None:
         if not self.vectors:
@@ -166,7 +165,7 @@ class Sum:
 class OPlusV:
     """``OPlus(v…)`` — n-ary direct-sum *stack* of vectors (space ``⊕(sᵢ)``)."""
 
-    vectors: Tuple["Term", ...]
+    vectors: tuple[Term, ...]
 
     def __post_init__(self) -> None:
         for v in self.vectors:
@@ -180,7 +179,7 @@ class OPlusV:
 class OProdV:
     """``OProd(v…)`` — n-ary tensor product of vectors (space ``⊗(sᵢ)``)."""
 
-    vectors: Tuple["Term", ...]
+    vectors: tuple[Term, ...]
 
     def __post_init__(self) -> None:
         if not self.vectors:
@@ -197,7 +196,7 @@ class OProdV:
 # ===========================================================================
 
 
-def _check_positions_args(ctx: str, positions: Tuple[int, ...], args: Tuple["Term", ...]) -> None:
+def _check_positions_args(ctx: str, positions: tuple[int, ...], args: tuple[Term, ...]) -> None:
     if len(positions) != len(args):
         raise TermError(
             f"{ctx}: positions ({len(positions)}) and args ({len(args)}) "
@@ -219,9 +218,9 @@ class Eval:
     Apply a linear map ``f`` at the selected dual slots ``positions`` with ``args``.
     """
 
-    f: "Term"
-    positions: Tuple[int, ...]
-    args: Tuple["Term", ...]
+    f: Term
+    positions: tuple[int, ...]
+    args: tuple[Term, ...]
 
     def __post_init__(self) -> None:
         _require_term(self.f, "Eval.f")
@@ -235,9 +234,9 @@ class Eval:
 class NEval:
     """``NEval(f, positions, args…)`` — **non-linear** application (apply a ``Lam``)."""
 
-    f: "Term"
-    positions: Tuple[int, ...]
-    args: Tuple[object, ...]
+    f: Term
+    positions: tuple[int, ...]
+    args: tuple[object, ...]
 
     def __post_init__(self) -> None:
         _require_term(self.f, "NEval.f")
@@ -260,9 +259,9 @@ class Compose:
     """``Compose(f, positions, gs…)`` — contract each ``gₖ``'s codomain into ``f``'s
     selected slot."""
 
-    f: "Term"
-    positions: Tuple[int, ...]
-    gs: Tuple["Term", ...]
+    f: Term
+    positions: tuple[int, ...]
+    gs: tuple[Term, ...]
 
     def __post_init__(self) -> None:
         _require_term(self.f, "Compose.f")
@@ -276,7 +275,7 @@ class Compose:
 class Trace:
     """``Trace(f, i, j)`` — contract (primal) index ``i`` with dual index ``j``."""
 
-    f: "Term"
+    f: Term
     i: int
     j: int
 
@@ -300,7 +299,7 @@ class Trace:
 class Solve:
     """``Solve(f)`` — the inverse map ``f⁻¹`` (requires ``f`` asserted ``bij``; IW3)."""
 
-    f: "Term"
+    f: Term
 
     def __post_init__(self) -> None:
         _require_term(self.f, "Solve.f")
@@ -313,7 +312,7 @@ class Solve:
 class Pinv:
     """``Pinv(f)`` — the Moore–Penrose pseudo-inverse map ``f†``."""
 
-    f: "Term"
+    f: Term
 
     def __post_init__(self) -> None:
         _require_term(self.f, "Pinv.f")
@@ -326,8 +325,8 @@ class Pinv:
 class SolveApply:
     """``SolveApply(f, v)`` — solve ``f·x = v`` (the applied form of ``Solve``)."""
 
-    f: "Term"
-    v: "Term"
+    f: Term
+    v: Term
 
     def __post_init__(self) -> None:
         _require_term(self.f, "SolveApply.f")
@@ -341,8 +340,8 @@ class SolveApply:
 class PinvApply:
     """``PinvApply(f, v)`` — apply the pseudo-inverse: ``f†·v``."""
 
-    f: "Term"
-    v: "Term"
+    f: Term
+    v: Term
 
     def __post_init__(self) -> None:
         _require_term(self.f, "PinvApply.f")
@@ -356,7 +355,7 @@ class PinvApply:
 class Dagger:
     """``Dagger(f)`` — metric-transpose adjoint (real ⇒ no conjugate)."""
 
-    f: "Term"
+    f: Term
 
     def __post_init__(self) -> None:
         _require_term(self.f, "Dagger.f")
@@ -413,7 +412,7 @@ class Sharp:
 class Project:
     """``Project(v, s)`` — project ``v`` onto a subspace ``s`` (``s ⊑ space(v)``; IW3)."""
 
-    vector: "Term"
+    vector: Term
     space: Space
 
     def __post_init__(self) -> None:
@@ -428,7 +427,7 @@ class Project:
 class Embed:
     """``Embed(v, s)`` — embed ``v`` into a larger space ``s`` (``space(v) ⊑ s``)."""
 
-    vector: "Term"
+    vector: Term
     space: Space
 
     def __post_init__(self) -> None:
@@ -443,7 +442,7 @@ class Embed:
 class Assert:
     """``Assert(v, s)`` — assert ``v`` has space ``s`` (``space(v) ~ s``; IW3)."""
 
-    vector: "Term"
+    vector: Term
     space: Space
 
     def __post_init__(self) -> None:
@@ -490,7 +489,7 @@ class TupleProject:
 class Remetric:
     """``Remetric(v, g)`` — enter ``WithInner(s, g)`` (`20` point 9)."""
 
-    vector: "Term"
+    vector: Term
     metric: object
 
     def __post_init__(self) -> None:
@@ -504,8 +503,8 @@ class Remetric:
 class Lift:
     """``Lift(v, fused, k?)`` — index reshape (≡ curry); fuse the listed tensor indices."""
 
-    vector: "Term"
-    fused: Tuple[int, ...]
+    vector: Term
+    fused: tuple[int, ...]
     k: int | None = None
 
     def __post_init__(self) -> None:
@@ -522,8 +521,8 @@ class Lift:
 class InvLift:
     """``InvLift(v, fused, k?)`` — inverse index reshape (≡ uncurry)."""
 
-    vector: "Term"
-    fused: Tuple[int, ...]
+    vector: Term
+    fused: tuple[int, ...]
     k: int | None = None
 
     def __post_init__(self) -> None:
@@ -540,8 +539,8 @@ class InvLift:
 class Kron:
     """``Kron(f, g)`` — Kronecker product of maps (first-class)."""
 
-    f: "Term"
-    g: "Term"
+    f: Term
+    g: Term
 
     def __post_init__(self) -> None:
         _require_term(self.f, "Kron.f")
@@ -568,8 +567,8 @@ class LLam:
     detectable violations the spec calls out.)
     """
 
-    vars: Tuple[Var, ...]
-    body: "Term"
+    vars: tuple[Var, ...]
+    body: Term
 
     def __post_init__(self) -> None:
         if not self.vars:
@@ -597,9 +596,9 @@ class Lam:
     corresponding ``Var`` objects are stored in ``term_vars`` for reference by the body.
     """
 
-    binders: Tuple[Tuple[str, Kind], ...]
+    binders: tuple[tuple[str, Kind], ...]
     body: object  # Term | Space | Type | Dim
-    term_vars: Tuple[Var, ...] = ()
+    term_vars: tuple[Var, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.binders:
@@ -628,7 +627,7 @@ class Frame:
     Listed in the IW1 Term scope (`60 §1`). A ``Frame`` binds a runtime value ``x:s`` to
     a basis (``x ↦ basis of τ(x)``). The basis-producing body lives in :mod:`basis`; we
     store the bound term ``Var`` and the basis body (kept ``object`` to avoid a cycle).
-    The richer basis tower (``BLam``/``BApp``) is in :mod:`grassman.core.basis`.
+    The richer basis tower (``BLam``/``BApp``) is in :mod:`grassmann.core.basis`.
     """
 
     var: Var
@@ -643,41 +642,7 @@ class Frame:
 
 
 # A Term is any of the node types above.
-Term = Union[
-    Var,
-    External,
-    Zero,
-    Identity,
-    Lit,
-    Scale,
-    Sum,
-    OPlusV,
-    OProdV,
-    Eval,
-    NEval,
-    Compose,
-    Trace,
-    Solve,
-    Pinv,
-    SolveApply,
-    PinvApply,
-    Dagger,
-    Inner,
-    Flat,
-    Sharp,
-    Project,
-    Embed,
-    Assert,
-    TupleEmbed,
-    TupleProject,
-    Remetric,
-    Lift,
-    InvLift,
-    Kron,
-    LLam,
-    Lam,
-    Frame,
-]
+Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Solve | Pinv | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Kron | LLam | Lam | Frame
 
 _TERM_TYPES = (
     Var,
@@ -731,7 +696,7 @@ def _require_space_field(s: object, ctx: str) -> None:
         raise TermError(f"{ctx}: expected a Space, got {s!r}")
 
 
-def _check_index_list(ctx: str, idx: Tuple[int, ...]) -> None:
+def _check_index_list(ctx: str, idx: tuple[int, ...]) -> None:
     for p in idx:
         if not isinstance(p, int) or p < 0:
             raise TermError(f"{ctx}: indices must be non-negative ints, got {p!r}")
@@ -751,7 +716,7 @@ def _is_lam_body(body: object) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _check_llam_linearity(vars: Tuple[Var, ...], body: "Term") -> None:
+def _check_llam_linearity(vars: tuple[Var, ...], body: Term) -> None:
     """Reject the structurally detectable ways a linear var would make the result
     space *depend* on it (`20 §1`/`§2`): occurring in a ``Lam`` binder domain
     annotation, or as an explicit space/nat argument of an ``NEval``/``App``.
@@ -810,7 +775,7 @@ def _is_nat(x: object) -> bool:
     return is_dim(x)
 
 
-def _children(node: object) -> Tuple[object, ...]:
+def _children(node: object) -> tuple[object, ...]:
     """Yield the child Terms (and any embedded Spaces, walked for var occurrences)."""
     if not is_term(node):
         # Spaces may embed Terms (Ker/Img/.../App.f); walk those for var occurrences.
@@ -828,8 +793,7 @@ def _children(node: object) -> Tuple[object, ...]:
     return tuple(c for c in out if is_term(c) or is_space(c))
 
 
-def _space_children(s: object) -> Tuple[object, ...]:
-    from .space import App, CoImg, CoKer, Img, Ker
+def _space_children(s: object) -> tuple[object, ...]:
 
     out: list[object] = []
     for fname in getattr(s, "__dataclass_fields__", {}):
@@ -850,7 +814,7 @@ def var(name: str, space: Space, props: MapProps | None = None) -> Var:
     return Var(name, space, props)
 
 
-def external(space: Space, data: object, *args: "Term") -> External:
+def external(space: Space, data: object, *args: Term) -> External:
     return External(space, data, tuple(args))
 
 
@@ -866,55 +830,55 @@ def lit(value: float) -> Lit:
     return Lit(value)
 
 
-def scale(scalar: object, vector: "Term") -> Scale:
+def scale(scalar: object, vector: Term) -> Scale:
     return Scale(scalar, vector)
 
 
-def sum_(*vectors: "Term") -> Sum:
+def sum_(*vectors: Term) -> Sum:
     return Sum(tuple(vectors))
 
 
-def oplus_v(*vectors: "Term") -> OPlusV:
+def oplus_v(*vectors: Term) -> OPlusV:
     return OPlusV(tuple(vectors))
 
 
-def oprod_v(*vectors: "Term") -> OProdV:
+def oprod_v(*vectors: Term) -> OProdV:
     return OProdV(tuple(vectors))
 
 
-def eval_(f: "Term", positions: Tuple[int, ...], *args: "Term") -> Eval:
+def eval_(f: Term, positions: tuple[int, ...], *args: Term) -> Eval:
     return Eval(f, tuple(positions), tuple(args))
 
 
-def neval(f: "Term", positions: Tuple[int, ...], *args: object) -> NEval:
+def neval(f: Term, positions: tuple[int, ...], *args: object) -> NEval:
     return NEval(f, tuple(positions), tuple(args))
 
 
-def compose(f: "Term", positions: Tuple[int, ...], *gs: "Term") -> Compose:
+def compose(f: Term, positions: tuple[int, ...], *gs: Term) -> Compose:
     return Compose(f, tuple(positions), tuple(gs))
 
 
-def trace(f: "Term", i: int, j: int) -> Trace:
+def trace(f: Term, i: int, j: int) -> Trace:
     return Trace(f, i, j)
 
 
-def solve(f: "Term") -> Solve:
+def solve(f: Term) -> Solve:
     return Solve(f)
 
 
-def pinv(f: "Term") -> Pinv:
+def pinv(f: Term) -> Pinv:
     return Pinv(f)
 
 
-def solve_apply(f: "Term", v: "Term") -> SolveApply:
+def solve_apply(f: Term, v: Term) -> SolveApply:
     return SolveApply(f, v)
 
 
-def pinv_apply(f: "Term", v: "Term") -> PinvApply:
+def pinv_apply(f: Term, v: Term) -> PinvApply:
     return PinvApply(f, v)
 
 
-def dagger(f: "Term") -> Dagger:
+def dagger(f: Term) -> Dagger:
     return Dagger(f)
 
 
@@ -930,15 +894,15 @@ def sharp(space: Space) -> Sharp:
     return Sharp(space)
 
 
-def project(vector: "Term", space: Space) -> Project:
+def project(vector: Term, space: Space) -> Project:
     return Project(vector, space)
 
 
-def embed(vector: "Term", space: Space) -> Embed:
+def embed(vector: Term, space: Space) -> Embed:
     return Embed(vector, space)
 
 
-def assert_(vector: "Term", space: Space) -> Assert:
+def assert_(vector: Term, space: Space) -> Assert:
     return Assert(vector, space)
 
 
@@ -950,28 +914,28 @@ def tuple_project(space: Space, i: int) -> TupleProject:
     return TupleProject(space, i)
 
 
-def remetric(vector: "Term", metric: object) -> Remetric:
+def remetric(vector: Term, metric: object) -> Remetric:
     return Remetric(vector, metric)
 
 
-def lift(vector: "Term", fused: Tuple[int, ...], k: int | None = None) -> Lift:
+def lift(vector: Term, fused: tuple[int, ...], k: int | None = None) -> Lift:
     return Lift(vector, tuple(fused), k)
 
 
-def inv_lift(vector: "Term", fused: Tuple[int, ...], k: int | None = None) -> InvLift:
+def inv_lift(vector: Term, fused: tuple[int, ...], k: int | None = None) -> InvLift:
     return InvLift(vector, tuple(fused), k)
 
 
-def kron(f: "Term", g: "Term") -> Kron:
+def kron(f: Term, g: Term) -> Kron:
     return Kron(f, g)
 
 
-def llam(*vars: Var, body: "Term") -> LLam:
+def llam(*vars: Var, body: Term) -> LLam:
     """``LLam`` — pass the bound :class:`Var`s positionally and ``body=`` as keyword."""
     return LLam(tuple(vars), body)
 
 
-def lam(binders: Tuple[Tuple[str, Kind], ...], body: object, term_vars: Tuple[Var, ...] = ()) -> Lam:
+def lam(binders: tuple[tuple[str, Kind], ...], body: object, term_vars: tuple[Var, ...] = ()) -> Lam:
     return Lam(tuple(binders), body, tuple(term_vars))
 
 

@@ -1,15 +1,15 @@
-# Grassman — Landscape of the source systems
+# Grassmann — Landscape of the source systems
 
 > Captured 2026-06-15 from exploration of the four repos. This is the factual
 > substrate the meta-plan builds on. Update it when the upstreams move.
 
-Grassman is a **new** coordinate-free linear-algebra language positioned at a
+Grassmann is a **new** coordinate-free linear-algebra language positioned at a
 **midway point between Grassmann *in the GLang paper* and Grassmann *in the old
 FEMOracle implementation***, and it **targets an extracted, standalone IR derived
-from chartLib**. Today none of the four repos reference each other — Grassman is
+from chartLib**. Today none of the four repos reference each other — Grassmann is
 the bridge we are creating.
 
-> **Scope.** Grassman is coordinate-free *linear algebra*, with **first-class bases
+> **Scope.** Grassmann is coordinate-free *linear algebra*, with **first-class bases
 > and frames** (frames = basis families / the paper's discrete vector frame — pure
 > LA). **Out of scope:** the exterior-algebra / differential-forms layer (FEMOracle
 > `baseExt/forms.py`), the polynomial / orthopoly / quadrature machinery, the
@@ -36,7 +36,7 @@ the bridge we are creating.
 
 A dependently-typed **coordinate-free linear algebra** language, formalized in
 Lean. Paper title: *"Grassmann: The Coordinate Independent Linear Algebra
-Programming Language."* (Note: GLang is already "Grassmann-themed"; our Grassman
+Programming Language."* (Note: GLang is already "Grassmann-themed"; our Grassmann
 is a sibling, not a rename.)
 
 **The 3-layer discipline worth stealing:**
@@ -55,7 +55,7 @@ is a sibling, not a rename.)
 Hard linear algebra (SVD/GSVD/RREF/Moore–Penrose) sits behind an **axiomatized
 boundary** (18 allow-listed sorries).
 
-**Takeaways for Grassman:** (a) cleanly separate abstract / basis / concrete;
+**Takeaways for Grassmann:** (a) cleanly separate abstract / basis / concrete;
 (b) make basis first-class; (c) the four fundamental subspaces are load-bearing;
 (d) push hard numerics behind a narrow, named interface; (e) split application /
 pinv by syntactic form so semantics can recurse on raw syntax.
@@ -69,7 +69,7 @@ Key files: `GLang/Syntax.lean`, `Typing.lean`, `Denot.lean`, `Values.lean`,
 
 A symbolic-numeric **imperative array IR** currently living in
 `~/projects/fem/chartLib/src/chartlib/_symbolic/`. We **extract** it into a
-standalone shared package, **`polyarray`**, that *both chartLib and Grassman*
+standalone shared package, **`polyarray`**, that *both chartLib and Grassmann*
 depend on (single source of truth; `polyarray` never imports chartLib). See
 `10-ir-extraction.md`.
 
@@ -158,11 +158,11 @@ Also: `diff.py`, `pullback.py` (parameter substitution in spaces), `embed.py`
 `orthopoly.py`: polynomial / Jacobi-Dubiner bases, quadrature. `tabulate.py`:
 basis sampling + derivatives. `nonLinear.py`: sqrt/abs/pow functors.
 
-> **Out of scope for Grassman** — described here only as context. We do **not**
+> **Out of scope for Grassmann** — described here only as context. We do **not**
 > build forms/exterior algebra, polynomial bases, quadrature, tabulation, or the
 > chart/geometry stack.
 
-**Takeaway for Grassman (from `base/` only):** FEMOracle's `base/` is the
+**Takeaway for Grassmann (from `base/` only):** FEMOracle's `base/` is the
 *executable reference* for coordinate-free LA — the algebra ADT shape, and the
 basis-representation / change-of-basis algorithms (`representDown`,
 `convertBasisTowardsStandard`, `spaceBasis`, the `isomorphism` bundle for
