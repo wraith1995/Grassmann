@@ -13,12 +13,15 @@ Public surface
 - :func:`tensor_power` — ``V⊗ᵏ`` (helper).
 - linear-algebra conveniences: :func:`dot`, :func:`norm_sq`,
   :func:`orthogonal_projection`, :func:`least_squares`.
+- basic nonlinear scalar ops (the old ``BaseNonLinear``): :func:`sqrt`, :func:`absval`,
+  :func:`sign`, :func:`div`, :func:`reciprocal`.
 """
 
 from __future__ import annotations
 
 from .exterior import alt, exterior_power, tensor_power, wedge
 from .linalg import dot, least_squares, norm_sq, orthogonal_projection
+from .scalar import absval, div, reciprocal, sign, sqrt
 
 __all__ = [
     # exterior algebra
@@ -31,4 +34,10 @@ __all__ = [
     "norm_sq",
     "orthogonal_projection",
     "least_squares",
+    # nonlinear scalar ops
+    "sqrt",
+    "absval",
+    "sign",
+    "div",
+    "reciprocal",
 ]

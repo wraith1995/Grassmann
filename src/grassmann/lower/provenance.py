@@ -31,6 +31,7 @@ __all__ = ["LowerProv", "PROV_KINDS"]
 PROV_KINDS: frozenset[str] = frozenset(
     {
         "value",      # Lit / Zero / Identity / Var input / const
+        "external",   # External nonlinear-scalar op (sqrt/abs/sign/div/reciprocal)
         "algebra",    # Scale / Sum / OPlus / OProd
         "eval",       # Eval contraction
         "neval",      # NEval (Lam application)

@@ -46,7 +46,25 @@ from .cob import cob
 from .provenance import LowerProv
 from .space_basis import default_basis, realize_ffs_basis, space_basis
 
-__all__ = ["represent", "Rep", "RepresentError"]
+__all__ = ["represent", "Rep", "RepresentError", "ExternalOp"]
+
+
+@dataclass(frozen=True)
+class ExternalOp:
+    """The ``data`` payload of a nonlinear-scalar ``External`` node (`41 §3`).
+
+    Names the op (``sqrt``/``abs``/``sign``/``div``/``reciprocal``/…) and carries the
+    numpy callable applied elementwise to the lowered operand array(s). Stored on the core
+    :class:`~grassmann.core.term.External`'s ``data`` field so the node ``repr`` and the
+    lowering provenance (``external:<name>``) are meaningful. Frozen + hashable (the ``fn``
+    is hashed by identity, which is fine for the module-level numpy ufuncs used here).
+    """
+
+    name: str
+    fn: object  # a numpy elementwise callable, e.g. np.sqrt / np.sign
+
+    def __repr__(self) -> str:
+        return f"ExternalOp({self.name!r})"
 
 
 class RepresentError(Exception):
@@ -129,6 +147,7 @@ _NOTE_PREFIX_PROV: dict[str, tuple[str, str]] = {
     "zero": ("value", "Zero"),
     "identity": ("value", "Identity"),
     "var": ("value", "Var"),
+    "external": ("external", "External"),
     "scale": ("algebra", "Scale"),
     "sum": ("algebra", "Sum"),
     "oplus": ("algebra", "OPlusV"),
@@ -223,6 +242,8 @@ def _rep(e: T.Term, ctx: _Ctx) -> Rep:
     match e:
         case T.Var():
             return _rep_var(e, ctx)
+        case T.External():
+            return _rep_external(e, ctx)
         case T.Lit(v):
             return _rep_const(ctx, np.asarray(float(v)), S.Scalar(), B.scalar_basis(),
                               note="lit:const")
@@ -385,6 +406,39 @@ def _make_dynamic_ffs_input(
             note=f"assert:ffs-input-sibling({e.name})",
         )
     return arr
+
+
+def _rep_external(e: T.External, ctx: _Ctx) -> Rep:
+    """``External(s, data, args…)`` — a foreign elementwise numeric op (`41 §3`).
+
+    The basic nonlinear scalar ops (``sqrt``/``abs``/``sign``/division/reciprocal — the
+    old ``BaseNonLinear`` of the FEMOracle algebra) lower here.  ``data`` is expected to be
+    an :class:`ExternalOp` naming the op and carrying the numpy callable; its operands are
+    the lowered ``args`` and the op is applied elementwise.  A bare (arg-less) ``External``
+    with numeric ``data`` is emitted as a constant.
+
+    Provenance is ``external:<op>`` (see :data:`_NOTE_PREFIX_PROV`).
+    """
+    space = _synth(e)
+    data = e.data
+    if not isinstance(data, ExternalOp):
+        # A bare External holding a numeric value/array (no foreign op): emit as a const.
+        if not e.args:
+            arr = _const(ctx, np.asarray(data, dtype=float), note="external:const")
+            return Rep(arr, default_basis(space), space)
+        raise RepresentError(
+            f"represent: External.data must be an ExternalOp to lower, got {data!r}"
+        )
+    arg_reps = [_rep(a, ctx) for a in e.args]
+    # Elementwise over matching-shaped operands (scalar args ⇒ scalar result).
+    out_shape = _shape_of(arg_reps[0].array) if arg_reps else _shape_of_space(space)
+    for r in arg_reps[1:]:
+        _assert_shape_eq(ctx, arg_reps[0].array, r.array, note="assert:external-shapes")
+    [out] = ctx.prog.emit_stmt(
+        _ExternalOp(name=data.name, fn=data.fn), [r.array for r in arg_reps],
+        [pa.OutSpec("external", out_shape)], note=f"external:{data.name}",
+    )
+    return Rep(out, default_basis(space), space)
 
 
 def _rep_const(
@@ -1692,3 +1746,19 @@ class _SinvFullOp:
 class _KronMapOp:
     def __call__(self, F: np.ndarray, G: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.kron(np.asarray(F, dtype=float), np.asarray(G, dtype=float))
+
+
+@dataclass(frozen=True)
+class _ExternalOp:
+    """Apply a foreign numpy callable elementwise to the operand array(s) (`41 §3`).
+
+    Lowers an :class:`ExternalOp`-carrying :class:`~grassmann.core.term.External`: the
+    nonlinear scalar ops (``sqrt``/``abs``/``sign``/``div``/``reciprocal``). The callable
+    receives the lowered operands as float arrays and returns the elementwise result.
+    """
+
+    name: str
+    fn: object
+
+    def __call__(self, *xs: np.ndarray) -> np.ndarray:
+        return np.asarray(self.fn(*[np.asarray(x, dtype=float) for x in xs]), dtype=float)
