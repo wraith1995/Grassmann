@@ -13,6 +13,7 @@ dimensions of ``Ker f`` / ``Img f`` / ``CoKer f`` / ``CoImg f`` from its asserte
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import assert_never
 
 from grassmann.core.props import MapProps
 from grassmann.core.space import CoImg, Dim, Img, Ker, Space
@@ -76,15 +77,17 @@ def ffs_dims(f: object, dom: Space, cod: Space) -> FFSDims:
 def ffs_dim(node: Ker | Img | _CoKer | CoImg, dom: Space, cod: Space) -> Dim:
     """Dimension of a specific FFS space node (dispatch helper)."""
     dims = ffs_dims(node.f, dom, cod)
-    if isinstance(node, Img):
-        return dims.dim_img
-    if isinstance(node, CoImg):
-        return dims.dim_coimg
-    if isinstance(node, Ker):
-        return dims.dim_ker
-    if isinstance(node, _CoKer):
-        return dims.dim_coker
-    raise TypeError(f"ffs_dim: not an FFS node: {node!r}")
+    match node:
+        case Img():
+            return dims.dim_img
+        case CoImg():
+            return dims.dim_coimg
+        case Ker():
+            return dims.dim_ker
+        case _CoKer():
+            return dims.dim_coker
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 __all__ = [

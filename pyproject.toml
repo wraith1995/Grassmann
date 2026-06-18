@@ -41,6 +41,9 @@ chartlib = { path = "../chartlib", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: heaviest exterior/geometry lowering cases; skipped unless --runslow is passed",
+]
 
 [tool.ruff]
 target-version = "py313"

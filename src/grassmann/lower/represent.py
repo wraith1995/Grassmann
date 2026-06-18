@@ -30,6 +30,7 @@ a different basis (`41 §0` strategy).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 
 import numpy as np
 import polyarray as pa
@@ -38,15 +39,42 @@ from grassmann.core import basis as B
 from grassmann.core import space as S
 from grassmann.core import term as T
 from grassmann.core.kinds import SpaceSort as _SpaceSort
-from grassmann.infer import synth_space
+from grassmann.infer import map_domain_codomain, synth_space
+from grassmann.infer.properties import map_props
 
 from ._dims import DynamicDim, dim_of
 from .choose import choose
-from .cob import cob
+from .cob import _basis_eq, cob, realize_basis
 from .provenance import LowerProv
-from .space_basis import default_basis, realize_ffs_basis, space_basis
+from .space_basis import (
+    FfsRealization,
+    _GSvdFullOp,
+    default_basis,
+    realize_ffs_basis,
+    realize_image_application,
+    space_basis,
+)
 
-__all__ = ["represent", "Rep", "RepresentError", "ExternalOp"]
+__all__ = ["represent", "Rep", "RepresentError", "ExternalOp", "BasisReq"]
+
+
+class BasisReq(Enum):
+    """The basis an :class:`ExternalOp` kernel is mathematically defined in — its
+    equivariance class (`71 §2.2`).
+
+    A componentwise foreign op ``φ`` is basis-invariant only if ``φ(M x) = M φ(x)`` for
+    every admissible change-of-basis ``M``. ``sqrt``/``abs``/``sign``/``reciprocal``/``div``
+    are **not** equivariant under a general orthonormal/SVD rotation, so they must be
+    applied in fixed (standard) coordinates.
+    """
+
+    STANDARD = "standard"
+    """Kernel is meaningful ONLY in the orthonormal standard basis ⇒ operands MUST be
+    cob'd to ``default_basis`` before the kernel runs. This is the SAFE default."""
+
+    EQUIVARIANT = "equivariant"
+    """Kernel commutes with change-of-basis (e.g. a global linear scale) ⇒ apply in
+    whatever basis arrives, and carry that basis through honestly."""
 
 
 @dataclass(frozen=True)
@@ -58,10 +86,17 @@ class ExternalOp:
     :class:`~grassmann.core.term.External`'s ``data`` field so the node ``repr`` and the
     lowering provenance (``external:<name>``) are meaningful. Frozen + hashable (the ``fn``
     is hashed by identity, which is fine for the module-level numpy ufuncs used here).
+
+    ``basis_req`` records the **basis contract** of the kernel (`71 §2`): with the default
+    :attr:`BasisReq.STANDARD` the op is meaningful only in standard coordinates, so
+    lowering ``cob``\\ s every operand to ``default_basis`` first (identity — and thus
+    byte-identical to before — for the scalar stdlib ops); :attr:`BasisReq.EQUIVARIANT`
+    opts into applying in the arriving basis.
     """
 
     name: str
     fn: object  # a numpy elementwise callable, e.g. np.sqrt / np.sign
+    basis_req: BasisReq = BasisReq.STANDARD
 
     def __repr__(self) -> str:
         return f"ExternalOp({self.name!r})"
@@ -230,6 +265,17 @@ class _Ctx:
     # `41 §3` Lam→sub-Program: a body lowered once into its own sub-Program, keyed by
     # (id(Lam), sub-input uids) so a *reused* dependent function is lowered once + called.
     lam_subprograms: dict[tuple, pa.Program] = field(default_factory=dict)
+    # D2 — per-Program-build memo of FFS factorizations (the SvdOp/QrOp/GSvdOp seam).
+    # An FFS basis of a map ``f`` may be requested many times in one lowering (a Var's
+    # dynamic-δ shape, the rank-consistency AssertOp, and every Project/Embed of that
+    # FFS space all trigger ``_realize_ffs_for_space``).  Without memoization each request
+    # re-emits ``_rep(f)`` + the (cod,dom) transpose + a fresh SvdOp/QrOp/GSvdOp — the same
+    # factorization computed N times at run time.  Keyed by ``(which, id(f))`` (the map's
+    # domain/codomain metric is a pure function of ``f``, so it needs no separate key term;
+    # ``id(f)`` never collapses two genuinely-distinct map nodes), the first realization is
+    # cached and its :class:`FfsRealization` outputs (cols, rank, δ DimAtom) are reused by
+    # every later consumer — so each distinct factorization is emitted exactly once.
+    ffs_realizations: dict[tuple[str, int], FfsRealization] = field(default_factory=dict)
 
 
 # ===========================================================================
@@ -248,7 +294,8 @@ def _rep(e: T.Term, ctx: _Ctx) -> Rep:
             return _rep_const(ctx, np.asarray(float(v)), S.Scalar(), B.scalar_basis(),
                               note="lit:const")
         case T.Zero(space):
-            return _rep_zeros(ctx, space, note="zero:zeros")
+            # B1: an omitted (None) space must be recovered by inference first.
+            return _rep_zeros(ctx, space if space is not None else _synth(e), note="zero:zeros")
         case T.Identity(space):
             return _rep_identity(e, ctx)
         case T.Scale(scalar, vector):
@@ -284,7 +331,8 @@ def _rep(e: T.Term, ctx: _Ctx) -> Rep:
         case T.Sharp(space):
             return _rep_sharp(e, space, ctx)
         case T.Project(vector, space):
-            return _rep_project(e, vector, space, ctx)
+            # B1: an omitted (None) target subspace is recovered by inference.
+            return _rep_project(e, vector, space if space is not None else _synth(e), ctx)
         case T.Embed(vector, space):
             return _rep_embed(e, vector, space, ctx)
         case T.Assert(vector, space):
@@ -430,15 +478,29 @@ def _rep_external(e: T.External, ctx: _Ctx) -> Rep:
             f"represent: External.data must be an ExternalOp to lower, got {data!r}"
         )
     arg_reps = [_rep(a, ctx) for a in e.args]
+    # The kernel's basis contract (`71 §2`): STANDARD forces the operands to standard
+    # coords (a numeric cob; identity for scalar/standard operands ⇒ byte-identical to
+    # before) and labels the result standard honestly; EQUIVARIANT applies in the
+    # arriving basis and carries that basis through.
+    req = getattr(data, "basis_req", BasisReq.STANDARD)
+    if req is BasisReq.STANDARD:
+        arrays = [
+            _coerce_basis(ctx, r, default_basis(r.space), note=f"external:{data.name}:cob-std")
+            for r in arg_reps
+        ]
+        out_basis = default_basis(space)
+    else:  # EQUIVARIANT
+        arrays = [r.array for r in arg_reps]
+        out_basis = arg_reps[0].basis if arg_reps else default_basis(space)
     # Elementwise over matching-shaped operands (scalar args ⇒ scalar result).
-    out_shape = _shape_of(arg_reps[0].array) if arg_reps else _shape_of_space(space)
-    for r in arg_reps[1:]:
-        _assert_shape_eq(ctx, arg_reps[0].array, r.array, note="assert:external-shapes")
+    out_shape = _shape_of(arrays[0]) if arrays else _shape_of_space(space)
+    for a in arrays[1:]:
+        _assert_shape_eq(ctx, arrays[0], a, note="assert:external-shapes")
     [out] = ctx.prog.emit_stmt(
-        _ExternalOp(name=data.name, fn=data.fn), [r.array for r in arg_reps],
+        _ExternalOp(name=data.name, fn=data.fn), arrays,
         [pa.OutSpec("external", out_shape)], note=f"external:{data.name}",
     )
-    return Rep(out, default_basis(space), space)
+    return Rep(out, out_basis, space)
 
 
 def _rep_const(
@@ -487,6 +549,16 @@ def _rep_sum(e: T.Sum, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
     free-label order with a transpose einsum before adding, so the sum is taken on
     matching basis indices.
     """
+    # B1: a Zero(None) summand has no space of its own — borrow it from a sibling that
+    # does (the sum's common space), so the optional-space zero lowers in context.
+    def _is_bare_zero(v: T.Term) -> bool:
+        return isinstance(v, T.Zero) and v.space is None
+
+    if any(_is_bare_zero(v) for v in vectors) and not all(_is_bare_zero(v) for v in vectors):
+        sib = next(v for v in vectors if not _is_bare_zero(v))
+        sib_space = _synth(sib)
+        vectors = tuple(T.Zero(sib_space) if _is_bare_zero(v) else v for v in vectors)
+
     reps = [_rep(v, ctx) for v in vectors]
     target = reps[0].basis
     free = reps[0].free_labels
@@ -941,8 +1013,6 @@ def _map_metrics(f: T.Term) -> tuple[S.Space, S.Space] | None:
     metric-aware ``GSvdOp`` path; an identity (non-``WithInner``) metric returns ``None`` so
     the lowering collapses to the plain ``PinvOp`` (the min-sym win, `41 §1`).
     """
-    from grassmann.infer import map_domain_codomain
-
     dom, cod = map_domain_codomain(f)
     if isinstance(dom, S.WithInner) or isinstance(cod, S.WithInner):
         return dom, cod
@@ -960,8 +1030,6 @@ def _gsvd_pinv_map(
     ``PinvOp`` convention (the stored map is the transpose of the math ``(cod,dom)`` matrix).
     Identity metrics make ``GSvdOp`` coincide numerically with plain pinv.
     """
-    from .space_basis import _GSvdFullOp
-
     n_dom, n_cod = _static_dim(dom), _static_dim(cod)
     m_v = _metric_matrix(ctx, dom, n_dom, note="pinv:metric(dom)")
     m_w = _metric_matrix(ctx, cod, n_cod, note="pinv:metric(cod)")
@@ -1255,8 +1323,6 @@ def _natural_basis(space: S.Space, term: T.Term, ctx: _Ctx) -> B.Basis:
 
 def _coerce_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> pa.SymArray:
     """Change ``rep`` into ``target`` basis (a numeric cob matmul), `41 §2`."""
-    from .cob import _basis_eq
-
     if _basis_eq(rep.basis, target):
         return rep.array
     M = cob(ctx.prog, rep.basis, target)
@@ -1295,9 +1361,90 @@ def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.S
         return sub_basis, real.cols
     # Non-FFS subspace: realize its (standard) basis columns directly.
     sub_basis = default_basis(sub)
-    from .cob import realize_basis
+    return sub_basis, realize_basis_cols(ctx, sub_basis)
 
-    return sub_basis, realize_basis(ctx.prog, sub_basis)
+
+def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
+    """Matrix whose columns are ``b``'s vectors in ambient std coords (`41 §2`).
+
+    Term-bearing basis nodes that the pure-matrix :func:`grassmann.lower.cob.realize_basis`
+    cannot handle are realized here (they need ``_rep``): a :class:`~grassmann.core.basis.
+    ListBasis` lowers each Term vector and stacks the coordinate columns; an
+    :class:`~grassmann.core.basis.ImageBasis` realizes the LITERAL map-application columns
+    (the raw ``f(eᵢ)``, the R/fwd side — `73 Topic 2`).  Everything else defers to
+    :func:`grassmann.lower.cob.realize_basis`.
+    """
+    match b:
+        case B.ListBasis(vectors):
+            return _realize_list_basis(ctx, vectors)
+        case B.ImageBasis(f):
+            return _realize_image_basis(ctx, f)
+        case _:
+            return realize_basis(ctx.prog, b)
+
+
+def _realize_list_basis(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
+    """Stack the lowered Term ``vectors`` as the columns of the basis matrix (`41 §2`)."""
+    cols: list[pa.SymArray] = []
+    n_rows: int | None = None
+    for v in vectors:
+        if not T.is_term(v):
+            raise RepresentError(f"ListBasis: a basis vector must be a Term, got {v!r}")
+        rep = _rep(v, ctx)
+        flat = _flatten_to_column(ctx, rep.array)
+        rows = _shape_of(flat)[0]
+        if n_rows is None:
+            n_rows = rows
+        elif n_rows != rows:
+            raise RepresentError(
+                f"ListBasis: vectors have inconsistent ambient dim {n_rows} vs {rows}"
+            )
+        cols.append(flat)
+    [out] = ctx.prog.emit_stmt(
+        _ColStackOp(), cols,
+        [pa.OutSpec("list-basis", (n_rows, len(cols)))],
+        note="ffs-basis:ListBasis=stack-columns",
+    )
+    return out
+
+
+def _realize_image_basis(ctx: _Ctx, f: object) -> pa.SymArray:
+    """Realize ``ImageBasis(f)`` — the literal map-application columns ``f(eᵢ)`` (`73 T2`)."""
+    dom, cod = map_domain_codomain(f)
+    f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
+    [f_cd] = ctx.prog.emit_stmt(
+        _TransposeOp(), [f_rep.array],
+        [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
+        note="ffs-basis:to-(cod,dom)",
+    )
+    real = realize_image_application(
+        ctx.prog, f_cd, dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
+        label=getattr(f, "name", "f"),
+    )
+    return real.cols
+
+
+def _flatten_to_column(ctx: _Ctx, arr: pa.SymArray) -> pa.SymArray:
+    """Ravel a (possibly multi-axis ``V⊗ᵏ``) value array into a single ambient column."""
+    shape = _shape_of(arr)
+    if len(shape) <= 1:
+        return arr
+    n = 1
+    for d in shape:
+        n *= d
+    [out] = ctx.prog.emit_stmt(
+        _ReshapeOp((n,)), [arr], [pa.OutSpec("ravel", (n,))],
+        note="ffs-basis:ListBasis=ravel-vector",
+    )
+    return out
+
+
+@dataclass(frozen=True)
+class _ColStackOp:
+    """Stack 1-D coordinate vectors as the columns of a matrix (the ``ListBasis`` matrix)."""
+
+    def __call__(self, *cols: np.ndarray) -> np.ndarray:
+        return np.stack([np.asarray(c, dtype=float).reshape(-1) for c in cols], axis=1)
 
 
 # ===========================================================================
@@ -1505,13 +1652,24 @@ def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
     return shp[0]
 
 
-def _realize_ffs_for_space(ctx: _Ctx, space: S.Space):
-    """Realize the FFS basis of an ``Img``/``Ker``/``CoImg``/``CoKer`` space (`41 §1`)."""
-    which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
-    from grassmann.infer import map_domain_codomain
-    from grassmann.infer.properties import map_props
+def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
+    """Realize the FFS basis of an ``Img``/``Ker``/``CoImg``/``CoKer`` space (`41 §1`).
 
+    D2: memoized per ``(which, id(f))`` on the context so a factorization requested by
+    multiple consumers (a Var's δ shape, the rank-consistency AssertOp, every
+    Project/Embed of that FFS) emits the SvdOp/QrOp/GSvdOp — and its ``_rep(f)`` +
+    (cod,dom) transpose prelude — **exactly once**, returning the cached
+    :class:`FfsRealization` thereafter.  The numbers are unchanged (the cached outputs are
+    the very same Stmt outputs the first call produced); only the redundant *recomputation*
+    is removed.
+    """
+    which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
     f = space.f
+    key = (which, id(f))
+    cached = ctx.ffs_realizations.get(key)
+    if cached is not None:
+        return cached
+
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
     [f_cd] = ctx.prog.emit_stmt(
@@ -1519,11 +1677,13 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space):
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
         note="ffs-basis:to-(cod,dom)",
     )
-    return realize_ffs_basis(
+    real = realize_ffs_basis(
         ctx.prog, which, f_cd,
         dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
         props=map_props(f), label=getattr(f, "name", "f"),
     )
+    ctx.ffs_realizations[key] = real
+    return real
 
 
 def _ffs_sibling_key(space: S.Space) -> tuple | None:
@@ -1537,7 +1697,6 @@ def _ffs_sibling_key(space: S.Space) -> tuple | None:
     if not isinstance(space, (S.Img, S.Ker, S.CoImg, S.CoKer)):
         return None
     which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
-    from grassmann.infer import map_domain_codomain
 
     dom, cod = map_domain_codomain(space.f)
     try:

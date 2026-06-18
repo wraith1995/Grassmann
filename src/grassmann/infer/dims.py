@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Hashable
+from typing import assert_never
 
 from grassmann.core.space import (
     Base,
@@ -26,6 +27,7 @@ from grassmann.core.space import (
     Dim,
     DimAtomRef,
     DimLit,
+    DimMod,
     DimNeg,
     DimOf,
     DimProd,
@@ -62,36 +64,38 @@ def dim_of(s: Space) -> Dim:
     FFS dims (``Ker``/``Img``/``CoKer``/``CoImg``) require knowing the source/target
     spaces and the map's rank; rank is resolved via :func:`rank_of`.
     """
-    if isinstance(s, Scalar):
-        return DimLit(1)
-    if isinstance(s, Base):
-        return s.dim
-    if isinstance(s, SVar):
-        # |SVar α| = δα = dim(α) — an opaque static Nat keyed by the space var.
-        return DimOf(s)
-    if isinstance(s, Dual):
-        return dim_of(s.space)
-    if isinstance(s, WithInner):
-        return dim_of(s.space)
-    if isinstance(s, OPlus):
-        return dim_sum(*(dim_of(c) for c in s.spaces))
-    if isinstance(s, OProd):
-        return dim_prod(*(dim_of(c) for c in s.spaces))
-    if isinstance(s, OPlusRep):
-        return dim_prod(s.count, dim_of(s.space))
-    if isinstance(s, Img):
-        return rank_of(s.f)
-    if isinstance(s, CoImg):
-        return rank_of(s.f)
-    if isinstance(s, Ker):
-        # |Ker f| = |dom f| − rank(f)
-        dom = _ffs_source(s)
-        return dim_diff(dim_of(dom), rank_of(s.f))
-    if isinstance(s, CoKer):
-        # |CoKer f| = |cod f| − rank(f)
-        cod = _ffs_target(s)
-        return dim_diff(dim_of(cod), rank_of(s.f))
-    raise DimError(f"dim_of: unsupported space {s!r}")
+    match s:
+        case Scalar():
+            return DimLit(1)
+        case Base():
+            return s.dim
+        case SVar():
+            # |SVar α| = δα = dim(α) — an opaque static Nat keyed by the space var.
+            return DimOf(s)
+        case Dual():
+            return dim_of(s.space)
+        case WithInner():
+            return dim_of(s.space)
+        case OPlus():
+            return dim_sum(*(dim_of(c) for c in s.spaces))
+        case OProd():
+            return dim_prod(*(dim_of(c) for c in s.spaces))
+        case OPlusRep():
+            return dim_prod(s.count, dim_of(s.space))
+        case Img():
+            return rank_of(s.f)
+        case CoImg():
+            return rank_of(s.f)
+        case Ker():
+            # |Ker f| = |dom f| − rank(f)
+            dom = _ffs_source(s)
+            return dim_diff(dim_of(dom), rank_of(s.f))
+        case CoKer():
+            # |CoKer f| = |cod f| − rank(f)
+            cod = _ffs_target(s)
+            return dim_diff(dim_of(cod), rank_of(s.f))
+        case _:
+            raise DimError(f"dim_of: unsupported space {s!r}")
 
 
 def _ffs_source(node: Ker | Img | CoKer | CoImg) -> Space:
@@ -191,7 +195,9 @@ def dim_eq(a: object, b: object) -> bool:
 
 
 def _is_dimlike(d: object) -> bool:
-    return isinstance(d, (DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd, DimNeg))
+    return isinstance(
+        d, (DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd, DimNeg, DimMod)
+    )
 
 
 # --- Polynomial normal form -------------------------------------------------
@@ -206,34 +212,77 @@ _Poly = dict[_Monomial, int]
 
 def _gen_key(d: DimVar | DimOf | DimAtomRef) -> Hashable:
     """A hashable key identifying an opaque generator (so δ_f ≡ δ_g iff f≈g)."""
-    if isinstance(d, DimVar):
-        return ("var", d.name)
-    if isinstance(d, DimOf):
-        # Spaces are frozen dataclasses ⇒ hashable & structurally compared.
-        return ("dimof", d.space)
-    if isinstance(d, DimAtomRef):
-        return ("atom", d.key)
-    raise DimError(f"_gen_key: not a generator {d!r}")
+    match d:
+        case DimVar():
+            return ("var", d.name)
+        case DimOf():
+            # Spaces are frozen dataclasses ⇒ hashable & structurally compared.
+            return ("dimof", d.space)
+        case DimAtomRef():
+            return ("atom", d.key)
+        case _:
+            raise DimError(f"_gen_key: not a generator {d!r}")
 
 
 def _to_poly(d: Dim) -> _Poly:
-    if isinstance(d, DimLit):
-        return {} if d.value == 0 else {(): d.value}
-    if isinstance(d, (DimVar, DimOf, DimAtomRef)):
-        return {((_gen_key(d), 1),): 1}
-    if isinstance(d, DimSum):
-        out: _Poly = {}
-        for t in d.terms:
-            _poly_iadd(out, _to_poly(t))
-        return out
-    if isinstance(d, DimProd):
-        acc: _Poly = {(): 1}
-        for t in d.terms:
-            acc = _poly_mul(acc, _to_poly(t))
-        return acc
-    if isinstance(d, DimNeg):
-        return {mono: -c for mono, c in _to_poly(d.term).items()}  # type: ignore[arg-type]
-    raise DimError(f"_to_poly: not a Dim {d!r}")
+    match d:
+        case DimLit():
+            return {} if d.value == 0 else {(): d.value}
+        case DimVar() | DimOf() | DimAtomRef():
+            return {((_gen_key(d), 1),): 1}
+        case DimSum():
+            out: _Poly = {}
+            for t in d.terms:
+                _poly_iadd(out, _to_poly(t))
+            return out
+        case DimProd():
+            acc: _Poly = {(): 1}
+            for t in d.terms:
+                acc = _poly_mul(acc, _to_poly(t))
+            return acc
+        case DimNeg():
+            return {mono: -c for mono, c in _to_poly(d.term).items()}  # type: ignore[arg-type]
+        case DimMod():
+            return _mod_poly(d)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _poly_const(p: _Poly) -> int | None:
+    """Return the integer value of ``p`` if it is a pure constant (no generators)."""
+    if not p:
+        return 0
+    if len(p) == 1 and () in p:
+        return p[()]
+    return None
+
+
+def _mod_poly(d: DimMod) -> _Poly:
+    """Normalize ``a mod b``.
+
+    - Both operands static ⇒ constant-fold to ``a % b`` (Python non-negative remainder);
+      a static zero modulus is an error.
+    - Otherwise opaque: key a fresh generator by the *normalized* operand polynomials so
+      ``(a mod b) ≡ (a' mod b')`` iff ``a ≡ a'`` and ``b ≡ b'``. ``a mod 1 ≡ 0`` is the one
+      symbolic identity we fold (a literal-1 modulus).
+    """
+    tp = _to_poly(d.term)
+    mp = _to_poly(d.modulus)
+    t_const = _poly_const(tp)
+    m_const = _poly_const(mp)
+    if m_const == 0:
+        raise DimError(f"_to_poly: modulus of {d!r} is statically zero")
+    if m_const == 1:
+        return {}  # a mod 1 ≡ 0
+    if t_const is not None and m_const is not None:
+        return {} if t_const % m_const == 0 else {(): t_const % m_const}
+    key = ("mod", _poly_canon(tp), _poly_canon(mp))
+    return {((key, 1),): 1}
+
+
+def _poly_canon(p: _Poly) -> Hashable:
+    """A hashable, order-independent canonical form of a polynomial (for keying)."""
+    return tuple(sorted(p.items(), key=lambda kv: repr(kv[0])))
 
 
 def _poly_iadd(dst: _Poly, src: _Poly) -> None:
@@ -302,25 +351,32 @@ def _from_poly(poly: _Poly) -> Dim:
 
 
 def _gen_to_dim(gen: Hashable) -> Dim:
-    kind, payload = gen  # type: ignore[misc]
+    kind = gen[0]  # type: ignore[index]
     if kind == "var":
-        return DimVar(payload)
+        return DimVar(gen[1])  # type: ignore[index]
     if kind == "dimof":
-        return DimOf(payload)
+        return DimOf(gen[1])  # type: ignore[index]
     if kind == "atom":
-        return DimAtomRef(payload)
+        return DimAtomRef(gen[1])  # type: ignore[index]
+    if kind == "mod":
+        _, canon_t, canon_m = gen  # type: ignore[misc]
+        return DimMod(_from_poly(dict(canon_t)), _from_poly(dict(canon_m)))
     raise DimError(f"_gen_to_dim: unknown generator {gen!r}")
 
 
 def is_runtime_dim(d: object) -> bool:
     """True iff ``d`` mentions a runtime rank atom ``δ_f`` (`25 §1` F3 seam)."""
-    if isinstance(d, DimAtomRef):
-        return True
-    if isinstance(d, (DimSum, DimProd)):
-        return any(is_runtime_dim(t) for t in d.terms)
-    if isinstance(d, DimNeg):
-        return is_runtime_dim(d.term)
-    return False
+    match d:
+        case DimAtomRef():
+            return True
+        case DimSum() | DimProd():
+            return any(is_runtime_dim(t) for t in d.terms)
+        case DimNeg():
+            return is_runtime_dim(d.term)
+        case DimMod():
+            return is_runtime_dim(d.term) or is_runtime_dim(d.modulus)
+        case _:
+            return False
 
 
 def space_mentions_runtime_dim(s: object) -> bool:

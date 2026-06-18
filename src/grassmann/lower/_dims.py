@@ -63,6 +63,12 @@ def _dim_int(d: S.Dim) -> int:
             for t in terms:
                 out *= _dim_int(t)
             return out
+        case S.DimMod(term, modulus):
+            # Python-style non-negative remainder; only foldable when both static.
+            m = _dim_int(modulus)
+            if m == 0:
+                raise DynamicDim(f"dim {d!r} has a zero modulus")
+            return _dim_int(term) % m
         case S.DimOf(s):
             return dim_of(s)
         case S.DimVar() | S.DimAtomRef():
@@ -94,6 +100,9 @@ def basis_dim(b: B.Basis) -> int:
             return out
         case B.BasisRep(count, inner):
             return _dim_int(count) * basis_dim(inner)
+        case B.ListBasis(vectors):
+            # an explicit list of basis vectors is statically sized by its length.
+            return len(vectors)
         case B.CompleteBasis(_, _):
             # ambient dim = sub + complement; complement is a realized matrix.
             import numpy as np

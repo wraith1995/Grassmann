@@ -298,7 +298,15 @@ def test_projected_basis_bad_which_raises():
     V = S.base("V", 3)
     f = T.var("f", S.linear_map_space(V, V))
     with pytest.raises(B.BasisError):
-        B.projected_basis(f, "image")  # not in PROJECTED_WHICH
+        B.projected_basis(f, "range")  # not in PROJECTED_WHICH ("image" IS valid now)
+
+
+def test_projected_basis_image_which_is_valid():
+    """``which="image"`` is the Q/orthonormal range basis (`73 Topic 2`)."""
+    V = S.base("V", 3)
+    f = T.var("f", S.linear_map_space(V, V))
+    pb = B.projected_basis(f, "image")
+    assert isinstance(pb, B.ProjectedBasis) and pb.which == "image"
 
 
 def test_complete_basis_requires_complement():

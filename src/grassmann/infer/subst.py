@@ -28,26 +28,28 @@ from grassmann.core.space import (
 
 def subst_space(s: Space, name: str, repl: Space) -> Space:
     """``s[name := repl]`` over an ``SVar(name)`` rigid space variable."""
-    if isinstance(s, SVar):
-        return repl if s.name == name else s
-    if isinstance(s, Dual):
-        return Dual(subst_space(s.space, name, repl))
-    if isinstance(s, WithInner):
-        return WithInner(subst_space(s.space, name, repl), s.metric)
-    if isinstance(s, OPlus):
-        return OPlus(tuple(subst_space(c, name, repl) for c in s.spaces))
-    if isinstance(s, OProd):
-        return OProd(tuple(subst_space(c, name, repl) for c in s.spaces))
-    if isinstance(s, OPlusRep):
-        return OPlusRep(s.count, subst_space(s.space, name, repl))
-    if isinstance(s, (Ker, Img, CoKer, CoImg)):
-        src = subst_space(s.source, name, repl) if s.source is not None else None
-        tgt = subst_space(s.target, name, repl) if s.target is not None else None
-        return type(s)(s.f, src, tgt)
-    if isinstance(s, App):
-        return s
-    # Scalar / Base / SVar(other) / metavars: unchanged.
-    return s
+    match s:
+        case SVar():
+            return repl if s.name == name else s
+        case Dual():
+            return Dual(subst_space(s.space, name, repl))
+        case WithInner():
+            return WithInner(subst_space(s.space, name, repl), s.metric)
+        case OPlus():
+            return OPlus(tuple(subst_space(c, name, repl) for c in s.spaces))
+        case OProd():
+            return OProd(tuple(subst_space(c, name, repl) for c in s.spaces))
+        case OPlusRep():
+            return OPlusRep(s.count, subst_space(s.space, name, repl))
+        case Ker() | Img() | CoKer() | CoImg():
+            src = subst_space(s.source, name, repl) if s.source is not None else None
+            tgt = subst_space(s.target, name, repl) if s.target is not None else None
+            return type(s)(s.f, src, tgt)
+        case App():
+            return s
+        case _:
+            # Scalar / Base / SVar(other) / metavars: unchanged.
+            return s
 
 
 def subst_type_space(t: object, name: str, repl: Space) -> object:
@@ -61,19 +63,21 @@ def subst_type_space(t: object, name: str, repl: Space) -> object:
     from grassmann.core.kinds import SPACE, SpaceSort
     from grassmann.core.types import Pi, SpaceAsType, TypeApp
 
-    if isinstance(t, SpaceAsType):
-        return SpaceAsType(subst_space(t.space, name, repl))
-    if isinstance(t, Pi):
-        dom = t.domain
-        if isinstance(dom, SpaceSort):
-            dom = SpaceSort(subst_space(dom.space, name, repl))  # type: ignore[arg-type]
-        # Shadowing: a nested Π binding the same space name hides outer `name`.
-        if dom == SPACE and t.binder == name:
-            return Pi(t.binder, dom, t.codomain)
-        return Pi(t.binder, dom, subst_type_space(t.codomain, name, repl))
-    if isinstance(t, TypeApp):
-        return t
-    return t
+    match t:
+        case SpaceAsType():
+            return SpaceAsType(subst_space(t.space, name, repl))
+        case Pi():
+            dom = t.domain
+            if isinstance(dom, SpaceSort):
+                dom = SpaceSort(subst_space(dom.space, name, repl))  # type: ignore[arg-type]
+            # Shadowing: a nested Π binding the same space name hides outer `name`.
+            if dom == SPACE and t.binder == name:
+                return Pi(t.binder, dom, t.codomain)
+            return Pi(t.binder, dom, subst_type_space(t.codomain, name, repl))
+        case TypeApp():
+            return t
+        case _:
+            return t
 
 
 def subst_term(t: object, name: str, repl: object) -> object:

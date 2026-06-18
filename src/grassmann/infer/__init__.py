@@ -19,6 +19,14 @@ Public entry points
 
 from __future__ import annotations
 
+from .assertions import (
+    AssertFactError,
+    DimFact,
+    assert_property_dims,
+    check_assert_property_consistency,
+    consistent_dim_facts,
+    map_facts_for_unify,
+)
 from .check import check, check_against
 from .dims import (
     DimError,
@@ -27,6 +35,12 @@ from .dims import (
     is_runtime_dim,
     rank_of,
     space_mentions_runtime_dim,
+)
+from .linearity import (
+    LinearityError,
+    Usage,
+    check_linearity,
+    check_llam_resources,
 )
 from .properties import (
     FFSDims,
@@ -74,4 +88,16 @@ __all__ = [
     "ffs_dims",
     "ffs_dim",
     "FFSDims",
+    # linearity (resource calculus)
+    "LinearityError",
+    "Usage",
+    "check_linearity",
+    "check_llam_resources",
+    # asserted-fact unification aids (A3)
+    "DimFact",
+    "AssertFactError",
+    "assert_property_dims",
+    "consistent_dim_facts",
+    "check_assert_property_consistency",
+    "map_facts_for_unify",
 ]

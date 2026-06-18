@@ -27,6 +27,12 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # `term` imports `space` at runtime, so importing it here would be a true
+    # cycle; under TYPE_CHECKING it is only used for forward annotations.
+    from .term import Term
 
 
 class SpaceError(Exception):
@@ -87,11 +93,11 @@ class DimOf:
 class DimAtomRef:
     """A runtime rank/dimension atom ``δ_f`` keyed by a term ``f`` (`25 §1`, F3).
 
-    Opaque Nat the SVD deduces at lowering; ``f`` is the keying term (kept as
-    ``object`` to avoid a term.py import cycle).
+    Opaque Nat the SVD deduces at lowering; ``f`` is the keying term (a forward
+    ref to ``Term`` to avoid a runtime term.py import cycle).
     """
 
-    key: object
+    key: Term
 
     def __repr__(self) -> str:
         return f"DimAtomRef({self.key!r})"
@@ -129,11 +135,29 @@ class DimNeg:
         return f"DimNeg({self.term!r})"
 
 
-Dim = DimLit | DimVar | DimOf | DimAtomRef | DimSum | DimProd | DimNeg
+@dataclass(frozen=True)
+class DimMod:
+    """``a mod b`` (modular reduction of a dim) — closes the ``Dim`` algebra under
+    the cyclic/periodic dimensions that e.g. circulant or torus constructions need
+    (`20 §5`). Convention: Python-style non-negative remainder, so ``0 ≤ a mod b < b``
+    and ``a mod 0`` is undefined (rejected at construction). Mirrors :class:`DimNeg`'s
+    style: a thin frozen node; constant-folding happens in :mod:`grassmann.infer.dims`,
+    kept symbolic otherwise."""
+
+    term: Dim
+    modulus: Dim
+
+    def __repr__(self) -> str:
+        return f"DimMod({self.term!r}, {self.modulus!r})"
+
+
+Dim = DimLit | DimVar | DimOf | DimAtomRef | DimSum | DimProd | DimNeg | DimMod
 
 
 def is_dim(d: object) -> bool:
-    return isinstance(d, (DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd, DimNeg))
+    return isinstance(
+        d, (DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd, DimNeg, DimMod)
+    )
 
 
 def as_dim(d: object) -> Dim:
@@ -161,6 +185,19 @@ def dim_prod(*ds: object) -> Dim:
     if len(parts) == 1:
         return parts[0]
     return DimProd(parts)
+
+
+def dim_mod(term: object, modulus: object) -> Dim:
+    """``term mod modulus`` (Python-style non-negative remainder).
+
+    Coerces ints to :class:`DimLit`. The modulus must be non-zero; a literal ``0``
+    modulus is rejected here, and a symbolic-but-statically-zero modulus is caught by
+    the constant-folder in :mod:`grassmann.infer.dims`. No folding is done here (kept
+    structural, mirroring :func:`dim_sum`/:func:`dim_prod`)."""
+    m = as_dim(modulus)
+    if isinstance(m, DimLit) and m.value == 0:
+        raise SpaceError("DimMod: modulus must be non-zero")
+    return DimMod(as_dim(term), m)
 
 
 # ===========================================================================
@@ -263,7 +300,7 @@ class OPlusRep:
 class Ker:
     """``Ker(f)`` — kernel of a linear map. source = dom(f), target = cod(f)."""
 
-    f: object  # a Term (linear map); object to avoid term.py import cycle
+    f: Term  # a linear map; forward ref to avoid a runtime term.py import cycle
     source: Space | None = None
     target: Space | None = None
 
@@ -278,7 +315,7 @@ class Ker:
 class Img:
     """``Img(f)`` — image (range) of a linear map."""
 
-    f: object
+    f: Term
     source: Space | None = None
     target: Space | None = None
 
@@ -293,7 +330,7 @@ class Img:
 class CoKer:
     """``CoKer(f)`` — cokernel of a linear map."""
 
-    f: object
+    f: Term
     source: Space | None = None
     target: Space | None = None
 
@@ -308,7 +345,7 @@ class CoKer:
 class CoImg:
     """``CoImg(f)`` — coimage of a linear map."""
 
-    f: object
+    f: Term
     source: Space | None = None
     target: Space | None = None
 
@@ -323,12 +360,12 @@ class CoImg:
 class WithInner:
     """``WithInner(s, g)`` — ``s`` re-metricized by ``g : s*⊗s*`` (`20` point 9).
 
-    ``g`` is a metric Term (kept as ``object``); the structural check is only that
-    ``s`` is a space.
+    ``g`` is a metric Term (a forward ref to ``Term`` to avoid a runtime cycle);
+    the structural check is only that ``s`` is a space.
     """
 
     space: Space
-    metric: object
+    metric: Term
 
     def __post_init__(self) -> None:
         _require_space(self.space, "WithInner")
@@ -343,12 +380,13 @@ class App:
 
     ``g`` is a SpaceFunction (a ``Lam`` whose body is a Space); ``positions`` selects
     the slots filled; ``args`` are the supplied arguments (spaces, nats, or values).
-    Kept loosely typed (``object``) — kind-level checking of the application is IW3.
+    Forward refs (``Term``) avoid a runtime cycle — kind-level checking of the
+    application is IW3.
     """
 
-    g: object
+    g: Term
     positions: tuple[int, ...]
-    args: tuple[object, ...]
+    args: tuple[Space | Dim | Term, ...]
 
     def __post_init__(self) -> None:
         if len(self.positions) != len(self.args):
@@ -481,27 +519,27 @@ def oplus_rep(count: object, space: Space) -> OPlusRep:
     return OPlusRep(as_dim(count), space)
 
 
-def ker(f: object, source: Space | None = None, target: Space | None = None) -> Ker:
+def ker(f: Term, source: Space | None = None, target: Space | None = None) -> Ker:
     return Ker(f, source, target)
 
 
-def img(f: object, source: Space | None = None, target: Space | None = None) -> Img:
+def img(f: Term, source: Space | None = None, target: Space | None = None) -> Img:
     return Img(f, source, target)
 
 
-def coker(f: object, source: Space | None = None, target: Space | None = None) -> CoKer:
+def coker(f: Term, source: Space | None = None, target: Space | None = None) -> CoKer:
     return CoKer(f, source, target)
 
 
-def coimg(f: object, source: Space | None = None, target: Space | None = None) -> CoImg:
+def coimg(f: Term, source: Space | None = None, target: Space | None = None) -> CoImg:
     return CoImg(f, source, target)
 
 
-def with_inner(s: Space, metric: object) -> WithInner:
+def with_inner(s: Space, metric: Term) -> WithInner:
     return WithInner(s, metric)
 
 
-def space_app(g: object, positions: tuple[int, ...], *args: object) -> App:
+def space_app(g: Term, positions: tuple[int, ...], *args: Space | Dim | Term) -> App:
     return App(g, tuple(positions), tuple(args))
 
 
@@ -522,10 +560,12 @@ __all__ = [
     "DimSum",
     "DimProd",
     "DimNeg",
+    "DimMod",
     "is_dim",
     "as_dim",
     "dim_sum",
     "dim_prod",
+    "dim_mod",
     # Space nodes
     "Space",
     "SpaceMeta",

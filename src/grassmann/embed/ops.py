@@ -71,11 +71,16 @@ class Expr:
     :data:`BASIS`/:data:`TYPE`. Use :func:`wrap` to build one (it classifies the node).
     """
 
-    __slots__ = ("node", "tower")
+    __slots__ = ("node", "tower", "note")
 
-    def __init__(self, node: object, tower: str | None = None) -> None:
+    def __init__(self, node: object, tower: str | None = None, note: object = None) -> None:
         object.__setattr__(self, "node", node)
         object.__setattr__(self, "tower", tower if tower is not None else _classify(node))
+        # OPTIONAL, non-invasive metadata (F1): a dict of side annotations (e.g. the base
+        # space ``V`` of an exterior power, recorded so the stdlib need not re-derive it).
+        # Deliberately EXCLUDED from ``__eq__``/``__hash__`` below — a note never changes a
+        # term's identity, so annotating is observationally transparent.
+        object.__setattr__(self, "note", dict(note) if note else None)
 
     # -- repr / equality delegate to the wrapped node -----------------------
 
@@ -84,11 +89,29 @@ class Expr:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Expr):
-            return self.node == other.node
+            return self.node == other.node  # note is intentionally NOT part of identity
         return NotImplemented
 
     def __hash__(self) -> int:
         return hash(self.node)
+
+    # -- optional annotation facility (F1) ----------------------------------
+
+    def with_note(self, **kw: object) -> Expr:
+        """Return a handle over the SAME node carrying the given side annotations.
+
+        Notes are optional metadata that never affect equality/hashing (an annotated and
+        an un-annotated handle over the same node compare equal). Existing notes are
+        merged; later keys win. Use :meth:`get_note` to read one back."""
+        merged = dict(self.note) if self.note else {}
+        merged.update(kw)
+        return Expr(self.node, self.tower, merged)
+
+    def get_note(self, key: str, default: object = None) -> object:
+        """Read a side annotation set via :meth:`with_note` (``default`` if absent)."""
+        if not self.note:
+            return default
+        return self.note.get(key, default)
 
     # ===================================================================
     # Operators.

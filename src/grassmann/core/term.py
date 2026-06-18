@@ -26,11 +26,17 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .kinds import Kind, SpaceSort, is_kind
 from .props import MapProps
-from .space import Space, _tuple_repr, is_space
-from .types import is_type
+from .space import Dim, Space, _tuple_repr, is_space
+from .types import Type, is_type
+
+if TYPE_CHECKING:
+    # `basis` imports `term` at runtime, so importing it here would be a true
+    # cycle; under TYPE_CHECKING it is only used for forward annotations.
+    from .basis import Basis
 
 
 class TermError(Exception):
@@ -91,12 +97,18 @@ class External:
 
 @dataclass(frozen=True)
 class Zero:
-    """``Zero(s)`` — the zero vector of a space."""
+    """``Zero(s?)`` — the zero vector of a space.
 
-    space: Space
+    ``space`` is **optional** (B1): when ``None`` the space is left to inference, which
+    recovers it via first-order unification (a fresh ``SpaceMeta`` solved by the
+    surrounding context — a ``Sum`` sibling, a ``check``/``Assert`` against an expected
+    space, etc.). Supplying ``space`` explicitly works exactly as before.
+    """
+
+    space: Space | None = None
 
     def __post_init__(self) -> None:
-        _require_space_field(self.space, "Zero")
+        _require_space_or_none(self.space, "Zero")
 
     def __repr__(self) -> str:
         return f"Zero({self.space!r})"
@@ -133,7 +145,7 @@ class Lit:
 class Scale:
     """``Scale(r, v)`` — scalar multiple. ``r`` is a real or a scalar-valued Term."""
 
-    scalar: object
+    scalar: float | Term
     vector: Term
 
     def __post_init__(self) -> None:
@@ -236,7 +248,7 @@ class NEval:
 
     f: Term
     positions: tuple[int, ...]
-    args: tuple[object, ...]
+    args: tuple[Term | Space | Dim, ...]
 
     def __post_init__(self) -> None:
         _require_term(self.f, "NEval.f")
@@ -410,14 +422,21 @@ class Sharp:
 
 @dataclass(frozen=True)
 class Project:
-    """``Project(v, s)`` — project ``v`` onto a subspace ``s`` (``s ⊑ space(v)``; IW3)."""
+    """``Project(v, s?)`` — project ``v`` onto a subspace ``s`` (``s ⊑ space(v)``; IW3).
+
+    ``space`` (the *target subspace*) is **optional** (B1): when ``None`` it is left to
+    inference. Because a subspace is not unique, the omitted target is recoverable only
+    when an expected space flows in from the surrounding context (the ⇐ check direction),
+    which unifies the fresh ``SpaceMeta`` and then the deferred ``s ⊑ space(v)`` obligation
+    is validated. Supplying ``space`` explicitly works exactly as before.
+    """
 
     vector: Term
-    space: Space
+    space: Space | None = None
 
     def __post_init__(self) -> None:
         _require_term(self.vector, "Project.vector")
-        _require_space_field(self.space, "Project")
+        _require_space_or_none(self.space, "Project")
 
     def __repr__(self) -> str:
         return f"Project({self.vector!r}, {self.space!r})"
@@ -490,7 +509,7 @@ class Remetric:
     """``Remetric(v, g)`` — enter ``WithInner(s, g)`` (`20` point 9)."""
 
     vector: Term
-    metric: object
+    metric: Term
 
     def __post_init__(self) -> None:
         _require_term(self.vector, "Remetric.vector")
@@ -597,7 +616,7 @@ class Lam:
     """
 
     binders: tuple[tuple[str, Kind], ...]
-    body: object  # Term | Space | Type | Dim
+    body: Term | Space | Type | Dim
     term_vars: tuple[Var, ...] = ()
 
     def __post_init__(self) -> None:
@@ -626,12 +645,13 @@ class Frame:
 
     Listed in the IW1 Term scope (`60 §1`). A ``Frame`` binds a runtime value ``x:s`` to
     a basis (``x ↦ basis of τ(x)``). The basis-producing body lives in :mod:`basis`; we
-    store the bound term ``Var`` and the basis body (kept ``object`` to avoid a cycle).
+    store the bound term ``Var`` and the basis body (a ``Basis`` forward ref, to avoid a
+    runtime basis.py import cycle).
     The richer basis tower (``BLam``/``BApp``) is in :mod:`grassmann.core.basis`.
     """
 
     var: Var
-    basis_body: object
+    basis_body: Basis
 
     def __post_init__(self) -> None:
         if not isinstance(self.var, Var):
@@ -696,6 +716,13 @@ def _require_space_field(s: object, ctx: str) -> None:
         raise TermError(f"{ctx}: expected a Space, got {s!r}")
 
 
+def _require_space_or_none(s: object, ctx: str) -> None:
+    """Like :func:`_require_space_field` but permits ``None`` (an OPTIONAL space left to
+    inference, B1)."""
+    if s is not None and not is_space(s):
+        raise TermError(f"{ctx}: expected a Space or None, got {s!r}")
+
+
 def _check_index_list(ctx: str, idx: tuple[int, ...]) -> None:
     for p in idx:
         if not isinstance(p, int) or p < 0:
@@ -728,36 +755,39 @@ def _check_llam_linearity(vars: tuple[Var, ...], body: Term) -> None:
     seen: set[int] = set()
 
     def walk(node: object, in_disallowed: bool) -> None:
-        if isinstance(node, Var):
-            if node.uid in var_ids:
-                seen.add(node.uid)
-                if in_disallowed:
-                    raise TermError(
-                        f"LLam: linear variable {node.name!r} appears in a "
-                        f"dependence position (space/nat arg or binder domain); "
-                        f"the result space would depend on it, violating linearity "
-                        f"(20 §1/§2)"
-                    )
-            return
-        if isinstance(node, Lam):
-            # Binder-domain annotations (SpaceSort spaces) are dependence positions.
-            for _name, sort in node.binders:
-                if isinstance(sort, SpaceSort):
-                    walk(sort.space, True)
-            walk(node.body, in_disallowed)
-            return
-        if isinstance(node, NEval):
-            walk(node.f, in_disallowed)
-            # NEval args may be explicit Space/Nat applications ⇒ dependence positions.
-            for a in node.args:
-                if is_space(a) or _is_nat(a):
-                    walk(a, True)
-                else:
-                    walk(a, in_disallowed)
-            return
-        # Generic structural recursion over child Terms/Spaces.
-        for child in _children(node):
-            walk(child, in_disallowed)
+        # Dispatch over the structurally-significant Term nodes; every other node
+        # (the rest of the Term union, plus embedded Spaces) falls through to the
+        # generic structural recursion below — this is a PARTIAL dispatch, so the
+        # default ``case _`` reproduces that fall-through (no ``assert_never``).
+        match node:
+            case Var():
+                if node.uid in var_ids:
+                    seen.add(node.uid)
+                    if in_disallowed:
+                        raise TermError(
+                            f"LLam: linear variable {node.name!r} appears in a "
+                            f"dependence position (space/nat arg or binder domain); "
+                            f"the result space would depend on it, violating linearity "
+                            f"(20 §1/§2)"
+                        )
+            case Lam():
+                # Binder-domain annotations (SpaceSort spaces) are dependence positions.
+                for _name, sort in node.binders:
+                    if isinstance(sort, SpaceSort):
+                        walk(sort.space, True)
+                walk(node.body, in_disallowed)
+            case NEval():
+                walk(node.f, in_disallowed)
+                # NEval args may be explicit Space/Nat applications ⇒ dependence positions.
+                for a in node.args:
+                    if is_space(a) or _is_nat(a):
+                        walk(a, True)
+                    else:
+                        walk(a, in_disallowed)
+            case _:
+                # Generic structural recursion over child Terms/Spaces.
+                for child in _children(node):
+                    walk(child, in_disallowed)
 
     walk(body, False)
     missing = var_ids - seen
@@ -818,7 +848,7 @@ def external(space: Space, data: object, *args: Term) -> External:
     return External(space, data, tuple(args))
 
 
-def zero(space: Space) -> Zero:
+def zero(space: Space | None = None) -> Zero:
     return Zero(space)
 
 
@@ -830,7 +860,7 @@ def lit(value: float) -> Lit:
     return Lit(value)
 
 
-def scale(scalar: object, vector: Term) -> Scale:
+def scale(scalar: float | Term, vector: Term) -> Scale:
     return Scale(scalar, vector)
 
 
@@ -850,12 +880,34 @@ def eval_(f: Term, positions: tuple[int, ...], *args: Term) -> Eval:
     return Eval(f, tuple(positions), tuple(args))
 
 
-def neval(f: Term, positions: tuple[int, ...], *args: object) -> NEval:
+def neval(f: Term, positions: tuple[int, ...], *args: Term | Space | Dim) -> NEval:
     return NEval(f, tuple(positions), tuple(args))
 
 
 def compose(f: Term, positions: tuple[int, ...], *gs: Term) -> Compose:
     return Compose(f, tuple(positions), tuple(gs))
+
+
+def chain(*fs: Term, at: int = 0) -> Term:
+    """Series composition ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]`` (right-applied at dual slot
+    ``at``).
+
+    A thin smart constructor — **no new core node**. It mimics FEMOracle's nested
+    single-arg ``Compose`` (``pullback.py:778`` builds ``Compose(proj, (0,),
+    [Compose(conv, (0,), [embed])])`` for ``proj ∘ conv ∘ embed``). Each junction feeds
+    one map's codomain into the dual slot ``at`` of the map to its left, so
+    ``chain(f, g) == Compose(f, (at,), (g,))`` and longer chains nest right-to-left.
+
+    A single map is returned unchanged; ``chain()`` with no args is an error.
+    """
+    if not fs:
+        raise TermError("chain needs at least one map")
+    if not isinstance(at, int) or at < 0:
+        raise TermError(f"chain: at must be a non-negative int, got {at!r}")
+    out: Term = fs[-1]
+    for f in reversed(fs[:-1]):
+        out = Compose(f, (at,), (out,))
+    return out
 
 
 def trace(f: Term, i: int, j: int) -> Trace:
@@ -894,7 +946,7 @@ def sharp(space: Space) -> Sharp:
     return Sharp(space)
 
 
-def project(vector: Term, space: Space) -> Project:
+def project(vector: Term, space: Space | None = None) -> Project:
     return Project(vector, space)
 
 
@@ -914,7 +966,7 @@ def tuple_project(space: Space, i: int) -> TupleProject:
     return TupleProject(space, i)
 
 
-def remetric(vector: Term, metric: object) -> Remetric:
+def remetric(vector: Term, metric: Term) -> Remetric:
     return Remetric(vector, metric)
 
 
@@ -935,11 +987,15 @@ def llam(*vars: Var, body: Term) -> LLam:
     return LLam(tuple(vars), body)
 
 
-def lam(binders: tuple[tuple[str, Kind], ...], body: object, term_vars: tuple[Var, ...] = ()) -> Lam:
+def lam(
+    binders: tuple[tuple[str, Kind], ...],
+    body: Term | Space | Type | Dim,
+    term_vars: tuple[Var, ...] = (),
+) -> Lam:
     return Lam(tuple(binders), body, tuple(term_vars))
 
 
-def frame(var: Var, basis_body: object) -> Frame:
+def frame(var: Var, basis_body: Basis) -> Frame:
     return Frame(var, basis_body)
 
 
@@ -994,6 +1050,7 @@ __all__ = [
     "eval_",
     "neval",
     "compose",
+    "chain",
     "trace",
     "solve",
     "pinv",

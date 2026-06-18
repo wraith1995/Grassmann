@@ -97,11 +97,15 @@ def test_default_basis_linear_map_space() -> None:
     assert db == C.basis_prod(C.dual_basis(C.base_basis("V")), C.base_basis("W"))
 
 
-def test_default_basis_img_is_image_basis() -> None:
+def test_default_basis_img_is_orthonormal_range() -> None:
     V, W = C.base("V", 3), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W))
     db, cands = space_basis(C.img(f, source=V, target=W))
-    assert isinstance(db, C.ImageBasis)
+    # The natural basis of Img(f) is now the ORTHONORMAL range (Q/SVD-U) —
+    # ProjectedBasis(f, "image") — not the literal map-application ImageBasis (`73 T2`).
+    assert isinstance(db, C.ProjectedBasis) and db.which == "image"
+    # the literal map-application ImageBasis(f) is offered as a candidate alternative.
+    assert any(isinstance(c, C.ImageBasis) for c in cands)
     # candidate includes the codomain's standard basis (numeric-result-wins foil).
     assert any(_basis_eq(c, C.base_basis("W")) for c in cands)
 
@@ -344,6 +348,85 @@ def test_ffs_two_ranks_two_shapes() -> None:
 
 
 # ===========================================================================
+# which="image" — the Q/orthonormal range owns the SVD/QR realization (`73 Topic 2`)
+# ===========================================================================
+
+
+def test_image_which_is_alias_of_img() -> None:
+    """``ProjectedBasis``' ``which="image"`` realizes identically to the legacy ``"img"``."""
+    rng = np.random.default_rng(7)
+    fn = rng.standard_normal((4, 2))  # cod=4, dom=2, injective
+    prog_a = pa.Program("a")
+    Fa, va = _sym_matrix(prog_a, fn, "f")
+    ra = realize_ffs_basis(prog_a, "image", Fa, dom_dim=2, cod_dim=4, props=P.inj, label="f")
+    prog_a.add_output("cols", ra.cols)
+    prog_b = pa.Program("b")
+    Fb, vb = _sym_matrix(prog_b, fn, "f")
+    rb = realize_ffs_basis(prog_b, "img", Fb, dom_dim=2, cod_dim=4, props=P.inj, label="f")
+    prog_b.add_output("cols", rb.cols)
+    assert ra.op == rb.op == "QrOp"
+    np.testing.assert_allclose(prog_a.run(va)["cols"], prog_b.run(vb)["cols"], atol=1e-12)
+
+
+def test_projected_image_injective_is_qrop_orthonormal_range() -> None:
+    """``which="image"`` on an injective map ⇒ ``QrOp`` Q (the recovered IsoSpace)."""
+    rng = np.random.default_rng(8)
+    fn = rng.standard_normal((4, 2))
+    prog = pa.Program("qr-image")
+    F, vals = _sym_matrix(prog, fn, "f")
+    real = realize_ffs_basis(prog, "image", F, dom_dim=2, cod_dim=4, props=P.inj, label="f")
+    assert real.op == "QrOp" and real.rank_dim is None  # static rank = |dom|
+    prog.add_output("Q", real.cols)
+    Q = prog.run(vals)["Q"]
+    assert Q.shape == (4, 2)
+    np.testing.assert_allclose(Q.T @ Q, np.eye(2), atol=1e-9)
+    # Q spans the same range as the literal map columns f(eᵢ).
+    span_q = Q @ Q.T
+    span_f = fn @ np.linalg.pinv(fn)
+    np.testing.assert_allclose(span_q, span_f, atol=1e-9)
+
+
+def test_image_basis_literal_map_application_columns() -> None:
+    """``ImageBasis(f)`` realizes the LITERAL ``f(eᵢ)`` columns — NOT orthonormalized."""
+    from grassmann.lower.space_basis import realize_image_application
+
+    rng = np.random.default_rng(9)
+    fn_cd = rng.standard_normal((4, 2))  # (cod, dom): columns are f(e_i)
+    prog = pa.Program("imgapp")
+    F, vals = _sym_matrix(prog, fn_cd, "f")
+    real = realize_image_application(prog, F, dom_dim=2, cod_dim=4, label="f")
+    assert real.op == "MapApply" and real.rank is None and real.rank_dim is None
+    prog.add_output("cols", real.cols)
+    cols = prog.run(vals)["cols"]
+    # columns ARE the (cod,dom) map matrix — the raw f(e_i), not orthonormal.
+    np.testing.assert_allclose(cols, fn_cd, atol=1e-12)
+    assert not np.allclose(cols.T @ cols, np.eye(2), atol=1e-6)
+
+
+def test_image_basis_to_projected_image_cob_edge() -> None:
+    """The ``ImageBasis ↔ ProjectedBasis(image)`` change of basis is realizable (`73 T2`).
+
+    For an injective ``f`` the literal columns ``R_img = f(eᵢ)`` and the orthonormal range
+    ``Q`` are related by ``Q = R_img · M`` for a square ``M`` (here the QR ``R⁻¹``); the
+    realized columns must span the same subspace.
+    """
+    from grassmann.lower.space_basis import realize_image_application
+
+    rng = np.random.default_rng(10)
+    fn_cd = rng.standard_normal((4, 2))
+    prog = pa.Program("edge")
+    F, vals = _sym_matrix(prog, fn_cd, "f")
+    img_app = realize_image_application(prog, F, dom_dim=2, cod_dim=4, label="f")
+    q_real = realize_ffs_basis(prog, "image", F, dom_dim=2, cod_dim=4, props=P.inj, label="f")
+    prog.add_output("R", img_app.cols)
+    prog.add_output("Q", q_real.cols)
+    out = prog.run(vals)
+    R, Q = out["R"], out["Q"]
+    # both span the range of f: projector R·R⁺ == Q·Qᵀ.
+    np.testing.assert_allclose(R @ np.linalg.pinv(R), Q @ Q.T, atol=1e-9)
+
+
+# ===========================================================================
 # choose — symbolic-aware basis choice heuristic (`41 §1b`)
 # ===========================================================================
 
@@ -354,8 +437,10 @@ def test_choose_absorbs_operator_structure() -> None:
     sp = C.img(f, source=V, target=W)
     _, cands = space_basis(sp)
     chosen = choose(sp, cands, term=f)
-    # the operator's own image (SVD) basis wins — coordinates become numeric there.
-    assert isinstance(chosen, C.ImageBasis)
+    # the operator's own image (SVD/Q) basis wins — coordinates become numeric there.
+    # That is now ProjectedBasis(f, "image") (the orthonormal range), `73 Topic 2`.
+    assert isinstance(chosen, C.ProjectedBasis) and chosen.which == "image"
+    assert chosen.f is f
 
 
 def test_choose_parametric_in_out_same_basis() -> None:
