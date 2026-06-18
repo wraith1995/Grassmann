@@ -13,6 +13,7 @@ implicit space metavars and dimension equality live in :mod:`grassmann.infer.uni
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import assert_never
 
 from grassmann.core.kinds import NAT, SPACE, STAR, Arrow, Kind, Sort, SpaceSort
 from grassmann.core.space import (
@@ -21,6 +22,8 @@ from grassmann.core.space import (
     OProd,
     Scalar,
     Space,
+    SpaceMeta,
+    SVar,
     dual,
     is_space,
     linear_map_space,
@@ -90,25 +93,62 @@ class Ctx:
 
     store: MetaStore = field(default_factory=MetaStore)
     space_vars: set[str] = field(default_factory=set)
+    # B1 — deferred ``s ⊑ parent`` obligations for ``Project(v, None)`` whose target
+    # subspace metavar must be resolved (by the ⇐ check direction) before the subspace
+    # relation can be validated. Each entry is (target_meta, parent_space, vector).
+    subspace_obligations: list[tuple[Space, Space, Term]] = field(default_factory=list)
 
 
 def synth(term: Term, ctx: Ctx | None = None) -> SynthResult:
     """Synthesize the Space/Type/Kind of ``term`` (`25 §3`)."""
+    top = ctx is None
     if ctx is None:
         ctx = Ctx()
     if not is_term(term):
         raise InferError(f"synth: expected a Term, got {term!r}")
-    return _synth(term, ctx)
+    r = _synth(term, ctx)
+    if top:
+        _check_subspace_obligations(ctx)
+    return r
 
 
 def synth_space(term: Term, ctx: Ctx | None = None) -> Space:
     """Synthesize and require a Space result (resolved against the metastore)."""
+    top = ctx is None
     if ctx is None:
         ctx = Ctx()
     r = synth(term, ctx)
+    if top:
+        _check_subspace_obligations(ctx)
     if not is_space(r):
         raise InferError(f"expected a value/map (a Space), got type {r!r} for {term!r}")
     return ctx.store.resolve(r)  # type: ignore[arg-type]
+
+
+def _check_subspace_obligations(ctx: Ctx) -> None:
+    """Validate any deferred ``Project(v, None)`` target obligations (B1).
+
+    Once the surrounding context has run, each deferred target metavar should be solved
+    (by the ⇐ check direction). A solved target must be a subspace of its parent; an
+    *unsolved* target means the omitted projection target was never pinned down — an
+    ambiguity the caller must resolve by annotating it or supplying an expected space."""
+    from .subspace import is_subspace
+
+    pending = ctx.subspace_obligations
+    ctx.subspace_obligations = []
+    for target, parent, vector in pending:
+        resolved = ctx.store.resolve(target)
+        if ctx.store.has_unsolved(resolved):
+            raise InferError(
+                f"project: target subspace of {vector!r} was omitted and could not be "
+                f"inferred (no expected space flowed in); annotate it explicitly (B1)"
+            )
+        parent = ctx.store.resolve(parent)
+        if not is_subspace(resolved, parent):
+            raise InferError(
+                f"project: inferred target {resolved!r} is not a subspace of "
+                f"{parent!r} (25 §6)"
+            )
 
 
 # ===========================================================================
@@ -117,75 +157,79 @@ def synth_space(term: Term, ctx: Ctx | None = None) -> Space:
 
 
 def _synth(e: Term, ctx: Ctx) -> SynthResult:
-    if isinstance(e, Var):
-        return e.space
-    if isinstance(e, Lit):
-        return Scalar()
-    if isinstance(e, External):
-        return e.space
-    if isinstance(e, Zero):
-        return e.space
-    if isinstance(e, Identity):
-        # Identity s : ~s * s  (a linear map s ⊸ s).
-        return linear_map_space(e.space, e.space)
-    if isinstance(e, Scale):
-        return _synth_value(e.vector, ctx)
-    if isinstance(e, Sum):
-        return _synth_sum(e, ctx)
-    if isinstance(e, OPlusV):
-        return oplus(*(_synth_value(v, ctx) for v in e.vectors))
-    if isinstance(e, OProdV):
-        return oprod(*(_synth_value(v, ctx) for v in e.vectors))
-    if isinstance(e, Eval):
-        return _synth_eval(e, ctx)
-    if isinstance(e, NEval):
-        return _synth_neval(e, ctx)
-    if isinstance(e, Compose):
-        return _synth_compose(e, ctx)
-    if isinstance(e, Trace):
-        return _synth_trace(e, ctx)
-    if isinstance(e, Solve):
-        return _synth_solve(e, ctx)
-    if isinstance(e, Pinv):
-        return _synth_pinv(e, ctx)
-    if isinstance(e, SolveApply):
-        return _synth_solve_apply(e, ctx)
-    if isinstance(e, PinvApply):
-        return _synth_pinv_apply(e, ctx)
-    if isinstance(e, Dagger):
-        return _synth_dagger(e, ctx)
-    if isinstance(e, Inner):
-        # Inner(s) is the metric bilinear form on s — an element of s* ⊗ s* (≡ ~s ⊗ ~s),
-        # with two covariant slots. Full contraction against two s-vectors ⇒ Scalar
-        # (same representation as Flat: a metric g is both the form and the map s→s*).
-        return oprod(dual(e.space), dual(e.space))
-    if isinstance(e, Flat):
-        return linear_map_space(e.space, dual(e.space))
-    if isinstance(e, Sharp):
-        return linear_map_space(dual(e.space), e.space)
-    if isinstance(e, Project):
-        return _synth_project(e, ctx)
-    if isinstance(e, Embed):
-        return _synth_embed(e, ctx)
-    if isinstance(e, Assert):
-        return _synth_assert(e, ctx)
-    if isinstance(e, TupleEmbed):
-        return _synth_tuple_embed(e, ctx)
-    if isinstance(e, TupleProject):
-        return _synth_tuple_project(e, ctx)
-    if isinstance(e, Remetric):
-        return _synth_remetric(e, ctx)
-    if isinstance(e, Kron):
-        return _synth_kron(e, ctx)
-    if isinstance(e, (Lift, InvLift)):
-        return _synth_lift(e, ctx)
-    if isinstance(e, LLam):
-        return _synth_llam(e, ctx)
-    if isinstance(e, Lam):
-        return _synth_lam(e, ctx)
-    if isinstance(e, Frame):
-        raise InferError("synth: Frame (basis binder) typing is out of IW3 scope")
-    raise InferError(f"synth: unsupported term {e!r}")
+    match e:
+        case Var():
+            return e.space
+        case Lit():
+            return Scalar()
+        case External():
+            return _synth_external(e, ctx)
+        case Zero():
+            # B1: an omitted space is a fresh metavar, solved by the surrounding context
+            # (a Sum sibling, a check/Assert against an expected space, …).
+            return e.space if e.space is not None else fresh_meta("zero")
+        case Identity():
+            # Identity s : ~s * s  (a linear map s ⊸ s).
+            return linear_map_space(e.space, e.space)
+        case Scale():
+            return _synth_value(e.vector, ctx)
+        case Sum():
+            return _synth_sum(e, ctx)
+        case OPlusV():
+            return oplus(*(_synth_value(v, ctx) for v in e.vectors))
+        case OProdV():
+            return oprod(*(_synth_value(v, ctx) for v in e.vectors))
+        case Eval():
+            return _synth_eval(e, ctx)
+        case NEval():
+            return _synth_neval(e, ctx)
+        case Compose():
+            return _synth_compose(e, ctx)
+        case Trace():
+            return _synth_trace(e, ctx)
+        case Solve():
+            return _synth_solve(e, ctx)
+        case Pinv():
+            return _synth_pinv(e, ctx)
+        case SolveApply():
+            return _synth_solve_apply(e, ctx)
+        case PinvApply():
+            return _synth_pinv_apply(e, ctx)
+        case Dagger():
+            return _synth_dagger(e, ctx)
+        case Inner():
+            # Inner(s) is the metric bilinear form on s — an element of s* ⊗ s* (≡ ~s ⊗ ~s),
+            # with two covariant slots. Full contraction against two s-vectors ⇒ Scalar
+            # (same representation as Flat: a metric g is both the form and the map s→s*).
+            return oprod(dual(e.space), dual(e.space))
+        case Flat():
+            return linear_map_space(e.space, dual(e.space))
+        case Sharp():
+            return linear_map_space(dual(e.space), e.space)
+        case Project():
+            return _synth_project(e, ctx)
+        case Embed():
+            return _synth_embed(e, ctx)
+        case Assert():
+            return _synth_assert(e, ctx)
+        case TupleEmbed():
+            return _synth_tuple_embed(e, ctx)
+        case TupleProject():
+            return _synth_tuple_project(e, ctx)
+        case Remetric():
+            return _synth_remetric(e, ctx)
+        case Kron():
+            return _synth_kron(e, ctx)
+        case Lift() | InvLift():
+            return _synth_lift(e, ctx)
+        case LLam():
+            return _synth_llam(e, ctx)
+        case Lam():
+            return _synth_lam(e, ctx)
+        case Frame():
+            raise InferError("synth: Frame (basis binder) typing is out of IW3 scope")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _synth_value(v: Term, ctx: Ctx) -> Space:
@@ -198,6 +242,44 @@ def _synth_value(v: Term, ctx: Ctx) -> Space:
 # ===========================================================================
 # Algebra.
 # ===========================================================================
+
+
+def _external_requires_standard(data: object) -> bool:
+    """Read the basis contract off an ``External``'s ``data`` payload without importing the
+    lowering layer (`71 §2.4`): an op carrying ``basis_req`` whose value is ``"standard"``
+    (the default :class:`~grassmann.lower.represent.BasisReq.STANDARD`) is meaningful only
+    in standard coordinates; one marked ``"equivariant"`` is basis-free."""
+    req = getattr(data, "basis_req", None)
+    if req is None:
+        return False  # not a basis-aware op payload ⇒ no constraint to surface.
+    return getattr(req, "value", req) == "standard"
+
+
+def _synth_external(e: External, ctx: Ctx) -> Space:
+    """``External(s, data, args…)`` — a foreign elementwise op (`41 §3`).
+
+    The result space is ``e.space`` (the source of truth, unchanged). On top of that we
+    **surface the kernel's basis contract** (`71 §2.4`): a ``STANDARD`` op's operands must
+    be standardizable to ``default_basis`` before the componentwise kernel runs, so an
+    operand whose space is a still-unresolved, basis-polymorphic metavar/``SVar`` (no known
+    realization ⇒ no standard basis) is rejected here — precisely the case that would
+    silently miscompute under a non-standard basis at lowering time.
+    """
+    if _external_requires_standard(e.data):
+        for a in e.args:
+            sp = ctx.store.resolve(_synth_value(a, ctx))
+            if isinstance(sp, (SpaceMeta, SVar)):
+                raise InferError(
+                    f"External {getattr(e.data, 'name', e.data)!r} requires standard "
+                    f"coordinates (basis_req=STANDARD), but operand {a!r} has a "
+                    f"basis-polymorphic space {sp!r} that cannot be standardized; "
+                    f"annotate/realize its space first (71 §2.4)"
+                )
+    else:
+        # Still type-check operands (synthesizable) even when no basis constraint applies.
+        for a in e.args:
+            _synth_value(a, ctx)
+    return e.space
 
 
 def _synth_sum(e: Sum, ctx: Ctx) -> Space:
@@ -282,37 +364,41 @@ def _synth_neval(e: NEval, ctx: Ctx) -> Space:
 
 def _apply_pi(fty: Pi, arg: object, ctx: Ctx) -> object:
     dom = fty.domain
-    if isinstance(dom, SpaceSort):
-        # Value domain: arg is a Term checked against the domain space.
-        if not is_term(arg):
-            raise InferError(f"NEval: expected a value argument, got {arg!r}")
-        _check(arg, dom.space, ctx)  # type: ignore[arg-type]
-        return _subst_codomain(fty, arg, ctx)
-    if isinstance(dom, Sort) and dom == SPACE:
-        # Space param: explicit space arg, or recover via a fresh metavar.
-        sp: Space = arg if is_space(arg) else fresh_meta(fty.binder)  # type: ignore[assignment]
-        return _subst_codomain(fty, sp, ctx)
-    if isinstance(dom, Sort) and dom == NAT:
-        # Nat param: must be explicit (nats are not unified, `25 §2`).
-        from grassmann.core.space import is_dim
+    match dom:
+        case SpaceSort():
+            # Value domain: arg is a Term checked against the domain space.
+            if not is_term(arg):
+                raise InferError(f"NEval: expected a value argument, got {arg!r}")
+            _check(arg, dom.space, ctx)  # type: ignore[arg-type]
+            return _subst_codomain(fty, arg, ctx)
+        case Sort() if dom == SPACE:
+            # Space param: explicit space arg, or recover via a fresh metavar.
+            sp: Space = arg if is_space(arg) else fresh_meta(fty.binder)  # type: ignore[assignment]
+            return _subst_codomain(fty, sp, ctx)
+        case Sort() if dom == NAT:
+            # Nat param: must be explicit (nats are not unified, `25 §2`).
+            from grassmann.core.space import is_dim
 
-        if not is_dim(arg):
-            raise InferError("NEval: nat parameter requires an explicit nat [n]")
-        return _subst_codomain(fty, arg, ctx)
-    raise InferError(f"NEval: unsupported Π domain {dom!r}")
+            if not is_dim(arg):
+                raise InferError("NEval: nat parameter requires an explicit nat [n]")
+            return _subst_codomain(fty, arg, ctx)
+        case _:
+            raise InferError(f"NEval: unsupported Π domain {dom!r}")
 
 
 def _subst_codomain(fty: Pi, value: object, ctx: Ctx) -> object:
     """Substitute the bound variable of ``fty`` by ``value`` in its codomain."""
     cod: Type = fty.codomain
     # SpaceSort domains bind a term Var by name; space/nat domains bind an SVar/DimVar.
-    if isinstance(fty.domain, SpaceSort):
-        return _subst_type_term(cod, fty.binder, value, ctx)
-    if fty.domain == SPACE:
-        return _subst_type_space(cod, fty.binder, value, ctx)
-    if fty.domain == NAT:
-        return _subst_type_nat(cod, fty.binder, value, ctx)
-    raise InferError(f"_subst_codomain: unsupported domain {fty.domain!r}")
+    match fty.domain:
+        case SpaceSort():
+            return _subst_type_term(cod, fty.binder, value, ctx)
+        case _ if fty.domain == SPACE:
+            return _subst_type_space(cod, fty.binder, value, ctx)
+        case _ if fty.domain == NAT:
+            return _subst_type_nat(cod, fty.binder, value, ctx)
+        case _:
+            raise InferError(f"_subst_codomain: unsupported domain {fty.domain!r}")
 
 
 def _subst_type_space(t: Type, name: str, sp: Space, ctx: Ctx) -> Type:
@@ -412,9 +498,14 @@ def _decode_map_space(s: Space) -> tuple[Space, Space]:
 
 
 def _synth_solve(e: Solve, ctx: Ctx) -> Space:
+    from .assertions import check_assert_property_consistency
+
     if not is_bijective(e.f):
         raise InferError("Solve requires the map to be asserted `bij` (25 §3/§7)")
     dom, cod = _map_dom_cod_resolved(e.f, ctx)
+    # `bij` guarantees |dom| ≡ |cod|; reject an asserted-bij map between unequal-dim
+    # spaces up front (A3: asserted facts inform/validate the inverse's space).
+    check_assert_property_consistency(e.f, dom, cod)
     return linear_map_space(cod, dom)
 
 
@@ -453,6 +544,14 @@ def _synth_project(e: Project, ctx: Ctx) -> Space:
     from .subspace import is_subspace
 
     s = ctx.store.resolve(_synth_value(e.vector, ctx))
+    if e.space is None:
+        # B1: target subspace omitted. A subspace is not unique, so we cannot solve the
+        # target by unification in the ⇒ direction; return a fresh metavar (to be solved
+        # by the ⇐ check direction) and DEFER the ``target ⊑ s`` obligation, validated
+        # once the metavar is resolved (see ``_check_subspace_obligations``).
+        target = fresh_meta("proj")
+        ctx.subspace_obligations.append((target, s, e.vector))
+        return target
     if not is_subspace(e.space, s):
         raise InferError(f"project: {e.space!r} is not a subspace of {s!r} (25 §6)")
     return e.space
@@ -468,9 +567,32 @@ def _synth_embed(e: Embed, ctx: Ctx) -> Space:
 
 
 def _synth_assert(e: Assert, ctx: Ctx) -> Space:
+    """``Assert(v, s)`` — unify ``v``'s space with ``s`` (recovering implicit metavars),
+    then let any **asserted map properties** of ``v`` *aid* inference (A3).
+
+    Structural unification of ``s`` solves the implicit space metavars in ``v``'s space
+    (the basic unification aid). On top of that, if ``v`` is a property-bearing map
+    (``inj``/``surj``/``bij``/``rank``), the property-implied dimension equalities are
+    checked against the now-resolved space: an assertion contradicting a property (e.g. a
+    ``bij`` map asserted between spaces of unequal dimension) is rejected here rather than
+    silently accepted (`25 §7`).
+    """
+    from .assertions import check_assert_property_consistency
+    from .properties import map_props
+
     s = _synth_value(e.vector, ctx)
     unify(s, e.space, ctx.store)
-    return ctx.store.resolve(e.space)
+    resolved = ctx.store.resolve(e.space)
+    # If the asserted value is a property-bearing map, use its asserted facts to validate
+    # the resolved map space (dom/cod dimension relations the property guarantees).
+    if map_props(e.vector) is not None:
+        try:
+            dom, cod = _decode_map_space(resolved)
+        except InferError:
+            dom = cod = None  # not a map space ⇒ no map-property facts apply
+        if dom is not None and cod is not None:
+            check_assert_property_consistency(e.vector, dom, cod)
+    return resolved
 
 
 def _synth_tuple_embed(e: TupleEmbed, ctx: Ctx) -> Space:
@@ -551,7 +673,16 @@ def _synth_lift(e: Lift | InvLift, ctx: Ctx) -> Space:
 
 
 def _synth_llam(e: LLam, ctx: Ctx) -> Space:
-    """``LLam([xᵢ:sᵢ]. e) ⇒ ⊗(Dual sᵢ) * s_e`` (the linear-map space, `25 §3`)."""
+    """``LLam([xᵢ:sᵢ]. e) ⇒ ⊗(Dual sᵢ) * s_e`` (the linear-map space, `25 §3`).
+
+    Beyond the space, enforce the **resource / usage** discipline (C1+C2): each linear
+    var must be consumed exactly once along every path of the body. ``x ↦ x ⊕ 0`` counts
+    as a single use of ``x`` (the ``Zero`` summand consumes nothing) — see
+    :mod:`grassmann.infer.linearity`.
+    """
+    from .linearity import check_llam_resources
+
+    check_llam_resources(e)
     s_e = ctx.store.resolve(_synth_value(e.body, ctx))
     dom_factors = [dual(v.space) for v in e.vars]
     return oprod(*dom_factors, s_e)

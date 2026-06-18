@@ -15,15 +15,20 @@ from grassmann.core.space import Space, is_space
 from grassmann.core.term import Lam, Term, is_term
 from grassmann.core.types import Pi, SpaceAsType, Type, is_type
 
-from .synth import Ctx, InferError, synth
+from .synth import Ctx, InferError, _check_subspace_obligations, synth
 from .unify import unify
 
 
 def check(term: Term, expected: Space | Type, ctx: Ctx | None = None) -> None:
     """Public ``⇐`` entry point. Raises on a mismatch (`25 §4`)."""
+    top = ctx is None
     if ctx is None:
         ctx = Ctx()
     check_against(term, expected, ctx)
+    if top:
+        # B1: validate any deferred Project(v, None) obligations now that the expected
+        # space has flowed in and solved their target metavars.
+        _check_subspace_obligations(ctx)
 
 
 def check_against(term: object, expected: Space | Type, ctx: Ctx) -> None:
@@ -68,26 +73,28 @@ def _check_lam_against_pi(term: Lam, expected: Pi, ctx: Ctx) -> None:
 
 def _check_type_eq(got: object, expected: Type, ctx: Ctx) -> None:
     """Structural type equality with space unification at the leaves (`25 §4`)."""
-    if isinstance(expected, SpaceAsType):
-        if isinstance(got, SpaceAsType):
-            unify(got.space, expected.space, ctx.store)
+    match expected:
+        case SpaceAsType():
+            if isinstance(got, SpaceAsType):
+                unify(got.space, expected.space, ctx.store)
+                return
+            if is_space(got):
+                unify(got, expected.space, ctx.store)  # type: ignore[arg-type]
+                return
+            raise InferError(f"check: expected {expected!r}, got {got!r}")
+        case Pi():
+            if not isinstance(got, Pi):
+                raise InferError(f"check: expected a Π {expected!r}, got {got!r}")
+            if got.domain != expected.domain:
+                raise InferError(
+                    f"check: Π domain mismatch {got.domain!r} vs {expected.domain!r}"
+                )
+            _check_type_eq(got.codomain, expected.codomain, ctx)
             return
-        if is_space(got):
-            unify(got, expected.space, ctx.store)  # type: ignore[arg-type]
-            return
-        raise InferError(f"check: expected {expected!r}, got {got!r}")
-    if isinstance(expected, Pi):
-        if not isinstance(got, Pi):
-            raise InferError(f"check: expected a Π {expected!r}, got {got!r}")
-        if got.domain != expected.domain:
-            raise InferError(
-                f"check: Π domain mismatch {got.domain!r} vs {expected.domain!r}"
-            )
-        _check_type_eq(got.codomain, expected.codomain, ctx)
-        return
-    # TypeApp: require structural equality.
-    if got != expected:
-        raise InferError(f"check: type mismatch {got!r} vs {expected!r}")
+        case _:
+            # TypeApp: require structural equality.
+            if got != expected:
+                raise InferError(f"check: type mismatch {got!r} vs {expected!r}")
 
 
 __all__ = ["check", "check_against"]

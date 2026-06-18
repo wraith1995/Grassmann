@@ -12,7 +12,7 @@ Scalar      ⇒ ScalarBasis                ⊕(sᵢ) ⇒ BasisSum(default sᵢ)
 Base(_,_)   ⇒ BaseBasis(name)            ⊗(sᵢ) ⇒ BasisProd(default sᵢ)
 Dual s      ⇒ DualBasis(default s)       ⊕ⁿ s  ⇒ BasisRep(n, default s)
 WithInner s g ⇒ default = g-orthonormal WithInnerBasis  (candidate: reuse default s)
-Img f       ⇒ ImageBasis(f)              Ker/CoImg/CoKer f ⇒ ProjectedBasis(f, which, …)
+Img f       ⇒ ProjectedBasis(f, "image") Ker/CoImg/CoKer f ⇒ ProjectedBasis(f, which, …)
 SVar α      ⇒ BVar(β)                    (basis supplied at instantiation)
 ```
 
@@ -41,6 +41,7 @@ __all__ = [
     "candidate_bases",
     "FfsRealization",
     "realize_ffs_basis",
+    "realize_image_application",
 ]
 
 
@@ -67,8 +68,12 @@ def default_basis(space: S.Space) -> B.Basis:
         case S.WithInner(s, g):
             # default = g-orthonormal (metric becomes identity in these coords).
             return B.with_inner_basis(default_basis(s), g)
-        case S.Img(f, _, _):
-            return B.image_basis(f)
+        case S.Img(f, src, tgt):
+            # The natural basis of the range is the ORTHONORMAL (Q/SVD-U) range basis —
+            # ``ProjectedBasis(f, "image")`` (the immersed side).  ``ImageBasis(f)`` is the
+            # separate LITERAL map-application basis (raw ``f(eᵢ)`` columns), offered only
+            # as a candidate (`73 Topic 2`).
+            return B.projected_basis(f, "image", _maybe(src), _maybe(tgt))
         case S.Ker(f, src, tgt):
             return B.projected_basis(f, "ker", _maybe(src), _maybe(tgt))
         case S.CoImg(f, src, tgt):
@@ -109,7 +114,9 @@ def candidate_bases(space: S.Space) -> tuple[B.Basis, ...]:
             # underlying standard basis (metric stays symbolic, but no whitening cob).
             _add(out, default_basis(s))
         case S.Img(f, src, tgt):
-            # the image basis IS the SVD basis of f; also the codomain's standard basis.
+            # default (out[0]) is the orthonormal range ProjectedBasis(f,"image"); the
+            # literal map-application ImageBasis(f) and the codomain's standard basis are
+            # alternatives the §1b heuristic can score against the term (`73 Topic 2`).
             _add(out, B.image_basis(f))
             if tgt is not None:
                 _add(out, default_basis(tgt))
@@ -178,16 +185,21 @@ def realize_ffs_basis(
     metric_cod: pa.SymArray | None = None,
     label: str = "f",
 ) -> FfsRealization:
-    """Realize an FFS basis (``which`` ∈ ``"img"|"coker"|"coimg"|"ker"``) (`41 §1`).
+    """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``) (`41 §1`).
+
+    ``"image"`` (the :class:`~grassmann.core.basis.ProjectedBasis` spelling) is accepted as
+    an alias of ``"img"`` — both name the **orthonormal range** (Q/SVD-U) basis.
 
     Emits the SVD/QR/GSVD ``Stmt``(s) into ``program`` and returns an
     :class:`FfsRealization`. Selection per `41 §1`/`50 §A1`:
 
-    * **injective + ``which == "img"``** ⇒ :class:`QrOp` — ``Q`` is the orthonormal range
-      basis with a *static* ``rank = dom_dim`` (recovers the dropped ``IsoSpace``);
+    * **injective + image** ⇒ :class:`QrOp` — ``Q`` is the orthonormal range basis with a
+      *static* ``rank = dom_dim`` (recovers the dropped ``IsoSpace``);
     * **metric present** ⇒ :class:`GSvdOp` (orthonormal in the metrics);
     * otherwise ⇒ :class:`SvdOp`, with the runtime rank ``δ_f`` sizing a dynamic axis.
     """
+    if which == "image":
+        which = "img"
     if which not in ("img", "coker", "coimg", "ker"):
         raise ValueError(f"realize_ffs_basis: bad which {which!r}")
 
@@ -202,6 +214,32 @@ def realize_ffs_basis(
             metric_dom, metric_cod, label,
         )
     return _realize_via_svd(program, which, f_matrix, dom_dim, cod_dim, label)
+
+
+def realize_image_application(
+    program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, cod_dim: int, *,
+    label: str = "f",
+) -> FfsRealization:
+    """Realize :class:`~grassmann.core.basis.ImageBasis` — the LITERAL map-application.
+
+    Columns are ``f`` applied to the source basis (``f(eᵢ)``), i.e. the ``(cod, dom)``
+    operator matrix itself — **not** orthonormalized (the R/fwd side, `73 Topic 2`).  No
+    QR/SVD is emitted; the columns ARE ``f_matrix`` (passed in ``(cod, dom)`` orientation).
+    The column axis is the static source dimension ``dom_dim`` (the ``f(eᵢ)`` per source
+    basis vector); ``rank``/``rank_dim`` are ``None`` (no SVD δ).
+    """
+    [cols] = program.emit_stmt(
+        _IdentityMatrixOp(), [f_matrix],
+        [pa.OutSpec("imgapp_" + label, (cod_dim, dom_dim))],
+        note=f"ffs-basis:ImageBasis({label}):map-application",
+    )
+    return FfsRealization(cols=cols, rank=None, rank_dim=None, op="MapApply")
+
+
+@dataclass(frozen=True)
+class _IdentityMatrixOp:
+    def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
+        return np.asarray(A, dtype=float)
 
 
 def _realize_via_qr(

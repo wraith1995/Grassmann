@@ -432,3 +432,73 @@ def test_runtime_contraction_assert_trips_through_run() -> None:
     # mismatched: the runtime AssertOp trips.
     with np.testing.assert_raises(AssertionError):
         p.run({"a": np.ones(3), "b": np.ones(4)})
+
+
+# ===========================================================================
+# ListBasis — explicit list-of-Term-vectors basis (`73 Topic 2`, B5)
+# ===========================================================================
+
+
+def test_list_basis_stacks_lowered_vectors_as_columns() -> None:
+    """``ListBasis(v0, v1)`` lowers to the matrix whose columns are ⟦v0⟧, ⟦v1⟧ (`73 T2`)."""
+    from grassmann.lower.represent import _Ctx, realize_basis_cols
+
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    y = C.var("y", V)
+    lb = C.list_basis(x, y)
+    prog = pa.Program("lb", budget=pa.SymbolicBudget.force_stmts())
+    ctx = _Ctx(prog=prog, basis_env={}, inputs={})
+    prog.add_output("B", realize_basis_cols(ctx, lb))
+    res = prog.run({_var_key(x): np.array([1.0, 2.0, 3.0]),
+                    _var_key(y): np.array([4.0, 5.0, 6.0])})["B"]
+    assert res.shape == (3, 2)
+    np.testing.assert_allclose(res, np.array([[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]]))
+    # the column-stack provenance note is present.
+    assert any("ListBasis=stack-columns" in n for n in _notes(prog))
+
+
+def test_list_basis_ravels_multi_axis_vectors() -> None:
+    """``ListBasis`` ravels a multi-axis (``V⊗ᵏ``) vector into one ambient column."""
+    from grassmann.lower.represent import _Ctx, realize_basis_cols
+
+    V = C.base("V", 2)
+    x = C.var("x", C.oprod(V, V))  # V⊗V, stored (2,2)
+    lb = C.list_basis(x)
+    prog = pa.Program("lb2", budget=pa.SymbolicBudget.force_stmts())
+    ctx = _Ctx(prog=prog, basis_env={}, inputs={})
+    prog.add_output("B", realize_basis_cols(ctx, lb))
+    xv = np.array([[1.0, 2.0], [3.0, 4.0]])
+    res = prog.run({_var_key(x): xv})["B"]
+    assert res.shape == (4, 1)
+    np.testing.assert_allclose(res.reshape(-1), xv.reshape(-1))
+
+
+def test_list_basis_inconsistent_dim_raises() -> None:
+    from grassmann.lower.represent import RepresentError, _Ctx, realize_basis_cols
+
+    V, W = C.base("V", 3), C.base("W", 2)
+    x = C.var("x", V)
+    y = C.var("y", W)
+    lb = C.list_basis(x, y)
+    prog = pa.Program("lb3", budget=pa.SymbolicBudget.force_stmts())
+    ctx = _Ctx(prog=prog, basis_env={}, inputs={})
+    with np.testing.assert_raises(RepresentError):
+        realize_basis_cols(ctx, lb)
+
+
+def test_image_basis_node_realizes_literal_map_application() -> None:
+    """``realize_basis_cols(ImageBasis(f))`` is the literal ``f(eᵢ)`` columns (`73 T2`)."""
+    from grassmann.lower.represent import _Ctx, realize_basis_cols
+
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W))  # stored (|V|,|W|) = (2,3)
+    prog = pa.Program("ib", budget=pa.SymbolicBudget.force_stmts())
+    ctx = _Ctx(prog=prog, basis_env={}, inputs={})
+    prog.add_output("B", realize_basis_cols(ctx, C.image_basis(f)))
+    fmat = np.arange(6.0).reshape(2, 3)  # stored (dom,cod)
+    res = prog.run({_var_key(f): fmat})["B"]
+    # columns = f applied to source basis = the (cod,dom) matrix = fmatᵀ (not orthonormal).
+    assert res.shape == (3, 2)
+    np.testing.assert_allclose(res, fmat.T)
+    assert any("ImageBasis" in n and "map-application" in n for n in _notes(prog))

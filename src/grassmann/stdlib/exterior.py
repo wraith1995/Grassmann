@@ -122,10 +122,15 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
     ``props`` only off a ``Var``).
     """
     if rank is None:
-        return G.img(alt(V, k))
-    Vk = tensor_power(V, k)
-    projector = G.var(f"Alt_{k}", Vk >> Vk, props=G.rank(rank))
-    return G.img(projector)
+        result = G.img(alt(V, k))
+    else:
+        Vk = tensor_power(V, k)
+        projector = G.var(f"Alt_{k}", Vk >> Vk, props=G.rank(rank))
+        result = G.img(projector)
+    # F1: record the base space V as an OPTIONAL side note so derived ops (``wedge``) can
+    # read it directly instead of structurally re-deriving it from the Img/Alt term. The
+    # note never affects the term's identity (see ``Expr.with_note``).
+    return result.with_note(base_space=V, exterior_k=k)
 
 
 # ===========================================================================
@@ -163,18 +168,30 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
 
     target = exterior_power(V, k + l)  # Λ^{k+l}(V)
     projected = G.project(antisym, target)  # onto Λ^{k+l}
-    return G.scale(math.comb(k + l, k), projected)
+    result = G.scale(math.comb(k + l, k), projected)
+    # F1: carry the base space forward as an OPTIONAL note so a *nested* wedge (whose next
+    # operand is this very result, e.g. the ``wedge_all`` fold) recovers V from the note
+    # instead of re-deriving it structurally. Identity-transparent (see ``Expr.with_note``).
+    return result.with_note(base_space=V, exterior_k=k + l)
 
 
 def _base_space_of_exterior(a: Expr, k: int) -> Expr:
     """Recover the ambient base space ``V`` from a value ``a : Λᵏ(V) = Img(alt(V, k))``.
 
-    The exterior power node is ``Img(Scale(1/k!, Lift(LLam([v:V, …], …), …)))``; we read
-    ``V`` off the first bound linear variable's space.
+    F1: if ``a`` carries an OPTIONAL ``base_space`` note (set by :func:`exterior_power`),
+    use it directly — no structural re-derivation. Otherwise (a bare var, an un-annotated
+    handle, etc.) fall back to reading ``V`` off the ``Img(Scale(1/k!, Lift(LLam([v:V, …],
+    …), …)))`` node — the first bound linear variable's space.
     """
     from grassmann.core import space as _s
     from grassmann.core import term as _t
     from grassmann.infer import synth_space
+
+    # Fast path: an explicit annotation on the surface handle.
+    if isinstance(a, Expr):
+        noted = a.get_note("base_space")
+        if noted is not None:
+            return noted if isinstance(noted, Expr) else Expr(noted)
 
     node = a.node if isinstance(a, Expr) else a
     # The operand may be a derived node (a ``Scale``/``Project`` result) whose ``.space`` is

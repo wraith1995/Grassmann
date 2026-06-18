@@ -24,6 +24,7 @@ from .builders import (
     bfn,
     bij,
     bot,
+    chain,
     coimg,
     coker,
     complete,
@@ -48,6 +49,7 @@ from .builders import (
     kron,
     lam,
     lift,
+    list_basis,
     lit,
     llam,
     ostack,
@@ -114,6 +116,7 @@ __all__ = [
     "ostack",
     # application / composition / trace
     "compose",
+    "chain",
     "tr",
     # inverses & adjoint
     "solve",
@@ -144,6 +147,7 @@ __all__ = [
     "basis",
     "image_basis",
     "projected_basis",
+    "list_basis",
     "with_inner_basis",
     "complete",
     "frame",

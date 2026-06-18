@@ -69,19 +69,21 @@ class MetaStore:
     def resolve(self, s: Space) -> Space:
         """Apply the current substitution all the way down (a *zonk*)."""
         s = self.walk(s)
-        if isinstance(s, SpaceMeta):
-            return s
-        if isinstance(s, Dual):
-            return Dual(self.resolve(s.space))
-        if isinstance(s, WithInner):
-            return WithInner(self.resolve(s.space), s.metric)
-        if isinstance(s, OPlus):
-            return OPlus(tuple(self.resolve(c) for c in s.spaces))
-        if isinstance(s, OProd):
-            return OProd(tuple(self.resolve(c) for c in s.spaces))
-        if isinstance(s, OPlusRep):
-            return OPlusRep(s.count, self.resolve(s.space))
-        return s
+        match s:
+            case SpaceMeta():
+                return s
+            case Dual():
+                return Dual(self.resolve(s.space))
+            case WithInner():
+                return WithInner(self.resolve(s.space), s.metric)
+            case OPlus():
+                return OPlus(tuple(self.resolve(c) for c in s.spaces))
+            case OProd():
+                return OProd(tuple(self.resolve(c) for c in s.spaces))
+            case OPlusRep():
+                return OPlusRep(s.count, self.resolve(s.space))
+            case _:
+                return s
 
     def walk(self, s: Space) -> Space:
         """Follow solved metavars one chain step (shallow)."""
@@ -95,28 +97,32 @@ class MetaStore:
     def has_unsolved(self, s: Space) -> bool:
         """True iff ``resolve(s)`` still mentions an unsolved metavar (`25 §5`)."""
         s = self.walk(s)
-        if isinstance(s, SpaceMeta):
-            return True
-        if isinstance(s, (Dual, WithInner)):
-            return self.has_unsolved(s.space)
-        if isinstance(s, (OPlus, OProd)):
-            return any(self.has_unsolved(c) for c in s.spaces)
-        if isinstance(s, OPlusRep):
-            return self.has_unsolved(s.space)
-        return False
+        match s:
+            case SpaceMeta():
+                return True
+            case Dual() | WithInner():
+                return self.has_unsolved(s.space)
+            case OPlus() | OProd():
+                return any(self.has_unsolved(c) for c in s.spaces)
+            case OPlusRep():
+                return self.has_unsolved(s.space)
+            case _:
+                return False
 
 
 def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
     s = store.walk(s)
-    if isinstance(s, SpaceMeta):
-        return s.uid == m.uid
-    if isinstance(s, (Dual, WithInner)):
-        return _occurs(store, m, s.space)
-    if isinstance(s, (OPlus, OProd)):
-        return any(_occurs(store, m, c) for c in s.spaces)
-    if isinstance(s, OPlusRep):
-        return _occurs(store, m, s.space)
-    return False
+    match s:
+        case SpaceMeta():
+            return s.uid == m.uid
+        case Dual() | WithInner():
+            return _occurs(store, m, s.space)
+        case OPlus() | OProd():
+            return any(_occurs(store, m, c) for c in s.spaces)
+        case OPlusRep():
+            return _occurs(store, m, s.space)
+        case _:
+            return False
 
 
 def unify(a: Space, b: Space, store: MetaStore) -> None:
@@ -129,59 +135,60 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
     a = store.walk(a)
     b = store.walk(b)
 
-    # Metavariable cases (?α ~ s).
-    if isinstance(a, SpaceMeta) and isinstance(b, SpaceMeta) and a.uid == b.uid:
-        return
-    if isinstance(a, SpaceMeta):
-        _solve_meta(a, b, store)
-        return
-    if isinstance(b, SpaceMeta):
-        _solve_meta(b, a, store)
-        return
+    match (a, b):
+        # Metavariable cases (?α ~ s).
+        case (SpaceMeta(), SpaceMeta()) if a.uid == b.uid:
+            return
+        case (SpaceMeta(), _):
+            _solve_meta(a, b, store)
+            return
+        case (_, SpaceMeta()):
+            _solve_meta(b, a, store)
+            return
 
-    # Structural cases.
-    if isinstance(a, Scalar) and isinstance(b, Scalar):
-        return
-    if isinstance(a, SVar) and isinstance(b, SVar):
-        if a.name != b.name:
-            raise UnifyError(f"space variable mismatch: {a.name} ~ {b.name}")
-        return
-    if isinstance(a, Base) and isinstance(b, Base):
-        if a.name != b.name:
-            raise UnifyError(f"base space name mismatch: {a.name!r} ~ {b.name!r}")
-        if not dim_eq(a.dim, b.dim):
-            raise UnifyError(f"base {a.name!r} dim mismatch: {a.dim!r} ≢ {b.dim!r}")
-        return
-    if isinstance(a, Dual) and isinstance(b, Dual):
-        unify(a.space, b.space, store)
-        return
-    if isinstance(a, OPlus) and isinstance(b, OPlus):
-        _unify_seq(a.spaces, b.spaces, store, "⊕")
-        return
-    if isinstance(a, OProd) and isinstance(b, OProd):
-        _unify_seq(a.spaces, b.spaces, store, "⊗")
-        return
-    if isinstance(a, OPlusRep) and isinstance(b, OPlusRep):
-        if not dim_eq(a.count, b.count):
-            raise UnifyError(f"⊕ⁿ count mismatch: {a.count!r} ≢ {b.count!r}")
-        unify(a.space, b.space, store)
-        return
-    if isinstance(a, WithInner) and isinstance(b, WithInner):
-        unify(a.space, b.space, store)
-        if not _metric_eq(a.metric, b.metric):
-            raise UnifyError(f"WithInner metric mismatch: {a.metric!r} ≠ {b.metric!r}")
-        return
-    if isinstance(a, (Ker, Img, CoKer, CoImg)) and type(a) is type(b):
-        # FFS unify by structural term equality of the keying map (`25 §2`).
-        if a.f != b.f:  # type: ignore[attr-defined]
-            raise UnifyError(f"FFS map mismatch: {a!r} ~ {b!r}")
-        return
-    if isinstance(a, App) and isinstance(b, App):
-        if a.g != b.g or a.positions != b.positions or a.args != b.args:
-            raise UnifyError(f"SpaceFunction application mismatch: {a!r} ~ {b!r}")
-        return
-
-    raise UnifyError(f"cannot unify {a!r} ~ {b!r}")
+        # Structural cases.
+        case (Scalar(), Scalar()):
+            return
+        case (SVar(), SVar()):
+            if a.name != b.name:
+                raise UnifyError(f"space variable mismatch: {a.name} ~ {b.name}")
+            return
+        case (Base(), Base()):
+            if a.name != b.name:
+                raise UnifyError(f"base space name mismatch: {a.name!r} ~ {b.name!r}")
+            if not dim_eq(a.dim, b.dim):
+                raise UnifyError(f"base {a.name!r} dim mismatch: {a.dim!r} ≢ {b.dim!r}")
+            return
+        case (Dual(), Dual()):
+            unify(a.space, b.space, store)
+            return
+        case (OPlus(), OPlus()):
+            _unify_seq(a.spaces, b.spaces, store, "⊕")
+            return
+        case (OProd(), OProd()):
+            _unify_seq(a.spaces, b.spaces, store, "⊗")
+            return
+        case (OPlusRep(), OPlusRep()):
+            if not dim_eq(a.count, b.count):
+                raise UnifyError(f"⊕ⁿ count mismatch: {a.count!r} ≢ {b.count!r}")
+            unify(a.space, b.space, store)
+            return
+        case (WithInner(), WithInner()):
+            unify(a.space, b.space, store)
+            if not _metric_eq(a.metric, b.metric):
+                raise UnifyError(f"WithInner metric mismatch: {a.metric!r} ≠ {b.metric!r}")
+            return
+        case ((Ker() | Img() | CoKer() | CoImg()), _) if type(a) is type(b):
+            # FFS unify by structural term equality of the keying map (`25 §2`).
+            if a.f != b.f:  # type: ignore[attr-defined]
+                raise UnifyError(f"FFS map mismatch: {a!r} ~ {b!r}")
+            return
+        case (App(), App()):
+            if a.g != b.g or a.positions != b.positions or a.args != b.args:
+                raise UnifyError(f"SpaceFunction application mismatch: {a!r} ~ {b!r}")
+            return
+        case _:
+            raise UnifyError(f"cannot unify {a!r} ~ {b!r}")
 
 
 def _solve_meta(m: SpaceMeta, s: Space, store: MetaStore) -> None:

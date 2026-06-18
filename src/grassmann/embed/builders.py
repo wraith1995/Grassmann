@@ -147,8 +147,9 @@ def external(s: object, data: object, *args: object) -> Expr:
     return wrap(_t.external(_space(s), data, *[_term(a) for a in args]))
 
 
-def zero(s: object) -> Expr:
-    return wrap(_t.zero(_space(s)))
+def zero(s: object = None) -> Expr:
+    # B1: ``s`` is OPTIONAL — omit it and let inference recover the space by unification.
+    return wrap(_t.zero(None if s is None else _space(s)))
 
 
 def id(s: object) -> Expr:
@@ -180,6 +181,13 @@ def ostack(*vs: object) -> Expr:
 def compose(f: object, g: object, positions: list[int] | tuple[int, ...] | None = None) -> Expr:
     pos = (0,) if positions is None else tuple(positions)
     return wrap(_t.compose(_term(f), pos, _term(g)))
+
+
+def chain(*fs: object, at: int = 0) -> Expr:
+    """Series composition ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]`` (right-applied at dual slot
+    ``at``). Sugar over nested single-arg :class:`Compose`; see
+    :func:`grassmann.core.term.chain`."""
+    return wrap(_t.chain(*[_term(f) for f in fs], at=at))
 
 
 def tr(f: object, i: int, j: int) -> Expr:
@@ -229,8 +237,10 @@ def sharp(s: object) -> Expr:
 # ===========================================================================
 
 
-def project(v: object, s: object) -> Expr:
-    return wrap(_t.project(_term(v), _space(s)))
+def project(v: object, s: object = None) -> Expr:
+    # B1: the target subspace ``s`` is OPTIONAL — omit it and let the ⇐ check direction
+    # recover it (a subspace is not unique, so it cannot be solved in the ⇒ direction).
+    return wrap(_t.project(_term(v), None if s is None else _space(s)))
 
 
 def embed(v: object, s: object) -> Expr:
@@ -362,6 +372,11 @@ def projected_basis(f: object, which: str, source: object = None, target: object
             None if target is None else _node(target),
         )
     )
+
+
+def list_basis(*vectors: object) -> Expr:
+    """``G.list_basis(v0, v1, …)`` — a basis given as an explicit list of Term vectors."""
+    return wrap(_b.list_basis(*(_node(v) for v in vectors)))
 
 
 def with_inner_basis(b: object, g: object) -> Expr:
