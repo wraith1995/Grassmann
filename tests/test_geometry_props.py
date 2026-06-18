@@ -74,7 +74,6 @@ def _grassmann_signed_volume(frame: np.ndarray) -> float:
     return float(T[tuple(range(d))])
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("d", [4])
 def test_volume_form_equals_determinant_high_dim(d: int) -> None:
     """``e¹∧…∧eᵈ(frame) == det(frame)`` for random square frames, d≥4 (lifts the cap)."""
@@ -86,7 +85,6 @@ def test_volume_form_equals_determinant_high_dim(d: int) -> None:
         )
 
 
-@pytest.mark.slow
 def test_volume_form_equals_det_jacobian_4simplex() -> None:
     """d=4 affine simplex: Grassmann volume form == chartlib ``volume_det_jacobian``."""
     interp = _interp()
@@ -151,7 +149,7 @@ def test_k_frame_volume_equals_subframe_minors_via_chartlib() -> None:
 # ===========================================================================
 
 
-@pytest.mark.parametrize("d", [2, 3, pytest.param(4, marks=pytest.mark.slow)])
+@pytest.mark.parametrize("d", [2, 3, 4])
 @pytest.mark.parametrize("seed", (0, 31))
 def test_swapping_frame_rows_flips_volume_sign(d: int, seed: int) -> None:
     """Swapping two rows of the frame negates the signed volume; det sign agrees."""
@@ -175,7 +173,7 @@ def test_swapping_frame_rows_flips_volume_sign(d: int, seed: int) -> None:
 # ===========================================================================
 
 
-@pytest.mark.parametrize("d", [2, 3, pytest.param(4, marks=pytest.mark.slow)])
+@pytest.mark.parametrize("d", [2, 3, 4])
 @pytest.mark.parametrize("seed", (0, 9))
 def test_scaling_a_row_scales_volume(d: int, seed: int) -> None:
     """Scaling one frame vector by ``α`` scales the signed volume by ``α``."""
@@ -188,7 +186,7 @@ def test_scaling_a_row_scales_volume(d: int, seed: int) -> None:
     np.testing.assert_allclose(_grassmann_signed_volume(scaled), alpha * vol, atol=1e-8)
 
 
-@pytest.mark.parametrize("d", [2, 3, pytest.param(4, marks=pytest.mark.slow)])
+@pytest.mark.parametrize("d", [2, 3, 4])
 @pytest.mark.parametrize("seed", (0, 9))
 def test_shear_row_leaves_volume_unchanged(d: int, seed: int) -> None:
     """Adding a multiple of another row to a row leaves the volume unchanged (shear)."""
