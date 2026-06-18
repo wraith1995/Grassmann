@@ -192,7 +192,7 @@ def test_cauchy_binet_gram_determinant(n: int, m: int, seed: int) -> None:
 
 @pytest.mark.parametrize(
     ("n", "m"),
-    [(3, 2), (4, 3), pytest.param(4, 4, marks=pytest.mark.slow)],
+    [(3, 2), (4, 3), (4, 4)],
 )
 @pytest.mark.parametrize("seed", (0, 88))
 def test_wedge_dependent_vector_is_zero(n: int, m: int, seed: int) -> None:
@@ -270,7 +270,7 @@ def test_top_power_component_is_determinant(n: int, seed: int) -> None:
 
 @pytest.mark.parametrize(
     ("n", "m"),
-    [(3, 3), (4, 3), pytest.param(4, 4, marks=pytest.mark.slow)],
+    [(3, 3), (4, 3), (4, 4)],
 )
 def test_full_symmetric_group_sign_law(n: int, m: int) -> None:
     """Permuting the ``m`` operands of a wedge scales it by ``sgn(σ)`` for all σ∈Sₘ."""
@@ -300,7 +300,7 @@ def test_full_symmetric_group_sign_law(n: int, m: int) -> None:
 
 @pytest.mark.parametrize(
     ("n", "k", "l"),
-    [(4, 2, 1), (4, 1, 2), pytest.param(4, 2, 2, marks=pytest.mark.slow)],
+    [(4, 2, 1), (4, 1, 2), (4, 2, 2)],
 )
 @pytest.mark.parametrize("seed", (0, 13))
 def test_graded_commutativity_general_kl(n: int, k: int, l: int, seed: int) -> None:  # noqa: E741

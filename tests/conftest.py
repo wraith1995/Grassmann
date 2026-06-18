@@ -1,9 +1,8 @@
 """Shared pytest plumbing for the Grassmann test suite.
 
-Implements the standard opt-in ``slow`` marker: the heaviest exterior-algebra /
-geometry lowering cases (largest ambient ``V⊗ᵐ`` nested wedges) are tagged
-``@pytest.mark.slow`` and skipped by default so the routine ``pytest`` run stays
-fast.  Pass ``--runslow`` to include them.
+The autouse fixture below releases polyarray's (and python-flint's) global ring /
+context caches after each test, preventing unbounded memory growth across the
+suite's many distinct lowerings.
 """
 
 from __future__ import annotations
@@ -28,30 +27,3 @@ def _release_poly_caches():
     """
     yield
     _pa_backend.clear_ring_caches()
-
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption(
-        "--runslow",
-        action="store_true",
-        default=False,
-        help="run tests marked @pytest.mark.slow (heaviest lowering cases)",
-    )
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers",
-        "slow: heaviest exterior/geometry lowering cases; skipped unless --runslow is passed",
-    )
-
-
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
-    if config.getoption("--runslow"):
-        return
-    skip_slow = pytest.mark.skip(reason="need --runslow option to run")
-    for item in items:
-        if "slow" in item.keywords:
-            item.add_marker(skip_slow)
