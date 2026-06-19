@@ -177,16 +177,15 @@ def test_inverse_through_map_is_rejected() -> None:
 
 
 def test_flat_metric_recovers_total_derivative() -> None:
-    # A constant (unmarked) metric ⇒ the connection correction is exactly Zero.
-    from grassmann.transform.diff import _covariant_correction, _DCtx
+    # A constant (unmarked) metric ⇒ not a covariant section ⇒ the plain total derivative.
+    from grassmann.transform.diff import _covariant_section, _DCtx
 
     V = S.base("V", 2)
     x = T.var("x", V)
     g = T.var("g", S.oprod(S.dual(V), S.dual(V)))
     e = T.Remetric(T.var("sec", V), g)
     ctx = _DCtx(x=x, h=T.var("dx", V), deps={})  # g absent ⇒ constant
-    corr = _covariant_correction(e, G.infer.synth_space(e), ctx)
-    assert isinstance(corr, T.Zero)
+    assert _covariant_section(e, ctx) is None
 
 
 def test_covariant_derivative_matches_christoffel() -> None:
@@ -247,7 +246,6 @@ def test_cotangent_connection_matches_christoffel() -> None:
 def test_connection_map_applied_to_vector() -> None:
     # The (1,1) connection map Γ(h):M⊸M (built via Permute + the M⊸M* decode + Eval
     # f-free-labels) applied to a vector matches the Christoffel contraction.
-    from grassmann.core.space import with_inner
     from grassmann.transform.diff import _connection_map
 
     M = S.base("M", 2)
@@ -255,8 +253,7 @@ def test_connection_map_applied_to_vector() -> None:
     g = T.var("g", S.oprod(S.dual(M), S.dual(M)))
     Dg = T.var("Dg", S.oprod(S.dual(M), S.dual(M), S.dual(M)))
     v = T.var("v", M)
-    MR = with_inner(M, g)
-    conn = _connection_map(M, MR, Dg, h)  # Γ(h) : M ⊸ M (seed-carrying)
+    conn = _connection_map(M, g, Dg, h)  # Γ(h) : M ⊸ M (seed-carrying, bare)
     applied = T.Eval(conn, (0,), (v,))
 
     g0 = np.array([[2.0, 0.3], [0.3, 1.5]])
@@ -272,6 +269,54 @@ def test_connection_map_applied_to_vector() -> None:
             for j in range(2):
                 gl[a] += 0.5 * (Dgv[i, j, a] + Dgv[j, i, a] - Dgv[a, i, j]) * hv[i] * vv[j]
     np.testing.assert_allclose(out, ginv @ gl, atol=1e-6)
+
+
+def test_covariant_identity_tensor_is_parallel() -> None:
+    # ∇I = 0 : the identity (1,1) tensor is parallel under any metric connection.
+    M = S.base("M", 2)
+    x = T.var("x", M)
+    g = T.var("g", S.oprod(S.dual(M), S.dual(M)))
+    Dg = T.var("Dg", S.oprod(S.dual(M), S.dual(M), S.dual(M)))
+    J = diff(T.Remetric(T.Identity(M), g), x, deps={g.uid: Dg})
+    g0 = np.array([[2.0, 0.3], [0.3, 1.5]])
+    Dgv = np.random.randn(2, 2, 2)
+    Dgv = 0.5 * (Dgv + Dgv.transpose(0, 2, 1))
+    Jv = _run(J, {f"g_{g.uid}": g0, f"Dg_{Dg.uid}": Dgv})
+    np.testing.assert_allclose(Jv, 0.0, atol=1e-10)
+
+
+def test_covariant_endomorphism_tensor() -> None:
+    # ∇_h T = dT + Γ(h)T − TΓ(h) for a (1,1) tensor field T : M ⊸ M.
+    M = S.base("M", 2)
+    x = T.var("x", M)
+    g = T.var("g", S.oprod(S.dual(M), S.dual(M)))
+    Dg = T.var("Dg", S.oprod(S.dual(M), S.dual(M), S.dual(M)))
+    Tt = T.var("Tt", S.oprod(S.dual(M), M))
+    DT = T.var("DT", S.oprod(S.dual(M), S.dual(M), M))  # dT/dx, flat
+    J = diff(T.Remetric(Tt, g), x, deps={Tt.uid: DT, g.uid: Dg})
+
+    g0 = np.array([[2.0, 0.3], [0.3, 1.5]])
+    ginv = np.linalg.inv(g0)
+    Dgv = np.random.randn(2, 2, 2)
+    Dgv = 0.5 * (Dgv + Dgv.transpose(0, 2, 1))
+    Tval, DTv = np.random.randn(2, 2), np.random.randn(2, 2, 2)
+    feed = {f"g_{g.uid}": g0, f"Dg_{Dg.uid}": Dgv, f"Tt_{Tt.uid}": Tval, f"DT_{DT.uid}": DTv}
+    Jv = _run(J, feed)  # stored (dom, cod, X)
+
+    def conn_op(i):  # Γ(e_i) as the operator matrix [k, m]
+        out = np.zeros((2, 2))
+        for k in range(2):
+            for m in range(2):
+                for a in range(2):
+                    out[k, m] += ginv[k, a] * 0.5 * (Dgv[m, i, a] + Dgv[i, m, a] - Dgv[a, i, m])
+        return out
+
+    Top = Tval.T  # T as an operator (stored dom,cod ⇒ operator is the transpose)
+    for i in range(2):
+        Ci = conn_op(i)
+        corr = Ci @ Top - Top @ Ci  # ΓT − TΓ, operator [k, l]
+        dT_op = DTv[i, :, :].T  # the i-th x-slice of dT, as an operator
+        np.testing.assert_allclose(Jv[:, :, i].T, dT_op + corr, atol=1e-6)
 
 
 def test_metric_pairing_is_parallel() -> None:

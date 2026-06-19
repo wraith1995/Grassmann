@@ -113,12 +113,22 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
     R = synth_space(e)
     h = Var(f"d{x.name}", x.space)
     ctx = _DCtx(x=x, h=h, deps=deps or {})
-    body = _dd(e, ctx)
-    body = _add(body, _covariant_correction(e, R, ctx), R)
+    cov = _covariant_section(e, ctx)
+    if cov is not None:
+        # A covariant section ``Remetric(sec, g)`` over a manifold with an x-dependent
+        # metric: ∇sec = d(sec) + Γ(h)·sec, computed entirely in the bare (coordinate-free)
+        # basis — the derivative never realizes a metric basis.
+        sec, M, g, Dg = cov
+        sspace = synth_space(sec)
+        body = _add(_dd(sec, ctx), _connection_correction(sec, sspace, M, g, Dg, ctx), sspace)
+        rspace = sspace
+    else:
+        body = _dd(e, ctx)
+        rspace = R
     if isinstance(body, Zero):
         # e is x-independent: the derivative is the zero map (an LLam over an unused seed
         # would violate the linear discipline, so emit the zero map directly).
-        return Zero(linear_map_space(ctx.X, R))
+        return Zero(linear_map_space(ctx.X, rspace))
     return LLam((h,), body)
 
 
@@ -400,103 +410,96 @@ def _dd_llam(e: LLam, vars_: tuple[Var, ...], body: Term, ctx: _DCtx) -> Term:
 # ===========================================================================
 
 
-def _covariant_correction(e: Term, R: Space, ctx: _DCtx) -> Term:
-    """The Levi-Civita connection correction ``Γ(h)·e`` for a value (section) living in a
-    ``WithInner(s, g)`` tangent space. Returns ``Zero`` for a flat space or a constant
-    metric (so the plain total derivative is recovered)."""
-    if not isinstance(R, WithInner):
-        return Zero(R)
-    return _connection_term(e, R, ctx)
+def _covariant_section(e: Term, ctx: _DCtx) -> tuple[Term, Space, Term, Term] | None:
+    """If ``e`` is a covariant *section* ``Remetric(sec, g)`` over a manifold ``M`` with an
+    **x-dependent** metric ``g``, return ``(sec, M, g, Dg)``; otherwise ``None``.
 
+    A constant metric (``Dg`` ``None``) is *not* covariant — the plain total derivative is
+    correct — so it falls through to the ordinary path. ``Remetric`` is the marker placing a
+    value into the (co)tangent bundle of ``M``; ``g`` is ``M``'s metric (``M*⊗M*``)."""
+    from grassmann.infer.synth import synth_space
 
-def _connection_term(e: Term, R: WithInner, ctx: _DCtx) -> Term:
-    """The metric (Levi-Civita) connection correction ``∇−d`` in direction ``h`` for a
-    rank-1 section ``e`` of the tangent / cotangent space ``R = WithInner(s, g)``.
-
-    For a **tangent vector** (``s = M``):
-        ``(Γ(h)·v)^k = ½ g^{kl}(∂ᵢg_{jl} + ∂ⱼg_{il} − ∂ₗg_{ij}) hⁱ vʲ``
-    — the first-kind Christoffel contracted with ``h`` and ``v``, then raised by ``g⁻¹``.
-    For a **cotangent covector** (``s = M*``):
-        ``(−Γ(h)·ω)_m = −½ (∂ₘg_{il} + ∂ᵢg_{ml} − ∂ₗg_{im}) hⁱ (♯ω)^l``
-    — the same first-kind symbol contracted with ``h`` and the raised ``♯ω``, with the
-    opposite sign and no final raise (the free index stays lower). Both are built purely by
-    contracting the metric gradient ``Dg`` (and ``Sharp``) — no tensor transpose. A constant
-    metric ⇒ ``Dg = 0`` ⇒ the correction is ``Zero`` and the total derivative is recovered.
-    The metric pairing ``⟨ω, v⟩`` is parallel under these two signs (see the tests).
-    """
-    from grassmann.core.space import Dual, OProd, with_inner
-
-    s0 = R.space
-    g = R.metric
-    h = ctx.h
-    # Classify the section's slot structure over the manifold M (whose metric is g):
-    #   M       → tangent vector (+Γ),  M* → cotangent covector (−Γ),
-    #   M* ⊗ M  → a (1,1) tensor / endomorphism field (+Γ on the upper, −Γ on the lower).
-    cotangent = isinstance(s0, Dual)
-    is_endo = (
-        isinstance(s0, OProd) and len(s0.spaces) == 2
-        and isinstance(s0.spaces[0], Dual) and s0.spaces[0].space == s0.spaces[1]
-    )
-    M = s0.spaces[1] if is_endo else (s0.space if cotangent else s0)
+    if not isinstance(e, Remetric) or not is_term(e.metric):
+        return None
+    sec, g = e.vector, e.metric
+    M = _manifold_of(synth_space(sec))
+    if M is None:
+        return None
     Dg = _metric_gradient(g, M, ctx)
-    if Dg is None:  # constant / x-independent metric ⇒ flat ⇒ no correction
-        return Zero(R)
+    if Dg is None:  # constant / x-independent metric ⇒ flat ⇒ ordinary derivative
+        return None
     if _strip_space(ctx.X) != M:
         raise DiffError(
-            "diff: the metric connection is only supported when the differentiation "
-            "variable lives in the tangent space itself (X == the manifold base space)"
+            "diff: the metric connection requires the differentiation variable to live in "
+            "the tangent space (X == the manifold base space M)"
         )
-    if not isinstance(e, Remetric):
-        raise DiffError(
-            "diff: to differentiate covariantly, write the section as Remetric(value, g) "
-            f"(a value placed in the (co)tangent space); got {type(e).__name__}"
-        )
-    v = e.vector
-    MR = with_inner(M, g)  # the manifold's metricized space, so Sharp reads g
-
-    if is_endo:
-        # (1,1) tensor T : M ⊸ M. ∇_h T = Conn∘T − T∘Conn — the math (and connection map) is
-        # ready, but the correction's basis is WithInner-contaminated via Sharp and the Sum
-        # against the flat derivative needs reconciling abstract metricized bases in `cob`
-        # (a basis-infra gap). Gated until that lands; see plans/80.
-        raise DiffError(
-            "diff: covariant differentiation of a (1,1)/tensor section is not yet wired "
-            "(blocked on WithInner-basis reconciliation in cob; see plans/80). Rank-1 "
-            "tangent/cotangent sections are supported."
-        )
-
-    if not cotangent:
-        # Tangent vector: ½(Γ contracted with h, v) as a covector, then raise with g⁻¹.
-        g_lower = Scale(0.5, Sum((
-            Eval(Dg, (0, 1), (h, v)),
-            Eval(Dg, (0, 1), (v, h)),
-            Scale(-1.0, Eval(Dg, (1, 2), (h, v))),
-        )))
-        return Eval(Sharp(MR), (0,), (g_lower,))
-
-    # Cotangent covector: raise ω to ♯ω, contract the first-kind symbol with (h, ♯ω) leaving
-    # the lower index m, negate. No final raise (the result is already a covector).
-    sharp_w = Eval(Sharp(MR), (0,), (v,))  # ♯ω : M
-    m_cov = Scale(0.5, Sum((
-        Eval(Dg, (0, 2), (h, sharp_w)),
-        Eval(Dg, (1, 2), (h, sharp_w)),
-        Scale(-1.0, Eval(Dg, (0, 1), (sharp_w, h))),
-    )))
-    # Re-metricize so the correction lives in the cotangent space R = WithInner(M*, g),
-    # matching the flat derivative's basis (the Sum then needs no change of basis).
-    return Remetric(Scale(-1.0, m_cov), g)
+    return (sec, M, g, Dg)
 
 
-def _connection_map(M: Space, MR: Space, Dg: Term, h: Var) -> Term:
-    """The Levi-Civita connection map ``Γ(h) : M ⊸ M`` (a seed-carrying primitive map).
+def _manifold_of(s: Space) -> Space | None:
+    """The base manifold ``M`` of a (co)tangent (tensor) space: ``M``, ``M*``, or a tensor
+    product whose factors are all ``M`` / ``M*`` over a single ``M``; else ``None``."""
+    from grassmann.core.space import Dual, OProd
 
-    ``Γ(h)^k_m = g^{kl}·½(∂ₘg_{il} + ∂ᵢg_{ml} − ∂ₗg_{mi}) hⁱ``. Built as ``Sharp ∘ Glower``,
-    where ``Glower : M ⊸ M*`` is the first-kind symbol contracted with ``h`` (the
-    ``Permute`` supplies the one transpose the reshape-only ``Lift`` cannot)."""
+    def base(f: Space) -> Space:
+        return f.space if isinstance(f, Dual) else f
+
+    if isinstance(s, OProd):
+        bases = {base(f) for f in s.spaces}
+        return next(iter(bases)) if len(bases) == 1 else None
+    return base(s)
+
+
+def _connection_correction(
+    sec: Term, sspace: Space, M: Space, g: Term, Dg: Term, ctx: _DCtx
+) -> Term:
+    """The Levi-Civita correction ``∇sec − d(sec)`` in direction ``h``, **basis-free**.
+
+    The tensor-product/Leibniz rule: apply the connection map ``Γ(h) : M ⊸ M`` to each slot
+    of the section — ``+Γ`` on a contravariant (``M``) factor, ``−Γ`` on a covariant
+    (``M*``) factor:
+
+    - vector ``v : M``        →  ``Γ(h)·v``                       (Eval)
+    - covector ``ω : M*``     →  ``−ωᵀ·Γ(h)``                     (precompose)
+    - ``(1,1)`` tensor ``T : M ⊸ M`` → ``Γ(h)∘T − T∘Γ(h)``       (the commutator)
+
+    Everything is built from ``Eval``/``Compose`` of the bare connection map, so no metric
+    basis is ever realized (the lowering stays in standard coordinates)."""
+    from grassmann.core.space import Dual, OProd
+
+    conn = _connection_map(M, g, Dg, ctx.h)  # Γ(h) : M ⊸ M, bare
+    factors = list(sspace.spaces) if isinstance(sspace, OProd) else [sspace]
+
+    if len(factors) == 1:
+        if isinstance(factors[0], Dual):  # covector: −Γ on the lower index (precompose)
+            return Scale(-1.0, Compose(sec, (0,), (conn,)))
+        return Eval(conn, (0,), (sec,))  # vector: +Γ
+
+    # (1,1) tensor T : M* ⊗ M (a map M ⊸ M): +Γ on the M (cod), −Γ on the M* (dom).
+    if (
+        len(factors) == 2
+        and isinstance(factors[0], Dual) and factors[0].space == M and factors[1] == M
+    ):
+        return Sum((Compose(conn, (0,), (sec,)), Scale(-1.0, Compose(sec, (0,), (conn,)))))
+
+    raise DiffError(
+        f"diff: covariant differentiation of a rank-{len(factors)} tensor section "
+        f"({sspace!r}) is not yet supported (vector, covector, and (1,1) are)"
+    )
+
+
+def _connection_map(M: Space, g: Term, Dg: Term, h: Var) -> Term:
+    """The Levi-Civita connection map ``Γ(h) : M ⊸ M`` — **basis-free**.
+
+    ``Γ(h)^k_m = g^{kl}·½(∂ₘg_{il} + ∂ᵢg_{ml} − ∂ₗg_{mi}) hⁱ``. Built as ``g⁻¹ ∘ Glower``,
+    where ``Glower : M ⊸ M*`` is the first-kind symbol contracted with ``h`` (the ``Permute``
+    supplies the one transpose the reshape-only ``Lift`` cannot). The inverse metric is the
+    **bare** map ``Pinv(g)`` — ``g`` decodes as the flat map ``M ⊸ M*`` — so the connection
+    carries no metric basis tag and the whole derivative stays coordinate-free."""
     t1 = Eval(Dg, (0,), (h,))  # ∂ᵢg_{jl} hⁱ, indexed (j, l)
     t2 = Eval(Dg, (1,), (h,))  # ∂ⱼg_{il} hⁱ, indexed (j, l)
     g_lower_map = Scale(0.5, Sum((t1, t2, Scale(-1.0, Permute(t2, (1, 0))))))  # M ⊸ M*
-    return Compose(Sharp(MR), (0,), (g_lower_map,))  # raise the cod index ⇒ M ⊸ M
+    return Compose(Pinv(g), (0,), (g_lower_map,))  # raise the cod index with g⁻¹ ⇒ M ⊸ M
 
 
 def _metric_gradient(g: Term, M: Space, ctx: _DCtx) -> Term | None:
