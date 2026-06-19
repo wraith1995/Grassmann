@@ -57,6 +57,7 @@ from grassmann.core.term import (
     NEval,
     OPlusV,
     OProdV,
+    Permute,
     Pinv,
     PinvApply,
     Project,
@@ -174,6 +175,8 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             return _wrap_linear(lambda d: Lift(d, fused, k), _dd(v, ctx), e, ctx)
         case InvLift(v, fused, k):
             return _wrap_linear(lambda d: InvLift(d, fused, k), _dd(v, ctx), e, ctx)
+        case Permute(v, perm):
+            return _wrap_linear(lambda d: Permute(d, perm), _dd(v, ctx), e, ctx)
         case Remetric(v, g):
             return _wrap_linear(lambda d: Remetric(d, g), _dd(v, ctx), e, ctx)
         case Kron():

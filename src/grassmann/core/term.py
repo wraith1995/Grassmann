@@ -555,6 +555,27 @@ class InvLift:
 
 
 @dataclass(frozen=True)
+class Permute:
+    """``Permute(v, perm)`` — reorder the tensor factors of ``v``'s space.
+
+    ``perm`` is a permutation: the result's factor ``i`` is ``v``'s factor ``perm[i]``
+    (so ``Permute(v, (1, 0))`` transposes a 2-factor tensor / form). The arity must match
+    ``v``'s factor count (checked at synthesis). Lowers to an axis transpose — the one
+    tensor reordering the reshape-only ``Lift``/``InvLift`` cannot express (e.g. the
+    transpose of a ``(0,2)`` form, which ``Dagger`` only provides for proper maps)."""
+
+    vector: Term
+    perm: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        _require_term(self.vector, "Permute.vector")
+        _check_index_list("Permute", self.perm)
+
+    def __repr__(self) -> str:
+        return f"Permute({self.vector!r}, {_tuple_repr(self.perm)})"
+
+
+@dataclass(frozen=True)
 class Kron:
     """``Kron(f, g)`` — Kronecker product of maps (first-class)."""
 
@@ -662,7 +683,7 @@ class Frame:
 
 
 # A Term is any of the node types above.
-Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Solve | Pinv | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Kron | LLam | Lam | Frame
+Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Solve | Pinv | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | Kron | LLam | Lam | Frame
 
 _TERM_TYPES = (
     Var,
@@ -694,6 +715,7 @@ _TERM_TYPES = (
     Remetric,
     Lift,
     InvLift,
+    Permute,
     Kron,
     LLam,
     Lam,
@@ -978,6 +1000,10 @@ def inv_lift(vector: Term, fused: tuple[int, ...], k: int | None = None) -> InvL
     return InvLift(vector, tuple(fused), k)
 
 
+def permute(vector: Term, perm: tuple[int, ...]) -> Permute:
+    return Permute(vector, tuple(perm))
+
+
 def kron(f: Term, g: Term) -> Kron:
     return Kron(f, g)
 
@@ -1032,6 +1058,7 @@ __all__ = [
     "Remetric",
     "Lift",
     "InvLift",
+    "Permute",
     "Kron",
     "LLam",
     "Lam",
@@ -1068,6 +1095,7 @@ __all__ = [
     "remetric",
     "lift",
     "inv_lift",
+    "permute",
     "kron",
     "llam",
     "lam",

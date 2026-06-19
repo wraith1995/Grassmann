@@ -502,3 +502,22 @@ def test_image_basis_node_realizes_literal_map_application() -> None:
     assert res.shape == (3, 2)
     np.testing.assert_allclose(res, fmat.T)
     assert any("ImageBasis" in n and "map-application" in n for n in _notes(prog))
+
+
+# Permute — tensor axis reorder / (0,2)-form transpose (the reordering Lift/InvLift can't do).
+
+
+def test_permute_transposes_a_form() -> None:
+    M = C.base("M", 3)
+    b = C.var("B", C.oprod(C.dual(M), C.dual(M)))
+    Bv = np.arange(9.0).reshape(3, 3)
+    out = represent(C.Permute(b, (1, 0))).run({_var_key(b): Bv})["result"]
+    np.testing.assert_allclose(out, Bv.T)
+
+
+def test_permute_reorders_three_factors() -> None:
+    M = C.base("M", 3)
+    w = C.var("W", C.oprod(C.dual(M), C.dual(M), M))
+    Wv = np.arange(27.0).reshape(3, 3, 3)
+    out = represent(C.Permute(w, (2, 0, 1))).run({_var_key(w): Wv})["result"]
+    np.testing.assert_allclose(out, Wv.transpose(2, 0, 1))

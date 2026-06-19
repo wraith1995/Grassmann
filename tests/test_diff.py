@@ -147,6 +147,20 @@ def test_inverse_apply_through_vector() -> None:
     assert np.allclose(Jv, fd, atol=1e-4) or np.allclose(Jv, fd.T, atol=1e-4)
 
 
+def test_diff_through_marked_map_applied() -> None:
+    # d(A(x)·v)/dx with A a marked map: exercises a seed-carrying map applied via Eval.
+    M = S.base("M", 3)
+    x = T.var("x", M)
+    A = T.var("A", S.oprod(S.dual(M), M))
+    v = T.var("v", M)
+    DA = T.var("DA", S.oprod(S.dual(M), S.dual(M), M))  # dA/dx : M ⊸ (M ⊸ M), flat
+    J = diff(T.Eval(A, (0,), (v,)), x, deps={A.uid: DA})
+    DAv, vval, Aval = np.random.randn(3, 3, 3), np.random.randn(3), np.random.randn(3, 3)
+    feed = {f"A_{A.uid}": Aval, f"v_{v.uid}": vval, f"DA_{DA.uid}": DAv}
+    Jv = _run(J, feed)
+    np.testing.assert_allclose(Jv, np.einsum("imk,m->ki", DAv, vval), atol=1e-6)
+
+
 def test_inverse_through_map_is_rejected() -> None:
     V = S.base("V", 2)
     x = T.var("x", V)

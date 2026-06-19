@@ -343,6 +343,8 @@ def _rep(e: T.Term, ctx: _Ctx) -> Rep:
             return _rep_tuple_project(e, space, i, ctx)
         case T.Remetric(vector, metric):
             return _rep_remetric(e, vector, metric, ctx)
+        case T.Permute():
+            return _rep_permute(e, ctx)
         case T.Lift() | T.InvLift():
             return _rep_lift(e, ctx)
         case T.Kron(f, g):
@@ -682,6 +684,14 @@ def _rep_eval(
     for k, lab in enumerate(f_labels):
         if k < len(fshape) and isinstance(fshape[k], int):
             dim_of_label[lab] = fshape[k]
+    # The map ``f`` may itself carry free (basis-index / seed) labels — e.g. a
+    # *differentiated* connection map applied to a slot. They trail f's space axes and ride
+    # through to the output, mirroring the arg/g free-label handling (and ``_rep_compose``).
+    f_free = f_rep.free_labels
+    for off, lab in enumerate(f_free):
+        ax = len(f_factors) + off
+        if ax < len(fshape) and isinstance(fshape[ax], int):
+            dim_of_label[lab] = fshape[ax]
 
     operands = [f_rep.array]
     arg_label_lists: list[str] = []
@@ -708,8 +718,9 @@ def _rep_eval(
         contracted.add(pos)
 
     surviving_f = "".join(lab for k, lab in enumerate(f_labels) if k not in contracted)
-    out_labels = surviving_f + out_free_labels
-    spec = ",".join(["".join(f_labels), *arg_label_lists]) + "->" + out_labels
+    out_free = f_free + out_free_labels
+    out_labels = surviving_f + out_free
+    spec = ",".join(["".join(f_labels) + f_free, *arg_label_lists]) + "->" + out_labels
 
     space = _synth(e)
     basis = _result_basis_from_factors(f_rep.basis, contracted, space)
@@ -719,7 +730,7 @@ def _rep_eval(
         [pa.OutSpec("eval", out_shape)],
         note=f"eval:contract@{sorted(contracted)}",
     )
-    return Rep(out, basis, space, free_labels=out_free_labels)
+    return Rep(out, basis, space, free_labels=out_free)
 
 
 def _fuse_arg_to_slot(
@@ -1212,6 +1223,28 @@ def _rep_remetric(e: T.Remetric, vector: T.Term, metric: object, ctx: _Ctx) -> R
     # No coordinate change; the metric is carried by the space. SPD is asserted when the
     # metric is later materialized (Inner/Flat/Sharp/dot); v1 keeps coords unchanged.
     return Rep(v_rep.array, default_basis(space), space)
+
+
+def _rep_permute(e: T.Permute, ctx: _Ctx) -> Rep:
+    """``Permute(v, perm)`` — reorder the space axes by ``perm`` (an einsum transpose).
+
+    Free (basis-index / seed) labels trail the space axes and ride through untouched."""
+    v_rep = _rep(e.vector, ctx)
+    n = len(_factors(v_rep.space))
+    perm = e.perm
+    space_labels = [chr(ord("a") + k) for k in range(n)]
+    free = v_rep.free_labels
+    in_labels = "".join(space_labels) + free
+    out_labels = "".join(space_labels[perm[i]] for i in range(n)) + free
+    spec = in_labels + "->" + out_labels
+    space = _synth(e)
+    in_shape = _shape_of(v_rep.array)
+    out_shape = tuple(in_shape[perm[i]] for i in range(n)) + tuple(in_shape[n:])
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp(spec), [v_rep.array],
+        [pa.OutSpec("permute", out_shape)], note=f"permute:{perm}",
+    )
+    return Rep(out, default_basis(space), space, free_labels=free)
 
 
 def _rep_lift(e: T.Lift | T.InvLift, ctx: _Ctx) -> Rep:
