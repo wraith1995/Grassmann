@@ -8,21 +8,31 @@ covariant differentiation general. Ordered roughly by value × independence.
 ## Current scope (done)
 - Total/Fréchet derivative: product/chain/quotient over Eval/Compose/OProd/Scale/Inner +
   nonlinear scalar External; applied inverses (`Solve`/`Pinv` through the vector), `Dagger`.
-- Connection for **rank-1 sections**, both slot types (`Remetric(sec, g)`, marked `g`/`Dg`,
-  `X = M`): tangent `∇_h v = dv + ½g⁻¹(Γ·h·v)` and cotangent `∇_h ω = dω − ½(Γ·h·♯ω)`.
-  Both built by contracting `Dg` with `h` and the (raised) section as Eval args — no tensor
-  transpose. Verified vs analytic Christoffel + the metric-pairing invariant.
-- Flat/constant metric ⇒ `Γ = 0` exactly (recovers the total derivative).
+- **Covariant connection, BASIS-FREE**, for sections `Remetric(sec, g)` (marked `g`/`Dg`,
+  `X = M`) via the tensor-product/Leibniz rule — `∇sec = d(sec) + Γ(h)·sec` applying the
+  connection map `Γ(h):M⊸M` per slot (`+Γ` contravariant, `−Γ` covariant):
+  - **vector** `v:M`, **covector** `ω:M*`, **(1,1) tensor** `T:M⊸M` (`∇T = ΓT − TΓ`).
+  - The connection map `Γ(h) = Pinv(g) ∘ ½(T1 + T2 − Permute(T2,(1,0)))` uses the inverse
+    metric as the **bare map `Pinv(g)`** (`g` decodes as the flat map `M⊸M*`), so nothing
+    realizes a metric basis — the derivative is coordinate-free end to end.
+  - Verified: vs analytic Christoffel (tangent/cotangent/(1,1)), `∇I = 0`, and the
+    metric-pairing invariant `⟨∇ω,v⟩+⟨ω,∇v⟩ = d⟨ω,v⟩`.
+- Flat/constant metric ⇒ not a covariant section ⇒ the plain total derivative.
 
-## DISCOVERED: substrate gates for higher-rank (task 2 ⇐ task 16)
-Higher-rank needs the general `(1,1)` connection *map* `Γ(h):M⊸M`, which needs two things
-the IR lacks (so **task 2 is blocked on task 16**):
-- **A tensor axis-permute / `(0,2)`-form transpose.** `Dagger` only transposes proper maps
-  (1 dual + 1 prim); a `(0,2)` form (2 duals) has no transpose, and raise→dagger→lower fails
-  on nested-dual decoding. Add a `Permute(v, perm)` node (lowers to a transpose einsum).
-- **`Eval` `f`-position free-label threading.** Applying a seed-carrying `Kron(I,…,Γ(h),…,I)`
-  map to one tensor slot puts the seed on the map (`f`) side; `_rep_eval` threads *arg*
-  free-labels but assumes `f` is seed-free (`_rep_compose` already threads both — mirror it).
+### The earlier `Sharp`/`WithInner`/`cob` trouble was self-inflicted
+The first cut raised the index with `Sharp(WithInner(M,g))`, which tagged the result with a
+`WithInner` *basis*; summing that against the flat derivative dragged in `cob` and abstract
+metricized bases. A coordinate-free derivative must never realize a basis — switching the
+raise to the bare `Pinv(g)` map removed the basis entirely and unblocked `(1,1)`. Tasks #17
+(cob abstract bases) and the old `cob._numeric_dim` mitigation are **no longer needed** for
+covariant diff.
+
+## Remaining for general `(p,q)` tensors
+`(2,0)`/`(0,2)` and higher-rank pure tensors (not maps) need to apply `Γ(h)` to one slot of
+a multi-axis value: `Eval(Kron(I,…,Γ(h),…,I), (0,), v)` — which needs **Kron free-label
+threading** (the seed rides inside the Kron'd map), or `Permute` the slot to the front. The
+substrate (`Permute`, Eval/Compose f-free-labels, the `M⊸M*` decode) is in place; only Kron
+free-labels (a small `_rep_kron` rewrite to an einsum) remains. Tests: `∇g=0`, `∇(S⊗T)=…`.
 
 ## Known limitations to lift (each is a task)
 1. **Cotangent / dual sections.** Covariant derivative of a 1-form `ω`:
