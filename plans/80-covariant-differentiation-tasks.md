@@ -27,12 +27,19 @@ raise to the bare `Pinv(g)` map removed the basis entirely and unblocked `(1,1)`
 (cob abstract bases) and the old `cob._numeric_dim` mitigation are **no longer needed** for
 covariant diff.
 
-## Remaining for general `(p,q)` tensors
-`(2,0)`/`(0,2)` and higher-rank pure tensors (not maps) need to apply `Γ(h)` to one slot of
-a multi-axis value: `Eval(Kron(I,…,Γ(h),…,I), (0,), v)` — which needs **Kron free-label
-threading** (the seed rides inside the Kron'd map), or `Permute` the slot to the front. The
-substrate (`Permute`, Eval/Compose f-free-labels, the `M⊸M*` decode) is in place; only Kron
-free-labels (a small `_rep_kron` rewrite to an einsum) remains. Tests: `∇g=0`, `∇(S⊗T)=…`.
+## Covariant-tensor coverage so far
+**Done, basis-free:** vector `v:M`, covector `ω:M*`, **all-covariant forms** `(0,p)` (incl.
+**the metric** — `∇g=0` verified to machine precision), and **`(1,1)` maps** `T:M⊸M`
+(`∇T=ΓT−TΓ`, `∇I=0`). All via per-slot `Eval`/`Compose` of the bare `Γ(h)`.
+
+**Remaining — pure contravariant slots (`(2,0)`/`(p,0)`):** Kron free-label threading is now
+done (`_rep_kron`/`_KronFreeOp`), but applying `Γ` to a primal slot via
+`Eval(Kron(I,…,Γ,…,I),(0,),v)` hits the **nested-⊗ codomain** issue (task #16/#18): `Kron`'s
+codomain is a nested `OProd`, so `Eval` returns the *fused* `(|M|²,)` cod, which mismatches
+the flat `(|M|,|M|)` of the covariant terms in the `Sum`. Fix options: (a) unfuse the Eval
+result (`InvLift`/reshape, threading the seed), or (b) use `OProd`+`Trace` per slot (keeps
+factors flat) — needs `OProdV`/`Trace` free-label threading. Then `(2,0)` + general `(p,q)`
+land. Tests: `∇(g⁻¹)=0`, `∇(S⊗T)=∇S⊗T+S⊗∇T`.
 
 ## Known limitations to lift (each is a task)
 1. **Cotangent / dual sections.** Covariant derivative of a 1-form `ω`:
