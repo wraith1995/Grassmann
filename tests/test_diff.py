@@ -202,6 +202,64 @@ def test_covariant_derivative_matches_christoffel() -> None:
     np.testing.assert_allclose(Jv, hand, atol=1e-6)
 
 
+def test_cotangent_connection_matches_christoffel() -> None:
+    # ∇_h ω = dω − Γ(h)ᵀ·ω for a 1-form section.
+    M = S.base("M", 2)
+    x = T.var("x", M)
+    g = T.var("g", S.oprod(S.dual(M), S.dual(M)))
+    om = T.var("om", S.dual(M))
+    Dom = T.var("Dom", S.oprod(S.dual(M), S.dual(M)))  # dω/dx : M → M*
+    Dg = T.var("Dg", S.oprod(S.dual(M), S.dual(M), S.dual(M)))
+    J = diff(T.Remetric(om, g), x, deps={om.uid: Dom, g.uid: Dg})
+
+    g0 = np.array([[2.0, 0.3], [0.3, 1.5]])
+    ginv = np.linalg.inv(g0)
+    Dgv = np.random.randn(2, 2, 2)
+    Dgv = 0.5 * (Dgv + Dgv.transpose(0, 2, 1))
+    omv, Domv = np.random.randn(2), np.random.randn(2, 2)
+    feed = {f"g_{g.uid}": g0, f"om_{om.uid}": omv, f"Dg_{Dg.uid}": Dgv, f"Dom_{Dom.uid}": Domv}
+    Jv = _run(J, feed)
+
+    gam_low = np.zeros((2, 2, 2))
+    for k in range(2):
+        for i in range(2):
+            for j in range(2):
+                gam_low[k, i, j] = 0.5 * (Dgv[i, j, k] + Dgv[j, i, k] - Dgv[k, i, j])
+    gam2 = np.einsum("kl,lmi->kmi", ginv, gam_low)  # Γ^k_{mi}
+    hand = Domv.T - np.einsum("kmi,k->mi", gam2, omv)
+    np.testing.assert_allclose(Jv, hand, atol=1e-6)
+
+
+def test_metric_pairing_is_parallel() -> None:
+    # ⟨∇ω, v⟩ + ⟨ω, ∇v⟩ = d⟨ω, v⟩ — the connection's effect cancels in the pairing.
+    M = S.base("M", 2)
+    x = T.var("x", M)
+    g = T.var("g", S.oprod(S.dual(M), S.dual(M)))
+    Dg = T.var("Dg", S.oprod(S.dual(M), S.dual(M), S.dual(M)))
+    sec = T.var("sec", M)
+    Dsec = T.var("Dsec", S.oprod(S.dual(M), M))
+    om = T.var("om", S.dual(M))
+    Dom = T.var("Dom", S.oprod(S.dual(M), S.dual(M)))
+    Jt = diff(T.Remetric(sec, g), x, deps={sec.uid: Dsec, g.uid: Dg})
+    Jc = diff(T.Remetric(om, g), x, deps={om.uid: Dom, g.uid: Dg})
+
+    g0 = np.array([[2.0, 0.3], [0.3, 1.5]])
+    Dgv = np.random.randn(2, 2, 2)
+    Dgv = 0.5 * (Dgv + Dgv.transpose(0, 2, 1))
+    secv, Dsecv = np.random.randn(2), np.random.randn(2, 2)
+    omv, Domv = np.random.randn(2), np.random.randn(2, 2)
+    feed = {
+        f"g_{g.uid}": g0, f"Dg_{Dg.uid}": Dgv,
+        f"sec_{sec.uid}": secv, f"Dsec_{Dsec.uid}": Dsecv,
+        f"om_{om.uid}": omv, f"Dom_{Dom.uid}": Domv,
+    }
+    Jtv = _run(Jt, feed)  # (∇v)^k_i
+    Jcv = _run(Jc, feed)  # (∇ω)_m_i
+    lhs = secv @ Jcv + omv @ Jtv  # ⟨∇ω,v⟩ + ⟨ω,∇v⟩, indexed by direction i
+    rhs = Domv @ secv + Dsecv @ omv  # d⟨ω,v⟩ = (∂ω)v + ω(∂v)
+    np.testing.assert_allclose(lhs, rhs, atol=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # Failure modes.
 # ---------------------------------------------------------------------------
