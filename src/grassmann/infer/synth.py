@@ -492,6 +492,12 @@ def _decode_map_space(s: Space) -> tuple[Space, Space]:
     if len(duals) >= 1 and len(prims) == 1:
         dom = oprod(*(d.space for d in duals)) if len(duals) > 1 else duals[0].space
         return dom, prims[0]
+    # A map into a *dual* codomain (e.g. ``M ⊸ M*`` = ``~M ⊗ ~M``) is all-dual and otherwise
+    # ambiguous; resolve it by the positional convention ``linear_map_space`` builds —
+    # factor 0 is ``dual(dom)``, the remaining factors are the codomain.
+    if len(prims) == 0 and len(factors) >= 2 and isinstance(factors[0], Dual):
+        cod = factors[1] if len(factors) == 2 else oprod(*factors[1:])
+        return factors[0].space, cod
     raise InferError(f"cannot decode map space (dom ⊸ cod): {s!r}")
 
 
