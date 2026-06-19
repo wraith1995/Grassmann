@@ -319,6 +319,21 @@ def test_covariant_endomorphism_tensor() -> None:
         np.testing.assert_allclose(Jv[:, :, i].T, dT_op + corr, atol=1e-6)
 
 
+def test_metric_is_compatible_nabla_g_zero() -> None:
+    # ∇g = 0 — metric compatibility, the defining property of the Levi-Civita connection.
+    # The metric is differentiated as a (0,2) section of its own connection.
+    M = S.base("M", 2)
+    x = T.var("x", M)
+    g = T.var("g", S.oprod(S.dual(M), S.dual(M)))
+    Dg = T.var("Dg", S.oprod(S.dual(M), S.dual(M), S.dual(M)))
+    J = diff(T.Remetric(g, g), x, deps={g.uid: Dg})
+    g0 = np.array([[2.0, 0.3], [0.3, 1.5]])
+    Dgv = np.random.randn(2, 2, 2)
+    Dgv = 0.5 * (Dgv + Dgv.transpose(0, 2, 1))  # ∂_a g_bc symmetric in (b, c)
+    Jv = _run(J, {f"g_{g.uid}": g0, f"Dg_{Dg.uid}": Dgv})
+    np.testing.assert_allclose(Jv, 0.0, atol=1e-10)
+
+
 def test_metric_pairing_is_parallel() -> None:
     # ⟨∇ω, v⟩ + ⟨ω, ∇v⟩ = d⟨ω, v⟩ — the connection's effect cancels in the pairing.
     M = S.base("M", 2)
