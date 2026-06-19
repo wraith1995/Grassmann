@@ -1265,12 +1265,17 @@ def _rep_kron(e: T.Kron, f: T.Term, g: T.Term, ctx: _Ctx) -> Rep:
     f_rep = _rep(f, ctx)
     g_rep = _rep(g, ctx)
     space = _synth(e)
-    # f : (b0,a0), g : (b1,a1) ⇒ result[(b0 b1),(a0 a1)] = f[b0,a0] g[b1,a1].
+    # f : (a0,b0), g : (a1,b1) ⇒ result[(a0 a1),(b0 b1)] = f[a0,b0] g[a1,b1] (Kron block).
+    # A *differentiated* Kron'd map (e.g. Kron(I,…,Γ(h),…,I) for a per-slot connection) may
+    # carry the seed as trailing free labels — those ride through (outer product).
+    out_free = f_rep.free_labels + g_rep.free_labels
+    free_dims = tuple(_shape_of(f_rep.array)[2:]) + tuple(_shape_of(g_rep.array)[2:])
     [out] = ctx.prog.emit_stmt(
-        _KronMapOp(), [f_rep.array, g_rep.array],
-        [pa.OutSpec("kron", _shape_of_space(space))], note="kron:block-einsum",
+        _KronFreeOp(len(f_rep.free_labels), len(g_rep.free_labels)),
+        [f_rep.array, g_rep.array],
+        [pa.OutSpec("kron", _shape_of_space(space) + free_dims)], note="kron:block-einsum",
     )
-    return Rep(out, default_basis(space), space)
+    return Rep(out, default_basis(space), space, free_labels=out_free)
 
 
 # ---------------------------------------------------------------------------
@@ -1964,9 +1969,24 @@ class _SinvFullOp:
 
 
 @dataclass(frozen=True)
-class _KronMapOp:
+class _KronFreeOp:
+    """``Kron`` of two maps that may carry trailing free (basis-index / seed) axes.
+
+    Each operand is ``(dom, cod, *free)``; the result is ``(dom_f·dom_g, cod_f·cod_g,
+    *f_free, *g_free)`` — the Kronecker block structure on the two space axes, an outer
+    product on the (disjoint) free axes. With no free axes this is exactly ``np.kron``."""
+
+    nf_free: int
+    ng_free: int
+
     def __call__(self, F: np.ndarray, G: np.ndarray) -> np.ndarray:  # noqa: N803
-        return np.kron(np.asarray(F, dtype=float), np.asarray(G, dtype=float))
+        F = np.asarray(F, dtype=float)
+        G = np.asarray(G, dtype=float)
+        df, cf, ff = F.shape[0], F.shape[1], F.shape[2:]
+        dg, cg, gg = G.shape[0], G.shape[1], G.shape[2:]
+        fr = F.reshape(df, 1, cf, 1, *ff, *([1] * self.ng_free))
+        gr = G.reshape(1, dg, 1, cg, *([1] * self.nf_free), *gg)
+        return (fr * gr).reshape(df * dg, cf * cg, *ff, *gg)
 
 
 @dataclass(frozen=True)

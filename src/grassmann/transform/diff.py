@@ -488,9 +488,10 @@ def _connection_correction(
         return Sum((Compose(conn, (0,), (sec,)), Scale(-1.0, Compose(sec, (0,), (conn,)))))
 
     raise DiffError(
-        f"diff: covariant differentiation of this tensor section ({sspace!r}) is not yet "
-        f"supported (vector, covector, all-covariant forms, and (1,1) maps are). A pure "
-        f"contravariant slot needs per-slot Kron (free-label threading) — see plans/80."
+        f"diff: covariant differentiation of {sspace!r} is not yet supported. A pure "
+        f"contravariant slot in a non-map tensor ((2,0) etc.) needs per-slot application "
+        f"that hits the nested-⊗ codomain issue — see plans/80. Supported: vector, "
+        f"covector, all-covariant forms (incl. the metric, ∇g=0), and (1,1) maps."
     )
 
 
