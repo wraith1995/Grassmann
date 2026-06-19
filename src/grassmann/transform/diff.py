@@ -465,26 +465,32 @@ def _connection_correction(
 
     Everything is built from ``Eval``/``Compose`` of the bare connection map, so no metric
     basis is ever realized (the lowering stays in standard coordinates)."""
-    from grassmann.core.space import Dual, OProd
+    from grassmann.core.space import OProd, dual
 
     conn = _connection_map(M, g, Dg, ctx.h)  # Γ(h) : M ⊸ M, bare
     factors = list(sspace.spaces) if isinstance(sspace, OProd) else [sspace]
+    M_dual = dual(M)
 
-    if len(factors) == 1:
-        if isinstance(factors[0], Dual):  # covector: −Γ on the lower index (precompose)
-            return Scale(-1.0, Compose(sec, (0,), (conn,)))
-        return Eval(conn, (0,), (sec,))  # vector: +Γ
+    # Single contravariant slot (a tangent vector v : M): +Γ·v.
+    if len(factors) == 1 and factors[0] == M:
+        return Eval(conn, (0,), (sec,))
+
+    # All-covariant tensor (covector, (0,p) form, the metric g itself): −Γ on every lower
+    # index. Each covariant slot is a dual that `Compose` contracts the connection map into.
+    if all(f == M_dual for f in factors):
+        return _sum(
+            [Scale(-1.0, Compose(sec, (a,), (conn,))) for a in range(len(factors))],
+            sec, ctx,
+        )
 
     # (1,1) tensor T : M* ⊗ M (a map M ⊸ M): +Γ on the M (cod), −Γ on the M* (dom).
-    if (
-        len(factors) == 2
-        and isinstance(factors[0], Dual) and factors[0].space == M and factors[1] == M
-    ):
+    if len(factors) == 2 and factors[0] == M_dual and factors[1] == M:
         return Sum((Compose(conn, (0,), (sec,)), Scale(-1.0, Compose(sec, (0,), (conn,)))))
 
     raise DiffError(
-        f"diff: covariant differentiation of a rank-{len(factors)} tensor section "
-        f"({sspace!r}) is not yet supported (vector, covector, and (1,1) are)"
+        f"diff: covariant differentiation of this tensor section ({sspace!r}) is not yet "
+        f"supported (vector, covector, all-covariant forms, and (1,1) maps are). A pure "
+        f"contravariant slot needs per-slot Kron (free-label threading) — see plans/80."
     )
 
 
