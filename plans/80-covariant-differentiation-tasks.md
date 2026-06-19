@@ -45,6 +45,27 @@ the IR lacks (so **task 2 is blocked on task 16**):
 6. **`X ≠ s0`.** Support a section whose tangent space differs from the differentiation
    variable's space (pull the connection back along the parameter map). Currently asserted equal.
 
+## Higher-rank recipe (task 2) — connection map DONE, blocked on basis-infra
+The connection map `Γ(h):M⊸M` is **built and validated** (`diff._connection_map`):
+`Γ(h) = Compose(Sharp(MR), (0,), ½(T1 + T2 − Permute(T2,(1,0))))` with
+`T1=Eval(Dg,(0,),h)`, `T2=Eval(Dg,(1,),h)` — enabled by the `M⊸M*` decode generalization
+(`_decode_map_space`) + `Permute` + Eval f-free-labels. `Eval(Γ(h),(0,),v)` matches the
+Christoffel contraction (tested).
+
+The `(1,1)` tensor case `∇_h T = Conn∘T − T∘Conn` (Compose-based, both Composes thread the
+seed) is **coded but gated** (`_connection_term` raises): the correction's basis is
+`WithInner`-contaminated through `Sharp`, so summing it against the flat derivative needs
+**reconciling abstract metricized bases in `cob`** — the real remaining blocker:
+- `cob` can't size an identity between two *equal abstract* `BaseBasis` (no explicit dim);
+  partially mitigated (`cob._numeric_dim` sizes from a numeric metric) but the endo
+  correction's basis differs *structurally* from the flat part (nested `WithInner` via
+  `Sharp`), needing realization of abstract bases. Fix: either keep the connection map's
+  result in the bare (default) basis (strip `WithInner` from `Sharp`'s output), or make `cob`
+  treat `WithInner`-decorated bases as their inner basis end-to-end (incl. realize/size).
+- Once unblocked: `(1,1)` lands immediately (`∇I=0`, `∇T=ΓT−TΓ` already validated offline);
+  general `(p,q)` follows via per-slot `Kron(I,…,Γ(h),…,I)`+`Eval` (needs Kron free-labels)
+  or `Permute`-to-front. Tests: `∇g=0`, `∇(S⊗T)=∇S⊗T+S⊗∇T`.
+
 ## New capabilities (build on the connection)
 7. **Christoffel symbols as a first-class term** `christoffel(g) : Γ^k_{ij}`. Reusable
    (geodesics, parallel transport, curvature) instead of inlined in the correction.

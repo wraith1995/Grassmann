@@ -244,6 +244,36 @@ def test_cotangent_connection_matches_christoffel() -> None:
     np.testing.assert_allclose(Jv, hand, atol=1e-6)
 
 
+def test_connection_map_applied_to_vector() -> None:
+    # The (1,1) connection map Γ(h):M⊸M (built via Permute + the M⊸M* decode + Eval
+    # f-free-labels) applied to a vector matches the Christoffel contraction.
+    from grassmann.core.space import with_inner
+    from grassmann.transform.diff import _connection_map
+
+    M = S.base("M", 2)
+    h = T.var("dx", M)
+    g = T.var("g", S.oprod(S.dual(M), S.dual(M)))
+    Dg = T.var("Dg", S.oprod(S.dual(M), S.dual(M), S.dual(M)))
+    v = T.var("v", M)
+    MR = with_inner(M, g)
+    conn = _connection_map(M, MR, Dg, h)  # Γ(h) : M ⊸ M (seed-carrying)
+    applied = T.Eval(conn, (0,), (v,))
+
+    g0 = np.array([[2.0, 0.3], [0.3, 1.5]])
+    ginv = np.linalg.inv(g0)
+    Dgv = np.random.randn(2, 2, 2)
+    Dgv = 0.5 * (Dgv + Dgv.transpose(0, 2, 1))
+    hv, vv = np.random.randn(2), np.random.randn(2)
+    feed = {f"g_{g.uid}": g0, f"Dg_{Dg.uid}": Dgv, f"dx_{h.uid}": hv, f"v_{v.uid}": vv}
+    out = _run(applied, feed)
+    gl = np.zeros(2)
+    for a in range(2):
+        for i in range(2):
+            for j in range(2):
+                gl[a] += 0.5 * (Dgv[i, j, a] + Dgv[j, i, a] - Dgv[a, i, j]) * hv[i] * vv[j]
+    np.testing.assert_allclose(out, ginv @ gl, atol=1e-6)
+
+
 def test_metric_pairing_is_parallel() -> None:
     # ⟨∇ω, v⟩ + ⟨ω, ∇v⟩ = d⟨ω, v⟩ — the connection's effect cancels in the pairing.
     M = S.base("M", 2)

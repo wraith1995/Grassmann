@@ -43,6 +43,17 @@ class CobError(Exception):
     """Raised when two bases cannot be related by a change of basis."""
 
 
+def _numeric_dim(metric: object) -> int | None:
+    """The dimension ``n`` of a numeric ``(n, n)`` metric, or ``None`` if not numeric."""
+    try:
+        a = np.asarray(metric, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if a.ndim == 2 and a.shape[0] == a.shape[1]:
+        return int(a.shape[0])
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Public entry point.
 # ---------------------------------------------------------------------------
@@ -74,10 +85,19 @@ def cob(
         # A ``WithInnerBasis`` shares its inner basis's *vectors* (the metric is metadata,
         # not a coordinate change), so a change of basis to/from it strips the wrapper —
         # e.g. relating a tangent-space value (metricized) to its base coordinates is the
-        # identity, not a (generally unrealizable) abstract-basis cob.
-        case (B.WithInnerBasis(fb, _), _):
+        # identity, not a (generally unrealizable) abstract-basis cob. When the strip makes
+        # the two sides equal we size the identity from the (numeric) metric, since the inner
+        # basis of an *abstract* Base carries no explicit dimension.
+        case (B.WithInnerBasis(fb, fg), _):
+            inner_to = to_basis.inner if isinstance(to_basis, B.WithInnerBasis) else to_basis
+            n = _numeric_dim(fg)
+            if n is not None and _basis_eq(fb, inner_to):
+                return _identity(program, n, "cob:wib-id")
             return cob(program, fb, to_basis)
-        case (_, B.WithInnerBasis(tb, _)):
+        case (_, B.WithInnerBasis(tb, tg)):
+            n = _numeric_dim(tg)
+            if n is not None and _basis_eq(from_basis, tb):
+                return _identity(program, n, "cob:wib-id")
             return cob(program, from_basis, tb)
 
     # General case: realize both toward standard coords and compose R_to⁻¹ · R_from.
