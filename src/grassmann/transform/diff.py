@@ -407,48 +407,68 @@ def _covariant_correction(e: Term, R: Space, ctx: _DCtx) -> Term:
 
 
 def _connection_term(e: Term, R: WithInner, ctx: _DCtx) -> Term:
-    """The metric (Levi-Civita) connection correction ``Γ(h)·e`` in direction ``h`` for a
-    section ``e`` of the tangent space ``R = WithInner(s, g)``.
+    """The metric (Levi-Civita) connection correction ``∇−d`` in direction ``h`` for a
+    rank-1 section ``e`` of the tangent / cotangent space ``R = WithInner(s, g)``.
 
-    In coordinates ``(Γ(h)·e)^k = ½ g^{kl}(∂ᵢg_{jl} + ∂ⱼg_{il} − ∂ₗg_{ij}) hⁱ eʲ`` — the
-    first-kind Christoffel symbol contracted with ``h`` and ``e``, then raised by ``g⁻¹``
-    (``Sharp``). Built from the **metric gradient** ``Dg : s ⊸ (s*⊗s*)`` (``∂_a g_{bc}``):
-    a constant/x-independent ``g`` has ``Dg = 0`` ⇒ the whole correction is ``Zero`` and the
-    total derivative is recovered exactly. Requires the genuine tangent-space setting where
-    the differentiation variable lives in the tangent space (``X = s``)."""
+    For a **tangent vector** (``s = M``):
+        ``(Γ(h)·v)^k = ½ g^{kl}(∂ᵢg_{jl} + ∂ⱼg_{il} − ∂ₗg_{ij}) hⁱ vʲ``
+    — the first-kind Christoffel contracted with ``h`` and ``v``, then raised by ``g⁻¹``.
+    For a **cotangent covector** (``s = M*``):
+        ``(−Γ(h)·ω)_m = −½ (∂ₘg_{il} + ∂ᵢg_{ml} − ∂ₗg_{im}) hⁱ (♯ω)^l``
+    — the same first-kind symbol contracted with ``h`` and the raised ``♯ω``, with the
+    opposite sign and no final raise (the free index stays lower). Both are built purely by
+    contracting the metric gradient ``Dg`` (and ``Sharp``) — no tensor transpose. A constant
+    metric ⇒ ``Dg = 0`` ⇒ the correction is ``Zero`` and the total derivative is recovered.
+    The metric pairing ``⟨ω, v⟩`` is parallel under these two signs (see the tests).
+    """
+    from grassmann.core.space import Dual, with_inner
+
     s0 = R.space
-    Dg = _metric_gradient(R.metric, s0, ctx)
+    # The base manifold M (a cotangent section lives in M* = Dual(M)); g is M's metric.
+    cotangent = isinstance(s0, Dual)
+    M = s0.space if cotangent else s0
+    g = R.metric
+    Dg = _metric_gradient(g, M, ctx)
     if Dg is None:  # constant / x-independent metric ⇒ flat ⇒ no correction
         return Zero(R)
-    if _strip_space(ctx.X) != s0:
+    if _strip_space(ctx.X) != M:
         raise DiffError(
             "diff: the metric connection is only supported when the differentiation "
-            "variable lives in the tangent space itself (X == the WithInner base space)"
+            "variable lives in the tangent space itself (X == the manifold base space)"
         )
-    # The section must be a base-space (s0) value so its coordinates contract against the
-    # metric-gradient slots. The natural form is ``Remetric(section, g)`` — place an
-    # s0-section into the tangent space; we strip back to the s0 value here.
     if not isinstance(e, Remetric):
         raise DiffError(
             "diff: to differentiate covariantly, write the section as Remetric(value, g) "
-            f"(an s0 value placed in the tangent space); got {type(e).__name__}"
+            f"(a value placed in the (co)tangent space); got {type(e).__name__}"
         )
     v = e.vector
     h = ctx.h
-    # First-kind Christoffel contracted with (h, v): a covector ½(T(h,v,·)+T(v,h,·)−T(·,h,v)).
-    g_lower = Scale(0.5, Sum((
-        Eval(Dg, (0, 1), (h, v)),
-        Eval(Dg, (0, 1), (v, h)),
-        Scale(-1.0, Eval(Dg, (1, 2), (h, v))),
+    MR = with_inner(M, g)  # the manifold's metricized space, so Sharp reads g
+
+    if not cotangent:
+        # Tangent vector: ½(Γ contracted with h, v) as a covector, then raise with g⁻¹.
+        g_lower = Scale(0.5, Sum((
+            Eval(Dg, (0, 1), (h, v)),
+            Eval(Dg, (0, 1), (v, h)),
+            Scale(-1.0, Eval(Dg, (1, 2), (h, v))),
+        )))
+        return Eval(Sharp(MR), (0,), (g_lower,))
+
+    # Cotangent covector: raise ω to ♯ω, contract the first-kind symbol with (h, ♯ω) leaving
+    # the lower index m, negate. No final raise (the result is already a covector).
+    sharp_w = Eval(Sharp(MR), (0,), (v,))  # ♯ω : M
+    m_cov = Scale(0.5, Sum((
+        Eval(Dg, (0, 2), (h, sharp_w)),
+        Eval(Dg, (1, 2), (h, sharp_w)),
+        Scale(-1.0, Eval(Dg, (0, 1), (sharp_w, h))),
     )))
-    # Raise the free index with g⁻¹ (Sharp of the *metricized* space, so it reads g, not the
-    # identity) ⇒ a vector in the tangent space R = WithInner(s0, g), matching the flat
-    # derivative's type (also a section of R) so the Sum needs no change of basis.
-    return Eval(Sharp(R), (0,), (g_lower,))
+    # Re-metricize so the correction lives in the cotangent space R = WithInner(M*, g),
+    # matching the flat derivative's basis (the Sum then needs no change of basis).
+    return Remetric(Scale(-1.0, m_cov), g)
 
 
-def _metric_gradient(g: Term, s0: Space, ctx: _DCtx) -> Term | None:
-    """The metric gradient ``Dg : s0 ⊸ (s0*⊗s0*)`` (``∂g/∂x``), as a *primitive* map, or
+def _metric_gradient(g: Term, M: Space, ctx: _DCtx) -> Term | None:
+    """The metric gradient ``Dg : M ⊸ (M*⊗M*)`` (``∂g/∂x``), as a *primitive* map, or
     ``None`` when the metric does not depend on ``x`` (a constant/flat metric).
 
     For v1 the metric must be a marked-dependent ``Var`` (its gradient supplied via ``deps``,
@@ -463,7 +483,7 @@ def _metric_gradient(g: Term, s0: Space, ctx: _DCtx) -> Term | None:
             return dval
         from grassmann.core.space import dual, oprod
 
-        cod = oprod(dual(s0), dual(s0))
+        cod = oprod(dual(M), dual(M))
         return Var(f"d_{g.name}_{next(_counter)}", linear_map_space(ctx.X, cod))
     if _depends_on_x(g, ctx):
         raise DiffError(
