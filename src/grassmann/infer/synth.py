@@ -50,6 +50,7 @@ from grassmann.core.term import (
     NEval,
     OPlusV,
     OProdV,
+    Permute,
     Pinv,
     PinvApply,
     Project,
@@ -222,6 +223,8 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
             return _synth_kron(e, ctx)
         case Lift() | InvLift():
             return _synth_lift(e, ctx)
+        case Permute():
+            return _synth_permute(e, ctx)
         case LLam():
             return _synth_llam(e, ctx)
         case Lam():
@@ -662,6 +665,23 @@ def _synth_lift(e: Lift | InvLift, ctx: Ctx) -> Space:
 
     out: list[Space] = [f for _, f in rest]
     out.insert(min(insert_at, len(out)), block)
+    if len(out) == 1:
+        return out[0]
+    return oprod(*out)
+
+
+def _synth_permute(e: Permute, ctx: Ctx) -> Space:
+    """``Permute(v, perm)`` — reorder ``v``'s tensor factors: result factor ``i`` is
+    ``v``'s factor ``perm[i]``."""
+    s = ctx.store.resolve(_synth_value(e.vector, ctx))
+    factors = list(_as_factors(s))
+    n = len(factors)
+    if sorted(e.perm) != list(range(n)):
+        raise InferError(
+            f"Permute: perm {e.perm!r} must be a permutation of range({n}) for a "
+            f"{n}-factor space, got space {s!r}"
+        )
+    out = [factors[e.perm[i]] for i in range(n)]
     if len(out) == 1:
         return out[0]
     return oprod(*out)

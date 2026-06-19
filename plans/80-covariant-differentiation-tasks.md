@@ -8,8 +8,21 @@ covariant differentiation general. Ordered roughly by value × independence.
 ## Current scope (done)
 - Total/Fréchet derivative: product/chain/quotient over Eval/Compose/OProd/Scale/Inner +
   nonlinear scalar External; applied inverses (`Solve`/`Pinv` through the vector), `Dagger`.
-- Connection `∇_h v = dv + Γ(h)·v` for `Remetric(sec, g)`, `X = s0`, marked metric `g`/`Dg`.
+- Connection for **rank-1 sections**, both slot types (`Remetric(sec, g)`, marked `g`/`Dg`,
+  `X = M`): tangent `∇_h v = dv + ½g⁻¹(Γ·h·v)` and cotangent `∇_h ω = dω − ½(Γ·h·♯ω)`.
+  Both built by contracting `Dg` with `h` and the (raised) section as Eval args — no tensor
+  transpose. Verified vs analytic Christoffel + the metric-pairing invariant.
 - Flat/constant metric ⇒ `Γ = 0` exactly (recovers the total derivative).
+
+## DISCOVERED: substrate gates for higher-rank (task 2 ⇐ task 16)
+Higher-rank needs the general `(1,1)` connection *map* `Γ(h):M⊸M`, which needs two things
+the IR lacks (so **task 2 is blocked on task 16**):
+- **A tensor axis-permute / `(0,2)`-form transpose.** `Dagger` only transposes proper maps
+  (1 dual + 1 prim); a `(0,2)` form (2 duals) has no transpose, and raise→dagger→lower fails
+  on nested-dual decoding. Add a `Permute(v, perm)` node (lowers to a transpose einsum).
+- **`Eval` `f`-position free-label threading.** Applying a seed-carrying `Kron(I,…,Γ(h),…,I)`
+  map to one tensor slot puts the seed on the map (`f`) side; `_rep_eval` threads *arg*
+  free-labels but assumes `f` is seed-free (`_rep_compose` already threads both — mirror it).
 
 ## Known limitations to lift (each is a task)
 1. **Cotangent / dual sections.** Covariant derivative of a 1-form `ω`:
