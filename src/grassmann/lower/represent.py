@@ -770,9 +770,20 @@ def _rep_compose(
     g_reps = [_rep(g, ctx) for g in gs]
 
     f_labels = [chr(ord("a") + k) for k in range(len(f_factors))]
+    dim_of_label: dict[str, int] = {}
+    # Free (basis-index) labels ride through verbatim to the output — both the map ``f``'s
+    # own (rare) and each ``gₖ``'s (the case a *differentiated* g carries the seed axis),
+    # mirroring ``_rep_eval``. With no free labels this is byte-identical to before.
+    f_free = f_rep.free_labels
+    fshape = _shape_of(f_rep.array)
+    for off, lab in enumerate(f_free):
+        ax = len(f_factors) + off
+        if ax < len(fshape) and isinstance(fshape[ax], int):
+            dim_of_label[lab] = fshape[ax]
     operands = [f_rep.array]
     g_label_lists: list[str] = []
     replaced: dict[int, str] = {}
+    out_free = f_free
     next_fresh = ord("p")
     for pos, g_rep in zip(positions, g_reps, strict=True):
         if pos >= len(f_factors):
@@ -786,21 +797,28 @@ def _rep_compose(
         dom_label = chr(next_fresh)
         next_fresh += 1
         operands.append(g_rep.array)
-        g_label_lists.append(dom_label + cod_label)
+        g_label_lists.append(dom_label + cod_label + g_rep.free_labels)
         replaced[pos] = dom_label
+        gshape = _shape_of(g_rep.array)
+        for off, lab in enumerate(g_rep.free_labels):
+            ax = 2 + off
+            if ax < len(gshape) and isinstance(gshape[ax], int):
+                dim_of_label[lab] = gshape[ax]
+        out_free += g_rep.free_labels
 
     out_labels = "".join(
         replaced[k] if k in replaced else lab for k, lab in enumerate(f_labels)
     )
-    spec = ",".join(["".join(f_labels), *g_label_lists]) + "->" + out_labels
+    spec = ",".join(["".join(f_labels) + f_free, *g_label_lists]) + "->" + out_labels + out_free
 
     space = _synth(e)
+    out_shape = _shape_of_space(space) + tuple(dim_of_label[lab] for lab in out_free)
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), operands,
-        [pa.OutSpec("compose", _shape_of_space(space))],
+        [pa.OutSpec("compose", out_shape)],
         note=f"compose:contract@{sorted(replaced)}",
     )
-    return Rep(out, default_basis(space), space)
+    return Rep(out, default_basis(space), space, free_labels=out_free)
 
 
 def _rep_trace(e: T.Trace, f: T.Term, i: int, j: int, ctx: _Ctx) -> Rep:
@@ -1164,8 +1182,10 @@ def _rep_tuple_embed(e: T.TupleEmbed, space: S.Space, i: int, ctx: _Ctx) -> Rep:
     offsets = _oplus_offsets(space)
     total = sum(_static_dim(s) for s in space.spaces)
     bi = _static_dim(space.spaces[i])
-    M = np.zeros((total, bi))
-    M[offsets[i]:offsets[i] + bi, :] = np.eye(bi)
+    # block_i ⊸ s stored (|dom|,|cod|) = (bi, total): the canonical map layout Eval/Compose
+    # read (axis 0 = dom = the block, axis 1 = cod = the padded ⊕). Pads the i-th block.
+    M = np.zeros((bi, total))
+    M[:, offsets[i]:offsets[i] + bi] = np.eye(bi)
     arr = _const(ctx, M, note=f"tuple-embed:inject@{i}")
     return Rep(arr, default_basis(_synth(e)), _synth(e))
 
@@ -1177,8 +1197,10 @@ def _rep_tuple_project(e: T.TupleProject, space: S.Space, i: int, ctx: _Ctx) -> 
     offsets = _oplus_offsets(space)
     total = sum(_static_dim(s) for s in space.spaces)
     bi = _static_dim(space.spaces[i])
-    M = np.zeros((bi, total))
-    M[:, offsets[i]:offsets[i] + bi] = np.eye(bi)
+    # s ⊸ block_i stored (|dom|,|cod|) = (total, bi): the canonical map layout Eval/Compose
+    # read (axis 0 = dom = the ⊕, axis 1 = cod = the block). Slices the i-th block.
+    M = np.zeros((total, bi))
+    M[offsets[i]:offsets[i] + bi, :] = np.eye(bi)
     arr = _const(ctx, M, note=f"tuple-project:slice@{i}")
     return Rep(arr, default_basis(_synth(e)), _synth(e))
 
@@ -1562,6 +1584,13 @@ def _metric_matrix(ctx: _Ctx, space: S.Space, n: int, *, note: str) -> pa.SymArr
     """
     if isinstance(space, S.WithInner) and _is_numeric_metric(space.metric):
         g = _const(ctx, np.asarray(space.metric, dtype=float), note=note + ":explicit")
+        _assert_spd(ctx, g, note=note + ":spd")
+        return g
+    # A *term-valued* metric (e.g. an x-dependent metric field, a Program input) lowers by
+    # representing the metric term in the natural basis of its space — so Inner/Flat/Sharp of
+    # a symbolic ``WithInner(s, g)`` read the actual ``g`` rather than the identity default.
+    if isinstance(space, S.WithInner) and T.is_term(space.metric):
+        g = _rep(space.metric, ctx).array
         _assert_spd(ctx, g, note=note + ":spd")
         return g
     return _const(ctx, np.eye(n), note=note + ":identity")

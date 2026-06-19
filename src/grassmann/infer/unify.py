@@ -178,6 +178,17 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             if not _metric_eq(a.metric, b.metric):
                 raise UnifyError(f"WithInner metric mismatch: {a.metric!r} ≠ {b.metric!r}")
             return
+        # A metricized space ``WithInner(s, g)`` is the underlying ``s`` carrying extra
+        # metric *metadata*: dimension- and contraction-identical. So it unifies with a
+        # bare ``s`` by stripping the metric (the metric only matters for musical/metric
+        # ops, which re-read it from the annotated side). This lets a tangent-space value
+        # contract against its base space (e.g. the covariant-derivative connection).
+        case (WithInner(), _):
+            unify(a.space, b, store)
+            return
+        case (_, WithInner()):
+            unify(a, b.space, store)
+            return
         case ((Ker() | Img() | CoKer() | CoImg()), _) if type(a) is type(b):
             # FFS unify by structural term equality of the keying map (`25 §2`).
             if a.f != b.f:  # type: ignore[attr-defined]
