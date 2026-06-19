@@ -30,6 +30,7 @@ from .builders import (
     complete,
     compose,
     dagger,
+    diff,
     dim_img,
     dim_ker,
     dot,
@@ -59,6 +60,7 @@ from .builders import (
     proj,
     project,
     projected_basis,
+    pullback,
     rank,
     remetric,
     scalar_basis,
@@ -136,6 +138,9 @@ __all__ = [
     "lift",
     "unlift",
     "kron",
+    # transformations
+    "pullback",
+    "diff",
     # binders
     "llam",
     "lam",

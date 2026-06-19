@@ -71,6 +71,14 @@ def cob(
         case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:
             inner = cob(program, fb, tb)
             return _block_repeat(program, inner, _count_int(fn))
+        # A ``WithInnerBasis`` shares its inner basis's *vectors* (the metric is metadata,
+        # not a coordinate change), so a change of basis to/from it strips the wrapper —
+        # e.g. relating a tangent-space value (metricized) to its base coordinates is the
+        # identity, not a (generally unrealizable) abstract-basis cob.
+        case (B.WithInnerBasis(fb, _), _):
+            return cob(program, fb, to_basis)
+        case (_, B.WithInnerBasis(tb, _)):
+            return cob(program, from_basis, tb)
 
     # General case: realize both toward standard coords and compose R_to⁻¹ · R_from.
     r_from = realize_basis(program, from_basis)

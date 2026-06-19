@@ -276,6 +276,34 @@ def kron(f: object, g: object) -> Expr:
 
 
 # ===========================================================================
+# Transformations (term→term passes; lazy import avoids an embed→transform cycle).
+# ===========================================================================
+
+
+def pullback(v: object, target: object) -> Expr:
+    """``G.pullback(v, T)`` — transport the value ``v`` into the target space ``T``
+    (auto project/embed, structural recursion through ⊗/⊕/Dual). See
+    :func:`grassmann.transform.pullback.pullback`."""
+    from grassmann.transform.pullback import pullback as _pb
+
+    return wrap(_pb(_term(v), _space(target)))
+
+
+def diff(e: object, x: object, deps: dict | None = None) -> Expr:
+    """``G.diff(e, x, deps=None)`` — total covariant derivative of ``e`` w.r.t. the value
+    variable ``x`` (a map ``X ⊸ space(e)``). ``deps`` maps a marked var's ``uid`` to its
+    derivative map (or ``None`` for a fresh symbolic one). See
+    :func:`grassmann.transform.diff.diff`."""
+    from grassmann.transform.diff import diff as _diff
+
+    xv = _node(x)
+    if not isinstance(xv, _t.Var):
+        raise EmbedError(f"diff: x must be a value variable (Var), got {x!r}")
+    dd = None if deps is None else {k: (None if d is None else _term(d)) for k, d in deps.items()}
+    return wrap(_diff(_term(e), xv, dd))
+
+
+# ===========================================================================
 # Binders (HOAS, 25 §F2).
 # ===========================================================================
 
