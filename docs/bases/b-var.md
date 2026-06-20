@@ -1,0 +1,31 @@
+# `BVar`
+
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases &nbsp;·&nbsp; **Paper:** 20 §7 (basis var)
+
+## Meaning
+
+A **basis variable** `BVar(β)` — the basis of a space variable [`SVar`](../spaces/s-var.md),
+carried on a `Lam` binder. The basis-tower counterpart of `SVar`: when a polymorphic construction
+binds a space `α`, its basis `β` comes into scope as a `BVar`, and a concrete basis is supplied at
+instantiation. No standalone realization until substituted.
+
+## Fields
+
+| field | type |
+|---|---|
+| `name` | `str` |
+
+## Built by
+
+- **Core constructor** (`grassmann.core.basis`): `bvar(name: 'str') -> 'BVar'`
+
+> A basis variable ``β`` — the basis of an ``SVar α`` (rides on a ``Lam``).
+
+## Represented as (lowering)
+
+Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
+
+## Conversion
+
+`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
+
