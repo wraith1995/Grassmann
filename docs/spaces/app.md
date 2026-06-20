@@ -12,6 +12,21 @@ This is the reduction site for space polymorphism: `(λα. α⊗α)[V]` is an `A
 `V⊗V`. An *unreduced* `App` has no static dimension or default basis — it must be reduced (its
 function resolved and substituted) before it can be lowered to coordinates.
 
+## Structure
+
+A space-function application; abstract until β-reduced (`(λα. α⊗α)[A] ≡ A⊗A`). Unreduced, it has no static dimension or default basis.
+
+```python
+spacefn(lambda a: a * a)[A]
+```
+
+| | |
+|---|---|
+| reduces to | `A ⊗ A` |
+| unreduced  `dim_of(app)` | `no static dim (must reduce first)` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

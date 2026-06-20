@@ -11,6 +11,22 @@ across the type tower:
 - over a **basis** ⇒ a **basis function** (e.g. `λβ. BasisProd(β,β)` is the basis of `λα. α⊗α`);
 - over a **nat** ⇒ a nat-parametric basis builder (e.g. for `⊕ⁿ`).
 
+## Structure
+
+A basis-level binder (machinery to BUILD a basis): over a value ⇒ a Frame; over a basis ⇒ a basis function (e.g. `λβ. BasisProd(β,β)` is the basis of `λα. α⊗α`); over a nat ⇒ a nat-parametric builder.
+
+```python
+blam(β. BasisProd(β, β))
+```
+
+| | |
+|---|---|
+| value domain | `→ Frame` |
+| basis domain | `→ basis function` |
+| nat domain | `→ nat-parametric builder` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

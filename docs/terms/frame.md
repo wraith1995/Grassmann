@@ -10,6 +10,22 @@ value-binding instance of the basis-tower `BLam`. This is how a moving/pointwise
 tangent frame along a chart) is expressed; it realizes to the basis appropriate at the supplied
 runtime value.
 
+## Structure
+
+A basis that VARIES with a runtime value `x` (the moving/pointwise frame). Basis-tower machinery — consumed through the basis tower, not lowered as a value.
+
+```python
+frame(x, base_basis("V"))
+```
+
+| | |
+|---|---|
+| binding var | `x : V` |
+| basis body | `BaseBasis("V")` |
+| role | `value → basis (a frame); not a value node` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

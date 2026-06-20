@@ -12,6 +12,22 @@ static when props pin the rank, else a runtime `δ_f`.
 [`ProjectedBasis(f,"ker")`](../bases/projected-basis.md) — the trailing right singular vectors
 `V` of `f`, realized by the SVD seam; the columns lie in `dom` and satisfy `f·col = 0`.
 
+## Dimension
+
+Kernel: dimension `|dom| − rank` = 5 − 2 (static when props pin the rank).
+
+```python
+ker(f)  # f: A(5) >> B(3), rank 2
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `3` |
+| array shape | `(3,)` |
+| default basis | `ProjectedBasis(…, "ker")` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

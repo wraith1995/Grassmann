@@ -11,6 +11,22 @@ codomain, so it captures the obstruction/residual directions of a least-squares 
 Basis [`ProjectedBasis(f,"coker")`](../bases/projected-basis.md) — the trailing left singular
 vectors `U` of `f` (in `cod`), realized by the SVD seam.
 
+## Dimension
+
+Cokernel: dimension `|cod| − rank` = 3 − 2 = 1.
+
+```python
+coker(f)  # rank 2
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `1` |
+| array shape | `(1,)` |
+| default basis | `ProjectedBasis(…, "coker")` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

@@ -8,6 +8,20 @@ A **dimension variable** `DimVar(name)` — a bound symbolic size, introduced by
 a nat-parametric builder (e.g. `⊕ⁿ` with `n` abstract). It has no value until instantiated;
 spaces sized by it cannot be given a static shape until the nat is supplied.
 
+## Dimension
+
+A symbolic dim variable (a nat parameter) — no value until bound.
+
+```python
+base("V", DimVar("n"))
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `symbolic (depends on the nat parameter `n`)` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

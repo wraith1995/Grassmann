@@ -8,6 +8,21 @@ A **basis application** `BApp(f, positions, args…)` — apply a `BLam` (basis 
 nat-builder) to arguments, mirroring `App`/`Eval` at the basis level. The reduction site that
 turns a basis function plus concrete arguments into a concrete basis.
 
+## Structure
+
+Apply a `BLam` (basis function / frame / nat-builder) to arguments — the reduction site that turns a basis function + concrete arguments into a concrete basis.
+
+```python
+bapp(f, (0,), arg)
+```
+
+| | |
+|---|---|
+| mirrors | `App / Eval at the basis level` |
+| result | `a concrete basis after reduction` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

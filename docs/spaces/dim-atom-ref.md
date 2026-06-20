@@ -9,6 +9,20 @@ evaluation time (`42 §C`). This is the size of a *generic* (non-injective, no-p
 (`Img`/`Ker`/…): the rank emerges from the SVD at run time. A space carrying a `DimAtomRef`
 lowers to a **dynamic (bulk) axis** sourced from a polyarray `DimAtom`, not a static int.
 
+## Dimension
+
+A runtime rank `δ_f` — the dimension of a generic (no-props) FFS, known only at evaluation (resolved from the SVD).
+
+```python
+img(g)  # g generic ⇒ rank is a runtime δ_f
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `runtime δ_f (dynamic bulk axis, resolved at run time)` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

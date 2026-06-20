@@ -4,7 +4,7 @@ A node-by-node reference for the Grassmann IR: every **space**, **term**, and **
 
 The structural sections are extracted live from the code by `tools/gen_docs.py`; the **Meaning** prose is hand-authored and reviewed.
 
-Every behavior described here is pinned by a doc-tied test: `tests/test_doc_represent.py` covers every **represent scenario** (one per term, plus the space shape laws) and `tests/test_doc_cob.py` covers every **change-of-basis scenario** (one per basis). A doc claim that drifts from the code fails there.
+Every node carries a concrete example — a **worked input→output** (terms), a **change of basis** (bases), a **dimension** computation (spaces/dims), or a **structural** fact (the abstract/meta nodes). Each example is generated from `tools/doc_examples.py`, which runs the code and asserts the result, and is re-run by `tests/test_doc_examples.py` — so the numbers shown are exactly what the code produces. Broader scenario coverage lives in `tests/test_doc_represent.py` (represent) and `tests/test_doc_cob.py` (change of basis).
 
 ## Approval dashboard
 

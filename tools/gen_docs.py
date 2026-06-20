@@ -253,9 +253,19 @@ def _render_example(name: str) -> list[str]:
     fn = DEX.EXAMPLES.get(name)
     if fn is None:
         return []
-    ex = fn()  # runs represent + self-asserts; returns the rendered values
-    label = "Change of basis" if ex.kind == "cob" else "Worked example"
-    out = [f"## {label}", "", ex.summary, "", "```python", ex.code, "```", ""]
+    ex = fn()  # runs/evaluates + self-asserts; returns the rendered values
+    label = {
+        "cob": "Change of basis", "dim": "Dimension", "struct": "Structure",
+    }.get(ex.kind, "Worked example")
+    out = [f"## {label}", "", ex.summary, ""]
+    if ex.code:
+        out += ["```python", ex.code, "```", ""]
+    if ex.facts:  # dim / struct examples: a small expression → value table
+        out.append("| | |")
+        out.append("|---|---|")
+        for expr, val in ex.facts:
+            out.append(f"| {expr} | `{val}` |")
+        out.append("")
     if ex.inputs:
         out.append("**Inputs**")
         out.append("")
@@ -266,12 +276,13 @@ def _render_example(name: str) -> list[str]:
             out.extend("    " + ln for ln in val.splitlines())
             out.append("    ```")
         out.append("")
-    out.append("**Output**")
-    out.append("")
-    out.append("```")
-    out.extend(ex.output.splitlines())
-    out.append("```")
-    out.append("")
+    if ex.output:
+        out.append("**Output**")
+        out.append("")
+        out.append("```")
+        out.extend(ex.output.splitlines())
+        out.append("```")
+        out.append("")
     out.append("_This example is executed and asserted in `tests/test_doc_examples.py`._")
     out.append("")
     return out
@@ -431,11 +442,13 @@ def _write_home(all_rows) -> None:
            "polyarray), and how it is converted between bases.", "",
            "The structural sections are extracted live from the code by "
            "`tools/gen_docs.py`; the **Meaning** prose is hand-authored and reviewed.", "",
-           "Every behavior described here is pinned by a doc-tied test: "
-           "`tests/test_doc_represent.py` covers every **represent scenario** (one per term, "
-           "plus the space shape laws) and `tests/test_doc_cob.py` covers every "
-           "**change-of-basis scenario** (one per basis). A doc claim that drifts from the "
-           "code fails there.", ""]
+           "Every node carries a concrete example — a **worked input→output** (terms), a "
+           "**change of basis** (bases), a **dimension** computation (spaces/dims), or a "
+           "**structural** fact (the abstract/meta nodes). Each example is generated from "
+           "`tools/doc_examples.py`, which runs the code and asserts the result, and is "
+           "re-run by `tests/test_doc_examples.py` — so the numbers shown are exactly what "
+           "the code produces. Broader scenario coverage lives in `tests/test_doc_represent.py` "
+           "(represent) and `tests/test_doc_cob.py` (change of basis).", ""]
     out.append("## Approval dashboard")
     out.append("")
     out.append("| category | approved | in review | draft |")

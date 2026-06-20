@@ -16,6 +16,22 @@ coordinates `g` becomes the identity (the min-sym fast path); the un-whitened st
 kept as a candidate, where `g` is materialized. Created at the surface by `s.with_inner(g)` /
 the [`Remetric`](../terms/remetric.md) term on values.
 
+## Dimension
+
+Re-metricized space: same dimension as the underlying `V` (metric is metadata); default basis is the g-orthonormal `WithInnerBasis`.
+
+```python
+V.with_inner(g)
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `3` |
+| array shape | `(3,)` |
+| default basis | `WithInnerBasis` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

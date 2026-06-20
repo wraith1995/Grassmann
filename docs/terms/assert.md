@@ -9,6 +9,30 @@ passing the coordinates through unchanged with a runtime shape check when the eq
 static. Used to bridge spaces that are equal but not syntactically identical (e.g. after an
 inference refinement).
 
+## Worked example
+
+Space coercion to an equivalent space — coordinates unchanged.
+
+```python
+assert_(x, V')
+```
+
+**Inputs**
+
+- `x` =
+
+    ```
+    [1., 2., 3.]
+    ```
+
+**Output**
+
+```
+[1., 2., 3.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

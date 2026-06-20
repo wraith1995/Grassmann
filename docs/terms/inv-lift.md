@@ -7,6 +7,31 @@
 **Uncurry / unfuse tensor slots** `InvLift(v, fused, k?)` — the inverse of `Lift`: split one
 fused `⊗` slot back into `k` separate axes (uncurrying, the inverse of `Lift`). A pure reshape.
 
+## Worked example
+
+Split a fused ⊗ slot back into factors (inverse of `Lift`).
+
+```python
+inv_lift(lift(x, (0,1)), (0,), 2)
+```
+
+**Inputs**
+
+- `x` =
+
+    ```
+    [[0., 1.],
+     [2., 3.]]
+    ```
+
+**Output**
+
+```
+[0., 1., 2., 3.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

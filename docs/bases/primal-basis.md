@@ -8,6 +8,20 @@ The **primal basis** `PrimalBasis(b)` — the inverse of `DualBasis`: recovers t
 underlying a dual basis (`PrimalBasis(DualBasis(b)) = b`). Bookkeeping for variance so a covector
 can be returned to its primal space's coordinates.
 
+## Structure
+
+The inverse of `DualBasis` — recovers the primal basis under a dual (`PrimalBasis(DualBasis(b)) = b`).
+
+```python
+primal_basis(dual_basis(b))
+```
+
+| | |
+|---|---|
+| PrimalBasis(DualBasis(b)) | `≡ b` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

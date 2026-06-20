@@ -14,6 +14,22 @@ are [`TupleEmbed`](../terms/tuple-embed.md) / [`TupleProject`](../terms/tuple-pr
 / slice the block). `bot()` is the empty sum `⊕()`, the zero-dimensional space. Its basis is the
 block-diagonal [`BasisSum`](../bases/basis-sum.md) of the component bases.
 
+## Dimension
+
+Direct sum: dimension is the SUM `|V|+|W|`.
+
+```python
+V & W
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `5` |
+| array shape | `(5,)` |
+| default basis | `BasisSum` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

@@ -10,7 +10,7 @@ calls every thunk (so the shown example is also a passing test).  One source, re
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import polyarray as pa
@@ -18,6 +18,9 @@ import polyarray as pa
 import grassmann.core as C
 from grassmann.core import basis as B
 from grassmann.lower import represent
+from grassmann.lower._dims import DynamicDim, dim_of
+from grassmann.lower.represent import _shape_of_space
+from grassmann.lower.space_basis import default_basis
 
 _RM = sys.modules["grassmann.lower.represent"]
 
@@ -25,10 +28,11 @@ _RM = sys.modules["grassmann.lower.represent"]
 @dataclass
 class Example:
     summary: str
-    code: str
-    inputs: list[tuple[str, str]]  # (label, formatted-array)
-    output: str
-    kind: str = "represent"  # "represent" | "cob"
+    code: str = ""
+    inputs: list[tuple[str, str]] = field(default_factory=list)  # (label, formatted-array)
+    output: str = ""
+    facts: list[tuple[str, str]] = field(default_factory=list)  # (expression, value)
+    kind: str = "represent"  # "represent" | "cob" | "dim" | "struct"
 
 
 def _show(a) -> str:
@@ -523,3 +527,372 @@ def _complete_basis():
     _ck(np.allclose(got, np.eye(3)))
     return Example("Realizes to `[ sub | complement ]` stacked.",
                    'complete(sub, complement)', [], _show(got), kind="cob")
+
+
+# ---------------------------------------------------------------------------
+# Spaces — dimension / shape / default basis ("computing dimensions").
+# ---------------------------------------------------------------------------
+
+
+def _basis_name(space) -> str:
+    b = default_basis(space)
+    if isinstance(b, B.ProjectedBasis):
+        return f'ProjectedBasis(…, "{b.which}")'
+    return type(b).__name__
+
+
+def _dim_ex(summary: str, code: str, space, expected: int) -> Example:
+    d = dim_of(space)
+    _ck(d == expected)
+    return Example(
+        summary, code,
+        facts=[("dimension  `dim_of(s)`", str(d)),
+               ("array shape", str(_shape_of_space(space))),
+               ("default basis", _basis_name(space))],
+        kind="dim",
+    )
+
+
+def _dynamic_dim_ex(summary: str, code: str, space, note: str) -> Example:
+    try:
+        dim_of(space)
+        raise AssertionError("expected a dynamic/symbolic dimension")
+    except DynamicDim:
+        pass
+    return Example(summary, code, facts=[("dimension  `dim_of(s)`", note)], kind="dim")
+
+
+@_ex("Scalar")
+def _dim_scalar():
+    return _dim_ex("The field ℝ — a single dimension.", "R  # scalar()", C.scalar(), 1)
+
+
+@_ex("Base")
+def _dim_base():
+    return _dim_ex("A named primitive space of its declared dimension.",
+                   'space("V", 3)', C.base("V", 3), 3)
+
+
+@_ex("Dual")
+def _dim_dual():
+    return _dim_ex("The dual `s*` has the same dimension as `s`.",
+                   "~V  # dual(space(\"V\", 3))", C.dual(C.base("V", 3)), 3)
+
+
+@_ex("OPlus")
+def _dim_oplus():
+    s = C.oplus(C.base("V", 2), C.base("W", 3))
+    return _dim_ex("Direct sum: dimension is the SUM `|V|+|W|`.", "V & W", s, 5)
+
+
+@_ex("OProd")
+def _dim_oprod():
+    s = C.oprod(C.base("V", 2), C.base("W", 3))
+    return _dim_ex("Tensor product: dimension is the PRODUCT `|V|·|W|`; one axis per factor.",
+                   "V * W", s, 6)
+
+
+@_ex("OPlusRep")
+def _dim_oplusrep():
+    s = C.oplus_rep(4, C.base("V", 2))
+    return _dim_ex("Homogeneous direct sum `⊕⁴ V`: dimension `count·|V|`.",
+                   "osum_n(4, V)", s, 8)
+
+
+@_ex("WithInner")
+def _dim_withinner():
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    s = C.with_inner(V, g)
+    return _dim_ex("Re-metricized space: same dimension as the underlying `V` (metric is "
+                   "metadata); default basis is the g-orthonormal `WithInnerBasis`.",
+                   "V.with_inner(g)", s, 3)
+
+
+@_ex("Img")
+def _dim_img():
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    return _dim_ex("Image of an injective `J : Rt(2)→Re(3)`: dimension = rank = `|dom|` "
+                   "(STATIC because `inj` pins the rank; a generic map ⇒ runtime δ_f).",
+                   "img(J)  # J: Rt >> Re, inj", C.img(J), 2)
+
+
+@_ex("Ker")
+def _dim_ker():
+    A, B_ = C.base("A", 5), C.base("B", 3)
+    f = C.var("f", C.linear_map_space(A, B_), props=C.props.rank(2))
+    return _dim_ex("Kernel: dimension `|dom| − rank` = 5 − 2 (static when props pin the rank).",
+                   "ker(f)  # f: A(5) >> B(3), rank 2", C.ker(f), 3)
+
+
+@_ex("CoImg")
+def _dim_coimg():
+    A, B_ = C.base("A", 5), C.base("B", 3)
+    f = C.var("f", C.linear_map_space(A, B_), props=C.props.rank(2))
+    return _dim_ex("Coimage (row space): dimension = rank = 2.",
+                   "coimg(f)  # rank 2", C.coimg(f), 2)
+
+
+@_ex("CoKer")
+def _dim_coker():
+    A, B_ = C.base("A", 5), C.base("B", 3)
+    f = C.var("f", C.linear_map_space(A, B_), props=C.props.rank(2))
+    return _dim_ex("Cokernel: dimension `|cod| − rank` = 3 − 2 = 1.",
+                   "coker(f)  # rank 2", C.coker(f), 1)
+
+
+@_ex("SVar")
+def _dim_svar():
+    return _dynamic_dim_ex(
+        "A space variable is abstract — its dimension is unknown until the binder is "
+        "instantiated with a concrete space.",
+        'svar("a")', C.svar("a"), "no static dim (abstract until instantiated)")
+
+
+@_ex("App")
+def _dim_app():
+    from grassmann.core.kinds import SpaceSort
+
+    sf = C.lam((("a", SpaceSort(C.base("A", 2))),), C.oprod(C.svar("a"), C.svar("a")))
+    app = C.space_app(sf, (0,), C.base("A", 2))
+    try:
+        dim_of(app)
+        ok = False
+    except Exception:
+        ok = True
+    _ck(ok)
+    return Example(
+        "A space-function application; abstract until β-reduced "
+        "(`(λα. α⊗α)[A] ≡ A⊗A`). Unreduced, it has no static dimension or default basis.",
+        "spacefn(lambda a: a * a)[A]",
+        facts=[("reduces to", "A ⊗ A"),
+               ("unreduced  `dim_of(app)`", "no static dim (must reduce first)")],
+        kind="struct")
+
+
+# ---------------------------------------------------------------------------
+# Dim expressions — "computing dimensions".
+# ---------------------------------------------------------------------------
+
+
+def _dim_expr_ex(summary: str, code: str, space, expected: int) -> Example:
+    d = dim_of(space)
+    _ck(d == expected)
+    return Example(summary, code, facts=[("evaluates to", str(d))], kind="dim")
+
+
+@_ex("DimLit")
+def _d_lit():
+    return _dim_expr_ex("A literal (concrete) dimension.",
+                        'base("V", DimLit(3))', C.base("V", C.DimLit(3)), 3)
+
+
+@_ex("DimSum")
+def _d_sum():
+    return _dim_expr_ex("Sum of dims `2 + 3` (the law behind `⊕`).",
+                        "dim_sum(2, 3)", C.base("V", C.dim_sum(2, 3)), 5)
+
+
+@_ex("DimProd")
+def _d_prod():
+    return _dim_expr_ex("Product of dims `2 · 3` (the law behind `⊗`).",
+                        "dim_prod(2, 3)", C.base("V", C.dim_prod(2, 3)), 6)
+
+
+@_ex("DimMod")
+def _d_mod():
+    return _dim_expr_ex("Dim modulo `7 mod 3` (non-negative remainder).",
+                        "dim_mod(7, 3)", C.base("V", C.dim_mod(7, 3)), 1)
+
+
+@_ex("DimOf")
+def _d_of():
+    W = C.base("W", 4)
+    return _dim_expr_ex("`|s|` as a dim expression — track another space's size.",
+                        "DimOf(W)  # = |W|", C.base("V", C.DimOf(W)), 4)
+
+
+@_ex("DimNeg")
+def _d_neg():
+    A, B_ = C.base("A", 5), C.base("B", 3)
+    f = C.var("f", C.linear_map_space(A, B_), props=C.props.rank(2))
+    _ck(dim_of(C.ker(f)) == 3)  # |Ker| = |dom| − rank = 5 − 2 (the difference DimNeg encodes)
+    return Example(
+        "A negated dim `−d` — a building block for difference sizes like `|dom| − rank`. It is "
+        "folded by the fundamental-subspace rank laws (e.g. `|Ker(f)| = |dom| − rank = 3`), not "
+        "evaluated standalone.",
+        "DimNeg(rank)  # inside |dom| − rank",
+        facts=[("e.g. |Ker(f)|, rank 2, |dom| 5", "5 − 2 = 3")],
+        kind="struct")
+
+
+@_ex("DimVar")
+def _d_var():
+    return _dynamic_dim_ex("A symbolic dim variable (a nat parameter) — no value until bound.",
+                           'base("V", DimVar("n"))', C.base("V", C.DimVar("n")),
+                           "symbolic (depends on the nat parameter `n`)")
+
+
+@_ex("DimAtomRef")
+def _d_atom():
+    g = C.var("g", C.linear_map_space(C.base("A", 4), C.base("B", 4)))  # no props ⇒ generic
+    return _dynamic_dim_ex(
+        "A runtime rank `δ_f` — the dimension of a generic (no-props) FFS, known only at "
+        "evaluation (resolved from the SVD).",
+        "img(g)  # g generic ⇒ rank is a runtime δ_f", C.img(g),
+        "runtime δ_f (dynamic bulk axis, resolved at run time)")
+
+
+# ---------------------------------------------------------------------------
+# Meta term/basis nodes — structural facts (no numeric value lowering).
+# ---------------------------------------------------------------------------
+
+
+@_ex("Lam")
+def _struct_lam():
+    from grassmann.core.kinds import SpaceSort
+
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W))
+    x = C.var("x", V)
+    lam = C.lam(((x.name, SpaceSort(V)),), C.eval_(f, (0,), x), (x,))
+    _ck(len(lam.binders) == 1)
+    return Example(
+        "A dependent function: binds value/space/nat arguments and returns a term whose type "
+        "may depend on them. Applied by `NEval`; lowered by representing its body once.",
+        "lam([x:V]. f(x))",
+        facts=[("# binders", str(len(lam.binders))),
+               ("applied by", "NEval (see the NEval example)"),
+               ("lowering", "body represented once into a sub-program")],
+        kind="struct")
+
+
+@_ex("Frame")
+def _struct_frame():
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    fr = C.frame(x, C.base_basis("V"))
+    _ck(isinstance(fr, C.Frame) and fr.var is x)
+    return Example(
+        "A basis that VARIES with a runtime value `x` (the moving/pointwise frame). Basis-tower "
+        "machinery — consumed through the basis tower, not lowered as a value.",
+        "frame(x, base_basis(\"V\"))",
+        facts=[("binding var", "x : V"),
+               ("basis body", "BaseBasis(\"V\")"),
+               ("role", "value → basis (a frame); not a value node")],
+        kind="struct")
+
+
+@_ex("BVar")
+def _struct_bvar():
+    return Example(
+        "A basis variable — the basis of an `SVar`, carried on a `Lam` binder; a concrete "
+        "basis is supplied at instantiation.",
+        'bvar("β")',
+        facts=[("pairs with", "the space variable SVar『a』"),
+               ("concrete at", "instantiation (rides on the Lam)")],
+        kind="struct")
+
+
+@_ex("PrimalBasis")
+def _struct_primal():
+    base = default_basis(C.base("V", 3))
+    pb = B.primal_basis(B.dual_basis(base))
+    _ck(isinstance(pb, B.PrimalBasis))
+    return Example(
+        "The inverse of `DualBasis` — recovers the primal basis under a dual "
+        "(`PrimalBasis(DualBasis(b)) = b`).",
+        "primal_basis(dual_basis(b))",
+        facts=[("PrimalBasis(DualBasis(b))", "≡ b")], kind="struct")
+
+
+@_ex("BasisRep")
+def _struct_basisrep():
+    db = default_basis(C.oplus_rep(4, C.base("V", 2)))
+    from grassmann.lower._dims import basis_dim
+    _ck(isinstance(db, B.BasisRep) and basis_dim(db) == 8)
+    return Example(
+        "The basis of `⊕ⁿ s`: `n` block-diagonal copies of `s`'s basis.",
+        "basis_rep(4, base_basis(\"V\"))",
+        facts=[("dimension", "count · |s| = 4 · 2 = 8")], kind="struct")
+
+
+@_ex("WithInnerBasis")
+def _struct_wib():
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    wib = B.with_inner_basis(default_basis(V), g)
+    _ck(isinstance(wib, B.WithInnerBasis))
+    return Example(
+        "A `g`-orthonormal basis: in these coordinates the metric `g` becomes the identity "
+        "(whitening). Default basis of a `WithInner` space; cob strips the metric (metadata).",
+        "with_inner_basis(b, g)",
+        facts=[("metric in these coords", "identity (whitened)"),
+               ("change of basis", "strips the metric wrapper")], kind="struct")
+
+
+@_ex("BLam")
+def _struct_blam():
+    return Example(
+        "A basis-level binder (machinery to BUILD a basis): over a value ⇒ a Frame; over a "
+        "basis ⇒ a basis function (e.g. `λβ. BasisProd(β,β)` is the basis of `λα. α⊗α`); "
+        "over a nat ⇒ a nat-parametric builder.",
+        "blam(β. BasisProd(β, β))",
+        facts=[("value domain", "→ Frame"),
+               ("basis domain", "→ basis function"),
+               ("nat domain", "→ nat-parametric builder")], kind="struct")
+
+
+@_ex("BApp")
+def _struct_bapp():
+    return Example(
+        "Apply a `BLam` (basis function / frame / nat-builder) to arguments — the reduction "
+        "site that turns a basis function + concrete arguments into a concrete basis.",
+        "bapp(f, (0,), arg)",
+        facts=[("mirrors", "App / Eval at the basis level"),
+               ("result", "a concrete basis after reduction")], kind="struct")
+
+
+@_ex("Var")
+def _var():
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    xv = [1.0, 2.0, 3.0]
+    got = _run(x, {x: xv})
+    _ck(np.allclose(got, xv))
+    return Example("A program input, returned in its space's coordinates.", 'var("x", V)',
+                   [("x", _show(xv))], _show(got))
+
+
+@_ex("Assert")
+def _assert():
+    V, Valt = C.base("V", 3), C.base("V", 3)
+    x = C.var("x", V)
+    xv = [1.0, 2.0, 3.0]
+    got = _run(C.assert_(x, Valt), {x: xv})
+    _ck(np.allclose(got, xv))
+    return Example("Space coercion to an equivalent space — coordinates unchanged.",
+                   "assert_(x, V')", [("x", _show(xv))], _show(got))
+
+
+@_ex("Lift")
+def _lift():
+    V = C.base("V", 2)
+    x = C.var("x", C.oprod(V, V))
+    xv = np.arange(4.0).reshape(2, 2)
+    got = _run(C.lift(x, (0, 1)), {x: xv})
+    _ck(np.allclose(np.ravel(got), np.ravel(xv)))
+    return Example("Fuse two ⊗ slots into one (a pure reshape; data preserved).",
+                   "lift(x, (0, 1))", [("x", _show(xv))], _show(got))
+
+
+@_ex("InvLift")
+def _inv_lift():
+    V = C.base("V", 2)
+    x = C.var("x", C.oprod(V, V))
+    xv = np.arange(4.0).reshape(2, 2)
+    got = _run(C.inv_lift(C.lift(x, (0, 1)), (0,), 2), {x: xv})
+    _ck(np.allclose(np.ravel(got), np.ravel(xv)))
+    return Example("Split a fused ⊗ slot back into factors (inverse of `Lift`).",
+                   "inv_lift(lift(x, (0,1)), (0,), 2)", [("x", _show(xv))], _show(got))

@@ -13,6 +13,20 @@ binds an `SVar` and builds a space from it; at instantiation the variable is sub
 concrete space (and its basis variable [`BVar`](../bases/b-var.md) with a concrete basis). It
 has no standalone lowering — it only acquires coordinates once substituted.
 
+## Dimension
+
+A space variable is abstract — its dimension is unknown until the binder is instantiated with a concrete space.
+
+```python
+svar("a")
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `no static dim (abstract until instantiated)` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

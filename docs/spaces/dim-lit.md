@@ -8,6 +8,20 @@ A **literal dimension** `DimLit(n)` — a concrete non-negative integer size. Th
 `space("V", 3)` stores `DimLit(3)`. Statically known, so any space sized only by `DimLit`s
 lowers to a fully static array shape.
 
+## Dimension
+
+A literal (concrete) dimension.
+
+```python
+base("V", DimLit(3))
+```
+
+| | |
+|---|---|
+| evaluates to | `3` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

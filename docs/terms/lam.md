@@ -9,6 +9,22 @@ over values, spaces, or nats and whose result type may depend on them (the pullb
 Mirrors the type-tower `BLam`. Applied by `NEval`; lowered by representing the body once into a
 sub-program. Surface: `lam` / `fn`.
 
+## Structure
+
+A dependent function: binds value/space/nat arguments and returns a term whose type may depend on them. Applied by `NEval`; lowered by representing its body once.
+
+```python
+lam([x:V]. f(x))
+```
+
+| | |
+|---|---|
+| # binders | `1` |
+| applied by | `NEval (see the NEval example)` |
+| lowering | `body represented once into a sub-program` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

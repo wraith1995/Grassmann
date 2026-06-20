@@ -8,6 +8,20 @@ The **repeated direct-sum basis** `BasisRep(n, b)` — the basis of `⊕ⁿ s`, 
 copies of `b`. Mirrors [`OPlusRep`](../spaces/o-plus-rep.md). Change-of-basis block-repeats the
 inner cob `n` times.
 
+## Structure
+
+The basis of `⊕ⁿ s`: `n` block-diagonal copies of `s`'s basis.
+
+```python
+basis_rep(4, base_basis("V"))
+```
+
+| | |
+|---|---|
+| dimension | `count · |s| = 4 · 2 = 8` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

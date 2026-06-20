@@ -8,6 +8,20 @@
 (`|s⊕t| = |s|+|t|`) and the static-rank laws for the fundamental subspaces
 (`|Ker| = |dom| − rank`). Folds to a `DimLit` when all parts are static.
 
+## Dimension
+
+Sum of dims `2 + 3` (the law behind `⊕`).
+
+```python
+dim_sum(2, 3)
+```
+
+| | |
+|---|---|
+| evaluates to | `5` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

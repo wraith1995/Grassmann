@@ -9,6 +9,21 @@ carried on a `Lam` binder. The basis-tower counterpart of `SVar`: when a polymor
 binds a space `α`, its basis `β` comes into scope as a `BVar`, and a concrete basis is supplied at
 instantiation. No standalone realization until substituted.
 
+## Structure
+
+A basis variable — the basis of an `SVar`, carried on a `Lam` binder; a concrete basis is supplied at instantiation.
+
+```python
+bvar("β")
+```
+
+| | |
+|---|---|
+| pairs with | `the space variable SVar『a』` |
+| concrete at | `instantiation (rides on the Lam)` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |
