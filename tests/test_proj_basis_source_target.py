@@ -83,6 +83,26 @@ def test_projected_basis_target_cob_roundtrips() -> None:
     assert m @ back == pytest.approx(np.eye(2))
 
 
+def test_image_to_metric_projected_uses_gsvd_factor() -> None:
+    """`cob(ImageBasis(f) → ProjectedBasis(f,"image",target=T))` exploits the GSVD factor
+    (`Uᵀ·M_W·J`) — round-trips and maps coords to the same geometric vector."""
+    J, Re = _img()
+    t = [G.var(f"t{i}", Re) for i in range(3)]
+    Tm = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.0, 0.0, 1.0]])
+    tgt = B.list_basis(*[ti.node for ti in t])
+    imgb = B.ImageBasis(J.node)
+    projb_t = B.ProjectedBasis(J.node, "image", target=tgt)
+    feeds = {_k(J): _JSTORED, **{_k(t[i]): Tm[:, i] for i in range(3)}}
+    m = _cob(imgb, projb_t, feeds)
+    back = _cob(projb_t, imgb, feeds)
+    assert m @ back == pytest.approx(np.eye(2))  # invertible pair
+    u = _realize(projb_t, feeds)
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        s = rng.standard_normal(2)
+        assert u @ (m @ s) == pytest.approx(_JMATH @ s)  # U·c = J·s (same vector)
+
+
 def test_image_basis_source_maps_the_source_basis() -> None:
     """`ImageBasis(f, source=S)` realizes `f` applied to `S` (`f·S`)."""
     Rt, Re = G.space("Rt", 2), G.space("Re", 3)
