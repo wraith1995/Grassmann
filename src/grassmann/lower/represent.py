@@ -1918,8 +1918,8 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return _realize_list_basis(ctx, vectors)
         case B.ImageBasis(f, source):
             return _realize_image_basis(ctx, f, source)
-        case B.ProjectedBasis(f, which, _src, _tgt):
-            return _realize_ffs_by_which(ctx, which, f).cols
+        case B.ProjectedBasis(f, which, src, tgt):
+            return _realize_ffs_by_which(ctx, which, f, source=src, target=tgt).cols
         case B.CompleteBasis(sub, complement):
             # [ realize(sub) | complement ] — realize the sub through the seam (it may be a
             # term/FFS basis the pure path can't build), then hstack the numeric complement.
@@ -2367,15 +2367,26 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     return _realize_ffs_by_which(ctx, which, space.f)
 
 
-def _realize_ffs_by_which(ctx: _Ctx, which: str, f: object) -> FfsRealization:
+def _realize_ffs_by_which(
+    ctx: _Ctx, which: str, f: object,
+    source: B.Basis | None = None, target: B.Basis | None = None,
+) -> FfsRealization:
     """Realize the FFS basis ``which`` of map ``f`` via the SVD/QR/GSVD seam (`41 §1`).
 
     Shares the same ``(which, id(f))`` memo as :func:`_realize_ffs_for_space` (``"image"``
     normalizes to ``"img"``), so a ``ProjectedBasis(f, "image")`` realized for a
     change-of-basis reuses an ``Img(f)`` factorization (and vice versa).
+
+    ``source`` / ``target`` (bases of ``f``'s domain / codomain) make the subspace basis
+    **orthonormal w.r.t. those bases' inner products** (`Stage B`): each is turned into the
+    metric ``G = (B·Bᵀ)⁻¹`` (in which ``B`` is orthonormal) and fed to the GSVD seam, so the
+    realized columns stay in the standard ambient frame (cob composes).  Both ``None`` ⇒ the
+    plain SVD/QR (byte-identical).
     """
     norm = "img" if which == "image" else which
-    key = (norm, id(f))
+    metric_dom = _basis_metric(ctx, source) if source is not None else None
+    metric_cod = _basis_metric(ctx, target) if target is not None else None
+    key = (norm, id(f), id(source), id(target))
     cached = ctx.ffs_realizations.get(key)
     if cached is not None:
         return cached
@@ -2389,10 +2400,26 @@ def _realize_ffs_by_which(ctx: _Ctx, which: str, f: object) -> FfsRealization:
     real = realize_ffs_basis(
         ctx.prog, norm, f_cd,
         dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
-        props=map_props(f), label=getattr(f, "name", "f"),
+        props=map_props(f), metric_dom=metric_dom, metric_cod=metric_cod,
+        label=getattr(f, "name", "f"),
     )
     ctx.ffs_realizations[key] = real
     return real
+
+
+def _basis_metric(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
+    """The metric ``G = (B·Bᵀ)⁻¹`` in which the basis ``B`` is orthonormal (std coords)."""
+    cols = realize_basis_cols(ctx, basis)
+    n = _shape_of(cols)[0]
+    [gram] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ik,jk->ij"), [cols, cols],
+        [pa.OutSpec("basis-metric:B·Bᵀ", (n, n))], note="basis-metric:B·Bᵀ",
+    )
+    [out] = ctx.prog.emit_stmt(
+        pa.InvOp(), [gram], [pa.OutSpec("basis-metric:(B·Bᵀ)⁻¹", (n, n))],
+        note="basis-metric:(B·Bᵀ)⁻¹",
+    )
+    return out
 
 
 def _ffs_sibling_key(space: S.Space) -> tuple | None:
