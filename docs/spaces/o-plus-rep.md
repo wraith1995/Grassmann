@@ -12,6 +12,22 @@ fixed number of nodes, a fixed-length sequence. `count` is a [Dim](index.md) and
 symbolic (a nat-parametric builder), which is how nat-polymorphic constructions are typed. Its
 basis is the block-repeated [`BasisRep`](../bases/basis-rep.md) of `s`'s basis.
 
+## Dimension
+
+Homogeneous direct sum `⊕⁴ V`: dimension `count·|V|`.
+
+```python
+osum_n(4, V)
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `8` |
+| array shape | `(8,)` |
+| default basis | `BasisRep` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

@@ -7,6 +7,20 @@
 `DimProd(d₀,…)` — the **product** of dim expressions, `d₀ · … · dₙ`. The size law behind `⊗`
 (`|s⊗t| = |s|·|t|`) and `⊕ⁿ` (`count·|s|`). Folds to a `DimLit` when all parts are static.
 
+## Dimension
+
+Product of dims `2 · 3` (the law behind `⊗`).
+
+```python
+dim_prod(2, 3)
+```
+
+| | |
+|---|---|
+| evaluates to | `6` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

@@ -17,6 +17,22 @@ columns `f(eᵢ)` are the separate [`ImageBasis`](../bases/image-basis.md) candi
 basis the metric is the immersed Gram `JᵀJ`. Lowering realizes the columns through the
 SVD/QR/GSVD seam (`41 §1`).
 
+## Dimension
+
+Image of an injective `J : Rt(2)→Re(3)`: dimension = rank = `|dom|` (STATIC because `inj` pins the rank; a generic map ⇒ runtime δ_f).
+
+```python
+img(J)  # J: Rt >> Re, inj
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `2` |
+| array shape | `(2,)` |
+| default basis | `ProjectedBasis(…, "image")` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

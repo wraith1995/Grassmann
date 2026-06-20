@@ -11,6 +11,22 @@ The **coimage** `CoImg(f)` of `f : dom ⊸ cod` — the orthogonal complement of
 Basis [`ProjectedBasis(f,"coimg")`](../bases/projected-basis.md) — the leading right singular
 vectors `V` of `f` (in `dom`), realized by the SVD seam.
 
+## Dimension
+
+Coimage (row space): dimension = rank = 2.
+
+```python
+coimg(f)  # rank 2
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `2` |
+| array shape | `(2,)` |
+| default basis | `ProjectedBasis(…, "coimg")` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

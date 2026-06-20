@@ -11,6 +11,22 @@ tensor, and the multiplier type of `Scale`. As a space it has a single basis vec
 number `1`), so a value lowers to a polyarray array of shape `()` (a 0-D scalar). There is
 nothing to choose about its basis — `ScalarBasis` is canonical and orthonormal.
 
+## Dimension
+
+The field ℝ — a single dimension.
+
+```python
+R  # scalar()
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `1` |
+| array shape | `()` |
+| default basis | `ScalarBasis` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Built by
 
 - **Core constructor** (`grassmann.core.space`): `scalar() -> 'Scalar'`

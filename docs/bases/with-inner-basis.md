@@ -10,6 +10,21 @@ that `g` becomes the identity in these coordinates (whitening). The default basi
 un-whitened `b` is kept as a candidate where `g` is materialized. For change-of-basis the metric
 wrapper is stripped (it is metadata, not a coordinate change).
 
+## Structure
+
+A `g`-orthonormal basis: in these coordinates the metric `g` becomes the identity (whitening). Default basis of a `WithInner` space; cob strips the metric (metadata).
+
+```python
+with_inner_basis(b, g)
+```
+
+| | |
+|---|---|
+| metric in these coords | `identity (whitened)` |
+| change of basis | `strips the metric wrapper` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

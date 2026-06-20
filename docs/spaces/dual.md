@@ -13,6 +13,22 @@ metric. A linear map `s ⊸ t` is represented as `s* ⊗ t`, so dual slots are e
 `s** = s`. Same dimension and array shape as `s`; the coordinate change between a basis and its
 dual basis is the inverse-transpose ([`DualBasis`](../bases/dual-basis.md)).
 
+## Dimension
+
+The dual `s*` has the same dimension as `s`.
+
+```python
+~V  # dual(space("V", 3))
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `3` |
+| array shape | `(3,)` |
+| default basis | `DualBasis` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

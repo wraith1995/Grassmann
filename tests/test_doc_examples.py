@@ -22,5 +22,5 @@ import doc_examples as DEX  # noqa: E402
 def test_doc_example_runs_and_matches(name: str) -> None:
     """The doc example for ``name`` lowers, runs, and matches its documented output."""
     ex = DEX.EXAMPLES[name]()  # raises AssertionError inside if the output drifts
-    assert ex.output  # a rendered output was produced
+    assert ex.output or ex.facts  # a rendered output / structural facts were produced
     assert ex.summary

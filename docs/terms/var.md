@@ -12,6 +12,30 @@ vars only). Those props are what let an FFS space over the var get a *static* ra
 At lowering a `Var` becomes a polyarray **program input** sized by its space; an FFS-typed var
 with a runtime rank becomes a dynamic bulk input (`42 §C`).
 
+## Worked example
+
+A program input, returned in its space's coordinates.
+
+```python
+var("x", V)
+```
+
+**Inputs**
+
+- `x` =
+
+    ```
+    [1., 2., 3.]
+    ```
+
+**Output**
+
+```
+[1., 2., 3.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

@@ -8,6 +8,31 @@
 fused slot (currying), e.g. turning a multilinear value into the matching linear-map
 shape. A pure reshape (no SVD/pinv) — the explicit reassociation seam read by `Eval`/`Compose`.
 
+## Worked example
+
+Fuse two ⊗ slots into one (a pure reshape; data preserved).
+
+```python
+lift(x, (0, 1))
+```
+
+**Inputs**
+
+- `x` =
+
+    ```
+    [[0., 1.],
+     [2., 3.]]
+    ```
+
+**Output**
+
+```
+[0., 1., 2., 3.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

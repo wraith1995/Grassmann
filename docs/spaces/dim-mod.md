@@ -8,6 +8,20 @@
 remainder). Supports cyclic/periodic sizing constructions. Foldable only when both operands are
 static; a zero modulus is rejected.
 
+## Dimension
+
+Dim modulo `7 mod 3` (non-negative remainder).
+
+```python
+dim_mod(7, 3)
+```
+
+| | |
+|---|---|
+| evaluates to | `1` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

@@ -15,6 +15,22 @@ contract `⊗` axes, and `Lift`/`InvLift` reassociate fused vs unfused `⊗` slo
 `linear_map_space(s,t)` is the convenience spelling `~s * t`. Its basis is the Kronecker
 [`BasisProd`](../bases/basis-prod.md) of the factor bases.
 
+## Dimension
+
+Tensor product: dimension is the PRODUCT `|V|·|W|`; one axis per factor.
+
+```python
+V * W
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `6` |
+| array shape | `(2, 3)` |
+| default basis | `BasisProd` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

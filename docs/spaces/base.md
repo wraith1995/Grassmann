@@ -15,6 +15,22 @@ an arithmetic combination (e.g. for a space-function parameter). A value lowers 
 of length `dim`; its default coordinate system is the standard basis
 ([`BaseBasis`](../bases/base-basis.md)).
 
+## Dimension
+
+A named primitive space of its declared dimension.
+
+```python
+space("V", 3)
+```
+
+| | |
+|---|---|
+| dimension  `dim_of(s)` | `3` |
+| array shape | `(3,)` |
+| default basis | `BaseBasis` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

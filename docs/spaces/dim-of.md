@@ -8,6 +8,20 @@
 terms of another space's size (e.g. a result whose dimension tracks an input's), and folds to a
 `DimLit` once `s`'s dimension is statically known.
 
+## Dimension
+
+`|s|` as a dim expression — track another space's size.
+
+```python
+DimOf(W)  # = |W|
+```
+
+| | |
+|---|---|
+| evaluates to | `4` |
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |
