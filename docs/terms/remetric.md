@@ -9,6 +9,30 @@ coordinates, new metric metadata `g` (an SPD assertion guards it when the metric
 materialized). The value-level entry into a non-Euclidean metric; the space-level counterpart is
 [`WithInner`](../spaces/with-inner.md). Surface: `v.remetric(g)`.
 
+## Worked example
+
+Re-metricize: coordinates unchanged (metric is metadata).
+
+```python
+v.remetric(g)
+```
+
+**Inputs**
+
+- `v` =
+
+    ```
+    [1., 2., 3.]
+    ```
+
+**Output**
+
+```
+[1., 2., 3.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

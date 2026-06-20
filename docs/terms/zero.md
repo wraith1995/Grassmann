@@ -8,6 +8,22 @@ The **zero vector** `Zero(space?)` of a space. The additive identity: `v + 0 = v
 **optional** — a bare `Zero(None)` borrows its space from context (a sibling summand) during
 inference/lowering, so you can write `+0` without naming the space. Lowers to an all-zeros array.
 
+## Worked example
+
+The zero vector of `V` (dim 4).
+
+```python
+zero(V)
+```
+
+**Output**
+
+```
+[0., 0., 0., 0.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

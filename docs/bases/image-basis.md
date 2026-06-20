@@ -12,6 +12,33 @@ tangent space in *source/pushforward* coordinates (the pointwise substrate). Rea
 literal columns (no SVD); change-of-basis to/from it routes through the FFS seam
 (`_basis_cob_matrix`).
 
+## Change of basis
+
+Realizes to the literal columns `J` (the raw `f(eᵢ)`).
+
+```python
+realize(image_basis(J))
+```
+
+**Inputs**
+
+- `J` =
+
+    ```
+    [[2., 1., 1.],
+     [0., 3., 1.]]
+    ```
+
+**Output**
+
+```
+[[2., 0.],
+ [1., 3.],
+ [1., 1.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

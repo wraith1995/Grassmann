@@ -8,6 +8,34 @@
 (`assert_square_full_rank`) enforces invertibility; lowers to an `InvOp`. Use `Solve` (not
 `Pinv`) when the map is genuinely bijective — it is the min-sym, exact path.
 
+## Worked example
+
+Exact inverse map `f⁻¹`.
+
+```python
+solve(f)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[-0.8 , -1.32, -0.25],
+     [ 0.42,  1.14,  0.11],
+     [-0.55, -0.78,  0.75]]
+    ```
+
+**Output**
+
+```
+[[-2.835, -3.571, -0.421],
+ [ 1.132,  2.223,  0.051],
+ [-0.902, -0.307,  1.078]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

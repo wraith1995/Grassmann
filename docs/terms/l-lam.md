@@ -10,6 +10,38 @@ This is how a coordinate-free *map* is written as a function of its inputs; at l
 var becomes a free basis-index axis (the coordinate-tensor binding, `41 §3`), so the body lowers to
 the full map tensor.
 
+## Worked example
+
+Linear λ building a pullback form `B(Tx,Ty)` (= `TᵀBT`).
+
+```python
+llam(x, y, body=B(T(x), T(y)))
+```
+
+**Inputs**
+
+- `B` =
+
+    ```
+    [[ 0.03,  1.36],
+     [ 1.22, -0.51]]
+    ```
+- `T` =
+
+    ```
+    [[-0.01,  1.05],
+     [ 0.74,  0.72]]
+    ```
+
+**Output**
+
+```
+[[-0.589,  0.552],
+ [ 0.662,  1.127]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

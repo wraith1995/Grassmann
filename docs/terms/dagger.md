@@ -10,6 +10,35 @@ default both metrics are the identity, so it collapses to a plain transpose (the
 non-orthonormal (`ImageBasis`) endpoint routes through the metric formula so the adjoint identity
 stays basis-invariant (`43 §2c`). Surface: `f.dagger` / `f.T`.
 
+## Worked example
+
+Adjoint `f†` — a plain transpose in the orthonormal default.
+
+```python
+f.dagger
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[ 0.,  1.,  2.,  3.],
+     [ 4.,  5.,  6.,  7.],
+     [ 8.,  9., 10., 11.]]
+    ```
+
+**Output**
+
+```
+[[ 0.,  4.,  8.],
+ [ 1.,  5.,  9.],
+ [ 2.,  6., 10.],
+ [ 3.,  7., 11.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

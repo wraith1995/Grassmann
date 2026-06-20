@@ -15,6 +15,33 @@ the SVD/QR/GSVD seam (`41 §1`). The **default** basis of every FFS space:
 its metric is the identity — the min-sym fast path. Dimensions come from the rank (static when
 props pin it, else a runtime `δ_f`).
 
+## Change of basis
+
+Realizes to the orthonormal range `Q` (QR of `J`).
+
+```python
+realize(projected_basis(J, "image"))
+```
+
+**Inputs**
+
+- `J` =
+
+    ```
+    [[2., 1., 1.],
+     [0., 3., 1.]]
+    ```
+
+**Output**
+
+```
+[[-0.816,  0.492],
+ [-0.408, -0.862],
+ [-0.408, -0.123]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

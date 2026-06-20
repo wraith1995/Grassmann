@@ -8,6 +8,26 @@
 slices the i-th `⊕` component out of the full sum. The projection `πᵢ = ιᵢ†`. Lowers to a
 constant selection/slice matrix.
 
+## Worked example
+
+Slice the 1st ⊕ block `π₀ : V⊕W ⊸ V`.
+
+```python
+proj(V & W, 0)
+```
+
+**Output**
+
+```
+[[1., 0.],
+ [0., 1.],
+ [0., 0.],
+ [0., 0.],
+ [0., 0.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

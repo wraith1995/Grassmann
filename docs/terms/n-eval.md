@@ -10,6 +10,36 @@ map): `NEval` *calls* a function whose output type may depend on the input. Lowe
 representing the `Lam` body once into its own polyarray sub-program and emitting a call, so a
 reused dependent function is lowered once and called many times.
 
+## Worked example
+
+Apply a dependent function (`Lam`) to a value.
+
+```python
+neval(lam, (0,), a)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[1., 2., 3.],
+     [4., 5., 6.]]
+    ```
+- `a` =
+
+    ```
+    [ 2., -1.]
+    ```
+
+**Output**
+
+```
+[-2., -1.,  0.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

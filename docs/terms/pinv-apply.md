@@ -8,6 +8,36 @@
 The metric case routes through the GSVD pseudo-inverse map then a matvec; the plain case is a
 `PinvOp` + matvec. The applied counterpart of `Pinv`.
 
+## Worked example
+
+Least-squares solution `f⁺·v`.
+
+```python
+pinv(f)(v)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[-1.74, -1.34, -1.36],
+     [-0.35, -2.31, -0.19]]
+    ```
+- `v` =
+
+    ```
+    [ 1. ,  0.5, -1. ]
+    ```
+
+**Output**
+
+```
+[-0.027, -0.22 ]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

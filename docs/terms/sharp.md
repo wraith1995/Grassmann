@@ -8,6 +8,30 @@ The **sharp** (musical ♯) map `Sharp(s)` — `s* ⊸ s`, raising an index; the
 `= G_s⁻¹`. Builds the metric in the primal basis and inverts (so it agrees with the immersed and
 explicit-metric conventions), tagging its result in the primal basis. `sharp(flat(v)) = v`.
 
+## Worked example
+
+`sharp(w) = G⁻¹·w` (identity metric ⇒ `w`).
+
+```python
+sharp(V)(w)
+```
+
+**Inputs**
+
+- `w` =
+
+    ```
+    [1., 2., 3.]
+    ```
+
+**Output**
+
+```
+[1., 2., 3.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

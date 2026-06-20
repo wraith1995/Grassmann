@@ -8,6 +8,33 @@
 einsum). Free (basis-index / seed) labels trail the space axes and ride through untouched. Used
 to align tensor slots (e.g. the antisymmetrizer's `x⊗y` vs `y⊗x`).
 
+## Worked example
+
+Transpose tensor axes.
+
+```python
+permute(x, (1, 0))
+```
+
+**Inputs**
+
+- `x` =
+
+    ```
+    [[0., 1., 2.],
+     [3., 4., 5.]]
+    ```
+
+**Output**
+
+```
+[[0., 3.],
+ [1., 4.],
+ [2., 5.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

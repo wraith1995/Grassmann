@@ -8,6 +8,33 @@
 (the diagonal sum), e.g. the matrix trace `Σ Aᵢᵢ`. Lowers to a diagonal-sum einsum over the two
 named axes.
 
+## Worked example
+
+Trace (contract two slots).
+
+```python
+tr(f)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[-0.65, -0.17,  1.66,  0.66],
+     [-1.64, -0.01, -0.62,  0.15],
+     [-1.61,  0.24,  0.24,  1.58],
+     [ 0.32,  0.51, -1.49,  2.25]]
+    ```
+
+**Output**
+
+```
+1.83
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |
