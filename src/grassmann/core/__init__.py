@@ -11,7 +11,6 @@ from __future__ import annotations
 from . import basis, kinds, props, space, term, types
 from .basis import (
     BApp,
-    BaseBasis,
     Basis,
     BasisError,
     BasisProd,
@@ -28,7 +27,6 @@ from .basis import (
     ScalarBasis,
     WithInnerBasis,
     bapp,
-    base_basis,
     basis_prod,
     basis_rep,
     basis_sum,
@@ -72,7 +70,6 @@ from .props import (
 )
 from .space import (
     App,
-    Base,
     CoImg,
     CoKer,
     Dim,

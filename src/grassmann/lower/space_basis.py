@@ -9,7 +9,7 @@ Basis tower per the `41 §1` table:
 
 ```
 Scalar      ⇒ ScalarBasis                ⊕(sᵢ) ⇒ BasisSum(default sᵢ)
-Base(_,_)   ⇒ BaseBasis(name)            ⊗(sᵢ) ⇒ BasisProd(default sᵢ)
+                                         ⊗(sᵢ) ⇒ BasisProd(default sᵢ)
 Dual s      ⇒ DualBasis(default s)       ⊕ⁿ s  ⇒ BasisRep(n, default s)
 WithInner s g ⇒ default = g-orthonormal WithInnerBasis  (candidate: reuse default s)
 Img f       ⇒ ProjectedBasis(f, "image") Ker/CoImg/CoKer f ⇒ ProjectedBasis(f, which, …)
@@ -55,10 +55,6 @@ def default_basis(space: S.Space) -> B.Basis:
     match space:
         case S.Scalar():
             return B.scalar_basis()
-        case S.Base(name, _):
-            # Carry the space so the standard basis is self-sizing (`20 §7`): its dimension
-            # and ambient are recoverable even with no explicit vectors.
-            return B.base_basis(name, space=space)
         case S.Dual(s):
             return B.dual_basis(default_basis(s))
         case S.OPlus(spaces):

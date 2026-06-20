@@ -34,6 +34,7 @@ import pytest
 import grassmann as G
 from grassmann.core import basis as B
 from grassmann.lower.represent import represent
+from grassmann.lower.space_basis import default_basis
 
 
 def _key(v: G.Expr) -> str:
@@ -103,8 +104,8 @@ def test_dagger_adjoint_identity(
 
     projb, imgb = _bases(J)
     tan = imgb if which == "image" else projb
-    dom_b = tan if dom_is_img else B.base_basis(Re2.node)
-    cod_b = tan if cod_is_img else B.base_basis(Re2.node)
+    dom_b = tan if dom_is_img else default_basis(Re2.node)
+    cod_b = tan if cod_is_img else default_basis(Re2.node)
     map_basis = B.basis_prod(B.dual_basis(dom_b), cod_b)
 
     env = {M.node.uid: map_basis}
@@ -257,7 +258,7 @@ def test_compose_equals_apply_and_is_basis_invariant(
 
     projb, imgb = _bases(J)
     tan = imgb if which == "image" else projb
-    base_re2 = B.base_basis(Re2.node)
+    base_re2 = default_basis(Re2.node)
     env = {
         f.node.uid: B.basis_prod(B.dual_basis(tan), base_re2),
         g.node.uid: B.basis_prod(B.dual_basis(base_re2), tan),
@@ -284,7 +285,7 @@ def test_compose_output_invariant_across_bases() -> None:
     b = G.var("b", Re2)
     composed = G.compose(f, g)(b)
     projb, imgb = _bases(J)
-    base_re2 = B.base_basis(Re2.node)
+    base_re2 = default_basis(Re2.node)
     _Q, Rm = np.linalg.qr(Jmath)
 
     # The SAME geometric g (codomain in Img(J)): ImageBasis coords vs ProjectedBasis coords
@@ -369,7 +370,7 @@ def test_eval_mismatched_map_application_reconciles(
     M = G.var("M", img >> Re2)
     a = G.var("a", img)
     projb, imgb = _bases(J)
-    base_re2 = B.base_basis(Re2.node)
+    base_re2 = default_basis(Re2.node)
     map_basis = B.basis_prod(B.dual_basis(imgb), base_re2)
     _Q, Rm = np.linalg.qr(Jmath)
     rng = np.random.default_rng(1)
@@ -402,7 +403,7 @@ def test_compose_mismatched_slot_pinning_reconciles(
     g = G.var("g", Re2 >> img)
     b = G.var("b", Re2)
     projb, imgb = _bases(J)
-    base_re2 = B.base_basis(Re2.node)
+    base_re2 = default_basis(Re2.node)
     fb = B.basis_prod(B.dual_basis(imgb), base_re2)
     _Q, Rm = np.linalg.qr(Jmath)
     rng = np.random.default_rng(2)

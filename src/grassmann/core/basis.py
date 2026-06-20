@@ -3,8 +3,7 @@
 ```
 Basis  b ::=
   -- mirror Space (§5)
-  | ScalarBasis | BaseBasis(name, vectors?, space?, backup?)   -- vectors = numeric matrix OR
-  |                                  Term frame; space ⇒ self-sizing; backup ⇒ RREF-complete
+  | ScalarBasis                     -- the basis of ℝ (the only ground)
   | BVar(β)                          basis variable (the basis of an SVar α)
   | DualBasis(b) | PrimalBasis(b)
   | BasisSum(b…) | BasisProd(b…)     -- ⊕ / ⊗  (n-ary)
@@ -59,38 +58,6 @@ class ScalarBasis:
 
     def __repr__(self) -> str:
         return "ScalarBasis()"
-
-
-@dataclass(frozen=True)
-class BaseBasis:
-    """A concrete basis of a ``Base`` space — the term-level "term basis" (`20 §7`).
-
-    Fields (all but ``name`` optional, so the historical ``BaseBasis(name)`` /
-    ``BaseBasis(name, vectors)`` forms are unchanged):
-
-    * ``vectors`` — the basis vectors.  Either a precomputed numeric matrix (columns = basis
-      vectors in ambient coords) OR a tuple of :class:`~grassmann.core.term.Term` vectors (a
-      *frame* realized at lowering, like :class:`ListBasis`).  ``None`` ⇒ the standard basis
-      (the ambient identity).
-    * ``space`` — the :class:`~grassmann.core.space.Space` this basis is OF.  Lets the basis
-      recover its dimension/ambient even when ``vectors`` is ``None`` (so a standard basis is
-      self-sizing instead of relying on the surrounding space).
-    * ``backup`` — a fallback :class:`Basis` used to **complete** ``vectors`` to a full basis
-      when the frame is not a maximal independent set (rank-deficient).  At lowering the
-      independent columns of ``vectors`` are kept (RREF / pivoted selection) and the missing
-      directions are filled from ``backup`` (default: the standard/ambient basis).
-    """
-
-    name: str
-    vectors: object | None = None
-    space: object | None = None
-    backup: object | None = None
-
-    def __repr__(self) -> str:
-        v = f", vectors={self.vectors!r}" if self.vectors is not None else ""
-        s = f", space={self.space!r}" if self.space is not None else ""
-        bk = f", backup={self.backup!r}" if self.backup is not None else ""
-        return f"BaseBasis({self.name!r}{v}{s}{bk})"
 
 
 @dataclass(frozen=True)
@@ -242,7 +209,7 @@ class ImageBasis:
 class ListBasis:
     """``ListBasis(vectors…)`` — a basis given as an EXPLICIT LIST OF TERM VECTORS.
 
-    The first-class, term-level analogue of :class:`BaseBasis`'s precomputed ``vectors``
+    A first-class basis given as explicit Term vectors
     numpy array: each entry is a :class:`~grassmann.core.term.Term` vector (all of the
     same space), and the basis is their span in the listed order.  At lowering each
     vector is represented and the columns are stacked into the basis matrix.
@@ -349,11 +316,10 @@ class BApp:
         return f"BApp({self.f!r}, {_tuple_repr(self.positions)}, {_tuple_repr(self.args)})"
 
 
-Basis = ScalarBasis | BaseBasis | BVar | DualBasis | PrimalBasis | BasisSum | BasisProd | BasisRep | ProjectedBasis | ImageBasis | ListBasis | WithInnerBasis | CompleteBasis | BLam | BApp
+Basis = ScalarBasis | BVar | DualBasis | PrimalBasis | BasisSum | BasisProd | BasisRep | ProjectedBasis | ImageBasis | ListBasis | WithInnerBasis | CompleteBasis | BLam | BApp
 
 _BASIS_TYPES = (
     ScalarBasis,
-    BaseBasis,
     BVar,
     DualBasis,
     PrimalBasis,
@@ -387,15 +353,6 @@ def _require_basis(b: object, ctx: str) -> None:
 
 def scalar_basis() -> ScalarBasis:
     return ScalarBasis()
-
-
-def base_basis(
-    name: str,
-    vectors: object | None = None,
-    space: object | None = None,
-    backup: object | None = None,
-) -> BaseBasis:
-    return BaseBasis(name, vectors, space, backup)
 
 
 def bvar(name: str) -> BVar:
@@ -462,7 +419,6 @@ __all__ = [
     "PROJECTED_WHICH",
     "Basis",
     "ScalarBasis",
-    "BaseBasis",
     "BVar",
     "DualBasis",
     "PrimalBasis",
@@ -478,7 +434,6 @@ __all__ = [
     "BApp",
     "is_basis",
     "scalar_basis",
-    "base_basis",
     "bvar",
     "dual_basis",
     "primal_basis",

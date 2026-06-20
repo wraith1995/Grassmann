@@ -4,7 +4,7 @@
 Dim   := symbolic Nat expr   (literal | n | dim(s) | n+m | n·m | …)
 Space :=
   | Scalar                         -- ℝ (real only);  ⊥ = OPlus()  (nullary ⊕)
-  | Base(name, Dim)                -- abstract/external atomic space
+  -- (no Base atom: ℝⁿ = ⊕ⁿ Scalar; Scalar is the only ground)
   | SVar(α)                        -- space variable, bound by a Lam over `space`
   | Dual(Space)                    -- s*
   | OPlus(Space, …)                -- n-ary ⊕
@@ -214,20 +214,6 @@ class Scalar:
 
 
 @dataclass(frozen=True)
-class Base:
-    """An abstract/external atomic space ``Base(name, dim)`` (for foreign fns)."""
-
-    name: str
-    dim: Dim
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "dim", as_dim(self.dim))
-
-    def __repr__(self) -> str:
-        return f"Base({self.name!r}, {self.dim!r})"
-
-
-@dataclass(frozen=True)
 class SVar:
     """A space variable, bound by a ``Lam`` over the sort ``space`` (`20 §5`)."""
 
@@ -421,13 +407,12 @@ class SpaceMeta:
 
 # A Space is any of the node types above.
 Space = (
-    Scalar | Base | SVar | Dual | OPlus | OProd | OPlusRep
+    Scalar | SVar | Dual | OPlus | OProd | OPlusRep
     | Ker | Img | CoKer | CoImg | WithInner | App | SpaceMeta
 )
 
 _SPACE_TYPES = (
     Scalar,
-    Base,
     SVar,
     Dual,
     OPlus,
@@ -491,8 +476,11 @@ def bot() -> OPlus:
     return OPlus(())
 
 
-def base(name: str, dim: object) -> Base:
-    return Base(name, as_dim(dim))
+def base(name: str, dim: object) -> OPlusRep:
+    """A primitive ``ℝⁿ`` — grounded on ``Scalar`` as ``⊕ⁿ ℝ`` (`Base` is gone; `Scalar` is
+    the only atom).  ``name`` is accepted for call-site compatibility but carries no identity
+    (two equal-dimension primitives are the SAME space)."""
+    return OPlusRep(as_dim(dim), Scalar())
 
 
 def svar(name: str) -> SVar:
@@ -570,7 +558,6 @@ __all__ = [
     "Space",
     "SpaceMeta",
     "Scalar",
-    "Base",
     "SVar",
     "Dual",
     "OPlus",

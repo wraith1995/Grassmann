@@ -404,8 +404,8 @@ def test_osum_n_symbolic():
 
 
 def test_basis_dual_and_prod():
-    bV = G.base_basis("V")
-    bW = G.base_basis("W")
+    bV = G.list_basis(G.var("v", G.space("V", 2)))
+    bW = G.list_basis(G.var("w", G.space("W", 2)))
     from grassmann.core import basis as B
 
     assert (~bV).node == B.dual_basis(bV.node)

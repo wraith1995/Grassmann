@@ -119,7 +119,8 @@ def _ambient_dim(V: G.Expr) -> int:
     from grassmann.core import space as _s
 
     node = V.node if hasattr(V, "node") else V
-    dim = node.dim if isinstance(node, _s.Base) else None
+    # ℝⁿ = ⊕ⁿ Scalar (OPlusRep(n, Scalar)); the ambient dim is the repeat count.
+    dim = node.count if isinstance(node, _s.OPlusRep) else None
     if isinstance(dim, _s.DimLit):
         return dim.value
     if isinstance(dim, int):

@@ -469,12 +469,6 @@ def _dim_scalar():
     return _dim_ex("The field ℝ — a single dimension.", "R  # scalar()", C.scalar(), 1)
 
 
-@_ex("Base")
-def _dim_base():
-    return _dim_ex("A named primitive space of its declared dimension.",
-                   'space("V", 3)', C.base("V", 3), 3)
-
-
 @_ex("Dual")
 def _dim_dual():
     return _dim_ex("The dual `s*` has the same dimension as `s`.",
@@ -674,14 +668,14 @@ def _struct_lam():
 def _struct_frame():
     V = C.base("V", 3)
     x = C.var("x", V)
-    fr = C.frame(x, C.base_basis("V"))
+    fr = C.frame(x, C.list_basis(x))
     _ck(isinstance(fr, C.Frame) and fr.var is x)
     return Example(
         "A basis that VARIES with a runtime value `x` (the moving/pointwise frame). Basis-tower "
         "machinery — consumed through the basis tower, not lowered as a value.",
-        "frame(x, base_basis(\"V\"))",
+        "frame(x, list_basis(x))",
         facts=[("binding var", "x : V"),
-               ("basis body", "BaseBasis(\"V\")"),
+               ("basis body", "ListBasis(x)"),
                ("role", "value → basis (a frame); not a value node")],
         kind="struct")
 
@@ -760,9 +754,23 @@ def _conv(to, via, b_from, b_to, expected, feeds=None) -> Conv:
     return Conv(to, via, _show(m))
 
 
-_V3 = C.base("V", 3)
-_STD3 = default_basis(_V3)
-_PERM = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])  # cols e2,e3,e1
+def _listb(name: str, cols: np.ndarray):
+    """An explicit ``ListBasis`` (the *term basis*) of ``ℝⁿ`` whose columns are ``cols``.
+
+    Returns ``(basis, feeds)`` — each basis vector is a Term var fed the matching column.
+    """
+    n_amb = cols.shape[0]
+    sp = C.base(name, n_amb)
+    vs = [C.var(f"{name}{i}", sp) for i in range(cols.shape[1])]
+    feeds = {v: cols[:, i] for i, v in enumerate(vs)}
+    return C.list_basis(*vs), feeds
+
+
+def _std(n: int):
+    """The standard basis of ``ℝⁿ = ⊕ⁿ Scalar`` ⇒ ``BasisRep(n, ScalarBasis)`` (identity)."""
+    return default_basis(C.base("V", n))
+
+
 _ROT = np.array([[2.0, 1.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]])
 
 
@@ -776,43 +784,20 @@ def _c_scalar_self():
 
 @_cv("ScalarBasis")
 def _c_scalar_note():
-    # Addresses the misconception: ℝ is 1-D, there is no x/y/z to convert to.
     return Conv("(no x/y/z — ℝ is one-dimensional)",
-                "a chosen unit/direction lives in a 1-D *Base* ℝ¹ (a different space) — see "
-                "BaseBasis; within Scalar the only change of basis is the identity")
-
-
-# --- BaseBasis (Base V, dim 3) --------------------------------------------
-@_cv("BaseBasis")
-def _c_base_self():
-    return _conv("the same standard basis",
-                 "identical bases ⇒ identity (cob short-circuits)",
-                 _STD3, _STD3, np.eye(3))
-
-
-@_cv("BaseBasis")
-def _c_base_perm():
-    # "convert to x/y/z": the standard basis to a permuted/axis-relabeled basis.
-    return _conv("an axis-permuted basis (columns e₂,e₃,e₁)",
-                 "numeric matmul — realize both toward ambient, M = pinv(C_to)·C_from = P⁻¹",
-                 _STD3, B.base_basis("V", _PERM), np.linalg.inv(_PERM))
-
-
-@_cv("BaseBasis")
-def _c_base_rot():
-    return _conv("a rotated/scaled explicit basis",
-                 "numeric matmul  M = pinv(ROT)·I = ROT⁻¹",
-                 _STD3, B.base_basis("V", _ROT), np.linalg.inv(_ROT))
+                "ℝ has a single basis (the unit); the only change of basis is the identity. A "
+                "non-standard basis of ℝⁿ (n>1) is a `ListBasis` of n term vectors.")
 
 
 # --- DualBasis (V*) -------------------------------------------------------
 @_cv("DualBasis")
 def _c_dual():
-    primal = _cob(_STD3, B.base_basis("V", _ROT))
-    return _conv("the dual of a rotated basis (a covector cob)",
+    rot, feeds = _listb("r", _ROT)
+    primal = _cob(_std(3), rot, feeds)
+    return _conv("the dual of a rotated term basis (a covector cob)",
                  "DualBasis→DualBasis ⇒ (primal cob)⁻ᵀ",
-                 B.dual_basis(_STD3), B.dual_basis(B.base_basis("V", _ROT)),
-                 np.linalg.inv(primal).T)
+                 B.dual_basis(_std(3)), B.dual_basis(rot),
+                 np.linalg.inv(primal).T, feeds)
 
 
 # --- PrimalBasis ----------------------------------------------------------
@@ -830,25 +815,26 @@ def _c_primal():
 def _c_sum():
     A = np.array([[2.0, 0.0], [1.0, 1.0]])
     Bm = np.array([[3.0]])
-    from_b = B.basis_sum(B.base_basis("V", A), B.base_basis("W", Bm))
-    to_b = B.basis_sum(default_basis(C.base("V", 2)), default_basis(C.base("W", 1)))
+    la, fa = _listb("a", A)
+    lb, fb = _listb("b", Bm)
+    from_b = B.basis_sum(la, lb)
+    to_b = B.basis_sum(_std(2), _std(1))
     exp = np.zeros((3, 3))
     exp[:2, :2] = A
     exp[2:, 2:] = Bm
-    return _conv("another ⊕ basis (per-summand bases changed)",
+    return _conv("another ⊕ basis (per-summand term bases changed)",
                  "BasisSum→BasisSum ⇒ block-diagonal of the per-summand cobs",
-                 from_b, to_b, exp)
+                 from_b, to_b, exp, {**fa, **fb})
 
 
 # --- BasisProd (V⊗W) ------------------------------------------------------
 @_cv("BasisProd")
 def _c_prod():
     J, imgb, projb = _img()
-    base2 = B.base_basis("Re2", np.eye(2))
     return _conv("another ⊗ basis (a factor changed: ImageBasis* → ProjectedBasis*)",
                  "BasisProd→BasisProd ⇒ Kronecker product of the per-factor cobs",
-                 B.basis_prod(B.dual_basis(imgb), base2),
-                 B.basis_prod(B.dual_basis(projb), base2),
+                 B.basis_prod(B.dual_basis(imgb), _std(2)),
+                 B.basis_prod(B.dual_basis(projb), _std(2)),
                  np.kron(np.linalg.inv(_R).T, np.eye(2)), {J: _JSTORED})
 
 
@@ -856,14 +842,15 @@ def _c_prod():
 @_cv("BasisRep")
 def _c_rep():
     A = np.array([[2.0, 0.0], [1.0, 1.0]])
-    from_b = B.basis_rep(3, B.base_basis("V", A))
-    to_b = B.basis_rep(3, default_basis(C.base("V", 2)))
+    la, fa = _listb("a", A)
+    from_b = B.basis_rep(3, la)
+    to_b = B.basis_rep(3, _std(2))
     exp = np.zeros((6, 6))
     for i in range(3):
         exp[2 * i:2 * i + 2, 2 * i:2 * i + 2] = A
-    return _conv("another ⊕ⁿ basis (the repeated inner basis changed)",
+    return _conv("another ⊕ⁿ basis (the repeated inner term basis changed)",
                  "BasisRep→BasisRep ⇒ block-repeat of the inner cob (n copies)",
-                 from_b, to_b, exp)
+                 from_b, to_b, exp, fa)
 
 
 # --- ProjectedBasis (Img(J)) ----------------------------------------------
@@ -926,11 +913,11 @@ def _c_wib():
 # --- CompleteBasis --------------------------------------------------------
 @_cv("CompleteBasis")
 def _c_complete():
-    sub = B.base_basis("V", np.array([[1.0], [0.0], [0.0]]))
+    sub, fs = _listb("sub", np.array([[1.0], [0.0], [0.0]]))
     comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
     return _conv("the standard ambient basis",
                  "realize `[ sub | complement ]` then compose; here = the completed matrix",
-                 B.complete_basis(sub, comp), default_basis(C.base("V", 3)), np.eye(3))
+                 B.complete_basis(sub, comp), _std(3), np.eye(3), fs)
 
 
 # --- Abstract bases: conversion is defined only after instantiation/reduction ---

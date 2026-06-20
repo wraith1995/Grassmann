@@ -21,7 +21,6 @@ from collections.abc import Hashable
 from typing import assert_never
 
 from grassmann.core.space import (
-    Base,
     CoImg,
     CoKer,
     Dim,
@@ -67,8 +66,6 @@ def dim_of(s: Space) -> Dim:
     match s:
         case Scalar():
             return DimLit(1)
-        case Base():
-            return s.dim
         case SVar():
             # |SVar α| = δα = dim(α) — an opaque static Nat keyed by the space var.
             return DimOf(s)

@@ -44,7 +44,6 @@ AUTHORED = DOCS / "_authored"
 
 SPACES = [
     ("Scalar", "scalar", "R"),
-    ("Base", "base", "space"),
     ("SVar", "svar", "svar"),
     ("Dual", "dual", "~ / dual"),
     ("OPlus", "oplus", "& / osum"),
@@ -108,7 +107,6 @@ TERMS = [
 
 BASES = [
     ("ScalarBasis", "scalar_basis", "scalar_basis"),
-    ("BaseBasis", "base_basis", "base_basis"),
     ("BVar", "bvar", None),
     ("DualBasis", "dual_basis", None),
     ("PrimalBasis", "primal_basis", None),

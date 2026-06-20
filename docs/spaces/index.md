@@ -2,12 +2,11 @@
 
 Every space constructor, its meaning, how it is built, how it is represented, and how it converts. Approve each by setting `status: approved` in its `docs/_authored/` file and re-running `python tools/gen_docs.py`.
 
-**Progress: 0 approved · 21 in review · 0 draft (of 21)**
+**Progress: 0 approved · 20 in review · 0 draft (of 20)**
 
 | node | status |
 |---|---|
 | [`Scalar`](scalar.md) | 🟡 in review |
-| [`Base`](base.md) | 🟡 in review |
 | [`SVar`](s-var.md) | 🟡 in review |
 | [`Dual`](dual.md) | 🟡 in review |
 | [`OPlus`](o-plus.md) | 🟡 in review |

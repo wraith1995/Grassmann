@@ -343,7 +343,7 @@ def test_type_function_pi():
 
 
 def test_basis_tower_mirror_and_repr():
-    b = B.basis_prod(B.scalar_basis(), B.dual_basis(B.base_basis("e")))
+    b = B.basis_prod(B.scalar_basis(), B.dual_basis(B.basis_rep(3, B.scalar_basis())))
     assert isinstance(b, B.BasisProd)
     rebuilt = eval(repr(b), _repr_namespace())
     assert rebuilt == b

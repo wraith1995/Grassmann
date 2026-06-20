@@ -19,9 +19,9 @@ from __future__ import annotations
 
 from grassmann.core.space import (
     App,
-    Base,
     CoImg,
     CoKer,
+    DimLit,
     Dual,
     Img,
     Ker,
@@ -37,6 +37,14 @@ from grassmann.core.space import (
 )
 
 from .dims import dim_eq
+
+
+def _expand_rep(s: Space) -> Space:
+    """Expand a static-count ``OPlusRep(n, s)`` to the explicit ``OPlus(s, …, s)`` (else
+    pass through), so ``⊕ⁿ s`` and ``⊕(s,…,s)`` are unified as the same space."""
+    if isinstance(s, OPlusRep) and isinstance(s.count, DimLit):
+        return OPlus(tuple([s.space] * s.count.value))
+    return s
 
 
 class UnifyError(Exception):
@@ -153,12 +161,6 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             if a.name != b.name:
                 raise UnifyError(f"space variable mismatch: {a.name} ~ {b.name}")
             return
-        case (Base(), Base()):
-            if a.name != b.name:
-                raise UnifyError(f"base space name mismatch: {a.name!r} ~ {b.name!r}")
-            if not dim_eq(a.dim, b.dim):
-                raise UnifyError(f"base {a.name!r} dim mismatch: {a.dim!r} ≢ {b.dim!r}")
-            return
         case (Dual(), Dual()):
             unify(a.space, b.space, store)
             return
@@ -172,6 +174,12 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             if not dim_eq(a.count, b.count):
                 raise UnifyError(f"⊕ⁿ count mismatch: {a.count!r} ≢ {b.count!r}")
             unify(a.space, b.space, store)
+            return
+        # ``⊕ⁿ s`` (OPlusRep) and the explicit ``⊕(s,…,s)`` (OPlus) are the SAME space (the new
+        # ground ``ℝⁿ = ⊕ⁿ Scalar`` can appear either way); a static-count OPlusRep expands to
+        # OPlus and unifies component-wise.
+        case (OPlusRep(), OPlus()) | (OPlus(), OPlusRep()):
+            unify(_expand_rep(a), _expand_rep(b), store)
             return
         case (WithInner(), WithInner()):
             unify(a.space, b.space, store)

@@ -10,9 +10,9 @@ Spaces and terms carry a concrete example — a **worked input→output**, a **d
 
 | category | approved | in review | draft |
 |---|---|---|---|
-| [Spaces](spaces/index.md) | 0/21 | 21 | 0 |
+| [Spaces](spaces/index.md) | 0/20 | 20 | 0 |
 | [Terms](terms/index.md) | 0/34 | 34 | 0 |
-| [Bases](bases/index.md) | 0/15 | 15 | 0 |
+| [Bases](bases/index.md) | 0/14 | 14 | 0 |
 
 **Marking statuses.** Either edit a node's `docs/_authored/<category>/<node>.md` (`status: draft|review|approved`) and re-run `python tools/gen_docs.py`, or — to mark from the site — run `python tools/review_server.py` alongside `mkdocs serve` and click the **status buttons** on any node page (they write back to the repo and the page reloads with the new badge).
 

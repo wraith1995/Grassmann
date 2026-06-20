@@ -14,7 +14,7 @@ inner cob `n` times.
 
 How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-### → another ⊕ⁿ basis (the repeated inner basis changed)
+### → another ⊕ⁿ basis (the repeated inner term basis changed)
 
 **Mechanism (`cob`):** BasisRep→BasisRep ⇒ block-repeat of the inner cob (n copies)
 
