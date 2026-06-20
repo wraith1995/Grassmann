@@ -131,7 +131,7 @@ the coordinate-free truth:
   than rejected: the mismatched operand is changed into the slot-consistent basis through the FFS
   realization seam, so the result is correct regardless of how the slots were pinned.
     - The FFS-aware cob is `_basis_cob_matrix` → `_ffs_cob_matrix`: it realizes both bases toward the
-      ambient/codomain coords through the SVD/QR seam (`_realize_basis_ambient`, sharing the
+      ambient/codomain coords through the SVD/QR seam (`realize_basis_cols`, sharing the
       `_realize_ffs_by_which` memo) and composes `pinv(C_to)·C_from` (a pseudo-inverse, since the FFS
       column matrices are non-square), with the `41 §2` `DualBasis→DualBasis ⇒ (·)⁻ᵀ` rule for
       covectors.  `cob.realize_basis` still refuses FFS bases — only this represent-level path, which
@@ -143,6 +143,34 @@ the coordinate-free truth:
       involved, so orthonormal/`choose` lowering is byte-identical.
     - `test_*_mismatched_*_reconciles` (feed the same geometric value through the inconsistent pin and
       assert it equals the consistent-pin / coordinate-free result), `test_consistent_pinning_still_works`.
+
+## 2d. Totality — `cob` between ANY two bases, dynamic-rank metric, and movement bases (2026-06-20)
+
+Following §2c, three totality gaps were closed so every (term, basis) combo valid for the space is
+supported and `cob` goes between *any two bases of the same space*:
+
+- **`cob` is total** (`_basis_cob_matrix`, `tests/test_cob_totality.py`).  The pure-matrix
+  `cob` (`cob.py`) is the byte-identical fast path; for a basis it refuses, `_basis_cob_matrix`
+  mirrors the `41 §2` structural rules itself (Kron over `BasisProd`, block-diag over `BasisSum`,
+  block-repeat over `BasisRep`, `(·)⁻ᵀ` over `DualBasis`, strip `WithInnerBasis`) and realizes the
+  **leaves** through the FFS seam, composing `pinv(C_to)·C_from`.  Handles: `ImageBasis ↔
+  ProjectedBasis` (+ duals), structured bases with FFS leaves, and the standard `BaseBasis` (no
+  explicit vectors ⇒ no static dim of its own — sized from the companion basis's ambient dim).
+  `_coerce_basis` (used by `_rep_sum`) now routes through it, so it is total too.
+- **Dynamic-rank metric — `dynamic → dynamic` is always allowed** (`42 §C`).  `_metric_matrix` /
+  `_rep_inner` / `_rep_flat` / `_rep_sharp` previously called `_static_dim`, raising for a generic
+  (no-props) FFS whose rank is a runtime `δ_f`.  They now take `_dyn_dim` (int or `DimAtom`); the
+  orthonormal identity is sized dynamically from the FFS realization's column axis (`_dyn_identity`
+  / `_DynEyeOp`).  So `dot`/`flat`/`sharp` over generic `Img`/`Ker` vectors lower.  The static path
+  stays a plain `np.eye` const.  `test_dynamic_{image,kernel}_inner_product_lowers`.
+- **`embed` uses the operand's active basis** (`_rep_embed`).  It padded `v ∈ Img(J)` into the
+  ambient via the *default* (`ProjectedBasis`/`Q`) columns regardless of `v`'s pin — wrong for an
+  `ImageBasis`-pinned `v` (literal-column coords against `Q` columns).  Now realizes `v`'s active
+  basis columns (`ImageBasis ⇒ J`, default path byte-identical).  `test_embed_uses_operand_basis`.
+
+*Known residual (pre-existing, orthogonal):* a standard `BaseBasis` carries no dimension of its
+own, so it can only be realized when a companion basis supplies the ambient dim (which the total
+cob does).  Standalone realization of a bare standard basis still has no size to use.
 
 The original (now-historical) recommendation follows.
 

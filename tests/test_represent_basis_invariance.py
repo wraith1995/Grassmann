@@ -431,3 +431,78 @@ def test_consistent_pinning_still_works() -> None:
     b = G.var("b", img)
     _projb, imgb = _bases(J)
     represent(G.dot(a, b).node, basis_env={a.node.uid: imgb, b.node.uid: imgb})
+
+
+# ---------------------------------------------------------------------------
+# Movement (`embed`) with a non-default operand basis (`43 §2c` audit).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("Jmath", "dom", "cod"), CASES)
+@pytest.mark.parametrize("which", ["projected", "image"])
+def test_embed_uses_operand_basis(
+    Jmath: np.ndarray, dom: int, cod: int, which: str,
+) -> None:
+    """``embed(v, ambient)`` reconstructs the SAME ambient vector ``J·s`` in either basis.
+
+    ``embed`` pads ``v ∈ Img(J)`` into the ambient via ``P·⟦v⟧``.  ``P`` must be the operand's
+    *active* basis columns: ``ImageBasis`` ⇒ the literal ``J`` columns (coords ``s``),
+    ``ProjectedBasis`` ⇒ ``Q`` (coords ``R·s``).  (Before the fix the ``ImageBasis`` pin used
+    ``Q`` with ``ImageBasis`` coords — a wrong ambient vector.)
+    """
+    from grassmann.embed.builders import embed
+
+    _Rt, Re, J = _setup(dom, cod)
+    img = G.img(J)
+    v = G.var("v", img)
+    term = embed(v, Re)
+    projb, imgb = _bases(J)
+    _Q, Rm = np.linalg.qr(Jmath)
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        s = rng.standard_normal(dom)
+        basis = imgb if which == "image" else projb
+        coord = s if which == "image" else Rm @ s
+        out = represent(term.node, basis_env={v.node.uid: basis}).run(
+            {_key(v): coord, _key(J): Jmath.T}
+        )["result"]
+        assert np.asarray(out, float) == pytest.approx(Jmath @ s)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic-rank FFS: dynamic → dynamic is always allowed (`42 §C`, `43 §2c`).
+#
+# A generic (no-props) map has a runtime rank δ_f; an inner product over its image/kernel
+# vectors must lower (the orthonormal metric is a δ×δ identity sized at run time).
+# ---------------------------------------------------------------------------
+
+# rank-2 4×4 matrix (generic ⇒ dynamic rank).
+_GEN = np.array([[1.0, 0.0, 2.0, 0.0], [0.0, 1.0, 0.0, 3.0],
+                 [1.0, 1.0, 2.0, 3.0], [2.0, 0.0, 4.0, 0.0]])
+
+
+def _dynamic_ffs_dot(space_ctor) -> None:
+    V = G.space("V", 4)
+    W = G.space("W", 4)
+    f = G.var("f", V >> W)  # no props ⇒ generic ⇒ dynamic rank δ_f
+    ffs = space_ctor(f)
+    a = G.var("a", ffs)
+    b = G.var("b", ffs)
+    prog = represent(G.dot(a, b).node)  # default ProjectedBasis (orthonormal ⇒ identity δ×δ)
+    rng = np.random.default_rng(0)
+    for _ in range(4):
+        av = rng.standard_normal(2)  # δ resolves to rank 2 at run time
+        bv = rng.standard_normal(2)
+        out = prog.run({_key(a): av, _key(b): bv, _key(f): _GEN.T})["result"]
+        # ProjectedBasis (SVD-U) is orthonormal ⇒ the inner product is the raw coord dot.
+        assert float(out) == pytest.approx(float(av @ bv))
+
+
+def test_dynamic_image_inner_product_lowers() -> None:
+    """``dot`` over two vectors of a *generic* (dynamic-rank) image lowers and is correct."""
+    _dynamic_ffs_dot(G.img)
+
+
+def test_dynamic_kernel_inner_product_lowers() -> None:
+    """``dot`` over two vectors of a *generic* (dynamic-rank) kernel lowers and is correct."""
+    _dynamic_ffs_dot(G.ker)

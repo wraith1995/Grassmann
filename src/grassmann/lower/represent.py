@@ -44,7 +44,18 @@ from grassmann.infer.properties import map_props
 
 from ._dims import DynamicDim, dim_of
 from .choose import choose
-from .cob import CobError, _basis_eq, cob, realize_basis
+from .cob import (
+    CobError,
+    _basis_eq,
+    _block_diag,
+    _block_repeat,
+    _count_int,
+    _identity,
+    _inv_transpose,
+    _kron,
+    cob,
+    realize_basis,
+)
 from .provenance import LowerProv
 from .space_basis import (
     FfsRealization,
@@ -830,78 +841,118 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 
 
 def _basis_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
-    """Change-of-basis matrix ``M`` (from-coords → to-coords), FFS-aware (`43 §2c`).
+    """Change-of-basis matrix ``M`` (from-coords → to-coords) — **total** over bases (`43 §2c`).
 
-    Uses the pure-matrix :func:`~grassmann.lower.cob.cob` when it applies; for an FFS basis
-    (which ``cob`` refuses) it realizes both sides toward the ambient coords through the FFS
-    SVD/QR seam and composes ``pinv(C_to) · C_from`` (the §2 "convert toward standard, then
-    out" shape, but with a pseudo-inverse for the non-square FFS column matrices).
+    Goes between *any two bases of the same space*.  The pure-matrix
+    :func:`~grassmann.lower.cob.cob` is the fast path (byte-identical) for bases it can
+    realize; for a basis it refuses — an FFS basis (``ImageBasis``/``ProjectedBasis``, whose
+    columns come from the SVD/QR seam) or a structured basis with an FFS leaf — this mirrors
+    the `41 §2` structural rules (Kron over ``BasisProd``, block-diag over ``BasisSum``,
+    block-repeat over ``BasisRep``, inv-transpose over ``DualBasis``, strip ``WithInnerBasis``)
+    and realizes the leaves through the FFS seam, composing ``pinv(C_to)·C_from`` (a
+    pseudo-inverse, since the FFS column matrices are non-square).
     """
     try:
-        return cob(ctx.prog, from_basis, to_basis)
-    except CobError:
-        return _ffs_cob_matrix(ctx, from_basis, to_basis)
+        return cob(ctx.prog, from_basis, to_basis)  # pure-matrix fast path (byte-identical)
+    except (CobError, DynamicDim):
+        pass
+    if _basis_eq(from_basis, to_basis):
+        return _identity_like(ctx, from_basis)
+    match (from_basis, to_basis):
+        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):
+            return _kron(ctx.prog, [
+                _basis_cob_matrix(ctx, f, t) for f, t in zip(fs, ts, strict=True)
+            ])
+        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):
+            return _block_diag(ctx.prog, [
+                _basis_cob_matrix(ctx, f, t) for f, t in zip(fs, ts, strict=True)
+            ])
+        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:
+            return _block_repeat(ctx.prog, _basis_cob_matrix(ctx, fb, tb), _count_int(fn))
+        case (B.DualBasis(fb), B.DualBasis(tb)):
+            return _inv_transpose(ctx.prog, _basis_cob_matrix(ctx, fb, tb))
+        case (B.WithInnerBasis(fb, _), _):
+            return _basis_cob_matrix(ctx, fb, _strip_withinner(to_basis))
+        case (_, B.WithInnerBasis(tb, _)):
+            return _basis_cob_matrix(ctx, _strip_withinner(from_basis), tb)
+        case _:
+            return _ffs_cob_matrix(ctx, from_basis, to_basis)
 
 
 def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
-    """The FFS change-of-basis matrix via the realization seam (`43 §2c`)."""
+    """The leaf FFS change-of-basis matrix via the realization seam (`43 §2c`).
+
+    Realizes both leaves toward the ambient coords (``realize_basis_cols``, which routes FFS /
+    ``ListBasis`` through the seam) and composes ``pinv(C_to)·C_from``; a covariant
+    (``DualBasis``) pair adds the `41 §2` ``(·)⁻ᵀ`` rule.
+    """
     from_dual, to_dual = _peel_dual(from_basis), _peel_dual(to_basis)
     if from_dual != to_dual:
         raise RepresentError(
-            f"cannot reconcile FFS bases of differing variance: {from_basis!r} vs {to_basis!r}"
+            f"cob: bases of differing variance: {from_basis!r} vs {to_basis!r}"
         )
-    c_from, n_dom, n_cod = _realize_basis_ambient(ctx, _strip_to_ffs(from_basis))
-    c_to, _, _ = _realize_basis_ambient(ctx, _strip_to_ffs(to_basis))
-    # primal cob (from→to) = pinv(C_to) · C_from   (n_dom × n_dom).
+    fp, tp = _strip_variance(from_basis), _strip_variance(to_basis)
+    c_from = _realize_leaf_cols(ctx, fp, peer=tp)
+    c_to = _realize_leaf_cols(ctx, tp, peer=fp)
+    n_amb, k_from = _shape_of(c_from)
+    _, k_to = _shape_of(c_to)
+    # primal cob (from→to) = pinv(C_to) · C_from   (k_to × k_from).
     [pinv_to] = ctx.prog.emit_stmt(
-        pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (n_dom, n_cod))],
+        pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (k_to, n_amb))],
         note="ffs-cob:pinv(C_to)",
     )
     [m_primal] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp("ij,jk->ik"), [pinv_to, c_from],
-        [pa.OutSpec("cob:pinv(C_to)·C_from", (n_dom, n_dom))],
+        [pa.OutSpec("cob:pinv(C_to)·C_from", (k_to, k_from))],
         note="ffs-cob:pinv(C_to)·C_from",
     )
     if not from_dual:
         return m_primal
-    # dual (covector) cob = (M_primal)⁻ᵀ  (the `41 §2` DualBasis→DualBasis rule).
-    [m_inv] = ctx.prog.emit_stmt(
-        pa.InvOp(), [m_primal], [pa.OutSpec("cob:inv", (n_dom, n_dom))], note="ffs-cob:inv",
-    )
+    return _inv_transpose(ctx.prog, m_primal)
+
+
+def _realize_leaf_cols(ctx: _Ctx, leaf: B.Basis, *, peer: B.Basis) -> pa.SymArray:
+    """Ambient columns of a leaf basis; a standard ``BaseBasis`` (no vectors, hence no static
+    dim of its own) is the ambient *identity*, sized from the ``peer``'s ambient dimension.
+    """
+    try:
+        return realize_basis_cols(ctx, leaf)
+    except CobError:
+        peer_cols = realize_basis_cols(ctx, peer)  # peer carries the ambient (row) dim
+        n = _shape_of(peer_cols)[0]
+        if isinstance(n, int):
+            return _const(ctx, np.eye(n), note="cob:standard-basis-identity")
+        [out] = ctx.prog.emit_stmt(
+            _DynEyeRowsOp(), [peer_cols], [pa.OutSpec("std-id-dyn", (n, n))],
+            note="cob:standard-basis-identity-dyn",
+        )
+        return out
+
+
+def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
+    """A cob identity sized to ``basis`` — static ``eye`` or a runtime ``δ×δ`` from the seam."""
+    cols = realize_basis_cols(ctx, _strip_variance(basis))
+    k = _shape_of(cols)[1]
+    if isinstance(k, int):
+        return _identity(ctx.prog, k, "cob:id-ffs")
     [out] = ctx.prog.emit_stmt(
-        _TransposeOp(), [m_inv], [pa.OutSpec("cob:inv-T", (n_dom, n_dom))], note="ffs-cob:⁻ᵀ",
+        _DynEyeOp(), [cols], [pa.OutSpec("cob:id-dyn", (k, k))], note="cob:id-dyn",
     )
     return out
 
 
-def _realize_basis_ambient(ctx: _Ctx, basis: B.Basis) -> tuple[pa.SymArray, int, int]:
-    """Ambient (codomain-coords) column matrix of an FFS ``basis`` + ``(n_dom, n_cod)``.
-
-    Both the literal ``ImageBasis`` (columns ``f(eᵢ)``) and the orthonormal ``ProjectedBasis``
-    (``Q``/SVD-``U``) are realized in the codomain coords through the FFS seam, so a cob
-    between them composes consistently.
-    """
+def _strip_variance(basis: B.Basis) -> B.Basis:
+    """Strip Dual/Primal/WithInner wrappers down to the underlying (leaf) basis."""
     match basis:
-        case B.ImageBasis(f):
-            dom, cod = map_domain_codomain(f)
-            return _realize_image_basis(ctx, f), _static_dim(dom), _static_dim(cod)
-        case B.ProjectedBasis(f, which, _src, _tgt):
-            dom, cod = map_domain_codomain(f)
-            real = _realize_ffs_by_which(ctx, which, f)
-            return real.cols, _static_dim(dom), _static_dim(cod)
-        case _:  # pragma: no cover - guarded by _strip_to_ffs
-            raise RepresentError(f"_realize_basis_ambient: not an FFS basis: {basis!r}")
-
-
-def _strip_to_ffs(basis: B.Basis) -> B.Basis:
-    """Strip Dual/Primal/WithInner wrappers down to the underlying FFS basis."""
-    match basis:
-        case B.ImageBasis() | B.ProjectedBasis():
-            return basis
         case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
-            return _strip_to_ffs(inner)
+            return _strip_variance(inner)
         case _:
-            raise RepresentError(f"_strip_to_ffs: not an FFS basis: {basis!r}")
+            return basis
+
+
+def _strip_withinner(basis: B.Basis) -> B.Basis:
+    """Strip a single ``WithInnerBasis`` wrapper (the metric is metadata, not coordinates)."""
+    return basis.inner if isinstance(basis, B.WithInnerBasis) else basis
 
 
 def _apply_cob_on_axis(
@@ -1459,7 +1510,7 @@ def _rep_inner(
     non-orthonormal ``ImageBasis`` ⇒ the immersed Gram ``JᵀJ``).  The result ``Rep`` is
     tagged with the per-slot basis so downstream bookkeeping stays consistent.
     """
-    n = _static_dim(space)
+    n = _dyn_dim(space, ctx)  # int (static) or DimAtom δ_f (generic FFS rank)
     g = _metric_matrix(ctx, space, n, note="metric:Inner", basis=basis)
     map_space = _synth(e)
     return Rep(g, _inner_map_basis(map_space, basis), map_space)
@@ -1487,7 +1538,7 @@ def _rep_flat(e: T.Flat, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = N
     chain genuinely re-enters the immersed metric instead of silently falling to identity).
     Orthonormal default (``basis is None``) ⇒ ``default_basis`` — byte-identical.
     """
-    n = _static_dim(space)
+    n = _dyn_dim(space, ctx)
     g = _metric_matrix(ctx, space, n, note="metric:Flat=G_s", basis=basis)
     map_space = _synth(e)
     return Rep(g, _inner_map_basis(map_space, basis), map_space)
@@ -1504,7 +1555,7 @@ def _rep_sharp(e: T.Sharp, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None =
     ``s⊗s`` map is tagged with the primal per-slot basis so the produced vector re-enters the
     immersed metric correctly (`43 §2c`).  Orthonormal default ⇒ byte-identical.
     """
-    n = _static_dim(space)
+    n = _dyn_dim(space, ctx)
     primal = _peel_one_dual(basis)
     g = _metric_matrix(ctx, space, n, note="metric:Sharp:G_s", basis=primal)
     [out] = ctx.prog.emit_stmt(
@@ -1558,7 +1609,13 @@ def _rep_embed(e: T.Embed, vector: T.Term, big: S.Space, ctx: _Ctx) -> Rep:
     expected multi-axis tensor.
     """
     v_rep = _rep(vector, ctx)
-    sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
+    # The embedding columns must be the operand's *active* basis vectors in ambient coords —
+    # ``P · ⟦v⟧`` reconstructs the ambient value.  A non-default (``ImageBasis``) pin realizes
+    # its literal columns (`43 §2c`); the default path is byte-identical via ``_subspace_cols``.
+    if _is_immersed_metric_basis(v_rep.basis):
+        P = realize_basis_cols(ctx, v_rep.basis)
+    else:
+        _sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
     big_shape = _shape_of_space(big)  # ambient layout (static); P has rows = Σ|axes|.
     [out] = ctx.prog.emit_stmt(
         _EmbedOp(tuple(big_shape)), [P, v_rep.array],
@@ -1779,10 +1836,14 @@ def _natural_basis(space: S.Space, term: T.Term, ctx: _Ctx) -> B.Basis:
 
 
 def _coerce_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> pa.SymArray:
-    """Change ``rep`` into ``target`` basis (a numeric cob matmul), `41 §2`."""
+    """Change ``rep`` into ``target`` basis (a numeric cob matmul), `41 §2`.
+
+    FFS-total: routes through :func:`_basis_cob_matrix`, which realizes an FFS basis through
+    the SVD/QR seam when the pure-matrix ``cob`` refuses it — so any valid basis is accepted.
+    """
     if _basis_eq(rep.basis, target):
         return rep.array
-    M = cob(ctx.prog, rep.basis, target)
+    M = _basis_cob_matrix(ctx, rep.basis, target)
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp("ij,j->i"), [M, rep.array],
         [pa.OutSpec("cobv", _shape_of(rep.array))], note=note,
@@ -1828,7 +1889,9 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
     cannot handle are realized here (they need ``_rep``): a :class:`~grassmann.core.basis.
     ListBasis` lowers each Term vector and stacks the coordinate columns; an
     :class:`~grassmann.core.basis.ImageBasis` realizes the LITERAL map-application columns
-    (the raw ``f(eᵢ)``, the R/fwd side — `73 Topic 2`).  Everything else defers to
+    (the raw ``f(eᵢ)``, the R/fwd side — `73 Topic 2`); a :class:`~grassmann.core.basis.
+    ProjectedBasis` realizes the orthonormal Q/SVD-U columns through the FFS seam (which the
+    pure-matrix :func:`~grassmann.lower.cob.realize_basis` refuses).  Everything else defers to
     :func:`grassmann.lower.cob.realize_basis`.
     """
     match b:
@@ -1836,6 +1899,8 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return _realize_list_basis(ctx, vectors)
         case B.ImageBasis(f):
             return _realize_image_basis(ctx, f)
+        case B.ProjectedBasis(f, which, _src, _tgt):
+            return _realize_ffs_by_which(ctx, which, f).cols
         case _:
             return realize_basis(ctx.prog, b)
 
@@ -2011,7 +2076,8 @@ def _assert_spd(ctx: _Ctx, g: pa.SymArray, *, note: str) -> None:
 
 
 def _metric_matrix(
-    ctx: _Ctx, space: S.Space, n: int, *, note: str, basis: B.Basis | None = None,
+    ctx: _Ctx, space: S.Space, n: int | pa.DimAtom, *, note: str,
+    basis: B.Basis | None = None,
 ) -> pa.SymArray:
     """The metric matrix ``G_s`` **in the active basis** ``basis`` (`41 §1`/`§3`).
 
@@ -2025,6 +2091,10 @@ def _metric_matrix(
     realized in the ambient/codomain coords (via the FFS realization seam, NOT the generic
     ``cob``) and ``G_cod`` is the codomain metric (identity for a plain ``Base``).  For an
     injective image this is ``JᵀJ``; the dual basis carries its (pseudo-)inverse.
+
+    ``n`` may be a runtime :class:`~polyarray.DimAtom` (a generic FFS rank ``δ_f``): the
+    orthonormal identity is then sized dynamically from the FFS realization (`42 §C`), so a
+    dynamic-rank inner product lowers (``dynamic → dynamic`` is always allowed).
     """
     if _is_immersed_metric_basis(basis):
         return _immersed_gram(ctx, space, basis, note=note + ":immersed")
@@ -2039,7 +2109,25 @@ def _metric_matrix(
         g = _rep(space.metric, ctx).array
         _assert_spd(ctx, g, note=note + ":spd")
         return g
-    return _const(ctx, np.eye(n), note=note + ":identity")
+    if isinstance(n, int):
+        return _const(ctx, np.eye(n), note=note + ":identity")  # static fast path
+    return _dyn_identity(ctx, space, note=note + ":identity-dyn")
+
+
+def _dyn_identity(ctx: _Ctx, space: S.Space, *, note: str) -> pa.SymArray:
+    """A runtime ``δ×δ`` identity for an orthonormal *dynamic-rank* FFS space (`42 §C`).
+
+    The size is the FFS rank ``δ_f``, sourced from the (memoized) SVD/QR realization's column
+    axis — so the orthonormal metric of a generic ``Img``/``Ker``/… inner product is an
+    identity of the runtime rank.  Only reachable when the static fast path raised
+    ``DynamicDim``; the static path stays a plain ``np.eye`` const.
+    """
+    real = _realize_ffs_for_space(ctx, space)
+    delta = _shape_of(real.cols)[1]
+    [out] = ctx.prog.emit_stmt(
+        _DynEyeOp(), [real.cols], [pa.OutSpec("dyn-eye", (delta, delta))], note=note,
+    )
+    return out
 
 
 def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
@@ -2362,6 +2450,22 @@ class _ConstOp:
 
     def __call__(self) -> np.ndarray:
         return np.frombuffer(self.data_bytes, dtype=self.dtype).reshape(self.shape).copy()
+
+
+@dataclass(frozen=True)
+class _DynEyeOp:
+    """A runtime identity sized by a reference array's column axis (the FFS rank ``δ_f``)."""
+
+    def __call__(self, ref: np.ndarray) -> np.ndarray:  # ref is (ambient, δ)
+        return np.eye(int(np.asarray(ref).shape[1]))
+
+
+@dataclass(frozen=True)
+class _DynEyeRowsOp:
+    """A runtime identity sized by a reference array's *row* axis (the ambient dim)."""
+
+    def __call__(self, ref: np.ndarray) -> np.ndarray:  # ref is (ambient, k)
+        return np.eye(int(np.asarray(ref).shape[0]))
 
 
 @dataclass(frozen=True)
