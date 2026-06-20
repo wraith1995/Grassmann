@@ -17,13 +17,13 @@ runtime value.
 A basis that VARIES with a runtime value `x` (the moving/pointwise frame). Basis-tower machinery — consumed through the basis tower, not lowered as a value.
 
 ```python
-frame(x, base_basis("V"))
+frame(x, list_basis(x))
 ```
 
 | | |
 |---|---|
 | binding var | `x : V` |
-| basis body | `BaseBasis("V")` |
+| basis body | `ListBasis(x)` |
 | role | `value → basis (a frame); not a value node` |
 
 ??? note "Test (literal source — input · run · expected assertion)"
@@ -31,7 +31,7 @@ frame(x, base_basis("V"))
     ```python
     V = C.base("V", 3)
     x = C.var("x", V)
-    fr = C.frame(x, C.base_basis("V"))
+    fr = C.frame(x, C.list_basis(x))
     _ck(isinstance(fr, C.Frame) and fr.var is x)
     ```
 

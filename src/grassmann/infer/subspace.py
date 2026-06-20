@@ -15,20 +15,36 @@ from __future__ import annotations
 from grassmann.core.space import (
     CoImg,
     CoKer,
+    DimLit,
+    Dual,
     Img,
     Ker,
     OPlus,
+    OPlusRep,
+    OProd,
     Space,
 )
 
 
+def _norm(s: Space) -> Space:
+    """Canonicalize a space for structural comparison: expand static ``⊕ⁿ s`` to ``⊕(s,…,s)``
+    (recursively), so ``ℝⁿ`` compares equal whether written as ``OPlusRep`` or ``OPlus``."""
+    match s:
+        case OPlusRep(count, inner) if isinstance(count, DimLit):
+            return OPlus(tuple([_norm(inner)] * count.value))
+        case OPlus(spaces):
+            return OPlus(tuple(_norm(x) for x in spaces))
+        case OProd(spaces):
+            return OProd(tuple(_norm(x) for x in spaces))
+        case Dual(inner):
+            return Dual(_norm(inner))
+        case _:
+            return s
+
+
 def _eq(a: Space, b: Space) -> bool:
-    if a == b:
-        return True
-    # Structural equality up to dim-equality on leaves is captured by ==; fall back to
-    # dim comparison for spaces that are equal-by-dimension leaves only when identical
-    # shape. (Reflexivity is the main use.)
-    return False
+    # Compare up to the ``⊕ⁿ ≡ ⊕(…)`` canonical form (the ℝⁿ ground can appear either way).
+    return a == b or _norm(a) == _norm(b)
 
 
 def is_subspace(sub: Space, amb: Space) -> bool:

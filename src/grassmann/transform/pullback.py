@@ -233,18 +233,25 @@ def _tensor_map(S: OProd, T: OProd) -> Term:
 
 
 def _normalize(s: Space) -> Space:
-    """Reject unresolved spaces and expand a *static-count* ``OPlusRep`` to ``OPlus``."""
+    """Reject unresolved spaces and expand *static-count* ``OPlusRep`` to ``OPlus``.
+
+    Recurses into ``⊕`` children so a nested ``⊕ⁿ Scalar`` (the new ``ℝⁿ`` ground) expands the
+    same way whether it sits at the top level or as a summand — so structural summand matching
+    sees one canonical form.
+    """
     if isinstance(s, (SVar, SpaceMeta)):
         raise PullbackError(
             f"pullback: space {s!r} is not fully determined; annotate/realize it first"
         )
     if isinstance(s, OPlusRep):
         if isinstance(s.count, DimLit):
-            return oplus(*([s.space] * s.count.value))
+            return oplus(*([_normalize(s.space)] * s.count.value))
         raise PullbackError(
             f"pullback: symbolic-count direct sum {s!r} is not supported; give a concrete "
             f"count"
         )
+    if isinstance(s, OPlus):
+        return oplus(*(_normalize(x) for x in s.spaces))
     return s
 
 

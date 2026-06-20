@@ -26,7 +26,7 @@ How this basis converts to other bases of the **same space**, and how `cob` hand
 
 ### → (no x/y/z — ℝ is one-dimensional)
 
-**Mechanism (`cob`):** a chosen unit/direction lives in a 1-D *Base* ℝ¹ (a different space) — see BaseBasis; within Scalar the only change of basis is the identity
+**Mechanism (`cob`):** ℝ has a single basis (the unit); the only change of basis is the identity. A non-standard basis of ℝⁿ (n>1) is a `ListBasis` of n term vectors.
 
 ## Built by
 

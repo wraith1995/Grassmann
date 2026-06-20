@@ -40,7 +40,7 @@ How this basis converts to other bases of the **same space**, and how `cob` hand
 
 > ``ListBasis(vectors…)`` — a basis given as an EXPLICIT LIST OF TERM VECTORS.
 > 
-> The first-class, term-level analogue of :class:`BaseBasis`'s precomputed ``vectors``
+> A first-class basis given as explicit Term vectors
 > numpy array: each entry is a :class:`~grassmann.core.term.Term` vector (all of the
 > same space), and the basis is their span in the listed order.  At lowering each
 > vector is represented and the columns are stacked into the basis matrix.

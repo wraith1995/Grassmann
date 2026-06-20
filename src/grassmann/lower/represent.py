@@ -892,8 +892,8 @@ def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.Sym
             f"cob: bases of differing variance: {from_basis!r} vs {to_basis!r}"
         )
     fp, tp = _strip_variance(from_basis), _strip_variance(to_basis)
-    c_from = _realize_leaf_cols(ctx, fp, peer=tp)
-    c_to = _realize_leaf_cols(ctx, tp, peer=fp)
+    c_from = realize_basis_cols(ctx, fp)
+    c_to = realize_basis_cols(ctx, tp)
     n_amb, k_from = _shape_of(c_from)
     _, k_to = _shape_of(c_to)
     # primal cob (from→to) = pinv(C_to) · C_from   (k_to × k_from).
@@ -909,24 +909,6 @@ def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.Sym
     if not from_dual:
         return m_primal
     return _inv_transpose(ctx.prog, m_primal)
-
-
-def _realize_leaf_cols(ctx: _Ctx, leaf: B.Basis, *, peer: B.Basis) -> pa.SymArray:
-    """Ambient columns of a leaf basis; a standard ``BaseBasis`` (no vectors, hence no static
-    dim of its own) is the ambient *identity*, sized from the ``peer``'s ambient dimension.
-    """
-    try:
-        return realize_basis_cols(ctx, leaf)
-    except CobError:
-        peer_cols = realize_basis_cols(ctx, peer)  # peer carries the ambient (row) dim
-        n = _shape_of(peer_cols)[0]
-        if isinstance(n, int):
-            return _const(ctx, np.eye(n), note="cob:standard-basis-identity")
-        [out] = ctx.prog.emit_stmt(
-            _DynEyeRowsOp(), [peer_cols], [pa.OutSpec("std-id-dyn", (n, n))],
-            note="cob:standard-basis-identity-dyn",
-        )
-        return out
 
 
 def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
@@ -1901,42 +1883,20 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return _realize_image_basis(ctx, f)
         case B.ProjectedBasis(f, which, _src, _tgt):
             return _realize_ffs_by_which(ctx, which, f).cols
-        case B.BaseBasis() if isinstance(b.vectors, tuple) or b.backup is not None:
-            return _realize_base_basis(ctx, b)
+        case B.CompleteBasis(sub, complement):
+            # [ realize(sub) | complement ] — realize the sub through the seam (it may be a
+            # term/FFS basis the pure path can't build), then hstack the numeric complement.
+            sub_cols = realize_basis_cols(ctx, sub)
+            comp = _const(ctx, np.asarray(complement, dtype=float), note="complete:complement")
+            n_rows = _shape_of(sub_cols)[0]
+            k = _shape_of(sub_cols)[1] + _shape_of(comp)[1]
+            [out] = ctx.prog.emit_stmt(
+                _HStackOp(), [sub_cols, comp],
+                [pa.OutSpec("complete:hstack", (n_rows, k))], note="complete:[sub|comp]",
+            )
+            return out
         case _:
             return realize_basis(ctx.prog, b)
-
-
-def _realize_base_basis(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
-    """Realize a term-frame / backup-completed :class:`BaseBasis` (`20 §7`).
-
-    The ``vectors`` frame (Term vectors realized via ``_rep``, or a numeric matrix) supplies
-    the primary columns; a ``backup`` basis **completes** them to a full basis when the frame
-    is not a maximal independent set — keeping the independent columns of the frame (RREF /
-    pivoted greedy selection) and filling the missing directions from ``backup``.
-    """
-    frame = _realize_frame_vectors(ctx, b.vectors) if b.vectors is not None else None
-    if b.backup is None:
-        if frame is None:  # pragma: no cover - guarded by realize_basis_cols
-            raise RepresentError(f"BaseBasis {b!r}: nothing to realize")
-        return frame
-    backup = realize_basis_cols(ctx, b.backup)
-    n = _static_dim(b.space) if b.space is not None else _shape_of(backup)[0]
-    if frame is None:
-        return backup
-    [out] = ctx.prog.emit_stmt(
-        _CompleteColsOp(n), [frame, backup],
-        [pa.OutSpec("base-basis:complete", (_shape_of(backup)[0], n))],
-        note="base-basis:RREF-complete(frame|backup)",
-    )
-    return out
-
-
-def _realize_frame_vectors(ctx: _Ctx, vectors: object) -> pa.SymArray:
-    """Realize a ``BaseBasis``/frame ``vectors`` field — a Term tuple or a numeric matrix."""
-    if isinstance(vectors, tuple):
-        return _realize_list_basis(ctx, vectors)  # stack lowered Term columns
-    return _const(ctx, np.asarray(vectors, dtype=float), note="base-basis:numeric-frame")
 
 
 def _realize_list_basis(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
@@ -2495,41 +2455,11 @@ class _DynEyeOp:
 
 
 @dataclass(frozen=True)
-class _DynEyeRowsOp:
-    """A runtime identity sized by a reference array's *row* axis (the ambient dim)."""
+class _HStackOp:
+    """Horizontally stack matrices (columns side by side) — `[A | B | …]`."""
 
-    def __call__(self, ref: np.ndarray) -> np.ndarray:  # ref is (ambient, k)
-        return np.eye(int(np.asarray(ref).shape[0]))
-
-
-@dataclass(frozen=True)
-class _CompleteColsOp:
-    """Complete a (possibly rank-deficient) frame to an ``n``-column basis (`20 §7`).
-
-    Greedy RREF-style selection: keep the frame's linearly-independent columns first, then
-    fill the remaining directions from the backup's columns — each column accepted only if it
-    raises the rank.  The result is an ``(ambient, n)`` full-column-rank basis matrix.
-    """
-
-    n: int
-
-    def __call__(self, frame: np.ndarray, backup: np.ndarray) -> np.ndarray:
-        frame = np.asarray(frame, dtype=float)
-        backup = np.asarray(backup, dtype=float)
-        rows = frame.shape[0]
-        kept = np.zeros((rows, 0))
-        tol = 1e-9
-        for c in [*frame.T, *backup.T]:
-            if kept.shape[1] == self.n:
-                break
-            cand = np.column_stack([kept, c])
-            if np.linalg.matrix_rank(cand, tol=tol) > kept.shape[1]:
-                kept = cand
-        if kept.shape[1] != self.n:
-            raise ValueError(
-                f"BaseBasis completion: frame ⊕ backup span {kept.shape[1]} < {self.n} dims"
-            )
-        return kept
+    def __call__(self, *mats: np.ndarray) -> np.ndarray:
+        return np.hstack([np.asarray(m, dtype=float) for m in mats])
 
 
 @dataclass(frozen=True)

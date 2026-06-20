@@ -15,16 +15,16 @@ change-of-basis: `realize(DualBasis(b)) = realize(b)⁻ᵀ`, and `cob(dual b →
 
 How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-### → the dual of a rotated basis (a covector cob)
+### → the dual of a rotated term basis (a covector cob)
 
 **Mechanism (`cob`):** DualBasis→DualBasis ⇒ (primal cob)⁻ᵀ
 
 **Change-of-basis matrix**
 
 ```
-[[2., 0., 0.],
- [1., 3., 0.],
- [0., 0., 1.]]
+[[ 2., -0.,  0.],
+ [ 1.,  3.,  0.],
+ [ 0.,  0.,  1.]]
 ```
 
 ## Fields

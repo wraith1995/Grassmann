@@ -356,7 +356,7 @@ def test_frame_is_basis_machinery_not_a_value_node() -> None:
     """
     V = C.base("V", 3)
     x = C.var("x", V)
-    fr = C.frame(x, C.base_basis("V"))
+    fr = C.frame(x, C.list_basis(x))
     assert isinstance(fr, C.Frame)
     assert fr.var is x
     # It is not a value node in the represent dispatch (no `_rep_frame`).
@@ -405,12 +405,12 @@ def test_oplusrep_dim_is_count_times() -> None:
     assert _dim_shape(C.oplus_rep(4, C.base("V", 2))) == (8,)
 
 
-def test_base_default_basis_is_self_sizing_standard() -> None:
-    """`Base` — default coordinate system is the standard `BaseBasis` carrying its space."""
-    sp = C.base("V", 3)
+def test_base_default_basis_is_basisrep_of_scalar() -> None:
+    """`ℝⁿ = ⊕ⁿ Scalar` — default coordinate system is `BasisRep(n, ScalarBasis)`."""
+    sp = C.base("V", 3)  # OPlusRep(3, Scalar)
     db = default_basis(sp)
-    assert isinstance(db, C.BaseBasis)
-    assert db.vectors is None and db.space == sp
+    assert isinstance(db, C.BasisRep)
+    assert isinstance(db.basis, C.ScalarBasis)
 
 
 def test_img_default_basis_is_orthonormal_range() -> None:

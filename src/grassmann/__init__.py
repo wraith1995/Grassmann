@@ -42,7 +42,6 @@ from .embed import (
     Space,
     Type,
     assert_,
-    base_basis,
     basis,
     bfn,
     bij,
@@ -217,7 +216,6 @@ __all__ = [
     "typefn",
     # bases & frames
     "scalar_basis",
-    "base_basis",
     "basis",
     "image_basis",
     "projected_basis",

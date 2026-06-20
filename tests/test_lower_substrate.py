@@ -7,16 +7,18 @@ and run through ``polyarray.Program.run`` on small numeric examples.
 
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 import polyarray as pa
 import pytest
 
 import grassmann.core as C
+import grassmann.lower.represent  # noqa: F401 (load the module for _Ctx/_basis_cob_matrix)
 from grassmann.core import props as P
 from grassmann.lower import (
     candidate_bases,
     choose,
-    cob,
     default_basis,
     realize_ffs_basis,
     score_basis,
@@ -24,9 +26,32 @@ from grassmann.lower import (
 )
 from grassmann.lower.cob import _basis_eq
 
+_RM = sys.modules["grassmann.lower.represent"]
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+
+def _listb(name: str, cols: np.ndarray):
+    """An explicit ``ListBasis`` (the term basis) of ``ℝⁿ`` whose columns are ``cols``.
+
+    Returns ``(basis, feeds)``: each basis vector is a Term var fed the matching column.
+    """
+    n_amb = cols.shape[0]
+    sp = C.base(name, n_amb)
+    vs = [C.var(f"{name}{i}", sp) for i in range(cols.shape[1])]
+    feeds = {f"{v.name}_{v.uid}": cols[:, i] for i, v in enumerate(vs)}
+    return C.list_basis(*vs), feeds
+
+
+def _cob_run(b_from, b_to, feeds: dict) -> np.ndarray:
+    """The change-of-basis matrix ``b_from → b_to`` via the represent-level (total) cob."""
+    prog = pa.Program("cob")
+    ctx = _RM._Ctx(prog=prog, basis_env={}, inputs={})
+    m = _RM._basis_cob_matrix(ctx, b_from, b_to)
+    prog.add_output("M", m)
+    return np.asarray(prog.run(feeds)["M"], float)
 
 
 def _sym_matrix(prog: pa.Program, Mn: np.ndarray, prefix: str):
@@ -62,24 +87,27 @@ def test_default_basis_scalar() -> None:
     assert cands == (C.scalar_basis(),)
 
 
+def _rb(n: int):
+    """The default basis of ``space(_, n)`` = ``⊕ⁿ Scalar`` ⇒ ``BasisRep(n, ScalarBasis)``."""
+    return C.basis_rep(n, C.scalar_basis())
+
+
 def test_default_basis_dual() -> None:
-    # ``_basis_eq`` (not ``==``): the default standard basis now carries its space as sizing
-    # metadata (`20 §7`), which ``_basis_eq`` treats as identity-irrelevant.
     db, _ = space_basis(C.dual(C.base("V", 3)))
-    assert _basis_eq(db, C.dual_basis(C.base_basis("V")))
+    assert _basis_eq(db, C.dual_basis(_rb(3)))
 
 
 def test_default_basis_oplus_oprod() -> None:
     V, W = C.base("V", 2), C.base("W", 3)
     db_sum, _ = space_basis(C.oplus(V, W))
-    assert _basis_eq(db_sum, C.basis_sum(C.base_basis("V"), C.base_basis("W")))
+    assert _basis_eq(db_sum, C.basis_sum(_rb(2), _rb(3)))
     db_prod, _ = space_basis(C.oprod(V, W))
-    assert _basis_eq(db_prod, C.basis_prod(C.base_basis("V"), C.base_basis("W")))
+    assert _basis_eq(db_prod, C.basis_prod(_rb(2), _rb(3)))
 
 
 def test_default_basis_oplusrep() -> None:
     db, _ = space_basis(C.oplus_rep(4, C.base("V", 2)))
-    assert _basis_eq(db, C.basis_rep(4, C.base_basis("V")))
+    assert _basis_eq(db, C.basis_rep(4, _rb(2)))
 
 
 def test_default_basis_with_inner_is_g_orthonormal() -> None:
@@ -89,14 +117,14 @@ def test_default_basis_with_inner_is_g_orthonormal() -> None:
     # default is the g-orthonormal WithInnerBasis (metric becomes identity in coords).
     assert isinstance(db, C.WithInnerBasis)
     # candidate: reuse the underlying standard basis (no whitening cob).
-    assert any(_basis_eq(c, C.base_basis("V")) for c in cands)
+    assert any(_basis_eq(c, _rb(2)) for c in cands)
 
 
 def test_default_basis_linear_map_space() -> None:
     V, W = C.base("V", 2), C.base("W", 3)
     sp = C.linear_map_space(V, W)  # ~V * W
     db, _ = space_basis(sp)
-    assert _basis_eq(db, C.basis_prod(C.dual_basis(C.base_basis("V")), C.base_basis("W")))
+    assert _basis_eq(db, C.basis_prod(C.dual_basis(_rb(2)), _rb(3)))
 
 
 def test_default_basis_img_is_orthonormal_range() -> None:
@@ -109,7 +137,7 @@ def test_default_basis_img_is_orthonormal_range() -> None:
     # the literal map-application ImageBasis(f) is offered as a candidate alternative.
     assert any(isinstance(c, C.ImageBasis) for c in cands)
     # candidate includes the codomain's standard basis (numeric-result-wins foil).
-    assert any(_basis_eq(c, C.base_basis("W")) for c in cands)
+    assert any(_basis_eq(c, _rb(4)) for c in cands)
 
 
 def test_default_basis_ffs_projected() -> None:
@@ -133,99 +161,77 @@ def test_default_basis_svar_is_bvar() -> None:
 # ===========================================================================
 
 
+# Explicit bases of ℝⁿ are now ``ListBasis`` (the term basis); cob through them runs at the
+# represent level (their vectors are Terms realized via `_rep`).  ``A``/``Bm`` are the basis
+# columns in standard coords; ``cob(A→B) = pinv(C_B)·C_A = Bm⁻¹·A`` for square invertible bases.
+_A = np.array([[1.0, 1.0], [0.0, 2.0]])
+_BM = np.array([[2.0, 0.0], [1.0, 1.0]])
+_EXP = np.linalg.solve(_BM, _A)  # = Bm⁻¹·A
+
+
 def test_cob_identical_basis_is_identity() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])
-    b = C.base_basis("R2", A)
-    prog = pa.Program("id")
-    M = cob(prog, b, b)
-    prog.add_output("M", M)
-    np.testing.assert_allclose(prog.run({})["M"], np.eye(2))
+    b, feeds = _listb("R2", _A)
+    np.testing.assert_allclose(_cob_run(b, b, feeds), np.eye(2))
 
 
 def test_cob_base_to_base_matches_known_matrix() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])  # from-basis columns (in std coords)
-    Bm = np.array([[2.0, 0.0], [1.0, 1.0]])  # to-basis columns
-    prog = pa.Program("cob")
-    M = cob(prog, C.base_basis("a", A), C.base_basis("b", Bm))
-    prog.add_output("M", M)
-    res = prog.run({})
-    # std = A @ x = Bm @ y  ⇒  y = Bm⁻¹ A x, so cob = Bm⁻¹ A.
-    np.testing.assert_allclose(res["M"], np.linalg.solve(Bm, A), atol=1e-12)
+    ba, fa = _listb("a", _A)
+    bb, fb = _listb("b", _BM)
+    np.testing.assert_allclose(_cob_run(ba, bb, {**fa, **fb}), _EXP, atol=1e-9)
 
 
 def test_cob_to_standard_is_realize_matrix() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])
-    prog = pa.Program("std")
-    M = cob(prog, C.base_basis("a", A), C.base_basis("std", np.eye(2)))
-    prog.add_output("M", M)
-    np.testing.assert_allclose(prog.run({})["M"], A, atol=1e-12)
+    ba, fa = _listb("a", _A)
+    np.testing.assert_allclose(_cob_run(ba, _rb(2), fa), _A, atol=1e-9)
 
 
 def test_cob_basisprod_is_kron() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])
-    Bm = np.array([[2.0, 0.0], [1.0, 1.0]])
-    exp = np.linalg.solve(Bm, A)
-    bf = C.basis_prod(C.base_basis("a", A), C.base_basis("s", np.eye(2)))
-    bt = C.basis_prod(C.base_basis("b", Bm), C.base_basis("s", np.eye(2)))
-    prog = pa.Program("prod")
-    prog.add_output("M", cob(prog, bf, bt))
-    np.testing.assert_allclose(prog.run({})["M"], np.kron(exp, np.eye(2)), atol=1e-12)
+    ba, fa = _listb("a", _A)
+    bb, fb = _listb("b", _BM)
+    bf = C.basis_prod(ba, _rb(2))
+    bt = C.basis_prod(bb, _rb(2))
+    got = _cob_run(bf, bt, {**fa, **fb})
+    np.testing.assert_allclose(got, np.kron(_EXP, np.eye(2)), atol=1e-9)
 
 
 def test_cob_basissum_is_block_diag() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])
-    Bm = np.array([[2.0, 0.0], [1.0, 1.0]])
-    exp = np.linalg.solve(Bm, A)
-    bf = C.basis_sum(C.base_basis("a", A), C.base_basis("s", np.eye(2)))
-    bt = C.basis_sum(C.base_basis("b", Bm), C.base_basis("s", np.eye(2)))
-    prog = pa.Program("sum")
-    prog.add_output("M", cob(prog, bf, bt))
-    np.testing.assert_allclose(prog.run({})["M"], _block_diag(exp, np.eye(2)), atol=1e-12)
+    ba, fa = _listb("a", _A)
+    bb, fb = _listb("b", _BM)
+    bf = C.basis_sum(ba, _rb(2))
+    bt = C.basis_sum(bb, _rb(2))
+    got = _cob_run(bf, bt, {**fa, **fb})
+    np.testing.assert_allclose(got, _block_diag(_EXP, np.eye(2)), atol=1e-9)
 
 
 def test_cob_dualbasis_is_inv_transpose() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])
-    Bm = np.array([[2.0, 0.0], [1.0, 1.0]])
-    exp = np.linalg.solve(Bm, A)
-    bf = C.dual_basis(C.base_basis("a", A))
-    bt = C.dual_basis(C.base_basis("b", Bm))
-    prog = pa.Program("dual")
-    prog.add_output("M", cob(prog, bf, bt))
-    np.testing.assert_allclose(prog.run({})["M"], np.linalg.inv(exp).T, atol=1e-12)
+    ba, fa = _listb("a", _A)
+    bb, fb = _listb("b", _BM)
+    got = _cob_run(C.dual_basis(ba), C.dual_basis(bb), {**fa, **fb})
+    np.testing.assert_allclose(got, np.linalg.inv(_EXP).T, atol=1e-9)
 
 
 def test_cob_basisrep_is_block_repeat() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])
-    Bm = np.array([[2.0, 0.0], [1.0, 1.0]])
-    exp = np.linalg.solve(Bm, A)
-    bf = C.basis_rep(2, C.base_basis("a", A))
-    bt = C.basis_rep(2, C.base_basis("b", Bm))
-    prog = pa.Program("rep")
-    prog.add_output("M", cob(prog, bf, bt))
-    np.testing.assert_allclose(prog.run({})["M"], _block_diag(exp, exp), atol=1e-12)
+    ba, fa = _listb("a", _A)
+    bb, fb = _listb("b", _BM)
+    got = _cob_run(C.basis_rep(2, ba), C.basis_rep(2, bb), {**fa, **fb})
+    np.testing.assert_allclose(got, _block_diag(_EXP, _EXP), atol=1e-9)
 
 
 def test_cob_roundtrip_is_inverse() -> None:
-    A = np.array([[1.0, 1.0], [0.0, 2.0]])
-    Bm = np.array([[2.0, 0.0], [1.0, 1.0]])
-    ba, bb = C.base_basis("a", A), C.base_basis("b", Bm)
-    prog = pa.Program("rt")
-    M = cob(prog, ba, bb)
-    Mback = cob(prog, bb, ba)
-    prog.add_output("M", M)
-    prog.add_output("Mback", Mback)
-    res = prog.run({})
-    np.testing.assert_allclose(res["M"] @ res["Mback"], np.eye(2), atol=1e-12)
+    ba, fa = _listb("a", _A)
+    bb, fb = _listb("b", _BM)
+    feeds = {**fa, **fb}
+    m = _cob_run(ba, bb, feeds)
+    mback = _cob_run(bb, ba, feeds)
+    np.testing.assert_allclose(m @ mback, np.eye(2), atol=1e-9)
 
 
 def test_cob_completebasis_stacks_sub_and_complement() -> None:
     # sub basis = e0; complement = e1; ambient = R^2.  cob to standard = [sub|comp] = I.
-    sub = C.base_basis("sub", np.array([[1.0], [0.0]]))
+    sub, fs = _listb("sub", np.array([[1.0], [0.0]]))
     comp = np.array([[0.0], [1.0]])
     cb = C.complete_basis(sub, comp)
-    prog = pa.Program("complete")
-    prog.add_output("M", cob(prog, cb, C.base_basis("std", np.eye(2))))
-    np.testing.assert_allclose(prog.run({})["M"], np.eye(2), atol=1e-12)
+    np.testing.assert_allclose(_cob_run(cb, _rb(2), fs), np.eye(2), atol=1e-9)
 
 
 # ===========================================================================

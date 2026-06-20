@@ -15,7 +15,7 @@ column matrices.
 
 How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-### → another ⊕ basis (per-summand bases changed)
+### → another ⊕ basis (per-summand term bases changed)
 
 **Mechanism (`cob`):** BasisSum→BasisSum ⇒ block-diagonal of the per-summand cobs
 

@@ -378,10 +378,6 @@ def typefn(fn):
 scalar_basis = wrap(_b.scalar_basis())
 
 
-def base_basis(name: str, vectors: object | None = None) -> Expr:
-    return wrap(_b.base_basis(name, vectors))
-
-
 def basis(name: str, s: object) -> Expr:  # noqa: ARG001 - s recorded for future inference
     """A basis variable named ``name`` (the basis of space ``s``)."""
     return wrap(_b.bvar(name))

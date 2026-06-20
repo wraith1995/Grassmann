@@ -30,7 +30,6 @@ nav:
   - Spaces:
     - Overview: spaces/index.md
     - scalar: spaces/scalar.md
-    - base: spaces/base.md
     - s-var: spaces/s-var.md
     - dual: spaces/dual.md
     - o-plus: spaces/o-plus.md
@@ -89,7 +88,6 @@ nav:
   - Bases:
     - Overview: bases/index.md
     - scalar-basis: bases/scalar-basis.md
-    - base-basis: bases/base-basis.md
     - b-var: bases/b-var.md
     - dual-basis: bases/dual-basis.md
     - primal-basis: bases/primal-basis.md
