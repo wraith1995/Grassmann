@@ -24,6 +24,11 @@ test = [
     "pytest>=8.0",
     "chartlib",
 ]
+# Reference doc site (tools/gen_docs.py + mkdocs). Build with `mkdocs build`, preview
+# with `mkdocs serve`. Doc-only — never a runtime dep.
+docs = [
+    "mkdocs-material>=9.5",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

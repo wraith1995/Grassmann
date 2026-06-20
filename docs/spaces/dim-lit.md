@@ -1,0 +1,29 @@
+# `DimLit`
+
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces &nbsp;·&nbsp; **Paper:** def §5 (dims)
+
+## Meaning
+
+A **literal dimension** `DimLit(n)` — a concrete non-negative integer size. The common case:
+`space("V", 3)` stores `DimLit(3)`. Statically known, so any space sized only by `DimLit`s
+lowers to a fully static array shape.
+
+## Fields
+
+| field | type |
+|---|---|
+| `value` | `int` |
+
+## Built by
+
+
+> A literal non-negative dimension.
+
+## Represented as (lowering)
+
+A value of this space lowers to a polyarray array whose shape is `_shape_of_space(space)` and whose default coordinate system is `default_basis(space)` (`space_basis.py`). See the *Bases* section for the basis attached to this space.
+
+## Conversion
+
+A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+

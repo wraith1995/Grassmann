@@ -13,3 +13,6 @@ env/
 
 # OS
 .DS_Store
+
+# MkDocs build output (regenerate with: mkdocs build)
+site/
