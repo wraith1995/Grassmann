@@ -9,7 +9,7 @@ Basis  b ::=
   | BasisSum(b…) | BasisProd(b…)     -- ⊕ / ⊗  (n-ary)
   | BasisRep(n, b)                   -- ⊕ⁿ
   | ProjectedBasis(f, which, source?, target?)  -- subspace basis (Image/Ker/CoImg/CoKer)
-  | ImageBasis(f)                    -- its OWN construct: the literal map-application basis
+  | ImageBasis(f, source?)            -- literal map-application basis (f applied to source)
   | ListBasis(vectors…)              -- explicit list of Term basis vectors
   | WithInnerBasis(b, g)             -- g-orthonormal basis
   | CompleteBasis(subBasis, complement)  -- complete a subspace basis to its ambient
@@ -184,25 +184,30 @@ class ProjectedBasis:
 
 @dataclass(frozen=True)
 class ImageBasis:
-    """``ImageBasis(f)`` — the **literal map-application** basis of ``f``'s range.
+    """``ImageBasis(f, source?)`` — the **literal map-application** basis of ``f``'s range.
 
-    Its columns are ``f`` applied to the source/immersed basis (the ``f(eᵢ)`` vectors,
-    the R/fwd side), **not** orthonormalized.  This is the natural / iso side of the map
-    (FEMOracle's source-side ``IsoBasis``, realized by ``R`` for an injective non-square
-    map and ``fwd`` when full — `73 Topic 2`).  The *orthonormalized* range basis (the Q
-    of QR / first ``δ_f`` columns of the SVD ``U``) is :class:`ProjectedBasis` with
-    ``which == "image"``; the two are connected by a change of basis (``QrOp.R``/``Q`` or
-    the SVD factors), so a value in one is expressible in the other.
+    Its columns are ``f`` applied to the **source** basis of ``f``'s domain — ``f(sᵢ)``,
+    the R/fwd side — **not** orthonormalized.  ``source`` (a basis of ``dom f``) defaults to
+    the standard basis (``None``), giving the literal columns ``f(eᵢ)``; a non-standard
+    ``source`` (e.g. a ``ListBasis`` of immersed/source coordinates) maps those vectors
+    instead.  The *orthonormalized* range basis (the ``Q`` of QR / first ``δ_f`` columns of
+    the SVD ``U``) is :class:`ProjectedBasis` with ``which == "image"``; the two are
+    connected by a change of basis (``QrOp.R``/``Q`` or the SVD factors).
     """
 
     f: Term
+    source: Basis | None = None
 
     def __post_init__(self) -> None:
         if self.f is None:
             raise BasisError("ImageBasis: linear-map argument `f` is required")
+        if self.source is not None:
+            _require_basis(self.source, "ImageBasis.source")
 
     def __repr__(self) -> str:
-        return f"ImageBasis({self.f!r})"
+        if self.source is None:
+            return f"ImageBasis({self.f!r})"
+        return f"ImageBasis({self.f!r}, source={self.source!r})"
 
 
 @dataclass(frozen=True)
@@ -385,8 +390,8 @@ def projected_basis(
     return ProjectedBasis(f, which, source, target)
 
 
-def image_basis(f: Term) -> ImageBasis:
-    return ImageBasis(f)
+def image_basis(f: Term, source: Basis | None = None) -> ImageBasis:
+    return ImageBasis(f, source)
 
 
 def list_basis(*vectors: Term) -> ListBasis:

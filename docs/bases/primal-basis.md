@@ -16,7 +16,14 @@ How this basis converts to other bases of the **same space**, and how `cob` hand
 
 ### → the underlying primal basis `b` (round trip)
 
-**Mechanism (`cob`):** PrimalBasis(DualBasis(b)) denotes `b` — the double-dual cancels, so converting back to `b` is the identity
+**Mechanism (`cob`):** PrimalBasis(DualBasis(b)) cancels the double-dual ⇒ identity (variance peeling)
+
+**Change-of-basis matrix**
+
+```
+[[1., 0.],
+ [0., 1.]]
+```
 
 ## Fields
 

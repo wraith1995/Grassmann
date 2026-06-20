@@ -892,23 +892,60 @@ def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.Sym
             f"cob: bases of differing variance: {from_basis!r} vs {to_basis!r}"
         )
     fp, tp = _strip_variance(from_basis), _strip_variance(to_basis)
-    c_from = realize_basis_cols(ctx, fp)
-    c_to = realize_basis_cols(ctx, tp)
-    n_amb, k_from = _shape_of(c_from)
-    _, k_to = _shape_of(c_to)
-    # primal cob (from→to) = pinv(C_to) · C_from   (k_to × k_from).
-    [pinv_to] = ctx.prog.emit_stmt(
-        pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (k_to, n_amb))],
-        note="ffs-cob:pinv(C_to)",
-    )
-    [m_primal] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("ij,jk->ik"), [pinv_to, c_from],
-        [pa.OutSpec("cob:pinv(C_to)·C_from", (k_to, k_from))],
-        note="ffs-cob:pinv(C_to)·C_from",
-    )
+    # Structure-exploiting fast path: ImageBasis(f) ↔ ProjectedBasis(f,"image") of the SAME
+    # injective map is the QR factor `R` (J = Q·R) directly — no realize-both-and-pinv.
+    m_primal = _same_map_ffs_cob(ctx, fp, tp)
+    if m_primal is None:
+        c_from = realize_basis_cols(ctx, fp)
+        c_to = realize_basis_cols(ctx, tp)
+        n_amb, k_from = _shape_of(c_from)
+        _, k_to = _shape_of(c_to)
+        # general primal cob (from→to) = pinv(C_to) · C_from   (k_to × k_from).
+        [pinv_to] = ctx.prog.emit_stmt(
+            pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (k_to, n_amb))],
+            note="ffs-cob:pinv(C_to)",
+        )
+        [m_primal] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("ij,jk->ik"), [pinv_to, c_from],
+            [pa.OutSpec("cob:pinv(C_to)·C_from", (k_to, k_from))],
+            note="ffs-cob:pinv(C_to)·C_from",
+        )
     if not from_dual:
         return m_primal
     return _inv_transpose(ctx.prog, m_primal)
+
+
+def _same_map_ffs_cob(
+    ctx: _Ctx, fp: B.Basis, tp: B.Basis,
+) -> pa.SymArray | None:
+    """The cob between the literal ``ImageBasis(f)`` and the orthonormal ``ProjectedBasis(f,
+    "image")`` of the SAME injective map — the QR factor ``R`` (or ``R⁻¹``), or ``None`` if
+    the pair is not that case (falls back to the generic realize+pinv).
+
+    ``J = Q·R`` ⇒ an ``ImageBasis``-coord ``s`` is ``R·s`` in ``ProjectedBasis`` coords, so
+    ``cob(Image→Projected) = R`` and ``cob(Projected→Image) = R⁻¹`` (`Stage B`).
+    """
+    def _kind(b: B.Basis) -> tuple[object, str] | None:
+        if isinstance(b, B.ImageBasis) and b.source is None:
+            return b.f, "image"
+        if isinstance(b, B.ProjectedBasis) and b.which in ("image", "img"):
+            return b.f, "projected"
+        return None
+
+    fk, tk = _kind(fp), _kind(tp)
+    if fk is None or tk is None or fk[0] != tk[0] or fk[1] == tk[1]:
+        return None
+    real = _realize_ffs_by_which(ctx, "img", fk[0])
+    if real.r is None:  # not the injective QR seam (SVD/GSVD) ⇒ no R
+        return None
+    if fk[1] == "image":  # Image → Projected = R
+        return real.r
+    # Projected → Image = R⁻¹.
+    n = _shape_of(real.r)[0]
+    [out] = ctx.prog.emit_stmt(
+        pa.InvOp(), [real.r], [pa.OutSpec("cob:R-inv", (n, n))], note="ffs-cob:R⁻¹",
+    )
+    return out
 
 
 def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
@@ -1879,8 +1916,8 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
     match b:
         case B.ListBasis(vectors):
             return _realize_list_basis(ctx, vectors)
-        case B.ImageBasis(f):
-            return _realize_image_basis(ctx, f)
+        case B.ImageBasis(f, source):
+            return _realize_image_basis(ctx, f, source)
         case B.ProjectedBasis(f, which, _src, _tgt):
             return _realize_ffs_by_which(ctx, which, f).cols
         case B.CompleteBasis(sub, complement):
@@ -1924,8 +1961,13 @@ def _realize_list_basis(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
     return out
 
 
-def _realize_image_basis(ctx: _Ctx, f: object) -> pa.SymArray:
-    """Realize ``ImageBasis(f)`` — the literal map-application columns ``f(eᵢ)`` (`73 T2`)."""
+def _realize_image_basis(ctx: _Ctx, f: object, source: B.Basis | None = None) -> pa.SymArray:
+    """Realize ``ImageBasis(f, source?)`` — ``f`` applied to its ``source`` basis (`73 T2`).
+
+    ``source is None`` ⇒ the literal columns ``f(eᵢ)`` (apply ``f`` to the standard domain
+    basis).  A non-standard ``source`` (a basis of ``dom f``) realizes its columns ``S`` in
+    domain coords and maps them: the image columns are ``fᵀ·S`` in codomain coords.
+    """
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
     [f_cd] = ctx.prog.emit_stmt(
@@ -1933,11 +1975,21 @@ def _realize_image_basis(ctx: _Ctx, f: object) -> pa.SymArray:
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
         note="ffs-basis:to-(cod,dom)",
     )
-    real = realize_image_application(
-        ctx.prog, f_cd, dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
-        label=getattr(f, "name", "f"),
+    if source is None:
+        real = realize_image_application(
+            ctx.prog, f_cd, dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
+            label=getattr(f, "name", "f"),
+        )
+        return real.cols
+    # f applied to the source basis: cols_cod = f_cd(cod,dom) · S(dom, k).
+    s_cols = realize_basis_cols(ctx, source)
+    n_cod, n_dom = _shape_of(f_cd)
+    k = _shape_of(s_cols)[1]
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("cd,dk->ck"), [f_cd, s_cols],
+        [pa.OutSpec("imgbasis:f·source", (n_cod, k))], note="ffs-basis:ImageBasis(f,source)",
     )
-    return real.cols
+    return out
 
 
 def _flatten_to_column(ctx: _Ctx, arr: pa.SymArray) -> pa.SymArray:
@@ -2160,8 +2212,8 @@ def _immersed_gram(
     f = img.f
     dom, cod = map_domain_codomain(f)
     n_dom, n_cod = _static_dim(dom), _static_dim(cod)
-    # cols : (cod, dom) — the literal map-application columns f(eᵢ) in codomain coords.
-    cols = _realize_image_basis(ctx, f)
+    # cols : (cod, dom) — the map-application columns f(sᵢ) in codomain coords (sᵢ = source).
+    cols = _realize_image_basis(ctx, f, img.source)
     # G_cod : the codomain metric in ITS orthonormal default basis (identity for a Base).
     g_cod = _metric_matrix(ctx, cod, n_cod, note=note + ":G_cod")
     # G = colsᵀ · G_cod · cols  (the immersed Gram, n_dom×n_dom).
@@ -2189,11 +2241,16 @@ def _immersed_gram(
 
 
 def _peel_dual(basis: B.Basis) -> bool:
-    """True iff ``basis`` is a (possibly wrapped) **dual** FFS basis (odd # of DualBasis)."""
+    """The net variance **parity** — ``True`` iff covariant (an odd number of stars).
+
+    ``DualBasis`` adds a star (toggle); ``PrimalBasis`` removes one (also a toggle — so
+    ``PrimalBasis(DualBasis(b))`` cancels to ``b``'s parity); ``WithInnerBasis`` is metadata
+    (no toggle).  Used to peel/cancel Primal/Dual wrappers when relating two bases.
+    """
     match basis:
-        case B.DualBasis(inner):
+        case B.DualBasis(inner) | B.PrimalBasis(inner):
             return not _peel_dual(inner)
-        case B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
+        case B.WithInnerBasis(inner, _):
             return _peel_dual(inner)
         case _:
             return False

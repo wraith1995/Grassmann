@@ -803,11 +803,11 @@ def _c_dual():
 # --- PrimalBasis ----------------------------------------------------------
 @_cv("PrimalBasis")
 def _c_primal():
-    # PrimalBasis cancels a DualBasis (un-stars). Presented structurally: pair it with the
-    # matching DualBasis so variances line up; the round trip denotes the primal basis `b`.
-    return Conv("the underlying primal basis `b` (round trip)",
-                "PrimalBasis(DualBasis(b)) denotes `b` — the double-dual cancels, so converting "
-                "back to `b` is the identity")
+    # PrimalBasis cancels a DualBasis (Stage B variance peeling): the round trip is identity.
+    J, imgb, _projb = _img()
+    return _conv("the underlying primal basis `b` (round trip)",
+                 "PrimalBasis(DualBasis(b)) cancels the double-dual ⇒ identity (variance peeling)",
+                 B.primal_basis(B.dual_basis(imgb)), imgb, np.eye(2), {J: _JSTORED})
 
 
 # --- BasisSum (V⊕W) -------------------------------------------------------
@@ -886,6 +886,21 @@ def _c_image_dual():
                  "DualBasis→DualBasis over the FFS seam ⇒ (R)⁻ᵀ",
                  B.dual_basis(imgb), B.dual_basis(projb), np.linalg.inv(primal).T,
                  {J: _JSTORED})
+
+
+@_cv("ImageBasis")
+def _c_image_source():
+    # ImageBasis(f, source=S): columns are f applied to a non-standard source basis (the
+    # immersed/source coordinates). cob to the literal ImageBasis(f) (source = standard) = S.
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    s0, s1 = C.var("s0", Rt), C.var("s1", Rt)
+    Sm = np.array([[1.0, 0.0], [1.0, 1.0]])  # source columns in domain coords
+    src = B.list_basis(s0, s1)
+    feeds = {J: _JSTORED, s0: Sm[:, 0], s1: Sm[:, 1]}
+    return _conv("the literal `ImageBasis(f)` (standard source) of the same map",
+                 "the source basis re-expressed against the standard source ⇒ the source cob = S",
+                 B.image_basis(J, source=src), B.image_basis(J), Sm, feeds)
 
 
 # --- ListBasis (V via term vectors) ---------------------------------------
