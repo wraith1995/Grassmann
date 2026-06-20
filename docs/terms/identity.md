@@ -8,6 +8,24 @@ The **identity map** `Identity(s)` on `s` — the linear map `s ⊸ s` that retu
 i.e. the tensor in `~s ⊗ s` whose matrix is `I`. The unit of `Compose`. Lowers to an identity
 matrix of shape `(|s|, |s|)`.
 
+## Worked example
+
+The identity map on `V`.
+
+```python
+identity(V)
+```
+
+**Output**
+
+```
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

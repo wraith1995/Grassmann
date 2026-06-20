@@ -8,6 +8,37 @@
 `f` without materializing `f⁻¹`. Lowers to a `SolveOp` (a linear solve), which is cheaper and
 better-conditioned than forming the inverse then multiplying.
 
+## Worked example
+
+Solve `f·x = v` for `x`.
+
+```python
+solve(f)(v)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[ 0.  ,  0.3 , -0.27],
+     [-0.89, -0.45, -0.99],
+     [ 0.06,  1.34, -0.49]]
+    ```
+- `v` =
+
+    ```
+    [1., 2., 3.]
+    ```
+
+**Output**
+
+```
+[-0.831,  1.552, -1.979]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

@@ -9,6 +9,36 @@ larger `s` via the sub-basis columns `P·⟦v⟧`. The adjoint of `Project`. The
 are realized in `v`'s **active** basis (an `ImageBasis`-pinned tangent vector embeds via the
 literal `J` columns; the default uses the orthonormal `Q`), `43 §2c`.
 
+## Worked example
+
+Embed an `Img(J)` value into the ambient (`Q·a`).
+
+```python
+embed(a, Re)
+```
+
+**Inputs**
+
+- `a` =
+
+    ```
+    [1., 2.]
+    ```
+- `J` =
+
+    ```
+    [[2., 1., 1.],
+     [0., 3., 1.]]
+    ```
+
+**Output**
+
+```
+[ 0.168, -2.132, -0.654]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

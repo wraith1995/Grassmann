@@ -8,6 +8,40 @@
 maps, acting on the tensor product of their domains. Lowers to a Kronecker einsum; threads each
 operand's free labels (`_KronFreeOp`) so differentiated/seeded maps compose correctly.
 
+## Worked example
+
+Kronecker product of maps.
+
+```python
+kron(f, g)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[-0.8 ,  0.24],
+     [-1.66,  0.66]]
+    ```
+- `g` =
+
+    ```
+    [[-1.1 , -0.73],
+     [-0.78,  0.27]]
+    ```
+
+**Output**
+
+```
+[[ 0.88 ,  0.584, -0.264, -0.175],
+ [ 0.624, -0.216, -0.187,  0.065],
+ [ 1.826,  1.212, -0.726, -0.482],
+ [ 1.295, -0.448, -0.515,  0.178]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

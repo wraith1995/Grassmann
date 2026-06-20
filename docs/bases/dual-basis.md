@@ -9,6 +9,32 @@ The **dual basis** `DualBasis(b)` — the basis of `s*` dual to a basis `b` of `
 change-of-basis: `realize(DualBasis(b)) = realize(b)⁻ᵀ`, and `cob(dual b → dual b') =
 (cob(b→b'))⁻ᵀ`. The basis on the dual (input) slots of a map.
 
+## Change of basis
+
+Covector cob = `(primal cob)⁻ᵀ` (ImageBasis* → ProjectedBasis*).
+
+```python
+cob(dual(image_basis(J)), dual(projected_basis(J, "image")))
+```
+
+**Inputs**
+
+- `J` =
+
+    ```
+    [[2., 1., 1.],
+     [0., 3., 1.]]
+    ```
+
+**Output**
+
+```
+[[-0.408, -0.   ],
+ [ 0.246, -0.369]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

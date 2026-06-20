@@ -10,6 +10,24 @@ orthogonalized against `subBasis`). `embed` = pad-zeros, `project` = drop-comple
 *from* this (no separate Embed/Project basis). Realizes to `[ realize(subBasis) | complement ]`
 stacked.
 
+## Change of basis
+
+Realizes to `[ sub | complement ]` stacked.
+
+```python
+complete(sub, complement)
+```
+
+**Output**
+
+```
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

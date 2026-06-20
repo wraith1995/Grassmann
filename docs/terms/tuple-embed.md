@@ -8,6 +8,24 @@
 i-th `⊕` component into the full sum with zeros elsewhere. The injection `ιᵢ`.
 Lowers to a constant selection/pad matrix.
 
+## Worked example
+
+Inject the 2nd ⊕ block `ι₁ : W ⊸ V⊕W`.
+
+```python
+inj_embed(V & W, 1)
+```
+
+**Output**
+
+```
+[[0., 0., 1., 0., 0.],
+ [0., 0., 0., 1., 0.],
+ [0., 0., 0., 0., 1.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

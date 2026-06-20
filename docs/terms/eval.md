@@ -12,6 +12,36 @@ symbolic degree never multiplies out at build time). At a **metric** contraction
 built in the operands' active basis; mismatched-pinned operands are auto-reconciled through the
 FFS seam (`43 §2c`).
 
+## Worked example
+
+Apply a map to a vector (`fᵀ·x`).
+
+```python
+f(x)  # eval_(f, (0,), x)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[1., 2., 3.],
+     [4., 5., 6.]]
+    ```
+- `x` =
+
+    ```
+    [1., 1.]
+    ```
+
+**Output**
+
+```
+[5., 7., 9.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

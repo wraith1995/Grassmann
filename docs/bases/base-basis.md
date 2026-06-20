@@ -19,6 +19,32 @@ of a `Base` space (`20 §7`). The default coordinate system of `space("V", n)`.
 unaffected. Realized by `realize_basis_cols` (term/backup forms) or `cob.realize_basis` (numeric
 / self-sizing standard).
 
+## Change of basis
+
+A rank-1 term frame `(c)` completed to a full basis via the standard backup (frame column kept first, rest filled from the backup).
+
+```python
+base_basis("W", vectors=(c,), space=W, backup=base_basis("W", space=W))
+```
+
+**Inputs**
+
+- `c` =
+
+    ```
+    [1., 2., 3.]
+    ```
+
+**Output**
+
+```
+[[1., 1., 0.],
+ [2., 0., 1.],
+ [3., 0., 0.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

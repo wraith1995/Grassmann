@@ -9,6 +9,24 @@ bases **block-diagonally**. Mirrors [`OPlus`](../spaces/o-plus.md). Change-of-ba
 block-diagonal of the per-component cobs; realization is the block-diagonal stack of the component
 column matrices.
 
+## Change of basis
+
+Sum cob = block-diagonal of the per-summand cobs.
+
+```python
+cob(sum(V_A, W_B), sum(V_std, W_std))
+```
+
+**Output**
+
+```
+[[2., 0., 0.],
+ [1., 1., 0.],
+ [0., 0., 3.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

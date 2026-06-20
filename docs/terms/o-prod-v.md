@@ -9,6 +9,36 @@ A **tensor (outer) product of vectors** `OProdV(v₀,…)` — the value `v₀ �
 (unfused); any free basis-index labels a factor carries ride through, so the outer product of
 `LLam`-bound matrix operands assembles the full map tensor.
 
+## Worked example
+
+Tensor (outer) product `a ⊗ b`.
+
+```python
+a * b
+```
+
+**Inputs**
+
+- `a` =
+
+    ```
+    [1., 2.]
+    ```
+- `b` =
+
+    ```
+    [3., 4., 5.]
+    ```
+
+**Output**
+
+```
+[[ 3.,  4.,  5.],
+ [ 6.,  8., 10.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

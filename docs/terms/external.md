@@ -9,6 +9,22 @@ An **external (foreign) value/function** `External(space, data, args…)` — an
 values the IR does not model symbolically (a black-box callable, an imported array). Lowered by
 threading `data` through with its argument dependencies; the IR does not look inside it.
 
+## Worked example
+
+A bare numeric foreign value (a constant).
+
+```python
+external(V, [3, 4])
+```
+
+**Output**
+
+```
+[3., 4.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

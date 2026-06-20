@@ -8,6 +8,22 @@ The **canonical basis of `Scalar`** `ScalarBasis()` — the single vector `1 ∈
 nothing to choose; it is orthonormal and realizes to the `1×1` identity. The basis attached to
 every scalar result (an inner product, a trace).
 
+## Change of basis
+
+Realizes to the 1×1 identity.
+
+```python
+realize(scalar_basis())
+```
+
+**Output**
+
+```
+[[1.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Built by
 
 - **Core constructor** (`grassmann.core.basis`): `scalar_basis() -> 'ScalarBasis'`

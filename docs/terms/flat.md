@@ -9,6 +9,30 @@ metric matrix `G_s` viewed as a primal→dual map. Identity in an orthonormal ba
 Gram / explicit metric otherwise. Carries a dual per-slot basis so a `sharp(flat(v))` chain
 re-enters the immersed metric correctly (`43 §2c`).
 
+## Worked example
+
+`flat(v) = G·v` (identity metric ⇒ `v`).
+
+```python
+flat(V)(v)
+```
+
+**Inputs**
+
+- `v` =
+
+    ```
+    [1., 2., 3.]
+    ```
+
+**Output**
+
+```
+[1., 2., 3.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

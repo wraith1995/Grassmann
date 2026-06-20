@@ -8,6 +8,30 @@
 and `v` a vector. The action of the field on a space. Lowers to an elementwise multiply of `v`'s
 array by the (broadcast) scalar.
 
+## Worked example
+
+Scalar multiple `2·x`.
+
+```python
+scale(2.0, x)
+```
+
+**Inputs**
+
+- `x` =
+
+    ```
+    [ 1., -2.,  3.]
+    ```
+
+**Output**
+
+```
+[ 2., -4.,  6.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

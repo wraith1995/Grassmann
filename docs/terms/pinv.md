@@ -9,6 +9,33 @@
 the **metric** pseudo-inverse `f† = [V|VI]·S⁻¹·[U|UI]ᵀ·M_W` via the GSVD seam; with identity
 metrics it collapses to the plain `PinvOp`. The coordinate-free "best inverse".
 
+## Worked example
+
+Moore–Penrose pseudo-inverse map.
+
+```python
+pinv(f)
+```
+
+**Inputs**
+
+- `f` =
+
+    ```
+    [[ 1.05,  1.78, -2.55],
+     [-0.14,  1.01,  1.35]]
+    ```
+
+**Output**
+
+```
+[[ 0.1  ,  0.014],
+ [ 0.25 ,  0.509],
+ [-0.177,  0.361]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

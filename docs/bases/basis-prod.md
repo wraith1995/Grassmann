@@ -8,6 +8,34 @@ The **tensor-product basis** `BasisProd(b₀,…)` — the basis of `⊗(sᵢ)`,
 of the factor bases. Mirrors [`OProd`](../spaces/o-prod.md); a linear map's basis is
 `BasisProd(DualBasis(dom), cod)`. Change-of-basis is the Kronecker product of the per-factor cobs.
 
+## Change of basis
+
+Product cob = Kronecker of the per-factor cobs (FFS leaf + identity).
+
+```python
+cob(prod(dual(imgb), I₂), prod(dual(projb), I₂))
+```
+
+**Inputs**
+
+- `J` =
+
+    ```
+    [[2., 1., 1.],
+     [0., 3., 1.]]
+    ```
+
+**Output**
+
+```
+[[-0.408, -0.   , -0.   , -0.   ],
+ [-0.   , -0.408, -0.   , -0.   ],
+ [ 0.246,  0.   , -0.369, -0.   ],
+ [ 0.   ,  0.246, -0.   , -0.369]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

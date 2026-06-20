@@ -9,6 +9,36 @@ keeping `v`'s component in `s'` (`proj = embed†`). For an FFS subspace the col
 come from the SVD/QR seam; the projected coords are `Pᵀ·⟦v⟧`. The space may be omitted and
 recovered by inference.
 
+## Worked example
+
+Project an ambient vector onto `Img(J)` (`Qᵀ·x`).
+
+```python
+project(x, img(J))
+```
+
+**Inputs**
+
+- `x` =
+
+    ```
+    [ 1. , -2. ,  0.5]
+    ```
+- `J` =
+
+    ```
+    [[2., 1., 1.],
+     [0., 3., 1.]]
+    ```
+
+**Output**
+
+```
+[-0.204,  2.154]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

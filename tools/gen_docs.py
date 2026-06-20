@@ -24,6 +24,8 @@ import inspect
 import re
 from pathlib import Path
 
+import doc_examples as DEX  # same-dir module; tools/ is on sys.path when run as a script
+
 from grassmann.core import basis as B
 from grassmann.core import space as S
 from grassmann.core import term as T
@@ -246,6 +248,35 @@ STATUS_BADGE = {
 # ---------------------------------------------------------------------------
 
 
+def _render_example(name: str) -> list[str]:
+    """Render the worked input→output example for ``name`` (from `tools/doc_examples.py`)."""
+    fn = DEX.EXAMPLES.get(name)
+    if fn is None:
+        return []
+    ex = fn()  # runs represent + self-asserts; returns the rendered values
+    label = "Change of basis" if ex.kind == "cob" else "Worked example"
+    out = [f"## {label}", "", ex.summary, "", "```python", ex.code, "```", ""]
+    if ex.inputs:
+        out.append("**Inputs**")
+        out.append("")
+        for lbl, val in ex.inputs:
+            out.append(f"- `{lbl}` =")
+            out.append("")
+            out.append("    ```")
+            out.extend("    " + ln for ln in val.splitlines())
+            out.append("    ```")
+        out.append("")
+    out.append("**Output**")
+    out.append("")
+    out.append("```")
+    out.extend(ex.output.splitlines())
+    out.append("```")
+    out.append("")
+    out.append("_This example is executed and asserted in `tests/test_doc_examples.py`._")
+    out.append("")
+    return out
+
+
 def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
     name, ctor, surface = entry
     cls = getattr(mod, name, None)
@@ -259,6 +290,9 @@ def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
     out.append("")
     out.append(meaning or "_(not yet authored)_")
     out.append("")
+
+    # Worked example (the doc-shown input→output IS a test — see tools/doc_examples.py).
+    out.extend(_render_example(name))
 
     # Fields
     flds = fields_of(cls) if cls else []

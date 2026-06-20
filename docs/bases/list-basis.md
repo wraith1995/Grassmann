@@ -9,6 +9,37 @@ An **explicit list-of-term-vectors basis** `ListBasis(vectors…)` — a basis g
 of `BaseBasis`'s precomputed numeric `vectors`. At lowering each vector is represented and the
 columns are stacked into the basis matrix.
 
+## Change of basis
+
+Explicit Term vectors stacked as columns.
+
+```python
+list_basis(a, b)
+```
+
+**Inputs**
+
+- `a` =
+
+    ```
+    [1., 0., 0.]
+    ```
+- `b` =
+
+    ```
+    [0., 1., 0.]
+    ```
+
+**Output**
+
+```
+[[1., 0.],
+ [0., 1.],
+ [0., 0.]]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

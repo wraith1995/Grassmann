@@ -8,6 +8,35 @@ A **direct-sum stack** `OPlusV(v₀,…)` — assembles component vectors into a
 concatenating their coordinate blocks. The value-level counterpart of the `⊕` space. Inverse of
 the per-component `TupleProject`.
 
+## Worked example
+
+Direct-sum stack (concatenate blocks).
+
+```python
+ostack(a, b)
+```
+
+**Inputs**
+
+- `a` =
+
+    ```
+    [1., 2.]
+    ```
+- `b` =
+
+    ```
+    [3., 4., 5.]
+    ```
+
+**Output**
+
+```
+[1., 2., 3., 4., 5.]
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |

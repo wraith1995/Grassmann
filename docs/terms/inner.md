@@ -9,6 +9,35 @@ The **inner-product map** `Inner(s)` — the metric `s ⊗ s ⊸ ℝ`, i.e. `⟨
 min-sym default) and the immersed Gram `JᵀJ` in a non-orthonormal `ImageBasis`; for a `WithInner`
 space it is the explicit metric `g`. Built in the operands' active basis at the contraction site.
 
+## Worked example
+
+Inner product `dot(a,b) = ⟨a,b⟩` (identity metric).
+
+```python
+dot(a, b)
+```
+
+**Inputs**
+
+- `a` =
+
+    ```
+    [1., 2., 3.]
+    ```
+- `b` =
+
+    ```
+    [4., 5., 6.]
+    ```
+
+**Output**
+
+```
+32.
+```
+
+_This example is executed and asserted in `tests/test_doc_examples.py`._
+
 ## Fields
 
 | field | type |
