@@ -401,32 +401,64 @@ def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
     return status, "\n".join(out)
 
 
+def _render_conv_detail(c, heading: str) -> list[str]:
+    """One conversion's detail block: target, mechanism, and the literal `cob` test (call +
+    inputs + output matrix) — the same content used on the per-basis page and the overview."""
+    out = [heading, "", f"**Mechanism (`cob`):** {c.via}", ""]
+    if c.code:
+        out.append("**Test** — run + asserted in `tests/test_doc_conversions.py`:")
+        out.append("")
+        out.append("```python")
+        out.append(c.code)
+        out.append("```")
+        out.append("")
+        for lbl, val in c.inputs:
+            out.append(f"Input `{lbl}` =")
+            out.append("")
+            out.append("```")
+            out.extend(val.splitlines())
+            out.append("```")
+            out.append("")
+    if c.matrix:
+        out.append("Output — the `cob` matrix:")
+        out.append("")
+        out.append("```")
+        out.extend(c.matrix.splitlines())
+        out.append("```")
+        out.append("")
+    return out
+
+
 def _render_conversions(name: str) -> list[str]:
     """Render a basis's **Conversions** section: how it converts to other bases of the same
-    space, the mechanism `cob` uses for each, and the resulting (tested) matrix."""
+    space, the mechanism `cob` uses, and the literal cob test (call · inputs · output)."""
     convs = DEX.CONVERSIONS.get(name, [])
     out = ["## Conversions", ""]
     out.append("How this basis converts to other bases of the **same space**, and how `cob` "
-               "handles each. Every row is executed and asserted in "
-               "`tests/test_doc_conversions.py`.")
+               "handles each — with the literal `cob` call, its inputs, and the resulting "
+               "matrix. Every entry is executed and asserted in `tests/test_doc_conversions.py`.")
     out.append("")
     if not convs:
         out.append("_No conversions enumerated yet._")
         out.append("")
         return out
-    for thunk in convs:
+    for c in _dedup_convs(convs):
+        out.extend(_render_conv_detail(c, f"### → {c.to}"))
+    return out
+
+
+def _dedup_convs(thunks) -> list:
+    """Evaluate conversion thunks, keeping one per target node (the term/complete bases reach
+    the same node from several spaces — show it once); abstract notes (`to_node == "—"`) are
+    all kept."""
+    out, seen = [], set()
+    for thunk in thunks:
         c = thunk()
-        out.append(f"### → {c.to}")
-        out.append("")
-        out.append(f"**Mechanism (`cob`):** {c.via}")
-        out.append("")
-        if c.matrix:
-            out.append("**Change-of-basis matrix**")
-            out.append("")
-            out.append("```")
-            out.extend(c.matrix.splitlines())
-            out.append("```")
-            out.append("")
+        if c.to_node and c.to_node != "—":
+            if c.to_node in seen:
+                continue
+            seen.add(c.to_node)
+        out.append(c)
     return out
 
 
@@ -454,21 +486,111 @@ def render_index(cat: str, rows: list[tuple[str, str, str]]) -> str:
     return "\n".join(out)
 
 
+def _conv_anchor(from_node: str, to_node: str) -> str:
+    """A stable, explicit anchor id for the ``from_node → to_node`` detail block."""
+    return f"conv-{slug(from_node)}-{slug(to_node)}"
+
+
 def _render_conversion_table() -> list[str]:
-    """A matrix of which basis converts to which (of the same space) + the cob mechanism."""
-    out = ["## Conversion matrix", "",
-           "What each basis can be converted **to** (within the same space), and how `cob` "
-           "does it. Each row is run + asserted in `tests/test_doc_conversions.py`.", "",
-           "| from basis | → to basis | via (`cob` mechanism) |", "|---|---|---|"]
-    for name in sorted(DEX.CONVERSIONS):
-        for thunk in DEX.CONVERSIONS[name]:
-            c = thunk()
-            via = c.via if len(c.via) <= 90 else c.via[:87] + "…"
-            to = c.to.replace("|", "\\|")
-            via = via.replace("|", "\\|")
-            out.append(f"| [`{name}`]({slug(name)}.md) | {to} | {via} |")
+    """The **N×N** convertibility matrix (every basis as a row AND a column) + the per-pair
+    explanations and `cob` tests listed below it."""
+    nodes = [n for n, _c, _b in BASES]  # the N basis node names, in registry order
+    # (from_node, to_node) → Conv, plus the deduped per-from-node detail list.
+    pair: dict[tuple[str, str], object] = {}
+    details: list[tuple[str, object]] = []
+    for name in nodes:
+        for c in _dedup_convs(DEX.CONVERSIONS.get(name, [])):
+            details.append((name, c))
+            if c.to_node and c.to_node != "—":
+                pair.setdefault((name, c.to_node), c)
+
+    out = ["## Conversion matrix (N × N)", "",
+           "Rows = the basis you convert **from**, columns = the basis you convert **to**, over "
+           "every concrete basis node (the abstract `BVar`/`BLam`/`BApp` are omitted — they have "
+           "no concrete cob until instantiated/reduced).", "",
+           "**The fallback is the standard basis.** When no specific structural case applies, "
+           "`cob(A → B) = cob(std → B) · cob(A → std)`: realizing a basis *is* its cob to the "
+           "standard basis (its vectors as columns), and `cob(std → A)` is the inverse. Every "
+           "basis converts to/from its standard basis (verified in `tests/test_cob_via_standard."
+           "py`), so — composing through that hub — **every concrete basis is inter-convertible "
+           "with every other**. The relation is **symmetric** and **transitively closed**, so "
+           "the matrix is complete (`I` on the diagonal, ✓/✓ᵗ everywhere else):", "",
+           "- The *term basis* `ListBasis` is the **universal** basis — it lists vectors of *any* "
+           "space (primal **or** covector), so it directly reaches every node.",
+           "- `PrimalBasis` is the **universal primal basis** (`PrimalBasis(DualBasis(b)) ≡ b`); "
+           "`DualBasis` is the **universal covector basis** (≈ a `ListBasis` of covectors); "
+           "`CompleteBasis` completes a sub-basis in any space. All are universal hubs.", ""]
+    # Abstract bases (no concrete cob until reduced) are omitted from the matrix.
+    nodes = [n for n in nodes if n not in _ABSTRACT_BASES]
+    closure = _transitive_closure(nodes, {p for p in pair if p[0] in nodes and p[1] in nodes})
+    header = "| from \\ to | " + " | ".join(f"`{n}`" for n in nodes) + " |"
+    out.append(header)
+    out.append("|" + "---|" * (len(nodes) + 1))
+    for r in nodes:
+        cells = []
+        for col in nodes:
+            if r == col:
+                cells.append("`I`")
+            elif (r, col) in pair:
+                cells.append(f"[✓](#{_conv_anchor(r, col)})")  # direct (tested below)
+            elif (r, col) in closure:
+                cells.append("✓ᵗ")  # transitive: composes via the universal term/standard basis
+            else:
+                cells.append("—")
+        out.append(f"| [`{r}`]({slug(r)}.md) | " + " | ".join(cells) + " |")
     out.append("")
+    out.append("**`I`** identity · **✓** a direct conversion (links to its explanation + test "
+               "below) · **✓ᵗ** transitive — reachable by composition through the universal "
+               "term/standard basis (`cob(A→C) = cob(B→C)·cob(A→B)`). The relation is "
+               "**transitively closed**: every concrete basis is inter-convertible with every "
+               "other.")
+    out.append("")
+
+    out.append("## Conversion details — explanations + tests")
+    out.append("")
+    out.append("Each conversion below is run and asserted in `tests/test_doc_conversions.py`; "
+               "the `cob` call, its inputs, and the output matrix are shown verbatim.")
+    out.append("")
+    for from_node, c in details:
+        if c.to_node and c.to_node in nodes:
+            out.append(f'<a id="{_conv_anchor(from_node, c.to_node)}"></a>')
+            out.append("")
+            out.extend(_render_conv_detail(c, f"### `{from_node}` → {c.to}"))
     return out
+
+
+_ABSTRACT_BASES = ("BVar", "BLam", "BApp")
+
+
+def _transitive_closure(nodes: list[str], edges: set) -> set:
+    """The transitive closure of the (symmetric) direct-conversion relation over ``nodes``."""
+    adj = {n: {n} for n in nodes}
+    for a, b in edges:
+        adj[a].add(b)
+        adj[b].add(a)
+    # connected components (convertibility is symmetric + transitive ⇒ an equivalence relation).
+    seen, comp_of = set(), {}
+    for n in nodes:
+        if n in seen:
+            continue
+        stack, comp = [n], []
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            comp.append(x)
+            stack.extend(adj[x] - seen)
+        for x in comp:
+            comp_of[x] = frozenset(comp)
+    return {(a, b) for a in nodes for b in comp_of[a] if a != b}
+
+
+def _has_self(node: str) -> bool:
+    for thunk in DEX.CONVERSIONS.get(node, []):
+        if thunk().to_node == node:
+            return True
+    return False
 
 
 def main() -> None:

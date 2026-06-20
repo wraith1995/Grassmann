@@ -12,21 +12,67 @@ every scalar result (an inner product, a trace).
 
 ## Conversions
 
-How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
+How this basis converts to other bases of the **same space**, and how `cob` handles each — with the literal `cob` call, its inputs, and the resulting matrix. Every entry is executed and asserted in `tests/test_doc_conversions.py`.
+
+### → a 1-vector term basis of ℝ `ListBasis(z)` (e.g. the const 3)
+
+**Mechanism (`cob`):** realize both bases toward the ℝ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ScalarBasis(), ListBasis(z))
+```
+
+Input `z0` =
+
+```
+3.
+```
+
+Output — the `cob` matrix:
+
+```
+[[0.333]]
+```
+
+### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
+
+**Mechanism (`cob`):** realize both bases toward the ℝ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ScalarBasis(), PrimalBasis(DualBasis(<the term basis>)))
+```
+
+Input `z0` =
+
+```
+3.
+```
+
+Output — the `cob` matrix:
+
+```
+[[0.333]]
+```
 
 ### → itself — ℝ has exactly one basis (the unit 1)
 
 **Mechanism (`cob`):** identical bases ⇒ 1×1 identity (cob short-circuits)
 
-**Change-of-basis matrix**
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ScalarBasis(), ScalarBasis())
+```
+
+Output — the `cob` matrix:
 
 ```
 [[1.]]
 ```
-
-### → (no x/y/z — ℝ is one-dimensional)
-
-**Mechanism (`cob`):** ℝ has a single basis (the unit); the only change of basis is the identity. A non-standard basis of ℝⁿ (n>1) is a `ListBasis` of n term vectors.
 
 ## Built by
 
