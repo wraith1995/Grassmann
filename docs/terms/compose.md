@@ -1,6 +1,6 @@
 # `Compose`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms &nbsp;·&nbsp; **Paper:** def §terms
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
 ## Meaning
 
@@ -36,4 +36,8 @@ Lowered by **`represent._rep_compose`**:
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

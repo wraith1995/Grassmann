@@ -1,11 +1,11 @@
 # `Img`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces &nbsp;·&nbsp; **Paper:** def §FFS (def:ffs)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
 ## Meaning
 
 The **image (range)** `Img(f)` of a linear map `f : dom ⊸ cod` — the subspace of `cod` spanned
-by `f`'s columns, one of the four fundamental subspaces (`def:ffs`). Its dimension is
+by `f`'s columns, one of the four fundamental subspaces. Its dimension is
 `rank(f)`: **static** (`= |dom|`) when `f` is asserted injective, otherwise a **runtime** rank
 `δ_f` resolved at evaluation.
 
@@ -39,4 +39,8 @@ A value of this space lowers to a polyarray array whose shape is `_shape_of_spac
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

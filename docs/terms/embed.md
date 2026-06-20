@@ -1,11 +1,11 @@
 # `Embed`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms &nbsp;·&nbsp; **Paper:** def §nas (embed)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
 ## Meaning
 
 **Embedding into an ambient space** `Embed(v, s)` — pad `v`'s subspace coordinates into the
-larger `s` via the sub-basis columns `P·⟦v⟧` (`def §nas`). The adjoint of `Project`. The columns
+larger `s` via the sub-basis columns `P·⟦v⟧`. The adjoint of `Project`. The columns
 are realized in `v`'s **active** basis (an `ImageBasis`-pinned tangent vector embeds via the
 literal `J` columns; the default uses the orthonormal `Q`), `43 §2c`.
 
@@ -36,4 +36,8 @@ Lowered by **`represent._rep_embed`**:
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

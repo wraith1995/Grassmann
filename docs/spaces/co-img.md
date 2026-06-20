@@ -1,11 +1,11 @@
 # `CoImg`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces &nbsp;·&nbsp; **Paper:** def §FFS (def:ffs)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
 ## Meaning
 
 The **coimage** `CoImg(f)` of `f : dom ⊸ cod` — the orthogonal complement of `Ker(f)` inside
-`dom`, i.e. the "row space" (`def:ffs`). Dimension `rank(f)`. It is the natural domain on which
+`dom`, i.e. the "row space". Dimension `rank(f)`. It is the natural domain on which
 `f` is injective, so it pairs with `Img(f)` under the map's restriction.
 
 Basis [`ProjectedBasis(f,"coimg")`](../bases/projected-basis.md) — the leading right singular
@@ -33,4 +33,8 @@ A value of this space lowers to a polyarray array whose shape is `_shape_of_spac
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

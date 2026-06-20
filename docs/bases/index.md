@@ -4,21 +4,21 @@ Every base constructor, its meaning, how it is built, how it is represented, and
 
 **Progress: 0 approved · 15 in review · 0 draft (of 15)**
 
-| node | status | paper |
-|---|---|---|
-| [`ScalarBasis`](scalar-basis.md) | 🟡 in review | 20 §7 |
-| [`BaseBasis`](base-basis.md) | 🟡 in review | 20 §7 (term basis) |
-| [`BVar`](b-var.md) | 🟡 in review | 20 §7 (basis var) |
-| [`DualBasis`](dual-basis.md) | 🟡 in review | 20 §7 |
-| [`PrimalBasis`](primal-basis.md) | 🟡 in review | 20 §7 |
-| [`BasisSum`](basis-sum.md) | 🟡 in review | 20 §7 (⊕) |
-| [`BasisProd`](basis-prod.md) | 🟡 in review | 20 §7 (⊗) |
-| [`BasisRep`](basis-rep.md) | 🟡 in review | 20 §7 (⊕ⁿ) |
-| [`ProjectedBasis`](projected-basis.md) | 🟡 in review | 20 §7 / 41 §1 |
-| [`ImageBasis`](image-basis.md) | 🟡 in review | 20 §7 / 73 T2 |
-| [`ListBasis`](list-basis.md) | 🟡 in review | 20 §7 |
-| [`WithInnerBasis`](with-inner-basis.md) | 🟡 in review | 20 §7 |
-| [`CompleteBasis`](complete-basis.md) | 🟡 in review | 20 §7 |
-| [`BLam`](b-lam.md) | 🟡 in review | 20 §7 (basis λ / frame) |
-| [`BApp`](b-app.md) | 🟡 in review | 20 §7 (basis apply) |
+| node | status |
+|---|---|
+| [`ScalarBasis`](scalar-basis.md) | 🟡 in review |
+| [`BaseBasis`](base-basis.md) | 🟡 in review |
+| [`BVar`](b-var.md) | 🟡 in review |
+| [`DualBasis`](dual-basis.md) | 🟡 in review |
+| [`PrimalBasis`](primal-basis.md) | 🟡 in review |
+| [`BasisSum`](basis-sum.md) | 🟡 in review |
+| [`BasisProd`](basis-prod.md) | 🟡 in review |
+| [`BasisRep`](basis-rep.md) | 🟡 in review |
+| [`ProjectedBasis`](projected-basis.md) | 🟡 in review |
+| [`ImageBasis`](image-basis.md) | 🟡 in review |
+| [`ListBasis`](list-basis.md) | 🟡 in review |
+| [`WithInnerBasis`](with-inner-basis.md) | 🟡 in review |
+| [`CompleteBasis`](complete-basis.md) | 🟡 in review |
+| [`BLam`](b-lam.md) | 🟡 in review |
+| [`BApp`](b-app.md) | 🟡 in review |
 

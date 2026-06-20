@@ -1,11 +1,11 @@
 # `Frame`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms &nbsp;·&nbsp; **Paper:** def §bunframe (frame)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
 ## Meaning
 
 A **frame** `Frame(var, basis_body)` — the dedicated term-level frame node: a basis that *varies
-with a runtime value* `x` (the paper's frame, `def:bunframe`), `x ↦ basis of τ(x)`. The
+with a runtime value* `x` (a *frame*), `x ↦ basis of τ(x)`. The
 value-binding instance of the basis-tower `BLam`. This is how a moving/pointwise basis (e.g. a
 tangent frame along a chart) is expressed; it realizes to the basis appropriate at the supplied
 runtime value.
@@ -37,4 +37,8 @@ _No direct `_rep_*` (lowered structurally / via another node)._
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

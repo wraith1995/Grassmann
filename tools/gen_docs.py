@@ -35,90 +35,90 @@ DOCS = ROOT / "docs"
 AUTHORED = DOCS / "_authored"
 
 # ---------------------------------------------------------------------------
-# Registry: (ClassName, core-constructor name, surface-builder name | None, paper ref).
+# Registry: (ClassName, core-constructor name, surface-builder name | None).
 # rep-function is auto-derived for terms from represent._rep's dispatch.
 # ---------------------------------------------------------------------------
 
 SPACES = [
-    ("Scalar", "scalar", "R", "def §5"),
-    ("Base", "base", "space", "def §5"),
-    ("SVar", "svar", "svar", "def §5 (space var)"),
-    ("Dual", "dual", "~ / dual", "def §5"),
-    ("OPlus", "oplus", "& / osum", "def §5 (⊕)"),
-    ("OProd", "oprod", "* / tensor", "def §5 (⊗)"),
-    ("OPlusRep", "oplus_rep", "osum_n", "def §5 (⊕ⁿ)"),
-    ("Ker", "ker", "ker", "def §FFS (def:ffs)"),
-    ("Img", "img", "img", "def §FFS (def:ffs)"),
-    ("CoKer", "coker", "coker", "def §FFS (def:ffs)"),
-    ("CoImg", "coimg", "coimg", "def §FFS (def:ffs)"),
-    ("WithInner", "with_inner", "with_inner", "def §inner"),
-    ("App", "space_app", None, "def §types (App)"),
+    ("Scalar", "scalar", "R"),
+    ("Base", "base", "space"),
+    ("SVar", "svar", "svar"),
+    ("Dual", "dual", "~ / dual"),
+    ("OPlus", "oplus", "& / osum"),
+    ("OProd", "oprod", "* / tensor"),
+    ("OPlusRep", "oplus_rep", "osum_n"),
+    ("Ker", "ker", "ker"),
+    ("Img", "img", "img"),
+    ("CoKer", "coker", "coker"),
+    ("CoImg", "coimg", "coimg"),
+    ("WithInner", "with_inner", "with_inner"),
+    ("App", "space_app", None),
 ]
 
 DIMS = [
-    ("DimLit", None, None, "def §5 (dims)"),
-    ("DimVar", None, None, "def §5 (dims)"),
-    ("DimOf", None, None, "def §5 (dims)"),
-    ("DimAtomRef", None, None, "42 §C (runtime δ)"),
-    ("DimSum", "dim_sum", None, "def §5 (dims)"),
-    ("DimProd", "dim_prod", None, "def §5 (dims)"),
-    ("DimNeg", None, None, "def §5 (dims)"),
-    ("DimMod", "dim_mod", None, "def §5 (dims)"),
+    ("DimLit", None, None),
+    ("DimVar", None, None),
+    ("DimOf", None, None),
+    ("DimAtomRef", None, None),
+    ("DimSum", "dim_sum", None),
+    ("DimProd", "dim_prod", None),
+    ("DimNeg", None, None),
+    ("DimMod", "dim_mod", None),
 ]
 
 TERMS = [
-    ("Var", "var", "var", "def §terms"),
-    ("External", "external", "external", "def §terms (external op)"),
-    ("Zero", "zero", "zero", "def §terms"),
-    ("Identity", "identity", "id", "def §terms"),
-    ("Lit", "lit", "lit", "def §terms (scalar)"),
-    ("Scale", "scale", "scale", "def §terms"),
-    ("Sum", "sum_", "sum", "def §terms (+)"),
-    ("OPlusV", "oplus_v", "ostack", "def §terms (⊕)"),
-    ("OProdV", "oprod_v", "tensor / *", "def §terms (⊗)"),
-    ("Eval", "eval_", "() apply", "def §terms (contraction)"),
-    ("NEval", "neval", "() apply", "def §terms (dependent apply)"),
-    ("Compose", "compose", "@ / compose", "def §terms"),
-    ("Trace", "trace", "tr", "def §terms"),
-    ("Solve", "solve", "solve", "def §terms"),
-    ("Pinv", "pinv", "pinv", "def §terms (pseudo-inverse)"),
-    ("SolveApply", "solve_apply", "solve()", "def §terms"),
-    ("PinvApply", "pinv_apply", "pinv()", "def §terms"),
-    ("Dagger", "dagger", "dagger / .T", "def §core (adjoint)"),
-    ("Inner", "inner", "inner", "def §inner"),
-    ("Flat", "flat", "flat", "def §inner (♭)"),
-    ("Sharp", "sharp", "sharp", "def §inner (♯)"),
-    ("Project", "project", "project", "def §nas (proj)"),
-    ("Embed", "embed", "embed", "def §nas (embed)"),
-    ("Assert", "assert_", "assert_", "def §terms (coerce)"),
-    ("TupleEmbed", "tuple_embed", "inj_embed", "def §nas (ι)"),
-    ("TupleProject", "tuple_project", "proj", "def §nas (π)"),
-    ("Remetric", "remetric", "remetric", "def §inner"),
-    ("Lift", "lift", "lift", "def §nas (curry)"),
-    ("InvLift", "inv_lift", "unlift", "def §nas (uncurry)"),
-    ("Permute", "permute", None, "def §terms (axis perm)"),
-    ("Kron", "kron", "kron", "def §terms (Kronecker)"),
-    ("LLam", "llam", "llam", "def §terms (linear λ)"),
-    ("Lam", "lam", "lam / fn", "def §types (dependent λ)"),
-    ("Frame", "frame", "frame", "def §bunframe (frame)"),
+    ("Var", "var", "var"),
+    ("External", "external", "external"),
+    ("Zero", "zero", "zero"),
+    ("Identity", "identity", "id"),
+    ("Lit", "lit", "lit"),
+    ("Scale", "scale", "scale"),
+    ("Sum", "sum_", "sum"),
+    ("OPlusV", "oplus_v", "ostack"),
+    ("OProdV", "oprod_v", "tensor / *"),
+    ("Eval", "eval_", "() apply"),
+    ("NEval", "neval", "() apply"),
+    ("Compose", "compose", "@ / compose"),
+    ("Trace", "trace", "tr"),
+    ("Solve", "solve", "solve"),
+    ("Pinv", "pinv", "pinv"),
+    ("SolveApply", "solve_apply", "solve()"),
+    ("PinvApply", "pinv_apply", "pinv()"),
+    ("Dagger", "dagger", "dagger / .T"),
+    ("Inner", "inner", "inner"),
+    ("Flat", "flat", "flat"),
+    ("Sharp", "sharp", "sharp"),
+    ("Project", "project", "project"),
+    ("Embed", "embed", "embed"),
+    ("Assert", "assert_", "assert_"),
+    ("TupleEmbed", "tuple_embed", "inj_embed"),
+    ("TupleProject", "tuple_project", "proj"),
+    ("Remetric", "remetric", "remetric"),
+    ("Lift", "lift", "lift"),
+    ("InvLift", "inv_lift", "unlift"),
+    ("Permute", "permute", None),
+    ("Kron", "kron", "kron"),
+    ("LLam", "llam", "llam"),
+    ("Lam", "lam", "lam / fn"),
+    ("Frame", "frame", "frame"),
 ]
 
 BASES = [
-    ("ScalarBasis", "scalar_basis", "scalar_basis", "20 §7"),
-    ("BaseBasis", "base_basis", "base_basis", "20 §7 (term basis)"),
-    ("BVar", "bvar", None, "20 §7 (basis var)"),
-    ("DualBasis", "dual_basis", None, "20 §7"),
-    ("PrimalBasis", "primal_basis", None, "20 §7"),
-    ("BasisSum", "basis_sum", None, "20 §7 (⊕)"),
-    ("BasisProd", "basis_prod", None, "20 §7 (⊗)"),
-    ("BasisRep", "basis_rep", None, "20 §7 (⊕ⁿ)"),
-    ("ProjectedBasis", "projected_basis", "projected_basis", "20 §7 / 41 §1"),
-    ("ImageBasis", "image_basis", "image_basis", "20 §7 / 73 T2"),
-    ("ListBasis", "list_basis", "list_basis", "20 §7"),
-    ("WithInnerBasis", "with_inner_basis", "with_inner_basis", "20 §7"),
-    ("CompleteBasis", "complete_basis", "complete", "20 §7"),
-    ("BLam", "blam", None, "20 §7 (basis λ / frame)"),
-    ("BApp", "bapp", None, "20 §7 (basis apply)"),
+    ("ScalarBasis", "scalar_basis", "scalar_basis"),
+    ("BaseBasis", "base_basis", "base_basis"),
+    ("BVar", "bvar", None),
+    ("DualBasis", "dual_basis", None),
+    ("PrimalBasis", "primal_basis", None),
+    ("BasisSum", "basis_sum", None),
+    ("BasisProd", "basis_prod", None),
+    ("BasisRep", "basis_rep", None),
+    ("ProjectedBasis", "projected_basis", "projected_basis"),
+    ("ImageBasis", "image_basis", "image_basis"),
+    ("ListBasis", "list_basis", "list_basis"),
+    ("WithInnerBasis", "with_inner_basis", "with_inner_basis"),
+    ("CompleteBasis", "complete_basis", "complete"),
+    ("BLam", "blam", None),
+    ("BApp", "bapp", None),
 ]
 
 CATS = {
@@ -206,7 +206,7 @@ STUB = """\
 status: draft
 ---
 
-_TODO: author the meaning of `{name}` here (semantics tied to the paper {ref})._
+_TODO: author the meaning of `{name}` here._
 """
 
 
@@ -214,12 +214,12 @@ def authored_path(cat: str, name: str) -> Path:
     return AUTHORED / cat / f"{slug(name)}.md"
 
 
-def ensure_authored(cat: str, name: str, ref: str) -> tuple[str, str]:
+def ensure_authored(cat: str, name: str) -> tuple[str, str]:
     """Return ``(status, meaning_body)``; create a draft stub the first time."""
     p = authored_path(cat, name)
     if not p.exists():
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(STUB.format(name=name, ref=ref))
+        p.write_text(STUB.format(name=name))
     text = p.read_text()
     status, body = _split_front_matter(text)
     return status, body
@@ -247,13 +247,13 @@ STATUS_BADGE = {
 
 
 def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
-    name, ctor, surface, ref = entry
+    name, ctor, surface = entry
     cls = getattr(mod, name, None)
-    status, meaning = ensure_authored(cat, name, ref)
+    status, meaning = ensure_authored(cat, name)
 
     out = [f"# `{name}`", ""]
     out.append(f"**Status:** {STATUS_BADGE.get(status, status)} &nbsp;·&nbsp; "
-               f"**Category:** {CATS[cat][0]} &nbsp;·&nbsp; **Paper:** {ref}")
+               f"**Category:** {CATS[cat][0]}")
     out.append("")
     out.append("## Meaning")
     out.append("")
@@ -325,6 +325,19 @@ def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
                    "the attached basis. See the [Bases](../bases/index.md) section.")
     out.append("")
 
+    # Tested by — the doc-tied behavior tests (`tests/test_doc_*`).
+    out.append("## Tested by")
+    out.append("")
+    if cat == "bases":
+        out.append("Realization + change-of-basis scenarios for this node are exercised in "
+                   "`tests/test_doc_cob.py` (and the represent path in "
+                   "`tests/test_doc_represent.py`).")
+    else:
+        out.append("The lowering scenario for this node is exercised in "
+                   "`tests/test_doc_represent.py`; change-of-basis behavior in "
+                   "`tests/test_doc_cob.py`.")
+    out.append("")
+
     return status, "\n".join(out)
 
 
@@ -336,16 +349,16 @@ def render_index(cat: str, rows: list[tuple[str, str, str]]) -> str:
                "`status: approved` in its `docs/_authored/` file and re-running "
                "`python tools/gen_docs.py`.")
     out.append("")
-    done = sum(1 for _, s, _ in rows if s == "approved")
-    review = sum(1 for _, s, _ in rows if s == "review")
-    draft = sum(1 for _, s, _ in rows if s == "draft")
+    done = sum(1 for _, s in rows if s == "approved")
+    review = sum(1 for _, s in rows if s == "review")
+    draft = sum(1 for _, s in rows if s == "draft")
     out.append(f"**Progress: {done} approved · {review} in review · {draft} draft "
                f"(of {len(rows)})**")
     out.append("")
-    out.append("| node | status | paper |")
-    out.append("|---|---|---|")
-    for name, status, ref in rows:
-        out.append(f"| [`{name}`]({slug(name)}.md) | {STATUS_BADGE.get(status, status)} | {ref} |")
+    out.append("| node | status |")
+    out.append("|---|---|")
+    for name, status in rows:
+        out.append(f"| [`{name}`]({slug(name)}.md) | {STATUS_BADGE.get(status, status)} |")
     out.append("")
     return "\n".join(out)
 
@@ -353,17 +366,17 @@ def render_index(cat: str, rows: list[tuple[str, str, str]]) -> str:
 def main() -> None:
     rep_map = term_rep_map()
     nav_cats: dict[str, list[str]] = {}
-    all_rows: dict[str, list[tuple[str, str, str]]] = {}
+    all_rows: dict[str, list[tuple[str, str]]] = {}
 
     for cat, (_title, mod, entries) in CATS.items():
         (DOCS / cat).mkdir(parents=True, exist_ok=True)
         rows = []
         nav = []
         for entry in entries:
-            name, _ctor, _surface, ref = entry
+            name = entry[0]
             status, page = render_page(cat, mod, entry, rep_map)
             (DOCS / cat / f"{slug(name)}.md").write_text(page + "\n")
-            rows.append((name, status, ref))
+            rows.append((name, status))
             nav.append(f"{cat}/{slug(name)}.md")
         all_rows[cat] = rows
         (DOCS / cat / "index.md").write_text(render_index(cat, rows) + "\n")
@@ -372,7 +385,7 @@ def main() -> None:
     _write_home(all_rows)
     _write_mkdocs(nav_cats)
     total = sum(len(r) for r in all_rows.values())
-    done = sum(1 for r in all_rows.values() for _, s, _ in r if s == "approved")
+    done = sum(1 for r in all_rows.values() for _, s in r if s == "approved")
     print(f"Generated {total} node pages across {len(CATS)} categories. "
           f"Approved: {done}/{total}.")
 
@@ -383,16 +396,21 @@ def _write_home(all_rows) -> None:
            "**basis** — what it means, how it is built, how it is represented (lowered to "
            "polyarray), and how it is converted between bases.", "",
            "The structural sections are extracted live from the code by "
-           "`tools/gen_docs.py`; the **Meaning** prose is hand-authored and reviewed.", ""]
+           "`tools/gen_docs.py`; the **Meaning** prose is hand-authored and reviewed.", "",
+           "Every behavior described here is pinned by a doc-tied test: "
+           "`tests/test_doc_represent.py` covers every **represent scenario** (one per term, "
+           "plus the space shape laws) and `tests/test_doc_cob.py` covers every "
+           "**change-of-basis scenario** (one per basis). A doc claim that drifts from the "
+           "code fails there.", ""]
     out.append("## Approval dashboard")
     out.append("")
     out.append("| category | approved | in review | draft |")
     out.append("|---|---|---|---|")
     for cat, (title, _m, _e) in CATS.items():
         rows = all_rows[cat]
-        done = sum(1 for _, s, _ in rows if s == "approved")
-        review = sum(1 for _, s, _ in rows if s == "review")
-        draft = sum(1 for _, s, _ in rows if s == "draft")
+        done = sum(1 for _, s in rows if s == "approved")
+        review = sum(1 for _, s in rows if s == "review")
+        draft = sum(1 for _, s in rows if s == "draft")
         out.append(f"| [{title}]({cat}/index.md) | {done}/{len(rows)} | {review} | {draft} |")
     out.append("")
     out.append("> Approve a node by setting `status: approved` in its "

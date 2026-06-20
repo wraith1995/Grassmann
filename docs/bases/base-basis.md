@@ -1,6 +1,6 @@
 # `BaseBasis`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases &nbsp;·&nbsp; **Paper:** 20 §7 (term basis)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
 ## Meaning
 
@@ -57,4 +57,8 @@ Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.
 ## Conversion
 
 `cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
+
+## Tested by
+
+Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 
