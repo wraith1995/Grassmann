@@ -33,7 +33,7 @@ import pytest
 
 import grassmann as G
 from grassmann.core import basis as B
-from grassmann.lower.represent import represent
+from grassmann.lower.represent import RepresentError, represent
 
 
 def _key(v: G.Expr) -> str:
@@ -314,3 +314,72 @@ def test_compose_output_invariant_across_bases() -> None:
         {_key(f): fv_proj, _key(g): gv_proj, _key(b): bv, _key(J): Jmath.T}
     )["result"]
     assert np.asarray(out_img, float) == pytest.approx(np.asarray(out_proj, float))
+
+
+# ---------------------------------------------------------------------------
+# The mismatched-pinning gap — guarded loudly (`43 §2c`).
+#
+# `choose` and consistent `basis_env` never split the two contracted slots of a contraction
+# across an immersed and an orthonormal basis.  An inconsistent MANUAL pin used to silently
+# miscompute (the raw index contraction omits the change-of-basis); represent now raises.
+# ---------------------------------------------------------------------------
+
+
+def test_dot_mismatched_operand_pinning_raises() -> None:
+    """``dot`` with one operand in ``ImageBasis`` and one in ``ProjectedBasis`` must raise.
+
+    (Before the guard this silently returned the raw ``aᵀb`` instead of ``aᵀ(JᵀJ)b``.)
+    """
+    _Rt, _Re, J = _setup(2, 3)
+    img = G.img(J)
+    a = G.var("a", img)
+    b = G.var("b", img)
+    projb, imgb = _bases(J)
+    with pytest.raises(RepresentError, match="mismatched-pinning"):
+        represent(G.dot(a, b).node, basis_env={a.node.uid: imgb, b.node.uid: projb})
+
+
+def test_compose_mismatched_slot_pinning_raises() -> None:
+    """``compose`` whose contracted ``Img(J)`` slots are pinned to different bases must raise."""
+    _Rt, _Re, J = _setup(2, 3)
+    img = G.img(J)
+    Re2 = G.space("Re2", 2)
+    f = G.var("f", img >> Re2)
+    g = G.var("g", Re2 >> img)
+    b = G.var("b", Re2)
+    projb, imgb = _bases(J)
+    base_re2 = B.base_basis(Re2.node)
+    env = {
+        f.node.uid: B.basis_prod(B.dual_basis(imgb), base_re2),   # f domain slot: ImageBasis
+        g.node.uid: B.basis_prod(B.dual_basis(base_re2), projb),  # g codomain slot: Projected
+    }
+    with pytest.raises(RepresentError, match="mismatched-pinning"):
+        represent(G.compose(f, g)(b).node, basis_env=env)
+
+
+def test_eval_mismatched_map_application_raises() -> None:
+    """A non-metric ``Eval`` (map application) with a slot/arg basis mismatch must raise."""
+    _Rt, _Re, J = _setup(2, 3)
+    img = G.img(J)
+    Re2 = G.space("Re2", 2)
+    M = G.var("M", img >> Re2)
+    a = G.var("a", img)
+    projb, imgb = _bases(J)
+    base_re2 = B.base_basis(Re2.node)
+    env = {
+        M.node.uid: B.basis_prod(B.dual_basis(imgb), base_re2),  # M domain slot: ImageBasis
+        a.node.uid: projb,                                        # arg: ProjectedBasis
+    }
+    with pytest.raises(RepresentError, match="mismatched-pinning"):
+        represent(M(a).node, basis_env=env)
+
+
+def test_consistent_pinning_does_not_raise() -> None:
+    """Consistent ImageBasis pins (the supported contract) compile without the guard firing."""
+    _Rt, _Re, J = _setup(2, 3)
+    img = G.img(J)
+    a = G.var("a", img)
+    b = G.var("b", img)
+    _projb, imgb = _bases(J)
+    # Both operands in the SAME ImageBasis ⇒ fine.
+    represent(G.dot(a, b).node, basis_env={a.node.uid: imgb, b.node.uid: imgb})
