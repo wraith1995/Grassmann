@@ -681,6 +681,8 @@ def _rep_eval_operands(
             f_rep = _rep_metric(f, metric_kind, ctx, basis=op_basis)
             return f_rep, arg_reps
         # orthonormal operands ⇒ identity-metric default: lower f exactly as before.
+        # But reject an inconsistent immersed/orthonormal split (`43 §2c`) first.
+        _assert_metric_operands_consistent(arg_reps, note=f"eval:{metric_kind}")
         return _rep(f, ctx), arg_reps
     f_rep = _rep(f, ctx)
     arg_reps = [_rep(a, ctx) for a in args]
@@ -723,6 +725,71 @@ def _operand_metric_basis(arg_reps: list[Rep]) -> B.Basis | None:
     return b if _is_immersed_metric_basis(b) else None
 
 
+def _assert_metric_operands_consistent(arg_reps: list[Rep], *, note: str) -> None:
+    """Guard the `43 §2c` mismatched-pinning gap for a **metric** contraction.
+
+    A metric ``Eval`` (``dot``/``Flat``/``Sharp`` application) builds its Gram in the
+    operands' *shared* basis (`43 §2b`).  If the operands are pinned to **different** bases
+    and at least one is a non-orthonormal ``ImageBasis``, that shared basis does not exist:
+    the metric would silently fall back to the identity in a non-orthonormal basis and the
+    contraction is wrong (the raw ``aᵀb`` instead of ``aᵀ·G·b``).  ``choose`` never produces
+    such a split (every operand of a space gets the same basis), so this only fires under an
+    inconsistent manual ``basis_env`` pin — which we reject loudly rather than miscompute.
+    """
+    bases = [r.basis for r in arg_reps]
+    if not any(_is_immersed_metric_basis(b) for b in bases):
+        return  # orthonormal-only: out of scope, identity metric is correct.
+    first = bases[0]
+    if not all(_basis_eq(first, b) for b in bases[1:]):
+        raise RepresentError(
+            f"{note}: metric operands are pinned to inconsistent bases {bases!r}; a "
+            "non-orthonormal (ImageBasis) inner product requires every operand in the SAME "
+            "basis (the `43 §2c` mismatched-pinning gap)."
+        )
+
+
+def _basis_pairing_consistent(slot_basis: B.Basis, op_basis: B.Basis) -> bool:
+    """True iff contracting ``slot_basis`` against ``op_basis`` is a valid natural pairing.
+
+    A ``dom ⊗ cod`` contraction (``Eval`` of a non-metric map, ``Compose``) sums raw indices
+    with no metric, so it is correct only when the two contracted slots are **mutually dual**
+    — one is the ``DualBasis`` of the other (covariant slot ↔ contravariant operand).
+    """
+    return _basis_eq(_peel_one_dual(slot_basis), op_basis) or _basis_eq(
+        slot_basis, _peel_one_dual(op_basis)
+    )
+
+
+def _assert_pairing_consistent(
+    slot_basis: B.Basis | None, op_basis: B.Basis | None, *, note: str,
+) -> None:
+    """Guard the `43 §2c` mismatched-pinning gap for a **natural-pairing** contraction.
+
+    Only fires when a non-orthonormal ``ImageBasis`` is involved on either contracted side
+    and the two are not mutually dual — the case the raw index contraction silently
+    miscomputes (it omits the change-of-basis between the slot and the operand).
+    Orthonormal-only contractions are out of scope (``choose`` keeps them consistent).
+    """
+    if slot_basis is None or op_basis is None:
+        return
+    if not (_is_immersed_metric_basis(slot_basis) or _is_immersed_metric_basis(op_basis)):
+        return
+    if _basis_pairing_consistent(slot_basis, op_basis):
+        return
+    raise RepresentError(
+        f"{note}: contracted slots are pinned to inconsistent bases ({slot_basis!r} vs "
+        f"{op_basis!r}); a non-orthonormal (ImageBasis) contraction requires mutually-dual "
+        "bases (the `43 §2c` mismatched-pinning gap)."
+    )
+
+
+def _slot_basis_at(basis: B.Basis, pos: int) -> B.Basis | None:
+    """The basis of factor ``pos`` of a map/tensor ``BasisProd`` (else ``None``)."""
+    if isinstance(basis, B.BasisProd) and 0 <= pos < len(basis.bases):
+        return basis.bases[pos]
+    return None
+
+
 def _rep_eval(
     e: T.Eval, f: T.Term, positions: tuple[int, ...], args: tuple[T.Term, ...], ctx: _Ctx,
 ) -> Rep:
@@ -739,6 +806,12 @@ def _rep_eval(
     # ``Eval`` keeps the original f-first order and is byte-identical (`41 §3`).
     f_rep, arg_reps = _rep_eval_operands(f, args, ctx)
     f_factors = _factors(f_rep.space)
+    # A metric ``f`` is reconciled inside ``_rep_eval_operands`` (built in the operand basis);
+    # a non-metric ``f`` contracts raw indices, so its slot must be the dual of the operand
+    # (the `43 §2c` natural-pairing guard, below). Flat/Sharp tag their result with the
+    # default basis even when built in an immersed basis, so the tag-based pairing guard is
+    # scoped to non-metric ``f`` where the basis tags are honest.
+    is_metric_f = _metric_node_kind(f) is not None
 
     # Assign einsum labels: one per f-axis; an arg's contracted axis shares the f-slot
     # label, and the arg's own *free* (basis-index) labels (`41 §3` LLam tensor) ride
@@ -772,6 +845,10 @@ def _rep_eval(
         arg_rep = _fuse_arg_to_slot(ctx, f_rep.array, pos, arg_rep)
         # dim-agreement assert at the contraction site (`41 §4`).
         _assert_axis_dims(ctx, f_rep.array, pos, arg_rep, note=f"assert:eval-dim@{pos}")
+        if not is_metric_f:
+            _assert_pairing_consistent(
+                _slot_basis_at(f_rep.basis, pos), arg_rep.basis, note=f"eval@{pos}",
+            )
         operands.append(arg_rep.array)
         arg_labels = f_labels[pos] + arg_rep.free_labels
         arg_label_lists.append(arg_labels)
@@ -868,6 +945,12 @@ def _rep_compose(
         # dom-axis (axis 0) is fresh and replaces f's slot in the output (`41 §3`).
         _assert_axes_match(
             ctx, f_rep.array, pos, g_rep.array, 1, note=f"assert:compose-dim@{pos}",
+        )
+        # `43 §2c` natural-pairing guard: f's slot ``pos`` contracts g's codomain (axis 1);
+        # the two must be mutually dual for the raw index contraction to be correct.
+        _assert_pairing_consistent(
+            _slot_basis_at(f_rep.basis, pos), _slot_basis_at(g_rep.basis, 1),
+            note=f"compose@{pos}",
         )
         cod_label = f_labels[pos]
         dom_label = chr(next_fresh)
@@ -1251,22 +1334,52 @@ def _inner_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
 
 
 def _rep_flat(e: T.Flat, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None) -> Rep:
-    """``Flat s`` — ``G_s`` (s ⊸ s*), identity-metric default ⇒ identity (`41 §3`)."""
+    """``Flat s`` — ``G_s`` (s ⊸ s*), identity-metric default ⇒ identity (`41 §3`).
+
+    ``Flat`` and ``Inner`` are the SAME matrix ``G_s`` (a ``s*⊗s*`` form), so the result
+    carries the same dual per-slot basis: in an immersed operand ``basis`` the surviving slot
+    of a partial contraction stays ``DualBasis(basis)`` (`43 §2c`, so a ``sharp(flat(v))``
+    chain genuinely re-enters the immersed metric instead of silently falling to identity).
+    Orthonormal default (``basis is None``) ⇒ ``default_basis`` — byte-identical.
+    """
     n = _static_dim(space)
     g = _metric_matrix(ctx, space, n, note="metric:Flat=G_s", basis=basis)
     map_space = _synth(e)
-    return Rep(g, default_basis(map_space), map_space)
+    return Rep(g, _inner_map_basis(map_space, basis), map_space)
 
 
 def _rep_sharp(e: T.Sharp, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None) -> Rep:
-    """``Sharp s`` — ``InvOp(G_s)`` (s* ⊸ s), identity-metric default ⇒ identity."""
+    """``Sharp s`` — ``InvOp(G_s)`` (s* ⊸ s), identity-metric default ⇒ identity.
+
+    ``basis`` (from the ``Eval`` site) is the operand *covector*'s basis — the **dual** of
+    the primal ``s`` basis.  The metric ``G_s`` is therefore built in the *primal* basis
+    (peel one dual) and then inverted, so ``Sharp`` agrees with the immersed-Gram convention
+    (``_metric_matrix(dual)`` already returns ``(JᵀJ)⁻¹`` — building ``G_s`` in the primal and
+    inverting avoids a double inverse) and with the explicit-``WithInner`` metric.  The result
+    ``s⊗s`` map is tagged with the primal per-slot basis so the produced vector re-enters the
+    immersed metric correctly (`43 §2c`).  Orthonormal default ⇒ byte-identical.
+    """
     n = _static_dim(space)
-    g = _metric_matrix(ctx, space, n, note="metric:Sharp:G_s", basis=basis)
+    primal = _peel_one_dual(basis)
+    g = _metric_matrix(ctx, space, n, note="metric:Sharp:G_s", basis=primal)
     [out] = ctx.prog.emit_stmt(
         pa.InvOp(), [g], [pa.OutSpec("sharp", (n, n))], note="sharp:InvOp(G_s)",
     )
     map_space = _synth(e)
-    return Rep(out, default_basis(map_space), map_space)
+    return Rep(out, _sharp_map_basis(map_space, basis), map_space)
+
+
+def _sharp_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
+    """Basis of the ``Sharp(s)`` map (an element of ``s⊗s``) for active operand ``basis``.
+
+    ``basis`` is the covector operand's (dual) basis; the map's two slots live in the primal
+    ``s`` (peel one dual), so the produced vector and a partial contraction's surviving slot
+    carry the primal operand basis.  ``basis is None`` ⇒ ``default_basis`` (byte-identical).
+    """
+    if basis is None or not isinstance(map_space, S.OProd):
+        return default_basis(map_space)
+    primal = _peel_one_dual(basis)
+    return B.basis_prod(*(primal for _ in map_space.spaces))
 
 
 # ---------------------------------------------------------------------------

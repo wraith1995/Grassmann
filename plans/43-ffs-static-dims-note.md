@@ -114,16 +114,24 @@ the coordinate-free truth:
   result `BasisProd(DualBasis(cod_primal), dom_primal)`. Orthonormal endpoints keep the
   **byte-identical** plain-transpose fast path (gated on `_is_immersed_metric_basis` of either
   slot). Verified for self-maps and asymmetric `img>>Re2` / `Re2>>img` maps, all three CASES.
-- **`_rep_flat` / `_rep_sharp` — confirmed already correct** after §2b. `⟨flat(v), v⟩ = sᵀ(JᵀJ)s`
-  and the round trip `sharp(flat(v)) = v` are basis-invariant (the §2b `_metric_matrix` fix and
-  `_inner_map_basis` dual tagging cover them). No change needed.
-- **`_rep_compose` / non-metric `Eval` — confirmed correct.** A domain⊗codomain contraction is a
-  *natural pairing* (no metric), so it is basis-agnostic: `(f∘g)(b) == f(g(b))` and the output is
-  basis-invariant under consistent pinning (which `choose` and consistent `basis_env` guarantee).
-  The only place a non-identity Gram enters a map contraction was `dagger`. *Caveat (latent, not
-  fixed):* an Eval/Compose whose contracted slots are pinned to **mismatched** bases (one
-  `ImageBasis`, one `ProjectedBasis`) is not reconciled — but `choose` never produces that, and
-  consistent pinning is the supported contract.
+- **`_rep_flat` / `_rep_sharp` — made basis-honest; FIXED.** The pairing `⟨flat(v), v⟩ = sᵀ(JᵀJ)s`
+  was already correct, but Flat/Sharp tagged their *result* with `default_basis` even when built in
+  an immersed basis — so a `sharp(flat(v))` chain lost the basis and only round-tripped by
+  error-cancellation (Sharp silently fell to the identity, masked by the leftover `JᵀJ` from Flat).
+  Now Flat tags its result with the dual per-slot basis (`_inner_map_basis`, shared with Inner) and
+  Sharp builds `G_s` in the *primal* basis (peel one dual) then inverts and tags the `s⊗s` slots
+  primal (`_sharp_map_basis`) — so `sharp(flat(v)) = v` is now *genuinely* correct (Sharp materializes
+  `(JᵀJ)⁻¹`). Orthonormal default unchanged (byte-identical). `test_sharp_flat_roundtrip_*`.
+- **`_rep_compose` / non-metric `Eval` — confirmed correct AND the mismatched-pinning gap is now
+  guarded.** A domain⊗codomain contraction is a *natural pairing* (no metric), so it is basis-agnostic
+  when the two contracted slots share a coordinate convention — `(f∘g)(b) == f(g(b))`, output
+  basis-invariant under consistent pinning (which `choose` and consistent `basis_env` guarantee). The
+  previously-latent gap — contracted slots pinned to **inconsistent** bases (one `ImageBasis`, one
+  orthonormal), which silently miscomputed the raw index contraction — is now a loud `RepresentError`:
+  `_assert_metric_operands_consistent` (metric `Eval`: all operands must share a basis) and
+  `_assert_pairing_consistent` (non-metric `Eval` slot↔arg and `Compose` slot↔g-codomain must be
+  mutually dual). Both fire only when an immersed basis is involved, so orthonormal lowering is
+  untouched. `test_*_mismatched_*_raises`, `test_consistent_pinning_does_not_raise`.
 
 The original (now-historical) recommendation follows.
 
