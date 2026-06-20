@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="OProd" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The **tensor product** `OProd(s₀,…,sₙ)` = `s₀ ⊗ … ⊗ sₙ` — the multilinear product. Dimension
@@ -29,7 +31,15 @@ V * W
 | array shape | `(2, 3)` |
 | default basis | `BasisProd` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    s = C.oprod(C.base("V", 2), C.base("W", 3))
+    return _dim_ex("Tensor product: dimension is the PRODUCT `|V|·|W|`; one axis per factor.",
+                   "V * W", s, 6)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

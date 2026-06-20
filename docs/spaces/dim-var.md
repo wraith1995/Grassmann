@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="DimVar" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 A **dimension variable** `DimVar(name)` — a bound symbolic size, introduced by a nat binder or
@@ -20,7 +22,15 @@ base("V", DimVar("n"))
 |---|---|
 | dimension  `dim_of(s)` | `symbolic (depends on the nat parameter `n`)` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dynamic_dim_ex("A symbolic dim variable (a nat parameter) — no value until bound.",
+                           'base("V", DimVar("n"))', C.base("V", C.DimVar("n")),
+                           "symbolic (depends on the nat parameter `n`)")
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

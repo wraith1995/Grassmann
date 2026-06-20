@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Assert" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Space coercion** `Assert(v, s')` — assert that `v` belongs to space `s'` (an equivalent space),
@@ -31,7 +33,17 @@ assert_(x, V')
 [1., 2., 3.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, Valt = C.base("V", 3), C.base("V", 3)
+    x = C.var("x", V)
+    xv = [1.0, 2.0, 3.0]
+    got = _run(C.assert_(x, Valt), {x: xv})
+    _ck(np.allclose(got, xv))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

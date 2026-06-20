@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Scale" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Scalar multiplication** `Scale(r, v)` — `r · v`, where `r` is a real or a scalar-valued term
@@ -30,7 +32,17 @@ scale(2.0, x)
 [ 2., -4.,  6.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    xv = [1.0, -2.0, 3.0]
+    got = _run(C.scale(2.0, x), {x: xv})
+    _ck(np.allclose(got, 2 * np.asarray(xv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="Scalar" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The field **ℝ** itself — the one-dimensional space of scalars (`Scalar`, dim 1).
@@ -25,7 +27,13 @@ R  # scalar()
 | array shape | `()` |
 | default basis | `ScalarBasis` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dim_ex("The field ℝ — a single dimension.", "R  # scalar()", C.scalar(), 1)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Built by
 

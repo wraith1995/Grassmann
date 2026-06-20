@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Trace" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Trace / contraction of two slots** `Trace(f, i, j)` — contract axes `i` and `j` of a tensor
@@ -33,7 +35,17 @@ tr(f)
 1.83
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 4)
+    f = C.var("f", C.linear_map_space(V, V))
+    A = np.round(np.random.default_rng(4).standard_normal((4, 4)), 2)
+    got = _run(C.trace(f, 1, 0), {f: A})
+    _ck(np.allclose(got, np.trace(A)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Inner" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 The **inner-product map** `Inner(s)` — the metric `s ⊗ s ⊸ ℝ`, i.e. `⟨·,·⟩` as a bilinear form.
@@ -36,7 +38,17 @@ dot(a, b)
 32.
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    a, b = C.var("a", V), C.var("b", V)
+    av, bv = [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]
+    got = _run(C.eval_(C.inner(V), (0, 1), a, b), {a: av, b: bv})
+    _ck(np.allclose(got, np.dot(av, bv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

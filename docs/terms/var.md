@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Var" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 A **variable** `Var(name, props?)` — a named leaf term, the input of a program. Its space is
@@ -34,7 +36,17 @@ var("x", V)
 [1., 2., 3.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    xv = [1.0, 2.0, 3.0]
+    got = _run(x, {x: xv})
+    _ck(np.allclose(got, xv))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

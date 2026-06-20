@@ -14,5 +14,5 @@ Every node carries a concrete example — a **worked input→output** (terms), a
 | [Terms](terms/index.md) | 0/34 | 34 | 0 |
 | [Bases](bases/index.md) | 0/15 | 15 | 0 |
 
-> Approve a node by setting `status: approved` in its `docs/_authored/<category>/<node>.md` file, then run `python tools/gen_docs.py`.
+**Marking statuses.** Either edit a node's `docs/_authored/<category>/<node>.md` (`status: draft|review|approved`) and re-run `python tools/gen_docs.py`, or — to mark from the site — run `python tools/review_server.py` alongside `mkdocs serve` and click the **status buttons** on any node page (they write back to the repo and the page reloads with the new badge).
 

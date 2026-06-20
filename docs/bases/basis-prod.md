@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="BasisProd" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **tensor-product basis** `BasisProd(b₀,…)` — the basis of `⊗(sᵢ)`, the **Kronecker** product
@@ -34,7 +36,17 @@ cob(prod(dual(imgb), I₂), prod(dual(projb), I₂))
  [ 0.   ,  0.246, -0.   , -0.369]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    J, imgb, projb = _img()
+    base2 = B.base_basis("Re2", np.eye(2))
+    got = _cob(B.basis_prod(B.dual_basis(imgb), base2),
+               B.basis_prod(B.dual_basis(projb), base2), {J: _JSTORED})
+    _ck(np.allclose(got, np.kron(np.linalg.inv(_R).T, np.eye(2))))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

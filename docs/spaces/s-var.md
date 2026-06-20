@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="SVar" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 A **space variable** `SVar(name)` — a bound, abstract space introduced by a dependent binder
@@ -25,7 +27,16 @@ svar("a")
 |---|---|
 | dimension  `dim_of(s)` | `no static dim (abstract until instantiated)` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dynamic_dim_ex(
+        "A space variable is abstract — its dimension is unknown until the binder is "
+        "instantiated with a concrete space.",
+        'svar("a")', C.svar("a"), "no static dim (abstract until instantiated)")
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

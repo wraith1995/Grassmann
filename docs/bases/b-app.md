@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="BApp" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 A **basis application** `BApp(f, positions, args…)` — apply a `BLam` (basis function / frame /
@@ -21,7 +23,7 @@ bapp(f, (0,), arg)
 | mirrors | `App / Eval at the basis level` |
 | result | `a concrete basis after reduction` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

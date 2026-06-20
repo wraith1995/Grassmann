@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="InvLift" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Uncurry / unfuse tensor slots** `InvLift(v, fused, k?)` — the inverse of `Lift`: split one
@@ -30,7 +32,17 @@ inv_lift(lift(x, (0,1)), (0,), 2)
 [0., 1., 2., 3.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 2)
+    x = C.var("x", C.oprod(V, V))
+    xv = np.arange(4.0).reshape(2, 2)
+    got = _run(C.inv_lift(C.lift(x, (0, 1)), (0,), 2), {x: xv})
+    _ck(np.allclose(np.ravel(got), np.ravel(xv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

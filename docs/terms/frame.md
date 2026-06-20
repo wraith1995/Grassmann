@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Frame" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 A **frame** `Frame(var, basis_body)` — the dedicated term-level frame node: a basis that *varies
@@ -24,7 +26,16 @@ frame(x, base_basis("V"))
 | basis body | `BaseBasis("V")` |
 | role | `value → basis (a frame); not a value node` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    fr = C.frame(x, C.base_basis("V"))
+    _ck(isinstance(fr, C.Frame) and fr.var is x)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

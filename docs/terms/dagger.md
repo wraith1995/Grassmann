@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Dagger" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Metric adjoint** `Dagger(f)` — `f†`, the adjoint of `f` defined by `⟨f† a, b⟩ = ⟨a, f b⟩`. In
@@ -37,7 +39,17 @@ f.dagger
  [ 3.,  7., 11.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 3), C.base("W", 4)
+    f = C.var("f", C.linear_map_space(V, W))
+    A = np.arange(12, dtype=float).reshape(3, 4)
+    got = _run(C.dagger(f), {f: A})
+    _ck(np.allclose(got, A.T))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

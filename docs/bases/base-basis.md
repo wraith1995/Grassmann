@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="BaseBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **term-level "term basis"** `BaseBasis(name, vectors?, space?, backup?)` — a concrete basis
@@ -43,7 +45,18 @@ base_basis("W", vectors=(c,), space=W, backup=base_basis("W", space=W))
  [3., 0., 0.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    W = C.base("W", 3)
+    c = C.var("c", W)
+    basis = B.base_basis("W", vectors=(c,), space=W, backup=B.base_basis("W", space=W))
+    cv = [1.0, 2.0, 3.0]
+    got = _realize(basis, {c: cv})
+    _ck(got.shape == (3, 3) and np.linalg.matrix_rank(got) == 3 and np.allclose(got[:, 0], cv))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

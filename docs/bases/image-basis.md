@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="ImageBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **literal map-application basis** `ImageBasis(f)` — the *raw* columns `f(eᵢ)` of `f`'s range
@@ -37,7 +39,15 @@ realize(image_basis(J))
  [1., 1.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    J, imgb, _ = _img()
+    got = _realize(imgb, {J: _JSTORED})
+    _ck(np.allclose(got, _JMATH))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

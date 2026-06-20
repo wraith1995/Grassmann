@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Sum" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Vector addition** `Sum(v₀,…,vₙ)` — n-ary `v₀ + … + vₙ`; all summands share one space. The
@@ -36,7 +38,17 @@ sum(a, b)
 [5., 7., 9.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    a, b = C.var("a", V), C.var("b", V)
+    av, bv = [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]
+    got = _run(C.sum_(a, b), {a: av, b: bv})
+    _ck(np.allclose(got, np.add(av, bv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

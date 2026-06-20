@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="DimSum" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 `DimSum(d₀,…)` — the **sum** of dim expressions, `d₀ + … + dₙ`. The size law behind `⊕`
@@ -20,7 +22,14 @@ dim_sum(2, 3)
 |---|---|
 | evaluates to | `5` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dim_expr_ex("Sum of dims `2 + 3` (the law behind `⊕`).",
+                        "dim_sum(2, 3)", C.base("V", C.dim_sum(2, 3)), 5)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

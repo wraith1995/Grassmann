@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="DimMod" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 `DimMod(term, modulus)` — a dim **modulo** another, `term mod modulus` (Python non-negative
@@ -20,7 +22,14 @@ dim_mod(7, 3)
 |---|---|
 | evaluates to | `1` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dim_expr_ex("Dim modulo `7 mod 3` (non-negative remainder).",
+                        "dim_mod(7, 3)", C.base("V", C.dim_mod(7, 3)), 1)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

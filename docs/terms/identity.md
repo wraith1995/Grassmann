@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Identity" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 The **identity map** `Identity(s)` on `s` — the linear map `s ⊸ s` that returns its input,
@@ -24,7 +26,15 @@ identity(V)
  [0., 0., 1.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    got = _run(C.identity(V), {})
+    _ck(np.allclose(got, np.eye(3)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

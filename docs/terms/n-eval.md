@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="NEval" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Dependent-function application** `NEval(f, positions, args…)` — apply a `Lam` (a non-linear /
@@ -38,7 +40,23 @@ neval(lam, (0,), a)
 [-2., -1.,  0.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    from grassmann.core.kinds import SpaceSort
+    
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W))
+    x = C.var("x", V)
+    lam = C.lam(((x.name, SpaceSort(V)),), C.eval_(f, (0,), x), (x,))
+    a = C.var("a", V)
+    fv = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    av = [2.0, -1.0]
+    got = _run(C.neval(lam, (0,), a), {f: fv, a: av})
+    _ck(np.allclose(got, np.asarray(fv).T @ np.asarray(av)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

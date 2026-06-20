@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="Ker" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The **kernel** `Ker(f)` of a linear map `f : dom ⊸ cod` — the subspace of `dom` that `f`
@@ -26,7 +28,16 @@ ker(f)  # f: A(5) >> B(3), rank 2
 | array shape | `(3,)` |
 | default basis | `ProjectedBasis(…, "ker")` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    A, B_ = C.base("A", 5), C.base("B", 3)
+    f = C.var("f", C.linear_map_space(A, B_), props=C.props.rank(2))
+    return _dim_ex("Kernel: dimension `|dom| − rank` = 5 − 2 (static when props pin the rank).",
+                   "ker(f)  # f: A(5) >> B(3), rank 2", C.ker(f), 3)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

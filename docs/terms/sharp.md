@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Sharp" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 The **sharp** (musical ♯) map `Sharp(s)` — `s* ⊸ s`, raising an index; the inverse of `Flat`,
@@ -30,7 +32,17 @@ sharp(V)(w)
 [1., 2., 3.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    w = C.var("w", C.dual(V))
+    wv = [1.0, 2.0, 3.0]
+    got = _run(C.eval_(C.sharp(V), (0,), w), {w: wv})
+    _ck(np.allclose(got, wv))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

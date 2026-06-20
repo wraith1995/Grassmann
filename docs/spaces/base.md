@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="Base" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 A **named primitive vector space** `Base(name, dim)` — an abstract ℝ^n with a human-readable
@@ -29,7 +31,14 @@ space("V", 3)
 | array shape | `(3,)` |
 | default basis | `BaseBasis` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dim_ex("A named primitive space of its declared dimension.",
+                   'space("V", 3)', C.base("V", 3), 3)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

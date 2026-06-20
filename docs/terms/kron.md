@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Kron" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Kronecker product of maps** `Kron(f, g)` — the block/tensor product `f ⊗ g` of two linear
@@ -40,7 +42,19 @@ kron(f, g)
  [ 1.295, -0.448, -0.515,  0.178]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 2)
+    f = C.var("f", C.linear_map_space(V, V))
+    g = C.var("g", C.linear_map_space(V, V))
+    Fm = np.round(np.random.default_rng(9).standard_normal((2, 2)), 2)
+    Gm = np.round(np.random.default_rng(10).standard_normal((2, 2)), 2)
+    got = _run(C.kron(f, g), {f: Fm, g: Gm})
+    _ck(np.allclose(got, np.kron(Fm, Gm)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

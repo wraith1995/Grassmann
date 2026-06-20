@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Compose" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Map composition** `Compose(f, positions, gs…)` — chain each `gₖ`'s codomain into `f`'s slot
@@ -40,7 +42,19 @@ compose(f, g)
  [ 0.662, -0.753]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W, U = C.base("V", 2), C.base("W", 3), C.base("U", 2)
+    f = C.var("f", C.linear_map_space(W, U))
+    g = C.var("g", C.linear_map_space(V, W))
+    Fm = np.round(np.random.default_rng(3).standard_normal((3, 2)), 2)
+    Gm = np.round(np.random.default_rng(4).standard_normal((2, 3)), 2)
+    got = _run(C.compose(f, (0,), g), {f: Fm, g: Gm})
+    _ck(np.allclose(got, Gm @ Fm))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

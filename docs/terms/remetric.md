@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Remetric" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Re-metricize a value** `Remetric(v, g)` — view `v` as living in `WithInner(s, g)`: same
@@ -31,7 +33,18 @@ v.remetric(g)
 [1., 2., 3.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    v = C.var("v", V)
+    vv = [1.0, 2.0, 3.0]
+    got = _run(C.remetric(v, g), {v: vv, g: np.eye(3)})
+    _ck(np.allclose(got, vv))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

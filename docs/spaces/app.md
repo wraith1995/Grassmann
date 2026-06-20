@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="App" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 A **space-function application** `App(g, positions, args)` — applies a space/type-level function
@@ -25,7 +27,22 @@ spacefn(lambda a: a * a)[A]
 | reduces to | `A ⊗ A` |
 | unreduced  `dim_of(app)` | `no static dim (must reduce first)` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    from grassmann.core.kinds import SpaceSort
+    
+    sf = C.lam((("a", SpaceSort(C.base("A", 2))),), C.oprod(C.svar("a"), C.svar("a")))
+    app = C.space_app(sf, (0,), C.base("A", 2))
+    try:
+        dim_of(app)
+        ok = False
+    except Exception:
+        ok = True
+    _ck(ok)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

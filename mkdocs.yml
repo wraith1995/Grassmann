@@ -16,8 +16,11 @@ theme:
       toggle: {icon: material/weather-sunny, name: Light}
 exclude_docs: |
   _authored/
+extra_javascript:
+  - js/review.js
 markdown_extensions:
   - admonition
+  - md_in_html
   - pymdownx.highlight
   - pymdownx.superfences
   - tables

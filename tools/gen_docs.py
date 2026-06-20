@@ -22,6 +22,7 @@ import dataclasses
 import importlib
 import inspect
 import re
+import textwrap
 from pathlib import Path
 
 import doc_examples as DEX  # same-dir module; tools/ is on sys.path when run as a script
@@ -283,9 +284,39 @@ def _render_example(name: str) -> list[str]:
         out.extend(ex.output.splitlines())
         out.append("```")
         out.append("")
-    out.append("_This example is executed and asserted in `tests/test_doc_examples.py`._")
+    # The literal test — the actual code that builds the inputs, runs it, and asserts the
+    # expected (this IS the test run by tests/test_doc_examples.py), shown verbatim.
+    src = _example_source(fn)
+    if src:
+        out.append('??? note "Test (literal source — input · run · expected assertion)"')
+        out.append("")
+        out.append("    ```python")
+        out.extend("    " + ln for ln in src.splitlines())
+        out.append("    ```")
+        out.append("")
+    out.append("_Executed and asserted in `tests/test_doc_examples.py`._")
     out.append("")
     return out
+
+
+def _example_source(fn) -> str:
+    """The example thunk's literal body — construction + run + ``_ck`` expected assertion.
+
+    Strips the ``@_ex`` decorator and the ``def`` line, and cuts the ``return Example(...)``
+    presentation tail (the numeric assertion above it is the expected check); a ``return
+    _dim_ex(...)`` / ``return _dynamic_dim_ex(...)`` carries its expected as an argument and is
+    kept whole.
+    """
+    raw = textwrap.dedent(inspect.getsource(fn))
+    body = []
+    for ln in raw.splitlines():
+        s = ln.strip()
+        if s.startswith("@_ex") or s.startswith("def "):
+            continue
+        if s.startswith("return Example("):
+            break
+        body.append(ln)
+    return textwrap.dedent("\n".join(body)).rstrip()
 
 
 def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
@@ -296,6 +327,13 @@ def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
     out = [f"# `{name}`", ""]
     out.append(f"**Status:** {STATUS_BADGE.get(status, status)} &nbsp;·&nbsp; "
                f"**Category:** {CATS[cat][0]}")
+    out.append("")
+    # Approval widget — `tools/review_server.py` + `js/review.js` turn this into clickable
+    # status buttons that write back to the authored file (no-op without the review server).
+    out.append(
+        f'<div class="gm-approval" data-node="{name}" data-cat="{cat}" '
+        f'data-status="{status}"></div>'
+    )
     out.append("")
     out.append("## Meaning")
     out.append("")
@@ -429,6 +467,7 @@ def main() -> None:
 
     _write_home(all_rows)
     _write_mkdocs(nav_cats)
+    _write_review_js()
     total = sum(len(r) for r in all_rows.values())
     done = sum(1 for r in all_rows.values() for _, s in r if s == "approved")
     print(f"Generated {total} node pages across {len(CATS)} categories. "
@@ -460,11 +499,69 @@ def _write_home(all_rows) -> None:
         draft = sum(1 for _, s in rows if s == "draft")
         out.append(f"| [{title}]({cat}/index.md) | {done}/{len(rows)} | {review} | {draft} |")
     out.append("")
-    out.append("> Approve a node by setting `status: approved` in its "
-               "`docs/_authored/<category>/<node>.md` file, then run "
-               "`python tools/gen_docs.py`.")
+    out.append("**Marking statuses.** Either edit a node's "
+               "`docs/_authored/<category>/<node>.md` (`status: draft|review|approved`) and "
+               "re-run `python tools/gen_docs.py`, or — to mark from the site — run "
+               "`python tools/review_server.py` alongside `mkdocs serve` and click the "
+               "**status buttons** on any node page (they write back to the repo and the page "
+               "reloads with the new badge).")
     out.append("")
     (DOCS / "index.md").write_text("\n".join(out) + "\n")
+
+
+_REVIEW_JS = r"""
+// Status-marking widget. Inert unless the local review server is running:
+//   python tools/review_server.py    (writes back to docs/_authored/, then regenerates)
+// With `mkdocs serve` also running, a click live-reloads the page with the new badge.
+(function () {
+  var API = "http://127.0.0.1:8017/status";
+  var STATES = [["approved", "✅ approved"], ["review", "🟡 in review"],
+                ["draft", "⬜ draft"]];
+  function render(el) {
+    var node = el.dataset.node, cat = el.dataset.cat, cur = el.dataset.status;
+    el.innerHTML = "";
+    var bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:.4em;align-items:center;flex-wrap:wrap;margin:.4em 0";
+    var tag = document.createElement("span");
+    tag.textContent = "Mark status:";
+    tag.style.cssText = "font-size:.8em;opacity:.7";
+    bar.appendChild(tag);
+    STATES.forEach(function (s) {
+      var b = document.createElement("button");
+      b.textContent = s[1];
+      b.style.cssText = "cursor:pointer;border:1px solid var(--md-default-fg-color--lightest);" +
+        "border-radius:.5em;padding:.1em .5em;font-size:.8em;background:" +
+        (s[0] === cur ? "var(--md-accent-fg-color);color:#fff" : "transparent");
+      b.onclick = function () {
+        fetch(API, {method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({cat: cat, node: node, status: s[0]})})
+          .then(function (r) { if (!r.ok) throw new Error(); el.dataset.status = s[0]; render(el);
+                               note(el, "saved — mkdocs will reload"); })
+          .catch(function () { note(el, "start: python tools/review_server.py"); });
+      };
+      bar.appendChild(b);
+    });
+    el.appendChild(bar);
+  }
+  function note(el, msg) {
+    var n = el.querySelector(".gm-note") || document.createElement("div");
+    n.className = "gm-note";
+    n.style.cssText = "font-size:.75em;opacity:.7;margin-top:.2em";
+    n.textContent = msg;
+    el.appendChild(n);
+  }
+  function init() { document.querySelectorAll(".gm-approval").forEach(render); }
+  if (document.readyState !== "loading") init();
+  else document.addEventListener("DOMContentLoaded", init);
+  // Material instant-navigation hook (no-op if absent).
+  if (window.document$ && window.document$.subscribe) window.document$.subscribe(init);
+})();
+"""
+
+
+def _write_review_js() -> None:
+    (DOCS / "js").mkdir(parents=True, exist_ok=True)
+    (DOCS / "js" / "review.js").write_text(_REVIEW_JS.lstrip("\n"))
 
 
 def _write_mkdocs(nav_cats) -> None:
@@ -487,8 +584,11 @@ def _write_mkdocs(nav_cats) -> None:
         "      toggle: {icon: material/weather-sunny, name: Light}",
         "exclude_docs: |",
         "  _authored/",
+        "extra_javascript:",
+        "  - js/review.js",
         "markdown_extensions:",
         "  - admonition",
+        "  - md_in_html",
         "  - pymdownx.highlight",
         "  - pymdownx.superfences",
         "  - tables",

@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="BLam" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 A **basis-level binder** `BLam(b:σ̂. bodyBasis)` — machinery to *build* a basis, mirroring `Lam`
@@ -25,7 +27,7 @@ blam(β. BasisProd(β, β))
 | basis domain | `→ basis function` |
 | nat domain | `→ nat-parametric builder` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

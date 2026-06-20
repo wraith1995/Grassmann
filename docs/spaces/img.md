@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="Img" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The **image (range)** `Img(f)` of a linear map `f : dom ⊸ cod` — the subspace of `cod` spanned
@@ -31,7 +33,17 @@ img(J)  # J: Rt >> Re, inj
 | array shape | `(2,)` |
 | default basis | `ProjectedBasis(…, "image")` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    return _dim_ex("Image of an injective `J : Rt(2)→Re(3)`: dimension = rank = `|dom|` "
+                   "(STATIC because `inj` pins the rank; a generic map ⇒ runtime δ_f).",
+                   "img(J)  # J: Rt >> Re, inj", C.img(J), 2)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

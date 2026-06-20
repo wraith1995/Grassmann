@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Lift" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Curry / fuse tensor slots** `Lift(v, fused, k?)` — reassociate `k` separate `⊗` axes into one
@@ -31,7 +33,17 @@ lift(x, (0, 1))
 [0., 1., 2., 3.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 2)
+    x = C.var("x", C.oprod(V, V))
+    xv = np.arange(4.0).reshape(2, 2)
+    got = _run(C.lift(x, (0, 1)), {x: xv})
+    _ck(np.allclose(np.ravel(got), np.ravel(xv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

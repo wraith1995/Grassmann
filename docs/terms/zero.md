@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Zero" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 The **zero vector** `Zero(space?)` of a space. The additive identity: `v + 0 = v`. The space is
@@ -22,7 +24,15 @@ zero(V)
 [0., 0., 0., 0.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 4)
+    got = _run(C.zero(V), {})
+    _ck(np.allclose(got, np.zeros(4)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

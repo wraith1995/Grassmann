@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Embed" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Embedding into an ambient space** `Embed(v, s)` — pad `v`'s subspace coordinates into the
@@ -37,7 +39,20 @@ embed(a, Re)
 [ 0.168, -2.132, -0.654]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    a = C.var("a", C.img(J))
+    Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
+    Q, _ = np.linalg.qr(Jm)
+    av = [1.0, 2.0]
+    got = _run(C.embed(a, Re), {a: av, J: Jm.T})
+    _ck(np.allclose(got, Q @ np.asarray(av)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 
