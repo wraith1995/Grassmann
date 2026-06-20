@@ -63,21 +63,23 @@ def test_default_basis_scalar() -> None:
 
 
 def test_default_basis_dual() -> None:
+    # ``_basis_eq`` (not ``==``): the default standard basis now carries its space as sizing
+    # metadata (`20 §7`), which ``_basis_eq`` treats as identity-irrelevant.
     db, _ = space_basis(C.dual(C.base("V", 3)))
-    assert db == C.dual_basis(C.base_basis("V"))
+    assert _basis_eq(db, C.dual_basis(C.base_basis("V")))
 
 
 def test_default_basis_oplus_oprod() -> None:
     V, W = C.base("V", 2), C.base("W", 3)
     db_sum, _ = space_basis(C.oplus(V, W))
-    assert db_sum == C.basis_sum(C.base_basis("V"), C.base_basis("W"))
+    assert _basis_eq(db_sum, C.basis_sum(C.base_basis("V"), C.base_basis("W")))
     db_prod, _ = space_basis(C.oprod(V, W))
-    assert db_prod == C.basis_prod(C.base_basis("V"), C.base_basis("W"))
+    assert _basis_eq(db_prod, C.basis_prod(C.base_basis("V"), C.base_basis("W")))
 
 
 def test_default_basis_oplusrep() -> None:
     db, _ = space_basis(C.oplus_rep(4, C.base("V", 2)))
-    assert db == C.basis_rep(4, C.base_basis("V"))
+    assert _basis_eq(db, C.basis_rep(4, C.base_basis("V")))
 
 
 def test_default_basis_with_inner_is_g_orthonormal() -> None:
@@ -94,7 +96,7 @@ def test_default_basis_linear_map_space() -> None:
     V, W = C.base("V", 2), C.base("W", 3)
     sp = C.linear_map_space(V, W)  # ~V * W
     db, _ = space_basis(sp)
-    assert db == C.basis_prod(C.dual_basis(C.base_basis("V")), C.base_basis("W"))
+    assert _basis_eq(db, C.basis_prod(C.dual_basis(C.base_basis("V")), C.base_basis("W")))
 
 
 def test_default_basis_img_is_orthonormal_range() -> None:

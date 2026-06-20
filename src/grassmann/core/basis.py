@@ -3,7 +3,8 @@
 ```
 Basis  b ::=
   -- mirror Space (§5)
-  | ScalarBasis | BaseBasis(name, vectors?)
+  | ScalarBasis | BaseBasis(name, vectors?, space?, backup?)   -- vectors = numeric matrix OR
+  |                                  Term frame; space ⇒ self-sizing; backup ⇒ RREF-complete
   | BVar(β)                          basis variable (the basis of an SVar α)
   | DualBasis(b) | PrimalBasis(b)
   | BasisSum(b…) | BasisProd(b…)     -- ⊕ / ⊗  (n-ary)
@@ -62,14 +63,34 @@ class ScalarBasis:
 
 @dataclass(frozen=True)
 class BaseBasis:
-    """A concrete basis of a ``Base`` space; optional explicit ``vectors``."""
+    """A concrete basis of a ``Base`` space — the term-level "term basis" (`20 §7`).
+
+    Fields (all but ``name`` optional, so the historical ``BaseBasis(name)`` /
+    ``BaseBasis(name, vectors)`` forms are unchanged):
+
+    * ``vectors`` — the basis vectors.  Either a precomputed numeric matrix (columns = basis
+      vectors in ambient coords) OR a tuple of :class:`~grassmann.core.term.Term` vectors (a
+      *frame* realized at lowering, like :class:`ListBasis`).  ``None`` ⇒ the standard basis
+      (the ambient identity).
+    * ``space`` — the :class:`~grassmann.core.space.Space` this basis is OF.  Lets the basis
+      recover its dimension/ambient even when ``vectors`` is ``None`` (so a standard basis is
+      self-sizing instead of relying on the surrounding space).
+    * ``backup`` — a fallback :class:`Basis` used to **complete** ``vectors`` to a full basis
+      when the frame is not a maximal independent set (rank-deficient).  At lowering the
+      independent columns of ``vectors`` are kept (RREF / pivoted selection) and the missing
+      directions are filled from ``backup`` (default: the standard/ambient basis).
+    """
 
     name: str
     vectors: object | None = None
+    space: object | None = None
+    backup: object | None = None
 
     def __repr__(self) -> str:
         v = f", vectors={self.vectors!r}" if self.vectors is not None else ""
-        return f"BaseBasis({self.name!r}{v})"
+        s = f", space={self.space!r}" if self.space is not None else ""
+        bk = f", backup={self.backup!r}" if self.backup is not None else ""
+        return f"BaseBasis({self.name!r}{v}{s}{bk})"
 
 
 @dataclass(frozen=True)
@@ -368,8 +389,13 @@ def scalar_basis() -> ScalarBasis:
     return ScalarBasis()
 
 
-def base_basis(name: str, vectors: object | None = None) -> BaseBasis:
-    return BaseBasis(name, vectors)
+def base_basis(
+    name: str,
+    vectors: object | None = None,
+    space: object | None = None,
+    backup: object | None = None,
+) -> BaseBasis:
+    return BaseBasis(name, vectors, space, backup)
 
 
 def bvar(name: str) -> BVar:

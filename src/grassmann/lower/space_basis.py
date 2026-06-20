@@ -56,7 +56,9 @@ def default_basis(space: S.Space) -> B.Basis:
         case S.Scalar():
             return B.scalar_basis()
         case S.Base(name, _):
-            return B.base_basis(name)
+            # Carry the space so the standard basis is self-sizing (`20 §7`): its dimension
+            # and ambient are recoverable even with no explicit vectors.
+            return B.base_basis(name, space=space)
         case S.Dual(s):
             return B.dual_basis(default_basis(s))
         case S.OPlus(spaces):

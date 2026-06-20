@@ -168,9 +168,26 @@ supported and `cob` goes between *any two bases of the same space*:
   `ImageBasis`-pinned `v` (literal-column coords against `Q` columns).  Now realizes `v`'s active
   basis columns (`ImageBasis ⇒ J`, default path byte-identical).  `test_embed_uses_operand_basis`.
 
-*Known residual (pre-existing, orthogonal):* a standard `BaseBasis` carries no dimension of its
-own, so it can only be realized when a companion basis supplies the ambient dim (which the total
-cob does).  Standalone realization of a bare standard basis still has no size to use.
+*Standalone standard-basis sizing — now CLOSED (§2e).* `BaseBasis` gained an optional `space`
+(carried by `default_basis`), so a standard basis is self-sizing — `basis_dim`/`realize_basis`
+no longer need a companion.  (A *bare* `base_basis(name)` with neither space nor vectors is still
+dynamic, but the default path always carries the space.)
+
+## 2e. `BaseBasis` becomes the term-level "term basis" (2026-06-20)
+
+`BaseBasis(name, vectors?, space?, backup?)` (`core/basis.py`, `tests/test_base_basis.py`):
+
+- **`space`** — the `Space` the basis is OF.  Makes a standard basis (no explicit vectors)
+  self-sizing: `basis_dim` returns `dim_of(space)` and `realize_basis` returns the ambient
+  identity, with no companion needed.  `default_basis(Base)` now attaches it.  `space` is sizing
+  metadata only — `_basis_eq` ignores it (so cob short-circuits stay byte-identical).
+- **`vectors`** — may now be a **Term frame** (a tuple of Term vectors realized via `_rep` at
+  lowering, like `ListBasis`) as well as a numeric matrix.
+- **`backup`** — a fallback basis that **completes** a rank-deficient frame to a full basis:
+  `_CompleteColsOp` keeps the frame's linearly-independent columns (greedy RREF-style pivot) and
+  fills the missing directions from the backup's columns.  Realized in
+  `represent.realize_basis_cols` → `_realize_base_basis` (term frames / backups need the
+  `_rep`/seam; the pure `cob.realize_basis` defers them).
 
 The original (now-historical) recommendation follows.
 
