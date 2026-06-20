@@ -103,7 +103,7 @@ work in the cob/metric machinery, deferred here. Reverted the attempt; suite is 
 ## 2c. AUDIT — represent.py assumes the orthonormal default in more places — EXECUTED (2026-06-19)
 
 **Update: this audit is now executed** (`represent.py` `_rep_dagger`, + `tests/test_represent_basis_invariance.py`,
-41 tests). Findings, each verified by the "same value, two bases, must agree" method against
+51 tests). Findings, each verified by the "same value, two bases, must agree" method against
 the coordinate-free truth:
 
 - **`_rep_dagger` — was the remaining metric bug; FIXED.** It emitted a *plain transpose*
@@ -123,15 +123,26 @@ the coordinate-free truth:
   primal (`_sharp_map_basis`) — so `sharp(flat(v)) = v` is now *genuinely* correct (Sharp materializes
   `(JᵀJ)⁻¹`). Orthonormal default unchanged (byte-identical). `test_sharp_flat_roundtrip_*`.
 - **`_rep_compose` / non-metric `Eval` — confirmed correct AND the mismatched-pinning gap is now
-  guarded.** A domain⊗codomain contraction is a *natural pairing* (no metric), so it is basis-agnostic
-  when the two contracted slots share a coordinate convention — `(f∘g)(b) == f(g(b))`, output
-  basis-invariant under consistent pinning (which `choose` and consistent `basis_env` guarantee). The
-  previously-latent gap — contracted slots pinned to **inconsistent** bases (one `ImageBasis`, one
-  orthonormal), which silently miscomputed the raw index contraction — is now a loud `RepresentError`:
-  `_assert_metric_operands_consistent` (metric `Eval`: all operands must share a basis) and
-  `_assert_pairing_consistent` (non-metric `Eval` slot↔arg and `Compose` slot↔g-codomain must be
-  mutually dual). Both fire only when an immersed basis is involved, so orthonormal lowering is
-  untouched. `test_*_mismatched_*_raises`, `test_consistent_pinning_does_not_raise`.
+  auto-reconciled.** A domain⊗codomain contraction is a *natural pairing* (no metric), so it is
+  basis-agnostic when the two contracted slots share a coordinate convention — `(f∘g)(b) == f(g(b))`,
+  output basis-invariant under consistent pinning (which `choose` and consistent `basis_env` guarantee).
+  The previously-latent gap — contracted slots pinned to **inconsistent** bases (one `ImageBasis`, one
+  orthonormal), which silently miscomputed the raw index contraction — is now **reconciled** rather
+  than rejected: the mismatched operand is changed into the slot-consistent basis through the FFS
+  realization seam, so the result is correct regardless of how the slots were pinned.
+    - The FFS-aware cob is `_basis_cob_matrix` → `_ffs_cob_matrix`: it realizes both bases toward the
+      ambient/codomain coords through the SVD/QR seam (`_realize_basis_ambient`, sharing the
+      `_realize_ffs_by_which` memo) and composes `pinv(C_to)·C_from` (a pseudo-inverse, since the FFS
+      column matrices are non-square), with the `41 §2` `DualBasis→DualBasis ⇒ (·)⁻ᵀ` rule for
+      covectors.  `cob.realize_basis` still refuses FFS bases — only this represent-level path, which
+      has the realization seam, handles them.
+    - Wired at three sites: `_reconcile_metric_operands` (metric `Eval`: cob later operands into the
+      first operand's basis so the Gram is built once in a shared basis), `_reconcile_pairing`
+      (non-metric `Eval`: cob the arg into f's slot dual-partner) and `_reconcile_compose_g`
+      (`Compose`: cob g's codomain into f's slot dual-partner).  All gated on an immersed basis being
+      involved, so orthonormal/`choose` lowering is byte-identical.
+    - `test_*_mismatched_*_reconciles` (feed the same geometric value through the inconsistent pin and
+      assert it equals the consistent-pin / coordinate-free result), `test_consistent_pinning_still_works`.
 
 The original (now-historical) recommendation follows.
 
