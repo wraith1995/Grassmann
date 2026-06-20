@@ -340,8 +340,13 @@ def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
     out.append(meaning or "_(not yet authored)_")
     out.append("")
 
-    # Worked example (the doc-shown input→output IS a test — see tools/doc_examples.py).
-    out.extend(_render_example(name))
+    # Bases are defined by how they CONVERT to other bases of the same space — not by a
+    # standalone realization.  Conversions live ONLY on basis pages.
+    if cat == "bases":
+        out.extend(_render_conversions(name))
+    else:
+        # Worked example (the doc-shown input→output IS a test — tools/doc_examples.py).
+        out.extend(_render_example(name))
 
     # Fields
     flds = fields_of(cls) if cls else []
@@ -370,58 +375,61 @@ def render_page(cat: str, mod, entry, rep_map) -> tuple[str, str]:
             out.append("> " + cdoc.replace("\n", "\n> "))
     out.append("")
 
-    # Represented as
-    out.append("## Represented as (lowering)")
-    out.append("")
-    if cat == "terms":
-        fn = rep_map.get(name)
-        if fn:
-            rdoc = first_doc_para(getattr(RP, fn, None))
-            out.append(f"Lowered by **`represent.{fn}`**:")
+    # Represented as — spaces & terms only (a basis is not "represented"; it converts).
+    if cat in ("spaces", "terms"):
+        out.append("## Represented as (lowering)")
+        out.append("")
+        if cat == "terms":
+            fn = rep_map.get(name)
+            if fn:
+                rdoc = first_doc_para(getattr(RP, fn, None))
+                out.append(f"Lowered by **`represent.{fn}`**:")
+                out.append("")
+                if rdoc:
+                    out.append("> " + rdoc.replace("\n", "\n> "))
+            else:
+                out.append("_No direct `_rep_*` (lowered structurally / via another node)._")
             out.append("")
-            if rdoc:
-                out.append("> " + rdoc.replace("\n", "\n> "))
-        else:
-            out.append("_No direct `_rep_*` (lowered structurally / via another node)._")
-    elif cat == "spaces":
-        out.append("A value of this space lowers to a polyarray array whose shape is "
-                   "`_shape_of_space(space)` and whose default coordinate system is "
-                   "`default_basis(space)` (`space_basis.py`). See the *Bases* section for "
-                   "the basis attached to this space.")
-    else:  # bases
-        out.append("Realized to ambient coordinate columns by "
-                   "`represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis "
-                   "between any two bases of the same space is `cob` / "
-                   "`represent._basis_cob_matrix` (total — see *Conversion*).")
-    out.append("")
-
-    # Converted
-    out.append("## Conversion")
-    out.append("")
-    if cat == "bases":
-        out.append("`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / "
-                   "term-frame leaves it routes through `represent._basis_cob_matrix` "
-                   "(realize toward ambient, compose `pinv(C_to)·C_from`). See "
-                   "[Bases overview](index.md).")
-    else:
-        out.append("A change of basis is a pullback (coordinate-free), realized by `cob` on "
-                   "the attached basis. See the [Bases](../bases/index.md) section.")
-    out.append("")
-
-    # Tested by — the doc-tied behavior tests (`tests/test_doc_*`).
-    out.append("## Tested by")
-    out.append("")
-    if cat == "bases":
-        out.append("Realization + change-of-basis scenarios for this node are exercised in "
-                   "`tests/test_doc_cob.py` (and the represent path in "
-                   "`tests/test_doc_represent.py`).")
-    else:
-        out.append("The lowering scenario for this node is exercised in "
-                   "`tests/test_doc_represent.py`; change-of-basis behavior in "
-                   "`tests/test_doc_cob.py`.")
-    out.append("")
+            out.append("_Exercised in `tests/test_doc_represent.py`._")
+        else:  # spaces
+            out.append("A value of this space lowers to a polyarray array whose shape is "
+                       "`_shape_of_space(space)` and whose default coordinate system is "
+                       "`default_basis(space)` (`space_basis.py`). See the *Bases* section "
+                       "for the basis attached to this space.")
+            out.append("")
+            out.append("_Exercised in `tests/test_doc_represent.py`._")
+        out.append("")
 
     return status, "\n".join(out)
+
+
+def _render_conversions(name: str) -> list[str]:
+    """Render a basis's **Conversions** section: how it converts to other bases of the same
+    space, the mechanism `cob` uses for each, and the resulting (tested) matrix."""
+    convs = DEX.CONVERSIONS.get(name, [])
+    out = ["## Conversions", ""]
+    out.append("How this basis converts to other bases of the **same space**, and how `cob` "
+               "handles each. Every row is executed and asserted in "
+               "`tests/test_doc_conversions.py`.")
+    out.append("")
+    if not convs:
+        out.append("_No conversions enumerated yet._")
+        out.append("")
+        return out
+    for thunk in convs:
+        c = thunk()
+        out.append(f"### → {c.to}")
+        out.append("")
+        out.append(f"**Mechanism (`cob`):** {c.via}")
+        out.append("")
+        if c.matrix:
+            out.append("**Change-of-basis matrix**")
+            out.append("")
+            out.append("```")
+            out.extend(c.matrix.splitlines())
+            out.append("```")
+            out.append("")
+    return out
 
 
 def render_index(cat: str, rows: list[tuple[str, str, str]]) -> str:
@@ -481,13 +489,13 @@ def _write_home(all_rows) -> None:
            "polyarray), and how it is converted between bases.", "",
            "The structural sections are extracted live from the code by "
            "`tools/gen_docs.py`; the **Meaning** prose is hand-authored and reviewed.", "",
-           "Every node carries a concrete example — a **worked input→output** (terms), a "
-           "**change of basis** (bases), a **dimension** computation (spaces/dims), or a "
-           "**structural** fact (the abstract/meta nodes). Each example is generated from "
-           "`tools/doc_examples.py`, which runs the code and asserts the result, and is "
-           "re-run by `tests/test_doc_examples.py` — so the numbers shown are exactly what "
-           "the code produces. Broader scenario coverage lives in `tests/test_doc_represent.py` "
-           "(represent) and `tests/test_doc_cob.py` (change of basis).", ""]
+           "Spaces and terms carry a concrete example — a **worked input→output**, a "
+           "**dimension** computation, or a **structural** fact — generated from "
+           "`tools/doc_examples.py` (which runs the code and asserts the result) and re-run by "
+           "`tests/test_doc_examples.py`. Bases instead enumerate their **Conversions** — how "
+           "each converts to other bases of the same space and the mechanism `cob` uses — each "
+           "row run + asserted by `tests/test_doc_conversions.py`. So the numbers shown are "
+           "exactly what the code produces.", ""]
     out.append("## Approval dashboard")
     out.append("")
     out.append("| category | approved | in review | draft |")

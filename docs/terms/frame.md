@@ -61,11 +61,5 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 _No direct `_rep_*` (lowered structurally / via another node)._
 
-## Conversion
-
-A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
-
-## Tested by
-
-The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
+_Exercised in `tests/test_doc_represent.py`._
 

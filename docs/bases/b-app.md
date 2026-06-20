@@ -10,20 +10,13 @@ A **basis application** `BApp(f, positions, args…)` — apply a `BLam` (basis 
 nat-builder) to arguments, mirroring `App`/`Eval` at the basis level. The reduction site that
 turns a basis function plus concrete arguments into a concrete basis.
 
-## Structure
+## Conversions
 
-Apply a `BLam` (basis function / frame / nat-builder) to arguments — the reduction site that turns a basis function + concrete arguments into a concrete basis.
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-bapp(f, (0,), arg)
-```
+### → any basis of the space, once reduced
 
-| | |
-|---|---|
-| mirrors | `App / Eval at the basis level` |
-| result | `a concrete basis after reduction` |
-
-_Executed and asserted in `tests/test_doc_examples.py`._
+**Mechanism (`cob`):** reduce the basis application to a concrete basis, then cob as usual
 
 ## Fields
 
@@ -38,16 +31,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 - **Core constructor** (`grassmann.core.basis`): `bapp(f: 'Basis', positions: 'tuple[int, ...]', *args: 'Term | Space | Dim | Basis') -> 'BApp'`
 
 > ``BApp(f, positions, args…)`` — apply a ``BLam`` (mirrors ``App``/``Eval``).
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 

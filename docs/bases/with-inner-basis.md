@@ -12,29 +12,21 @@ that `g` becomes the identity in these coordinates (whitening). The default basi
 un-whitened `b` is kept as a candidate where `g` is materialized. For change-of-basis the metric
 wrapper is stripped (it is metadata, not a coordinate change).
 
-## Structure
+## Conversions
 
-A `g`-orthonormal basis: in these coordinates the metric `g` becomes the identity (whitening). Default basis of a `WithInner` space; cob strips the metric (metadata).
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-with_inner_basis(b, g)
+### → the underlying (un-whitened) basis
+
+**Mechanism (`cob`):** the metric is metadata, not coordinates ⇒ cob strips it = identity
+
+**Change-of-basis matrix**
+
 ```
-
-| | |
-|---|---|
-| metric in these coords | `identity (whitened)` |
-| change of basis | `strips the metric wrapper` |
-
-??? note "Test (literal source — input · run · expected assertion)"
-
-    ```python
-    V = C.base("V", 3)
-    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
-    wib = B.with_inner_basis(default_basis(V), g)
-    _ck(isinstance(wib, B.WithInnerBasis))
-    ```
-
-_Executed and asserted in `tests/test_doc_examples.py`._
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
+```
 
 ## Fields
 
@@ -49,16 +41,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 - **Surface syntax** (`grassmann`): with_inner_basis
 
 > ``WithInnerBasis(b, g)`` — a ``g``-orthonormal basis.
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 

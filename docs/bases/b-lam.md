@@ -13,21 +13,13 @@ across the type tower:
 - over a **basis** ⇒ a **basis function** (e.g. `λβ. BasisProd(β,β)` is the basis of `λα. α⊗α`);
 - over a **nat** ⇒ a nat-parametric basis builder (e.g. for `⊕ⁿ`).
 
-## Structure
+## Conversions
 
-A basis-level binder (machinery to BUILD a basis): over a value ⇒ a Frame; over a basis ⇒ a basis function (e.g. `λβ. BasisProd(β,β)` is the basis of `λα. α⊗α`); over a nat ⇒ a nat-parametric builder.
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-blam(β. BasisProd(β, β))
-```
+### → (after application) the basis its body builds
 
-| | |
-|---|---|
-| value domain | `→ Frame` |
-| basis domain | `→ basis function` |
-| nat domain | `→ nat-parametric builder` |
-
-_Executed and asserted in `tests/test_doc_examples.py`._
+**Mechanism (`cob`):** abstract basis-builder — apply it (BApp) to get a concrete basis, then cob
 
 ## Fields
 
@@ -48,16 +40,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 > a value (``SpaceSort``) ⇒ a **Frame**; a basis ⇒ a **basis function**; a nat ⇒ a
 > nat-parametric builder. ``body`` is the produced :class:`Basis`. ``term_var`` /
 > ``basis_var`` hold the bound handle when applicable.
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 

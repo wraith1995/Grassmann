@@ -10,28 +10,23 @@ The **canonical basis of `Scalar`** `ScalarBasis()` — the single vector `1 ∈
 nothing to choose; it is orthonormal and realizes to the `1×1` identity. The basis attached to
 every scalar result (an inner product, a trace).
 
-## Change of basis
+## Conversions
 
-Realizes to the 1×1 identity.
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-realize(scalar_basis())
-```
+### → itself — ℝ has exactly one basis (the unit 1)
 
-**Output**
+**Mechanism (`cob`):** identical bases ⇒ 1×1 identity (cob short-circuits)
+
+**Change-of-basis matrix**
 
 ```
 [[1.]]
 ```
 
-??? note "Test (literal source — input · run · expected assertion)"
+### → (no x/y/z — ℝ is one-dimensional)
 
-    ```python
-    got = _realize(B.scalar_basis())
-    _ck(np.allclose(got, np.eye(1)))
-    ```
-
-_Executed and asserted in `tests/test_doc_examples.py`._
+**Mechanism (`cob`):** a chosen unit/direction lives in a 1-D *Base* ℝ¹ (a different space) — see BaseBasis; within Scalar the only change of basis is the identity
 
 ## Built by
 
@@ -39,16 +34,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 - **Surface syntax** (`grassmann`): scalar_basis
 
 > The standard basis of ``Scalar`` (ℝ).
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 

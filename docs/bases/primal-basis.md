@@ -10,27 +10,13 @@ The **primal basis** `PrimalBasis(b)` — the inverse of `DualBasis`: recovers t
 underlying a dual basis (`PrimalBasis(DualBasis(b)) = b`). Bookkeeping for variance so a covector
 can be returned to its primal space's coordinates.
 
-## Structure
+## Conversions
 
-The inverse of `DualBasis` — recovers the primal basis under a dual (`PrimalBasis(DualBasis(b)) = b`).
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-primal_basis(dual_basis(b))
-```
+### → the underlying primal basis `b` (round trip)
 
-| | |
-|---|---|
-| PrimalBasis(DualBasis(b)) | `≡ b` |
-
-??? note "Test (literal source — input · run · expected assertion)"
-
-    ```python
-    base = default_basis(C.base("V", 3))
-    pb = B.primal_basis(B.dual_basis(base))
-    _ck(isinstance(pb, B.PrimalBasis))
-    ```
-
-_Executed and asserted in `tests/test_doc_examples.py`._
+**Mechanism (`cob`):** PrimalBasis(DualBasis(b)) denotes `b` — the double-dual cancels, so converting back to `b` is the identity
 
 ## Fields
 
@@ -43,16 +29,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 - **Core constructor** (`grassmann.core.basis`): `primal_basis(b: 'Basis') -> 'PrimalBasis'`
 
 > ``PrimalBasis(b)`` — the primal basis of a dual basis.
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 
