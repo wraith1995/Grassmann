@@ -17,40 +17,31 @@ the SVD/QR/GSVD seam (`41 §1`). The **default** basis of every FFS space:
 its metric is the identity — the min-sym fast path. Dimensions come from the rank (static when
 props pin it, else a runtime `δ_f`).
 
-## Change of basis
+## Conversions
 
-Realizes to the orthonormal range `Q` (QR of `J`).
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-realize(projected_basis(J, "image"))
-```
+### → the same orthonormal range basis
 
-**Inputs**
+**Mechanism (`cob`):** identical ⇒ identity
 
-- `J` =
-
-    ```
-    [[2., 1., 1.],
-     [0., 3., 1.]]
-    ```
-
-**Output**
+**Change-of-basis matrix**
 
 ```
-[[-0.816,  0.492],
- [-0.408, -0.862],
- [-0.408, -0.123]]
+[[1., 0.],
+ [0., 1.]]
 ```
 
-??? note "Test (literal source — input · run · expected assertion)"
+### → the literal `ImageBasis` of the same image
 
-    ```python
-    J, _, projb = _img()
-    got = _realize(projb, {J: _JSTORED})
-    _ck(np.allclose(got.T @ got, np.eye(2)))
-    ```
+**Mechanism (`cob`):** FFS seam — realize both via SVD/QR, M = pinv(C_to)·C_from = R⁻¹
 
-_Executed and asserted in `tests/test_doc_examples.py`._
+**Change-of-basis matrix**
+
+```
+[[-0.408,  0.246],
+ [-0.   , -0.369]]
+```
 
 ## Fields
 
@@ -77,16 +68,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 > ``U[:, :δ_f]`` of ``SvdOp`` (`73 Topic 2`). It is the orthonormalized counterpart of
 > the literal :class:`ImageBasis` (the raw map-application columns); the two are related
 > by the ``QrOp.R``/``Q`` (injective) or SVD factors (general) change of basis.
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 

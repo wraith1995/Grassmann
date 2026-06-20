@@ -21,42 +21,45 @@ of a `Base` space (`20 §7`). The default coordinate system of `space("V", n)`.
 unaffected. Realized by `realize_basis_cols` (term/backup forms) or `cob.realize_basis` (numeric
 / self-sizing standard).
 
-## Change of basis
+## Conversions
 
-A rank-1 term frame `(c)` completed to a full basis via the standard backup (frame column kept first, rest filled from the backup).
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-base_basis("W", vectors=(c,), space=W, backup=base_basis("W", space=W))
-```
+### → the same standard basis
 
-**Inputs**
+**Mechanism (`cob`):** identical bases ⇒ identity (cob short-circuits)
 
-- `c` =
-
-    ```
-    [1., 2., 3.]
-    ```
-
-**Output**
+**Change-of-basis matrix**
 
 ```
-[[1., 1., 0.],
- [2., 0., 1.],
- [3., 0., 0.]]
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
 ```
 
-??? note "Test (literal source — input · run · expected assertion)"
+### → an axis-permuted basis (columns e₂,e₃,e₁)
 
-    ```python
-    W = C.base("W", 3)
-    c = C.var("c", W)
-    basis = B.base_basis("W", vectors=(c,), space=W, backup=B.base_basis("W", space=W))
-    cv = [1.0, 2.0, 3.0]
-    got = _realize(basis, {c: cv})
-    _ck(got.shape == (3, 3) and np.linalg.matrix_rank(got) == 3 and np.allclose(got[:, 0], cv))
-    ```
+**Mechanism (`cob`):** numeric matmul — realize both toward ambient, M = pinv(C_to)·C_from = P⁻¹
 
-_Executed and asserted in `tests/test_doc_examples.py`._
+**Change-of-basis matrix**
+
+```
+[[0., 0., 1.],
+ [1., 0., 0.],
+ [0., 1., 0.]]
+```
+
+### → a rotated/scaled explicit basis
+
+**Mechanism (`cob`):** numeric matmul  M = pinv(ROT)·I = ROT⁻¹
+
+**Change-of-basis matrix**
+
+```
+[[ 0.5  , -0.167,  0.   ],
+ [ 0.   ,  0.333,  0.   ],
+ [ 0.   ,  0.   ,  1.   ]]
+```
 
 ## Fields
 
@@ -88,16 +91,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 >   when the frame is not a maximal independent set (rank-deficient).  At lowering the
 >   independent columns of ``vectors`` are kept (RREF / pivoted selection) and the missing
 >   directions are filled from ``backup`` (default: the standard/ambient basis).
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 

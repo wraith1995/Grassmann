@@ -12,32 +12,21 @@ orthogonalized against `subBasis`). `embed` = pad-zeros, `project` = drop-comple
 *from* this (no separate Embed/Project basis). Realizes to `[ realize(subBasis) | complement ]`
 stacked.
 
-## Change of basis
+## Conversions
 
-Realizes to `[ sub | complement ]` stacked.
+How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
 
-```python
-complete(sub, complement)
-```
+### → the standard ambient basis
 
-**Output**
+**Mechanism (`cob`):** realize `[ sub | complement ]` then compose; here = the completed matrix
+
+**Change-of-basis matrix**
 
 ```
 [[1., 0., 0.],
  [0., 1., 0.],
  [0., 0., 1.]]
 ```
-
-??? note "Test (literal source — input · run · expected assertion)"
-
-    ```python
-    sub = B.base_basis("V", np.array([[1.0], [0.0], [0.0]]))
-    comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
-    got = _realize(B.complete_basis(sub, comp))
-    _ck(np.allclose(got, np.eye(3)))
-    ```
-
-_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 
@@ -54,16 +43,4 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 > ``CompleteBasis(subBasis, complement)`` — complete a subspace basis to its
 > ambient. ``complement`` is user-supplied. embed = pad-zeros, project =
 > drop-complement (realized FROM this; no Embed/ProjectBasis).
-
-## Represented as (lowering)
-
-Realized to ambient coordinate columns by `represent.realize_basis_cols` / `cob.realize_basis`; change-of-basis between any two bases of the same space is `cob` / `represent._basis_cob_matrix` (total — see *Conversion*).
-
-## Conversion
-
-`cob(from, to)` (`cob.py`) builds the change-of-basis matrix; for FFS / term-frame leaves it routes through `represent._basis_cob_matrix` (realize toward ambient, compose `pinv(C_to)·C_from`). See [Bases overview](index.md).
-
-## Tested by
-
-Realization + change-of-basis scenarios for this node are exercised in `tests/test_doc_cob.py` (and the represent path in `tests/test_doc_represent.py`).
 

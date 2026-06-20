@@ -71,11 +71,5 @@ Lowered by **`represent._rep_sharp`**:
 > ``s⊗s`` map is tagged with the primal per-slot basis so the produced vector re-enters the
 > immersed metric correctly (`43 §2c`).  Orthonormal default ⇒ byte-identical.
 
-## Conversion
-
-A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
-
-## Tested by
-
-The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
+_Exercised in `tests/test_doc_represent.py`._
 

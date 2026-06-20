@@ -93,11 +93,5 @@ Lowered by **`represent._rep_neval`**:
 > path can't package cleanly (a reused ``Lam`` ⇒ one shared Callable; a ``Lam`` bound to a
 > term ``Var`` rather than a literal).  Both run to identical numbers.
 
-## Conversion
-
-A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
-
-## Tested by
-
-The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
+_Exercised in `tests/test_doc_represent.py`._
 

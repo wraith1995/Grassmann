@@ -427,106 +427,8 @@ def _img():
     return J, B.image_basis(J), B.projected_basis(J, "image")
 
 
-@_ex("ScalarBasis")
-def _scalar_basis():
-    got = _realize(B.scalar_basis())
-    _ck(np.allclose(got, np.eye(1)))
-    return Example("Realizes to the 1×1 identity.", 'realize(scalar_basis())',
-                   [], _show(got), kind="cob")
-
-
-@_ex("BaseBasis")
-def _base_basis():
-    W = C.base("W", 3)
-    c = C.var("c", W)
-    basis = B.base_basis("W", vectors=(c,), space=W, backup=B.base_basis("W", space=W))
-    cv = [1.0, 2.0, 3.0]
-    got = _realize(basis, {c: cv})
-    _ck(got.shape == (3, 3) and np.linalg.matrix_rank(got) == 3 and np.allclose(got[:, 0], cv))
-    return Example(
-        "A rank-1 term frame `(c)` completed to a full basis via the standard backup "
-        "(frame column kept first, rest filled from the backup).",
-        'base_basis("W", vectors=(c,), space=W, backup=base_basis("W", space=W))',
-        [("c", _show(cv))], _show(got), kind="cob")
-
-
-@_ex("ImageBasis")
-def _image_basis():
-    J, imgb, _ = _img()
-    got = _realize(imgb, {J: _JSTORED})
-    _ck(np.allclose(got, _JMATH))
-    return Example("Realizes to the literal columns `J` (the raw `f(eᵢ)`).",
-                   'realize(image_basis(J))', [("J", _show(_JSTORED))], _show(got), kind="cob")
-
-
-@_ex("ProjectedBasis")
-def _projected_basis():
-    J, _, projb = _img()
-    got = _realize(projb, {J: _JSTORED})
-    _ck(np.allclose(got.T @ got, np.eye(2)))
-    return Example("Realizes to the orthonormal range `Q` (QR of `J`).",
-                   'realize(projected_basis(J, "image"))',
-                   [("J", _show(_JSTORED))], _show(got), kind="cob")
-
-
-@_ex("ListBasis")
-def _list_basis():
-    W = C.base("W", 3)
-    a, b = C.var("a", W), C.var("b", W)
-    av, bv = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]
-    got = _realize(B.list_basis(a, b), {a: av, b: bv})
-    _ck(np.allclose(got, np.column_stack([av, bv])))
-    return Example("Explicit Term vectors stacked as columns.", 'list_basis(a, b)',
-                   [("a", _show(av)), ("b", _show(bv))], _show(got), kind="cob")
-
-
-@_ex("DualBasis")
-def _dual_basis():
-    J, imgb, projb = _img()
-    f = {J: _JSTORED}
-    primal = _cob(imgb, projb, f)
-    got = _cob(B.dual_basis(imgb), B.dual_basis(projb), f)
-    _ck(np.allclose(got, np.linalg.inv(primal).T))
-    return Example("Covector cob = `(primal cob)⁻ᵀ` (ImageBasis* → ProjectedBasis*).",
-                   'cob(dual(image_basis(J)), dual(projected_basis(J, "image")))',
-                   [("J", _show(_JSTORED))], _show(got), kind="cob")
-
-
-@_ex("BasisProd")
-def _basis_prod():
-    J, imgb, projb = _img()
-    base2 = B.base_basis("Re2", np.eye(2))
-    got = _cob(B.basis_prod(B.dual_basis(imgb), base2),
-               B.basis_prod(B.dual_basis(projb), base2), {J: _JSTORED})
-    _ck(np.allclose(got, np.kron(np.linalg.inv(_R).T, np.eye(2))))
-    return Example("Product cob = Kronecker of the per-factor cobs (FFS leaf + identity).",
-                   'cob(prod(dual(imgb), I₂), prod(dual(projb), I₂))',
-                   [("J", _show(_JSTORED))], _show(got), kind="cob")
-
-
-@_ex("BasisSum")
-def _basis_sum():
-    A = np.array([[2.0, 0.0], [1.0, 1.0]])
-    Bm = np.array([[3.0]])
-    from_b = B.basis_sum(B.base_basis("V", A), B.base_basis("W", Bm))
-    to_b = B.basis_sum(C.base_basis("V"), C.base_basis("W"))
-    got = _cob(from_b, to_b)
-    exp = np.zeros((3, 3))
-    exp[:2, :2] = A
-    exp[2:, 2:] = Bm
-    _ck(np.allclose(got, exp))
-    return Example("Sum cob = block-diagonal of the per-summand cobs.",
-                   'cob(sum(V_A, W_B), sum(V_std, W_std))', [], _show(got), kind="cob")
-
-
-@_ex("CompleteBasis")
-def _complete_basis():
-    sub = B.base_basis("V", np.array([[1.0], [0.0], [0.0]]))
-    comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
-    got = _realize(B.complete_basis(sub, comp))
-    _ck(np.allclose(got, np.eye(3)))
-    return Example("Realizes to `[ sub | complement ]` stacked.",
-                   'complete(sub, complement)', [], _show(got), kind="cob")
+# NOTE: bases carry no worked/realization example — a basis is documented by how it CONVERTS
+# to other bases of the same space (see the CONVERSIONS registry at the bottom of this file).
 
 
 # ---------------------------------------------------------------------------
@@ -784,76 +686,6 @@ def _struct_frame():
         kind="struct")
 
 
-@_ex("BVar")
-def _struct_bvar():
-    return Example(
-        "A basis variable — the basis of an `SVar`, carried on a `Lam` binder; a concrete "
-        "basis is supplied at instantiation.",
-        'bvar("β")',
-        facts=[("pairs with", "the space variable SVar『a』"),
-               ("concrete at", "instantiation (rides on the Lam)")],
-        kind="struct")
-
-
-@_ex("PrimalBasis")
-def _struct_primal():
-    base = default_basis(C.base("V", 3))
-    pb = B.primal_basis(B.dual_basis(base))
-    _ck(isinstance(pb, B.PrimalBasis))
-    return Example(
-        "The inverse of `DualBasis` — recovers the primal basis under a dual "
-        "(`PrimalBasis(DualBasis(b)) = b`).",
-        "primal_basis(dual_basis(b))",
-        facts=[("PrimalBasis(DualBasis(b))", "≡ b")], kind="struct")
-
-
-@_ex("BasisRep")
-def _struct_basisrep():
-    db = default_basis(C.oplus_rep(4, C.base("V", 2)))
-    from grassmann.lower._dims import basis_dim
-    _ck(isinstance(db, B.BasisRep) and basis_dim(db) == 8)
-    return Example(
-        "The basis of `⊕ⁿ s`: `n` block-diagonal copies of `s`'s basis.",
-        "basis_rep(4, base_basis(\"V\"))",
-        facts=[("dimension", "count · |s| = 4 · 2 = 8")], kind="struct")
-
-
-@_ex("WithInnerBasis")
-def _struct_wib():
-    V = C.base("V", 3)
-    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
-    wib = B.with_inner_basis(default_basis(V), g)
-    _ck(isinstance(wib, B.WithInnerBasis))
-    return Example(
-        "A `g`-orthonormal basis: in these coordinates the metric `g` becomes the identity "
-        "(whitening). Default basis of a `WithInner` space; cob strips the metric (metadata).",
-        "with_inner_basis(b, g)",
-        facts=[("metric in these coords", "identity (whitened)"),
-               ("change of basis", "strips the metric wrapper")], kind="struct")
-
-
-@_ex("BLam")
-def _struct_blam():
-    return Example(
-        "A basis-level binder (machinery to BUILD a basis): over a value ⇒ a Frame; over a "
-        "basis ⇒ a basis function (e.g. `λβ. BasisProd(β,β)` is the basis of `λα. α⊗α`); "
-        "over a nat ⇒ a nat-parametric builder.",
-        "blam(β. BasisProd(β, β))",
-        facts=[("value domain", "→ Frame"),
-               ("basis domain", "→ basis function"),
-               ("nat domain", "→ nat-parametric builder")], kind="struct")
-
-
-@_ex("BApp")
-def _struct_bapp():
-    return Example(
-        "Apply a `BLam` (basis function / frame / nat-builder) to arguments — the reduction "
-        "site that turns a basis function + concrete arguments into a concrete basis.",
-        "bapp(f, (0,), arg)",
-        facts=[("mirrors", "App / Eval at the basis level"),
-               ("result", "a concrete basis after reduction")], kind="struct")
-
-
 @_ex("Var")
 def _var():
     V = C.base("V", 3)
@@ -896,3 +728,226 @@ def _inv_lift():
     _ck(np.allclose(np.ravel(got), np.ravel(xv)))
     return Example("Split a fused ⊗ slot back into factors (inverse of `Lift`).",
                    "inv_lift(lift(x, (0,1)), (0,), 2)", [("x", _show(xv))], _show(got))
+
+
+# ===========================================================================
+# CONVERSIONS — per basis, how it converts to other bases of the SAME space, the
+# mechanism cob uses, and the resulting (asserted) matrix. Rendered ONLY on basis pages;
+# each row is run + asserted by tests/test_doc_conversions.py.
+# ===========================================================================
+
+
+@dataclass
+class Conv:
+    to: str       # target basis (description)
+    via: str      # the mechanism cob uses
+    matrix: str = ""  # the resulting cob matrix (rendered), or "" for abstract
+
+
+CONVERSIONS: dict[str, list] = {}
+
+
+def _cv(name: str):
+    def deco(fn):
+        CONVERSIONS.setdefault(name, []).append(fn)
+        return fn
+    return deco
+
+
+def _conv(to, via, b_from, b_to, expected, feeds=None) -> Conv:
+    m = _cob(b_from, b_to, feeds)
+    _ck(np.allclose(m, expected))
+    return Conv(to, via, _show(m))
+
+
+_V3 = C.base("V", 3)
+_STD3 = default_basis(_V3)
+_PERM = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])  # cols e2,e3,e1
+_ROT = np.array([[2.0, 1.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]])
+
+
+# --- ScalarBasis (Scalar ℝ): a single basis -------------------------------
+@_cv("ScalarBasis")
+def _c_scalar_self():
+    return _conv("itself — ℝ has exactly one basis (the unit 1)",
+                 "identical bases ⇒ 1×1 identity (cob short-circuits)",
+                 B.scalar_basis(), B.scalar_basis(), np.eye(1))
+
+
+@_cv("ScalarBasis")
+def _c_scalar_note():
+    # Addresses the misconception: ℝ is 1-D, there is no x/y/z to convert to.
+    return Conv("(no x/y/z — ℝ is one-dimensional)",
+                "a chosen unit/direction lives in a 1-D *Base* ℝ¹ (a different space) — see "
+                "BaseBasis; within Scalar the only change of basis is the identity")
+
+
+# --- BaseBasis (Base V, dim 3) --------------------------------------------
+@_cv("BaseBasis")
+def _c_base_self():
+    return _conv("the same standard basis",
+                 "identical bases ⇒ identity (cob short-circuits)",
+                 _STD3, _STD3, np.eye(3))
+
+
+@_cv("BaseBasis")
+def _c_base_perm():
+    # "convert to x/y/z": the standard basis to a permuted/axis-relabeled basis.
+    return _conv("an axis-permuted basis (columns e₂,e₃,e₁)",
+                 "numeric matmul — realize both toward ambient, M = pinv(C_to)·C_from = P⁻¹",
+                 _STD3, B.base_basis("V", _PERM), np.linalg.inv(_PERM))
+
+
+@_cv("BaseBasis")
+def _c_base_rot():
+    return _conv("a rotated/scaled explicit basis",
+                 "numeric matmul  M = pinv(ROT)·I = ROT⁻¹",
+                 _STD3, B.base_basis("V", _ROT), np.linalg.inv(_ROT))
+
+
+# --- DualBasis (V*) -------------------------------------------------------
+@_cv("DualBasis")
+def _c_dual():
+    primal = _cob(_STD3, B.base_basis("V", _ROT))
+    return _conv("the dual of a rotated basis (a covector cob)",
+                 "DualBasis→DualBasis ⇒ (primal cob)⁻ᵀ",
+                 B.dual_basis(_STD3), B.dual_basis(B.base_basis("V", _ROT)),
+                 np.linalg.inv(primal).T)
+
+
+# --- PrimalBasis ----------------------------------------------------------
+@_cv("PrimalBasis")
+def _c_primal():
+    # PrimalBasis cancels a DualBasis (un-stars). Presented structurally: pair it with the
+    # matching DualBasis so variances line up; the round trip denotes the primal basis `b`.
+    return Conv("the underlying primal basis `b` (round trip)",
+                "PrimalBasis(DualBasis(b)) denotes `b` — the double-dual cancels, so converting "
+                "back to `b` is the identity")
+
+
+# --- BasisSum (V⊕W) -------------------------------------------------------
+@_cv("BasisSum")
+def _c_sum():
+    A = np.array([[2.0, 0.0], [1.0, 1.0]])
+    Bm = np.array([[3.0]])
+    from_b = B.basis_sum(B.base_basis("V", A), B.base_basis("W", Bm))
+    to_b = B.basis_sum(default_basis(C.base("V", 2)), default_basis(C.base("W", 1)))
+    exp = np.zeros((3, 3))
+    exp[:2, :2] = A
+    exp[2:, 2:] = Bm
+    return _conv("another ⊕ basis (per-summand bases changed)",
+                 "BasisSum→BasisSum ⇒ block-diagonal of the per-summand cobs",
+                 from_b, to_b, exp)
+
+
+# --- BasisProd (V⊗W) ------------------------------------------------------
+@_cv("BasisProd")
+def _c_prod():
+    J, imgb, projb = _img()
+    base2 = B.base_basis("Re2", np.eye(2))
+    return _conv("another ⊗ basis (a factor changed: ImageBasis* → ProjectedBasis*)",
+                 "BasisProd→BasisProd ⇒ Kronecker product of the per-factor cobs",
+                 B.basis_prod(B.dual_basis(imgb), base2),
+                 B.basis_prod(B.dual_basis(projb), base2),
+                 np.kron(np.linalg.inv(_R).T, np.eye(2)), {J: _JSTORED})
+
+
+# --- BasisRep (⊕ⁿ V) ------------------------------------------------------
+@_cv("BasisRep")
+def _c_rep():
+    A = np.array([[2.0, 0.0], [1.0, 1.0]])
+    from_b = B.basis_rep(3, B.base_basis("V", A))
+    to_b = B.basis_rep(3, default_basis(C.base("V", 2)))
+    exp = np.zeros((6, 6))
+    for i in range(3):
+        exp[2 * i:2 * i + 2, 2 * i:2 * i + 2] = A
+    return _conv("another ⊕ⁿ basis (the repeated inner basis changed)",
+                 "BasisRep→BasisRep ⇒ block-repeat of the inner cob (n copies)",
+                 from_b, to_b, exp)
+
+
+# --- ProjectedBasis (Img(J)) ----------------------------------------------
+@_cv("ProjectedBasis")
+def _c_proj_self():
+    J, _imgb, projb = _img()
+    return _conv("the same orthonormal range basis", "identical ⇒ identity",
+                 projb, projb, np.eye(2), {J: _JSTORED})
+
+
+@_cv("ProjectedBasis")
+def _c_proj_to_image():
+    J, imgb, projb = _img()
+    return _conv("the literal `ImageBasis` of the same image",
+                 "FFS seam — realize both via SVD/QR, M = pinv(C_to)·C_from = R⁻¹",
+                 projb, imgb, np.linalg.inv(_R), {J: _JSTORED})
+
+
+# --- ImageBasis (Img(J)) --------------------------------------------------
+@_cv("ImageBasis")
+def _c_image_to_proj():
+    J, imgb, projb = _img()
+    return _conv("the orthonormal `ProjectedBasis` of the same image",
+                 "FFS seam — realize both via SVD/QR, M = pinv(C_to)·C_from = R",
+                 imgb, projb, _R, {J: _JSTORED})
+
+
+@_cv("ImageBasis")
+def _c_image_dual():
+    J, imgb, projb = _img()
+    primal = _cob(imgb, projb, {J: _JSTORED})
+    return _conv("the dual `ProjectedBasis*` (a covector cob)",
+                 "DualBasis→DualBasis over the FFS seam ⇒ (R)⁻ᵀ",
+                 B.dual_basis(imgb), B.dual_basis(projb), np.linalg.inv(primal).T,
+                 {J: _JSTORED})
+
+
+# --- ListBasis (V via term vectors) ---------------------------------------
+@_cv("ListBasis")
+def _c_list():
+    W = C.base("W", 3)
+    a, b, c = C.var("a", W), C.var("b", W), C.var("c", W)
+    cols = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
+    feeds = {a: cols[:, 0], b: cols[:, 1], c: cols[:, 2]}
+    return _conv("the standard basis of the ambient",
+                 "numeric matmul — realize the listed columns, M = pinv(I)·C = C",
+                 B.list_basis(a, b, c), default_basis(W), cols, feeds)
+
+
+# --- WithInnerBasis -------------------------------------------------------
+@_cv("WithInnerBasis")
+def _c_wib():
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    return _conv("the underlying (un-whitened) basis",
+                 "the metric is metadata, not coordinates ⇒ cob strips it = identity",
+                 B.with_inner_basis(default_basis(V), g), default_basis(V), np.eye(3))
+
+
+# --- CompleteBasis --------------------------------------------------------
+@_cv("CompleteBasis")
+def _c_complete():
+    sub = B.base_basis("V", np.array([[1.0], [0.0], [0.0]]))
+    comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    return _conv("the standard ambient basis",
+                 "realize `[ sub | complement ]` then compose; here = the completed matrix",
+                 B.complete_basis(sub, comp), default_basis(C.base("V", 3)), np.eye(3))
+
+
+# --- Abstract bases: conversion is defined only after instantiation/reduction ---
+@_cv("BVar")
+def _c_bvar():
+    return Conv("any concrete basis of the space it stands for",
+                "abstract — no concrete cob until the space variable is instantiated; then it "
+                "converts like the supplied basis")
+
+
+@_cv("BLam")
+def _c_blam():
+    return Conv("(after application) the basis its body builds",
+                "abstract basis-builder — apply it (BApp) to get a concrete basis, then cob")
+
+
+@_cv("BApp")
+def _c_bapp():
+    return Conv("any basis of the space, once reduced",
+                "reduce the basis application to a concrete basis, then cob as usual")

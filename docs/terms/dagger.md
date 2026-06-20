@@ -81,11 +81,5 @@ Lowered by **`represent._rep_dagger`**:
 > A non-orthonormal endpoint (an ``ImageBasis`` slot, whose Gram is ``JᵀJ`` ≠ I) routes
 > through the metric formula so the adjoint identity stays basis-invariant (`43 §2c`).
 
-## Conversion
-
-A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
-
-## Tested by
-
-The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
+_Exercised in `tests/test_doc_represent.py`._
 
