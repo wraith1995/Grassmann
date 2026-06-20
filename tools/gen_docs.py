@@ -742,6 +742,7 @@ def _write_mkdocs(nav_cats) -> None:
         "  - toc: {permalink: true}",
         "nav:",
         "  - Home: index.md",
+        "  - Testing: testing.md",
     ]
     for cat, (title, _m, _e) in CATS.items():
         lines.append(f"  - {title}:")
