@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="Dual" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The **dual space** `Dual(s)` = `s*` — the space of linear functionals on `s` (covectors).
@@ -27,7 +29,14 @@ The dual `s*` has the same dimension as `s`.
 | array shape | `(3,)` |
 | default basis | `DualBasis` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dim_ex("The dual `s*` has the same dimension as `s`.",
+                   "~V  # dual(space(\"V\", 3))", C.dual(C.base("V", 3)), 3)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

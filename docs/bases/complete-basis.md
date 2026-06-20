@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="CompleteBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 A **completed subspace basis** `CompleteBasis(subBasis, complement)` — extends a subspace basis to
@@ -26,7 +28,16 @@ complete(sub, complement)
  [0., 0., 1.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    sub = B.base_basis("V", np.array([[1.0], [0.0], [0.0]]))
+    comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    got = _realize(B.complete_basis(sub, comp))
+    _ck(np.allclose(got, np.eye(3)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

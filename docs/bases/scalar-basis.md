@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="ScalarBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **canonical basis of `Scalar`** `ScalarBasis()` — the single vector `1 ∈ ℝ`. There is
@@ -22,7 +24,14 @@ realize(scalar_basis())
 [[1.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    got = _realize(B.scalar_basis())
+    _ck(np.allclose(got, np.eye(1)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Built by
 

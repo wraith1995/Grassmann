@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Lit" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 A **scalar literal** `Lit(r)` — a real number as a term of space `Scalar`. The constant leaf of
@@ -22,7 +24,14 @@ lit(2.5)
 [2.5]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    got = _run(C.lit(2.5), {})
+    _ck(np.allclose(np.ravel(got)[0], 2.5))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

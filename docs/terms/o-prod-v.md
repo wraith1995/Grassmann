@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="OProdV" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 A **tensor (outer) product of vectors** `OProdV(v₀,…)` — the value `v₀ ⊗ … ⊗ vₙ` of space
@@ -37,7 +39,17 @@ a * b
  [ 6.,  8., 10.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 2), C.base("W", 3)
+    a, b = C.var("a", V), C.var("b", W)
+    av, bv = [1.0, 2.0], [3.0, 4.0, 5.0]
+    got = _run(C.oprod_v(a, b), {a: av, b: bv})
+    _ck(np.allclose(got, np.outer(av, bv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

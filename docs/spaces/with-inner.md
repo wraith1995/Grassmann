@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="WithInner" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 A space **re-metricized** `WithInner(s, g)` — the same underlying space `s` carrying an explicit
@@ -30,7 +32,18 @@ V.with_inner(g)
 | array shape | `(3,)` |
 | default basis | `WithInnerBasis` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    s = C.with_inner(V, g)
+    return _dim_ex("Re-metricized space: same dimension as the underlying `V` (metric is "
+                   "metadata); default basis is the g-orthonormal `WithInnerBasis`.",
+                   "V.with_inner(g)", s, 3)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

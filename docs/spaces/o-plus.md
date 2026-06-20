@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="OPlus" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The **direct sum** `OPlus(s₀,…,sₙ)` = `s₀ ⊕ … ⊕ sₙ` — independent components stacked side by
@@ -28,7 +30,14 @@ V & W
 | array shape | `(5,)` |
 | default basis | `BasisSum` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    s = C.oplus(C.base("V", 2), C.base("W", 3))
+    return _dim_ex("Direct sum: dimension is the SUM `|V|+|W|`.", "V & W", s, 5)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

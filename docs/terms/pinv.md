@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Pinv" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Moore–Penrose pseudo-inverse map** `Pinv(f)` — the least-squares inverse of a general
@@ -34,7 +36,17 @@ pinv(f)
  [-0.177,  0.361]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W), props=C.props.rank(2))
+    A = np.round(np.random.default_rng(6).standard_normal((2, 3)), 2)
+    got = _run(C.pinv(f), {f: A})
+    _ck(np.allclose(got, np.linalg.pinv(A)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

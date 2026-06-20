@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="WithInnerBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 A **`g`-orthonormal basis** `WithInnerBasis(b, g)` — the basis `b` viewed under metric `g` such
@@ -23,7 +25,16 @@ with_inner_basis(b, g)
 | metric in these coords | `identity (whitened)` |
 | change of basis | `strips the metric wrapper` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    wib = B.with_inner_basis(default_basis(V), g)
+    _ck(isinstance(wib, B.WithInnerBasis))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

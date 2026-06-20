@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="DimLit" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 A **literal dimension** `DimLit(n)` — a concrete non-negative integer size. The common case:
@@ -20,7 +22,14 @@ base("V", DimLit(3))
 |---|---|
 | evaluates to | `3` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dim_expr_ex("A literal (concrete) dimension.",
+                        'base("V", DimLit(3))', C.base("V", C.DimLit(3)), 3)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

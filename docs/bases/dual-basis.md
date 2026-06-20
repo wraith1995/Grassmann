@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="DualBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **dual basis** `DualBasis(b)` — the basis of `s*` dual to a basis `b` of `s`, defined by
@@ -33,7 +35,17 @@ cob(dual(image_basis(J)), dual(projected_basis(J, "image")))
  [ 0.246, -0.369]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    J, imgb, projb = _img()
+    f = {J: _JSTORED}
+    primal = _cob(imgb, projb, f)
+    got = _cob(B.dual_basis(imgb), B.dual_basis(projb), f)
+    _ck(np.allclose(got, np.linalg.inv(primal).T))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="CoImg" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The **coimage** `CoImg(f)` of `f : dom ⊸ cod` — the orthogonal complement of `Ker(f)` inside
@@ -25,7 +27,16 @@ coimg(f)  # rank 2
 | array shape | `(2,)` |
 | default basis | `ProjectedBasis(…, "coimg")` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    A, B_ = C.base("A", 5), C.base("B", 3)
+    f = C.var("f", C.linear_map_space(A, B_), props=C.props.rank(2))
+    return _dim_ex("Coimage (row space): dimension = rank = 2.",
+                   "coimg(f)  # rank 2", C.coimg(f), 2)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

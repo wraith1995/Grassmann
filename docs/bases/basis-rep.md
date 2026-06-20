@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="BasisRep" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **repeated direct-sum basis** `BasisRep(n, b)` — the basis of `⊕ⁿ s`, `n` block-diagonal
@@ -20,7 +22,15 @@ basis_rep(4, base_basis("V"))
 |---|---|
 | dimension | `count · |s| = 4 · 2 = 8` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    db = default_basis(C.oplus_rep(4, C.base("V", 2)))
+    from grassmann.lower._dims import basis_dim
+    _ck(isinstance(db, B.BasisRep) and basis_dim(db) == 8)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

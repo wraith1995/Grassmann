@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="CoKer" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 The **cokernel** `CoKer(f)` of `f : dom ⊸ cod` — the orthogonal complement of `Img(f)` inside
@@ -25,7 +27,16 @@ coker(f)  # rank 2
 | array shape | `(1,)` |
 | default basis | `ProjectedBasis(…, "coker")` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    A, B_ = C.base("A", 5), C.base("B", 3)
+    f = C.var("f", C.linear_map_space(A, B_), props=C.props.rank(2))
+    return _dim_ex("Cokernel: dimension `|cod| − rank` = 3 − 2 = 1.",
+                   "coker(f)  # rank 2", C.coker(f), 1)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

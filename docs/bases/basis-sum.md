@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="BasisSum" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **direct-sum basis** `BasisSum(b₀,…)` — the basis of `⊕(sᵢ)` formed by laying the component
@@ -25,7 +27,21 @@ cob(sum(V_A, W_B), sum(V_std, W_std))
  [0., 0., 3.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    A = np.array([[2.0, 0.0], [1.0, 1.0]])
+    Bm = np.array([[3.0]])
+    from_b = B.basis_sum(B.base_basis("V", A), B.base_basis("W", Bm))
+    to_b = B.basis_sum(C.base_basis("V"), C.base_basis("W"))
+    got = _cob(from_b, to_b)
+    exp = np.zeros((3, 3))
+    exp[:2, :2] = A
+    exp[2:, 2:] = Bm
+    _ck(np.allclose(got, exp))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

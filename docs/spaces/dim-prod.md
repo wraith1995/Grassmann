@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="DimProd" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 `DimProd(d₀,…)` — the **product** of dim expressions, `d₀ · … · dₙ`. The size law behind `⊗`
@@ -19,7 +21,14 @@ dim_prod(2, 3)
 |---|---|
 | evaluates to | `6` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    return _dim_expr_ex("Product of dims `2 · 3` (the law behind `⊗`).",
+                        "dim_prod(2, 3)", C.base("V", C.dim_prod(2, 3)), 6)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

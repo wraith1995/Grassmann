@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="LLam" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Linear lambda** `LLam(vars…, body)` — a multilinear abstraction: binds linear variables and
@@ -40,7 +42,22 @@ llam(x, y, body=B(T(x), T(y)))
  [ 0.662,  1.127]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 2), C.base("W", 2)
+    b = C.var("B", C.oprod(C.dual(W), C.dual(W)))
+    Tm = C.var("T", C.linear_map_space(V, W))
+    x, y = C.var("x", V), C.var("y", V)
+    body = C.eval_(b, (0, 1), C.eval_(Tm, (0,), x), C.eval_(Tm, (0,), y))
+    form = C.llam(x, y, body=body)
+    Bv = np.round(np.random.default_rng(11).standard_normal((2, 2)), 2)
+    Tv = np.round(np.random.default_rng(12).standard_normal((2, 2)), 2)
+    got = _run(form, {b: Bv, Tm: Tv})
+    _ck(np.allclose(got, Tv @ Bv @ Tv.T))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

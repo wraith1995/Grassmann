@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Project" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Orthogonal projection onto a subspace** `Project(v, s')` — drop the complement coordinates,
@@ -37,7 +39,20 @@ project(x, img(J))
 [-0.204,  2.154]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    x = C.var("x", Re)
+    Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
+    Q, _ = np.linalg.qr(Jm)
+    xv = [1.0, -2.0, 0.5]
+    got = _run(C.project(x, C.img(J)), {x: xv, J: Jm.T})
+    _ck(np.allclose(got, Q.T @ np.asarray(xv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

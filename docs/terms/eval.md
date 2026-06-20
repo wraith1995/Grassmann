@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Eval" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Linear application (contraction)** `Eval(f, positions, args…)` — contract `f`'s dual slots
@@ -40,7 +42,19 @@ f(x)  # eval_(f, (0,), x)
 [5., 7., 9.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W))
+    x = C.var("x", V)
+    fv = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    xv = [1.0, 1.0]
+    got = _run(C.eval_(f, (0,), x), {f: fv, x: xv})
+    _ck(np.allclose(got, np.asarray(fv).T @ np.asarray(xv)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

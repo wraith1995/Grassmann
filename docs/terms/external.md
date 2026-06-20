@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="External" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 An **external (foreign) value/function** `External(space, data, args…)` — an opaque payload
@@ -23,7 +25,16 @@ external(V, [3, 4])
 [3., 4.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 2)
+    e = C.external(V, np.array([3.0, 4.0]))
+    got = _run(e, {})
+    _ck(np.allclose(got, [3.0, 4.0]))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

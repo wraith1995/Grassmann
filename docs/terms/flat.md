@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Flat" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 The **flat** (musical ♭) map `Flat(s)` — `s ⊸ s*`, lowering an index: `v ↦ ⟨v, ·⟩`. It *is* the
@@ -31,7 +33,17 @@ flat(V)(v)
 [1., 2., 3.]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    v = C.var("v", V)
+    vv = [1.0, 2.0, 3.0]
+    got = _run(C.eval_(C.flat(V), (0,), v), {v: vv})
+    _ck(np.allclose(got, vv))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

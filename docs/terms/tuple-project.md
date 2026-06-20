@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="TupleProject" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Direct-sum component extraction** `TupleProject(s, i)` — `πᵢ = ιᵢ†`, the map `s ⊸ blockᵢ` that
@@ -26,7 +28,16 @@ proj(V & W, 0)
  [0., 0.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 2), C.base("W", 3)
+    s = C.oplus(V, W)
+    got = _run(C.tuple_project(s, 0), {})
+    _ck(np.allclose(got, np.vstack([np.eye(2), np.zeros((3, 2))])))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

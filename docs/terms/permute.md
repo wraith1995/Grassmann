@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Permute" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Axis permutation** `Permute(v, perm)` — reorder a tensor's space axes by `perm` (a transpose
@@ -33,7 +35,17 @@ permute(x, (1, 0))
  [2., 5.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 2), C.base("W", 3)
+    x = C.var("x", C.oprod(V, W))
+    xv = np.arange(6.0).reshape(2, 3)
+    got = _run(C.permute(x, (1, 0)), {x: xv})
+    _ck(np.allclose(got, xv.T))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

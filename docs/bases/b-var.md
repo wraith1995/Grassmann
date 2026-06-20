@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="BVar" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 A **basis variable** `BVar(β)` — the basis of a space variable [`SVar`](../spaces/s-var.md),
@@ -22,7 +24,7 @@ bvar("β")
 | pairs with | `the space variable SVar『a』` |
 | concrete at | `instantiation (rides on the Lam)` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

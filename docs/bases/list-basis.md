@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="ListBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 An **explicit list-of-term-vectors basis** `ListBasis(vectors…)` — a basis given as Term vectors
@@ -38,7 +40,17 @@ list_basis(a, b)
  [0., 0.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    W = C.base("W", 3)
+    a, b = C.var("a", W), C.var("b", W)
+    av, bv = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]
+    got = _realize(B.list_basis(a, b), {a: av, b: bv})
+    _ck(np.allclose(got, np.column_stack([av, bv])))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

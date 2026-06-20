@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="DimOf" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 `DimOf(s)` — the **dimension of a space** as a dim expression, `|s|`. Lets a size be written in
@@ -20,7 +22,15 @@ DimOf(W)  # = |W|
 |---|---|
 | evaluates to | `4` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    W = C.base("W", 4)
+    return _dim_expr_ex("`|s|` as a dim expression — track another space's size.",
+                        "DimOf(W)  # = |W|", C.base("V", C.DimOf(W)), 4)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

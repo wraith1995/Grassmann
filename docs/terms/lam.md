@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="Lam" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Dependent lambda** `Lam([bᵢ:σᵢ]. body)` — a non-linear / dependent function whose binders range
@@ -23,7 +25,19 @@ lam([x:V]. f(x))
 | applied by | `NEval (see the NEval example)` |
 | lowering | `body represented once into a sub-program` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    from grassmann.core.kinds import SpaceSort
+    
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W))
+    x = C.var("x", V)
+    lam = C.lam(((x.name, SpaceSort(V)),), C.eval_(f, (0,), x), (x,))
+    _ck(len(lam.binders) == 1)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

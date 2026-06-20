@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="ProjectedBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **orthonormal subspace basis** `ProjectedBasis(f, which, source?, target?)` — the basis of a
@@ -40,7 +42,15 @@ realize(projected_basis(J, "image"))
  [-0.408, -0.123]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    J, _, projb = _img()
+    got = _realize(projb, {J: _JSTORED})
+    _ck(np.allclose(got.T @ got, np.eye(2)))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

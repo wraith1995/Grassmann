@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Bases
 
+<div class="gm-approval" data-node="PrimalBasis" data-cat="bases" data-status="review"></div>
+
 ## Meaning
 
 The **primal basis** `PrimalBasis(b)` — the inverse of `DualBasis`: recovers the primal basis
@@ -20,7 +22,15 @@ primal_basis(dual_basis(b))
 |---|---|
 | PrimalBasis(DualBasis(b)) | `≡ b` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    base = default_basis(C.base("V", 3))
+    pb = B.primal_basis(B.dual_basis(base))
+    _ck(isinstance(pb, B.PrimalBasis))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
+<div class="gm-approval" data-node="OPlusRep" data-cat="spaces" data-status="review"></div>
+
 ## Meaning
 
 A **homogeneous direct sum** `OPlusRep(count, s)` = `s ⊕ … ⊕ s` (`count` copies) — the n-ary
@@ -26,7 +28,15 @@ osum_n(4, V)
 | array shape | `(8,)` |
 | default basis | `BasisRep` |
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    s = C.oplus_rep(4, C.base("V", 2))
+    return _dim_ex("Homogeneous direct sum `⊕⁴ V`: dimension `count·|V|`.",
+                   "osum_n(4, V)", s, 8)
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

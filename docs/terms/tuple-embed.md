@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="TupleEmbed" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Direct-sum component injection** `TupleEmbed(s, i)` — `ιᵢ`, the map `blockᵢ ⊸ s` that pads the
@@ -24,7 +26,16 @@ inj_embed(V & W, 1)
  [0., 0., 0., 0., 1.]]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V, W = C.base("V", 2), C.base("W", 3)
+    s = C.oplus(V, W)
+    got = _run(C.tuple_embed(s, 1), {})
+    _ck(np.allclose(got, np.hstack([np.zeros((3, 2)), np.eye(3)])))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 

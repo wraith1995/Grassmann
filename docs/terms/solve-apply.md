@@ -2,6 +2,8 @@
 
 **Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
+<div class="gm-approval" data-node="SolveApply" data-cat="terms" data-status="review"></div>
+
 ## Meaning
 
 **Applied exact solve** `SolveApply(f, v)` — `f⁻¹ · v`, solving `f·x = v` for a square full-rank
@@ -37,7 +39,19 @@ solve(f)(v)
 [-0.831,  1.552, -1.979]
 ```
 
-_This example is executed and asserted in `tests/test_doc_examples.py`._
+??? note "Test (literal source — input · run · expected assertion)"
+
+    ```python
+    V = C.base("V", 3)
+    f = C.var("f", C.linear_map_space(V, V), props=C.props.bij)
+    v = C.var("v", V)
+    A = np.round(np.random.default_rng(7).standard_normal((3, 3)), 2)
+    vv = [1.0, 2.0, 3.0]
+    got = _run(C.solve_apply(f, v), {f: A, v: vv})
+    _ck(np.allclose(A @ got, vv))
+    ```
+
+_Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Fields
 
