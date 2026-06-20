@@ -19,35 +19,212 @@ props pin it, else a runtime `δ_f`).
 
 ## Conversions
 
-How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
+How this basis converts to other bases of the **same space**, and how `cob` handles each — with the literal `cob` call, its inputs, and the resulting matrix. Every entry is executed and asserted in `tests/test_doc_conversions.py`.
 
-### → the same orthonormal range basis
+### → the literal `ImageBasis(J)`
 
-**Mechanism (`cob`):** identical ⇒ identity
+**Mechanism (`cob`):** FFS factor — `Projected → Image` is `R⁻¹` (the inverse of the QR/GSVD factor)
 
-**Change-of-basis matrix**
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ProjectedBasis(J, "image"), ImageBasis(J))
+```
+
+Input `J` =
 
 ```
-[[1., 0.],
- [0., 1.]]
+[[2., 1., 1.],
+ [0., 3., 1.]]
 ```
 
-### → the literal `ImageBasis` of the same image
+Input `g0` =
 
-**Mechanism (`cob`):** FFS seam — realize both via SVD/QR, M = pinv(C_to)·C_from = R⁻¹
+```
+[2., 1., 1.]
+```
 
-**Change-of-basis matrix**
+Input `g1` =
+
+```
+[2., 4., 2.]
+```
+
+Input `h0` =
+
+```
+[2., 1., 1.]
+```
+
+Output — the `cob` matrix:
 
 ```
 [[-0.408,  0.246],
  [-0.   , -0.369]]
 ```
 
+### → a term basis spanning the image `ListBasis(g₀,g₁)`
+
+**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ProjectedBasis(J, "image"), ListBasis(g0, g1))
+```
+
+Input `J` =
+
+```
+[[2., 1., 1.],
+ [0., 3., 1.]]
+```
+
+Input `g0` =
+
+```
+[2., 1., 1.]
+```
+
+Input `g1` =
+
+```
+[2., 4., 2.]
+```
+
+Input `h0` =
+
+```
+[2., 1., 1.]
+```
+
+Output — the `cob` matrix:
+
+```
+[[-0.408,  0.615],
+ [-0.   , -0.369]]
+```
+
+### → a completed image basis `[ h₀ | J col ]`
+
+**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ProjectedBasis(J, "image"), CompleteBasis(ListBasis(h0), comp))
+```
+
+Input `J` =
+
+```
+[[2., 1., 1.],
+ [0., 3., 1.]]
+```
+
+Input `g0` =
+
+```
+[2., 1., 1.]
+```
+
+Input `g1` =
+
+```
+[2., 4., 2.]
+```
+
+Input `h0` =
+
+```
+[2., 1., 1.]
+```
+
+Output — the `cob` matrix:
+
+```
+[[-0.408,  0.246],
+ [-0.   , -0.369]]
+```
+
+### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
+
+**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ProjectedBasis(J, "image"), PrimalBasis(DualBasis(<the term basis>)))
+```
+
+Input `J` =
+
+```
+[[2., 1., 1.],
+ [0., 3., 1.]]
+```
+
+Input `g0` =
+
+```
+[2., 1., 1.]
+```
+
+Input `g1` =
+
+```
+[2., 4., 2.]
+```
+
+Input `h0` =
+
+```
+[2., 1., 1.]
+```
+
+Output — the `cob` matrix:
+
+```
+[[-0.408,  0.615],
+ [-0.   , -0.369]]
+```
+
 ### → the standard-orthonormal `ProjectedBasis` (re-orthonormalize)
 
-**Mechanism (`cob`):** source/target feed the GSVD metric G=(B·Bᵀ)⁻¹ ⇒ orthonormal w.r.t. that basis; columns stay in the standard frame so cob composes
+**Mechanism (`cob`):** `source`/`target` feed the GSVD metric `G=(B·Bᵀ)⁻¹` ⇒ orthonormal w.r.t. that basis; columns stay in the standard frame so cob composes
 
-**Change-of-basis matrix**
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(ProjectedBasis(J,"image",target=ListBasis(t…)), ProjectedBasis(J,"image"))
+```
+
+Input `J` =
+
+```
+[[2., 1., 1.],
+ [0., 3., 1.]]
+```
+
+Input `t0` =
+
+```
+[1., 0., 1.]
+```
+
+Input `t1` =
+
+```
+[0., 2., 0.]
+```
+
+Input `t2` =
+
+```
+[0., 0., 1.]
+```
+
+Output — the `cob` matrix:
 
 ```
 [[ 0.971,  1.07 ],

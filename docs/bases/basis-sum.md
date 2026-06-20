@@ -13,13 +13,163 @@ column matrices.
 
 ## Conversions
 
-How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
+How this basis converts to other bases of the **same space**, and how `cob` handles each — with the literal `cob` call, its inputs, and the resulting matrix. Every entry is executed and asserted in `tests/test_doc_conversions.py`.
+
+### → a term basis of V⊕W `ListBasis(q₀,q₁,q₂)`
+
+**Mechanism (`cob`):** realize both bases toward the V⊕W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(BasisSum(std₂, std₁), ListBasis(q0,q1,q2))
+```
+
+Input `q0` =
+
+```
+[1., 0., 0.]
+```
+
+Input `q1` =
+
+```
+[0., 1., 0.]
+```
+
+Input `q2` =
+
+```
+[1., 1., 1.]
+```
+
+Input `p0` =
+
+```
+[1., 0., 0.]
+```
+
+Output — the `cob` matrix:
+
+```
+[[ 1.,  0., -1.],
+ [ 0.,  1., -1.],
+ [ 0., -0.,  1.]]
+```
+
+### → a completed basis of V⊕W
+
+**Mechanism (`cob`):** realize both bases toward the V⊕W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(BasisSum(std₂, std₁), CompleteBasis(ListBasis(p0), comp))
+```
+
+Input `q0` =
+
+```
+[1., 0., 0.]
+```
+
+Input `q1` =
+
+```
+[0., 1., 0.]
+```
+
+Input `q2` =
+
+```
+[1., 1., 1.]
+```
+
+Input `p0` =
+
+```
+[1., 0., 0.]
+```
+
+Output — the `cob` matrix:
+
+```
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
+```
+
+### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
+
+**Mechanism (`cob`):** realize both bases toward the V⊕W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(BasisSum(std₂, std₁), PrimalBasis(DualBasis(<the term basis>)))
+```
+
+Input `q0` =
+
+```
+[1., 0., 0.]
+```
+
+Input `q1` =
+
+```
+[0., 1., 0.]
+```
+
+Input `q2` =
+
+```
+[1., 1., 1.]
+```
+
+Input `p0` =
+
+```
+[1., 0., 0.]
+```
+
+Output — the `cob` matrix:
+
+```
+[[ 1.,  0., -1.],
+ [ 0.,  1., -1.],
+ [ 0., -0.,  1.]]
+```
 
 ### → another ⊕ basis (per-summand term bases changed)
 
-**Mechanism (`cob`):** BasisSum→BasisSum ⇒ block-diagonal of the per-summand cobs
+**Mechanism (`cob`):** `BasisSum → BasisSum` ⇒ block-diagonal of the per-summand cobs
 
-**Change-of-basis matrix**
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(BasisSum(ListBasis(a…), ListBasis(b…)), BasisSum(std₂, std₁))
+```
+
+Input `a0` =
+
+```
+[2., 1.]
+```
+
+Input `a1` =
+
+```
+[0., 1.]
+```
+
+Input `b0` =
+
+```
+[3.]
+```
+
+Output — the `cob` matrix:
 
 ```
 [[2., 0., 0.],

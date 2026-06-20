@@ -880,39 +880,76 @@ def _basis_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.S
 
 
 def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
-    """The leaf FFS change-of-basis matrix via the realization seam (`43 §2c`).
+    """The leaf change-of-basis matrix — **via the standard basis** (`43 §2c`, the cob fallback).
 
-    Realizes both leaves toward the ambient coords (``realize_basis_cols``, which routes FFS /
-    ``ListBasis`` through the seam) and composes ``pinv(C_to)·C_from``; a covariant
-    (``DualBasis``) pair adds the `41 §2` ``(·)⁻ᵀ`` rule.
+    The general rule when no specific structural case applies: *route through the standard
+    basis of the shared space*.  Realizing a basis is exactly its cob **to** the standard basis
+    (its vectors as columns in standard coords), so
+
+        ``cob(A → B) = cob(std → B) · cob(A → std) = pinv(realize B) · realize A``
+
+    — and ``cob(std → B) = (realize B)⁻¹`` (we invert the to-standard transform).  This is total
+    over every basis that :func:`realize_basis_cols` can build (verified: each basis converts to
+    and from its standard basis).  ``realize_basis_cols`` puts each basis in its **natural**
+    coords — primal bases in standard primal coords, covariant (``DualBasis``) bases in standard
+    dual coords — so the only thing this guards is mixing a basis of ``V`` with one of ``V*``
+    (different spaces; that needs a metric, not a cob).
     """
-    from_dual, to_dual = _peel_dual(from_basis), _peel_dual(to_basis)
-    if from_dual != to_dual:
+    vf, vt = _basis_variance(ctx, from_basis), _basis_variance(ctx, to_basis)
+    if vf != vt:
         raise RepresentError(
-            f"cob: bases of differing variance: {from_basis!r} vs {to_basis!r}"
+            f"cob: bases of differing variance (a vector basis of V vs a covector basis of V*): "
+            f"{from_basis!r} vs {to_basis!r}"
         )
-    fp, tp = _strip_variance(from_basis), _strip_variance(to_basis)
     # Structure-exploiting fast path: ImageBasis(f) ↔ ProjectedBasis(f,"image") of the SAME
-    # injective map is the QR factor `R` (J = Q·R) directly — no realize-both-and-pinv.
-    m_primal = _same_map_ffs_cob(ctx, fp, tp)
-    if m_primal is None:
-        c_from = realize_basis_cols(ctx, fp)
-        c_to = realize_basis_cols(ctx, tp)
-        n_amb, k_from = _shape_of(c_from)
-        _, k_to = _shape_of(c_to)
-        # general primal cob (from→to) = pinv(C_to) · C_from   (k_to × k_from).
-        [pinv_to] = ctx.prog.emit_stmt(
-            pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (k_to, n_amb))],
-            note="ffs-cob:pinv(C_to)",
-        )
-        [m_primal] = ctx.prog.emit_stmt(
-            pa.EinsumStmtOp("ij,jk->ik"), [pinv_to, c_from],
-            [pa.OutSpec("cob:pinv(C_to)·C_from", (k_to, k_from))],
-            note="ffs-cob:pinv(C_to)·C_from",
-        )
-    if not from_dual:
-        return m_primal
-    return _inv_transpose(ctx.prog, m_primal)
+    # injective map is the QR/GSVD factor directly — no realize-both-and-pinv.
+    if not vf:
+        m = _same_map_ffs_cob(ctx, _strip_withinner(from_basis), _strip_withinner(to_basis))
+        if m is not None:
+            return m
+    # Fallback: realize both in their natural (standard) coords and compose A → std → B.
+    c_from = realize_basis_cols(ctx, from_basis)
+    c_to = realize_basis_cols(ctx, to_basis)
+    n_amb, k_from = _shape_of(c_from)
+    _, k_to = _shape_of(c_to)
+    [pinv_to] = ctx.prog.emit_stmt(  # cob(std → B) = (realize B)⁻¹ (pseudo-inverse if non-square)
+        pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (k_to, n_amb))],
+        note="ffs-cob:std→to=pinv(C_to)",
+    )
+    [m] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ij,jk->ik"), [pinv_to, c_from],
+        [pa.OutSpec("cob:pinv(C_to)·C_from", (k_to, k_from))],
+        note="ffs-cob:(std→to)·(from→std)",
+    )
+    return m
+
+
+def _basis_variance(ctx: _Ctx, basis: B.Basis) -> bool:
+    """The net variance **parity** — ``True`` iff covariant (a basis of a dual space ``V*``).
+
+    ``DualBasis``/``PrimalBasis`` toggle; ``WithInnerBasis`` is metadata.  A ``ListBasis``'s
+    variance comes from its vectors' space (a list of **covectors** is a covariant basis), so a
+    term basis of ``V*`` is recognised as such and converts to a ``DualBasis`` of ``V*``.
+    """
+    match basis:
+        case B.DualBasis(inner) | B.PrimalBasis(inner):
+            return not _basis_variance(ctx, inner)
+        case B.WithInnerBasis(inner, _):
+            return _basis_variance(ctx, inner)
+        case B.ListBasis(vectors):
+            return bool(vectors) and _term_is_dual(vectors[0])
+        case _:
+            return False
+
+
+def _term_is_dual(vector: object) -> bool:
+    """Whether a ``ListBasis`` vector is a covector (its space is a ``Dual``)."""
+    from grassmann.core.space import Dual
+    try:
+        from grassmann.infer.synth import synth_space
+        return isinstance(synth_space(vector), Dual)
+    except Exception:
+        return False
 
 
 def _same_map_ffs_cob(
@@ -1952,6 +1989,16 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
     match b:
         case B.ListBasis(vectors):
             return _realize_list_basis(ctx, vectors)
+        case B.PrimalBasis(B.DualBasis(inner)) | B.DualBasis(B.PrimalBasis(inner)):
+            return realize_basis_cols(ctx, inner)  # double involution cancels (FFS-safe)
+        case B.DualBasis(inner) | B.PrimalBasis(inner):
+            # A covariant basis realized in DUAL coords: the dual of `inner` is `(C_inner)⁻ᵀ`,
+            # so a covector basis converts to the standard dual basis just like a vector basis
+            # converts to the standard basis (this makes the cob fallback total over variance).
+            # `inner` must be a full (square) basis; an FFS dual is handled structurally.
+            return _inv_transpose(ctx.prog, realize_basis_cols(ctx, inner))
+        case B.WithInnerBasis(inner, _):
+            return realize_basis_cols(ctx, inner)  # metric is metadata, not coordinates
         case B.ImageBasis(f, source):
             return _realize_image_basis(ctx, f, source)
         case B.ProjectedBasis(f, which, src, tgt):
@@ -2029,9 +2076,13 @@ def _realize_image_basis(ctx: _Ctx, f: object, source: B.Basis | None = None) ->
 
 
 def _flatten_to_column(ctx: _Ctx, arr: pa.SymArray) -> pa.SymArray:
-    """Ravel a (possibly multi-axis ``V⊗ᵏ``) value array into a single ambient column."""
+    """Ravel a (possibly multi-axis ``V⊗ᵏ``) value array into a single ambient column.
+
+    A 0-d **scalar** (a basis vector of ``Scalar``/ℝ — e.g. the constant ``3``) becomes a
+    length-1 column, so a ``ListBasis`` is a valid *term basis* of ℝ too.
+    """
     shape = _shape_of(arr)
-    if len(shape) <= 1:
+    if len(shape) == 1:
         return arr
     n = 1
     for d in shape:

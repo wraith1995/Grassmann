@@ -15,7 +15,7 @@ across the type tower:
 
 ## Conversions
 
-How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
+How this basis converts to other bases of the **same space**, and how `cob` handles each — with the literal `cob` call, its inputs, and the resulting matrix. Every entry is executed and asserted in `tests/test_doc_conversions.py`.
 
 ### → (after application) the basis its body builds
 

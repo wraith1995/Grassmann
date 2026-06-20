@@ -13,13 +13,73 @@ change-of-basis: `realize(DualBasis(b)) = realize(b)⁻ᵀ`, and `cob(dual b →
 
 ## Conversions
 
-How this basis converts to other bases of the **same space**, and how `cob` handles each. Every row is executed and asserted in `tests/test_doc_conversions.py`.
+How this basis converts to other bases of the **same space**, and how `cob` handles each — with the literal `cob` call, its inputs, and the resulting matrix. Every entry is executed and asserted in `tests/test_doc_conversions.py`.
+
+### → a covector term basis `ListBasis(d₀,d₁,d₂)` (lists dual vectors)
+
+**Mechanism (`cob`):** realize both bases toward the (ℝ³)* ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(DualBasis(BasisRep(3, ScalarBasis())), ListBasis(d0, d1, d2))
+```
+
+Input `d0` =
+
+```
+[2., 0., 0.]
+```
+
+Input `d1` =
+
+```
+[1., 3., 0.]
+```
+
+Input `d2` =
+
+```
+[0., 1., 1.]
+```
+
+Output — the `cob` matrix:
+
+```
+[[ 0.5  , -0.167,  0.167],
+ [ 0.   ,  0.333, -0.333],
+ [ 0.   ,  0.   ,  1.   ]]
+```
 
 ### → the dual of a rotated term basis (a covector cob)
 
-**Mechanism (`cob`):** DualBasis→DualBasis ⇒ (primal cob)⁻ᵀ
+**Mechanism (`cob`):** `DualBasis → DualBasis` ⇒ `(primal cob)⁻ᵀ`
 
-**Change-of-basis matrix**
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(DualBasis(BasisRep(3, ScalarBasis())), DualBasis(ListBasis(r0,r1,r2)))
+```
+
+Input `r0` =
+
+```
+[2., 0., 0.]
+```
+
+Input `r1` =
+
+```
+[1., 3., 0.]
+```
+
+Input `r2` =
+
+```
+[0., 0., 1.]
+```
+
+Output — the `cob` matrix:
 
 ```
 [[ 2., -0.,  0.],
