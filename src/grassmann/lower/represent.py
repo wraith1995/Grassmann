@@ -663,6 +663,66 @@ def _dim_of_free(reps: list[Rep]) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+def _rep_eval_operands(
+    f: T.Term, args: tuple[T.Term, ...], ctx: _Ctx,
+) -> tuple[Rep, list[Rep]]:
+    """Lower ``f`` and ``args`` for an ``Eval``, building a metric ``f`` in the operands' basis.
+
+    Ordinary (non-metric) ``f`` is lowered FIRST exactly as before — byte-identical.  A
+    **metric** ``f`` (``Inner``/``Flat``/``Sharp``) whose operands sit in a non-orthonormal
+    ``ImageBasis`` is lowered AFTER the args, in their active basis, so the metric and the
+    operands are basis-consistent at the contraction (`41 §3`, the immersed-Gram seam).
+    """
+    metric_kind = _metric_node_kind(f)
+    if metric_kind is not None:
+        arg_reps = [_rep(a, ctx) for a in args]
+        op_basis = _operand_metric_basis(arg_reps)
+        if op_basis is not None:
+            f_rep = _rep_metric(f, metric_kind, ctx, basis=op_basis)
+            return f_rep, arg_reps
+        # orthonormal operands ⇒ identity-metric default: lower f exactly as before.
+        return _rep(f, ctx), arg_reps
+    f_rep = _rep(f, ctx)
+    arg_reps = [_rep(a, ctx) for a in args]
+    return f_rep, arg_reps
+
+
+def _metric_node_kind(f: T.Term) -> str | None:
+    """``"inner"``/``"flat"``/``"sharp"`` if ``f`` is a metric map node, else ``None``."""
+    match f:
+        case T.Inner():
+            return "inner"
+        case T.Flat():
+            return "flat"
+        case T.Sharp():
+            return "sharp"
+        case _:
+            return None
+
+
+def _rep_metric(f: T.Term, kind: str, ctx: _Ctx, *, basis: B.Basis) -> Rep:
+    """Lower a metric node ``f`` (``Inner``/``Flat``/``Sharp``) in the active ``basis``."""
+    if kind == "inner":
+        return _rep_inner(f, f.space, ctx, basis=basis)
+    if kind == "flat":
+        return _rep_flat(f, f.space, ctx, basis=basis)
+    return _rep_sharp(f, f.space, ctx, basis=basis)
+
+
+def _operand_metric_basis(arg_reps: list[Rep]) -> B.Basis | None:
+    """The non-orthonormal operand basis to build a metric in, or ``None`` (orthonormal).
+
+    Returns a non-orthonormal ``ImageBasis`` (the only basis whose metric is not identity)
+    when ALL operands agree on it; ``None`` when the operands are orthonormal (the
+    identity-metric default), so the existing fast path is taken and byte-identical.
+    """
+    bases = {r.basis for r in arg_reps}
+    if len(bases) != 1:
+        return None
+    (b,) = bases
+    return b if _is_immersed_metric_basis(b) else None
+
+
 def _rep_eval(
     e: T.Eval, f: T.Term, positions: tuple[int, ...], args: tuple[T.Term, ...], ctx: _Ctx,
 ) -> Rep:
@@ -671,9 +731,14 @@ def _rep_eval(
     ⟨min-sym⟩ a single deferred :class:`~polyarray.EinsumStmtOp`; symbolic degree does
     not multiply out at build time.
     """
-    f_rep = _rep(f, ctx)
+    # Metric contraction (``dot = Eval(Inner(s),(0,1),a,b)`` and Flat/Sharp applications):
+    # the metric must be built in the OPERANDS' active basis so the contraction is
+    # basis-consistent (a non-orthonormal ``ImageBasis`` ⇒ the immersed Gram, not identity).
+    # We therefore lower the args FIRST, read their basis, and lower the metric ``f`` in it.
+    # Scoped strictly to a metric ``f`` with a non-orthonormal operand basis — every other
+    # ``Eval`` keeps the original f-first order and is byte-identical (`41 §3`).
+    f_rep, arg_reps = _rep_eval_operands(f, args, ctx)
     f_factors = _factors(f_rep.space)
-    arg_reps = [_rep(a, ctx) for a in args]
 
     # Assign einsum labels: one per f-axis; an arg's contracted axis shares the f-slot
     # label, and the arg's own *free* (basis-index) labels (`41 §3` LLam tensor) ride
@@ -1087,42 +1152,116 @@ def _gsvd_pinv_map(
 
 
 def _rep_dagger(e: T.Dagger, f: T.Term, ctx: _Ctx) -> Rep:
-    """``Dagger f`` — metric-transpose ``G_cod⁻¹ · fᵀ · G_dom`` (`41 §3`).
+    """``Dagger f`` — the metric adjoint ``f†`` (`41 §3`, `43 §2c`).
 
-    In the orthonormal default basis the metrics are the identity, so this is a plain
-    transpose (a major min-sym win — `41 §1`).
+    The adjoint is defined by ``⟨f† y, x⟩_dom = ⟨y, f x⟩_cod``.  With ``f`` stored
+    ``(|dom|,|cod|)`` and per-slot metrics ``G_dom`` / ``G_cod`` in the *active* slot bases,
+    the stored adjoint ``(|cod|,|dom|)`` is
+
+        f† = G_cod · fᵀ · G_dom⁻¹ .
+
+    In the orthonormal default basis both metrics are the identity, so this collapses to a
+    plain transpose (the min-sym win, `41 §1`) — that fast path is kept **byte-identical**.
+    A non-orthonormal endpoint (an ``ImageBasis`` slot, whose Gram is ``JᵀJ`` ≠ I) routes
+    through the metric formula so the adjoint identity stays basis-invariant (`43 §2c`).
     """
     f_rep = _rep(f, ctx)
     space = _synth(e)
-    # v1: orthonormal default ⇒ metric = identity ⇒ plain transpose.
-    [out] = ctx.prog.emit_stmt(
-        _TransposeOp(), [f_rep.array],
-        [pa.OutSpec("dagger", _transpose_shape(_shape_of(f_rep.array)))],
-        note="dagger:transpose(identity-metric)",
+    dom_slot, cod_slot = _map_slot_bases(f_rep.basis)
+    # Fast path: orthonormal endpoints ⇒ metric = identity ⇒ plain transpose (byte-identical).
+    if not _is_immersed_metric_basis(dom_slot) and not _is_immersed_metric_basis(cod_slot):
+        [out] = ctx.prog.emit_stmt(
+            _TransposeOp(), [f_rep.array],
+            [pa.OutSpec("dagger", _transpose_shape(_shape_of(f_rep.array)))],
+            note="dagger:transpose(identity-metric)",
+        )
+        return Rep(out, default_basis(space), space)
+    # Metric adjoint: f† = G_cod · fᵀ · G_dom⁻¹  (`43 §2c`).  The dom slot is the *dual*
+    # (covariant) basis; peel one dual to the primal whose metric we materialize.
+    dom, cod = map_domain_codomain(f)
+    n_dom, n_cod = _static_dim(dom), _static_dim(cod)
+    dom_primal = _peel_one_dual(dom_slot)
+    g_dom = _metric_matrix(ctx, dom, n_dom, note="dagger:G_dom", basis=dom_primal)
+    g_cod = _metric_matrix(ctx, cod, n_cod, note="dagger:G_cod", basis=cod_slot)
+    [g_dom_inv] = ctx.prog.emit_stmt(
+        pa.InvOp(), [g_dom], [pa.OutSpec("dagger:G_dom-inv", (n_dom, n_dom))],
+        note="dagger:InvOp(G_dom)",
     )
-    return Rep(out, default_basis(space), space)
+    # f stored F[d,c]; f† stored (|cod|,|dom|): F†[i,l] = Σ G_cod[i,j]·F[l,j]·G_dom⁻¹[l',l]…
+    # ⇒ einsum "ij,kj,kl->il" over (G_cod, F, G_dom⁻¹).
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ij,kj,kl->il"), [g_cod, f_rep.array, g_dom_inv],
+        [pa.OutSpec("dagger", (n_cod, n_dom))],
+        note="dagger:G_cod·fᵀ·G_dom⁻¹",
+    )
+    # Result f† : cod ⊸ dom — its slots are DualBasis(cod_primal) (covariant) and dom_primal.
+    result_basis = B.basis_prod(B.dual_basis(cod_slot), dom_primal)
+    return Rep(out, result_basis, space)
 
 
-def _rep_inner(e: T.Inner, space: S.Space, ctx: _Ctx) -> Rep:
-    """``Inner(s)`` — the metric map ``s⊗s ⊸ R``; identity-metric default ⇒ ``G_s = I``."""
+def _map_slot_bases(basis: B.Basis) -> tuple[B.Basis | None, B.Basis | None]:
+    """The (domain-slot, codomain-slot) bases of a rank-2 map basis, else ``(None, None)``.
+
+    A linear-map ``Rep`` carries a :class:`~grassmann.core.basis.BasisProd` of two factors:
+    the covariant domain slot (a ``DualBasis``) and the contravariant codomain slot.  Maps
+    whose basis is not a 2-factor product (the orthonormal-default fast path still works on
+    them via the identity check) return ``(None, None)``.
+    """
+    if isinstance(basis, B.BasisProd) and len(basis.bases) == 2:
+        return basis.bases[0], basis.bases[1]
+    return None, None
+
+
+def _peel_one_dual(basis: B.Basis | None) -> B.Basis | None:
+    """Strip a single ``DualBasis`` wrapper (the covariant map slot → its primal)."""
+    match basis:
+        case B.DualBasis(inner):
+            return inner
+        case _:
+            return basis
+
+
+def _rep_inner(
+    e: T.Inner, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None,
+) -> Rep:
+    """``Inner(s)`` — the metric map ``s⊗s ⊸ R``; identity-metric default ⇒ ``G_s = I``.
+
+    ``basis`` (when supplied by the ``Eval`` contraction site) is the *active basis* of the
+    operands: the metric is built in THAT basis so the contraction is basis-consistent (a
+    non-orthonormal ``ImageBasis`` ⇒ the immersed Gram ``JᵀJ``).  The result ``Rep`` is
+    tagged with the per-slot basis so downstream bookkeeping stays consistent.
+    """
     n = _static_dim(space)
-    g = _metric_matrix(ctx, space, n, note="metric:Inner")
+    g = _metric_matrix(ctx, space, n, note="metric:Inner", basis=basis)
     map_space = _synth(e)
-    return Rep(g, default_basis(map_space), map_space)
+    return Rep(g, _inner_map_basis(map_space, basis), map_space)
 
 
-def _rep_flat(e: T.Flat, space: S.Space, ctx: _Ctx) -> Rep:
+def _inner_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
+    """Basis of the ``Inner(s)`` map (an element of ``s*⊗s*``) for active operand ``basis``.
+
+    With no active basis (orthonormal default) this is exactly ``default_basis(map_space)``
+    — byte-identical to before.  When the operands sit in a non-orthonormal ``basis`` over
+    ``s``, the two covariant slots are ``DualBasis(basis)`` so a partial contraction's
+    surviving slot keeps the operand-consistent basis (``_result_basis_from_factors``).
+    """
+    if basis is None or not isinstance(map_space, S.OProd):
+        return default_basis(map_space)
+    return B.basis_prod(*(B.dual_basis(basis) for _ in map_space.spaces))
+
+
+def _rep_flat(e: T.Flat, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None) -> Rep:
     """``Flat s`` — ``G_s`` (s ⊸ s*), identity-metric default ⇒ identity (`41 §3`)."""
     n = _static_dim(space)
-    g = _metric_matrix(ctx, space, n, note="metric:Flat=G_s")
+    g = _metric_matrix(ctx, space, n, note="metric:Flat=G_s", basis=basis)
     map_space = _synth(e)
     return Rep(g, default_basis(map_space), map_space)
 
 
-def _rep_sharp(e: T.Sharp, space: S.Space, ctx: _Ctx) -> Rep:
+def _rep_sharp(e: T.Sharp, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None) -> Rep:
     """``Sharp s`` — ``InvOp(G_s)`` (s* ⊸ s), identity-metric default ⇒ identity."""
     n = _static_dim(space)
-    g = _metric_matrix(ctx, space, n, note="metric:Sharp:G_s")
+    g = _metric_matrix(ctx, space, n, note="metric:Sharp:G_s", basis=basis)
     [out] = ctx.prog.emit_stmt(
         pa.InvOp(), [g], [pa.OutSpec("sharp", (n, n))], note="sharp:InvOp(G_s)",
     )
@@ -1613,13 +1752,24 @@ def _assert_spd(ctx: _Ctx, g: pa.SymArray, *, note: str) -> None:
 # ===========================================================================
 
 
-def _metric_matrix(ctx: _Ctx, space: S.Space, n: int, *, note: str) -> pa.SymArray:
-    """The metric matrix ``G_s``. In the orthonormal default basis this is the identity.
+def _metric_matrix(
+    ctx: _Ctx, space: S.Space, n: int, *, note: str, basis: B.Basis | None = None,
+) -> pa.SymArray:
+    """The metric matrix ``G_s`` **in the active basis** ``basis`` (`41 §1`/`§3`).
 
-    A ``WithInner(s, g)`` space with an explicit numeric metric materializes ``g`` (+ SPD
-    assert); otherwise the default basis is g-orthonormal ⇒ ``G_s = I`` (numeric, the
-    min-sym win).
+    In an *orthonormal* basis (the default ``ProjectedBasis``/``Q``, ``WithInnerBasis``, or
+    any g-orthonormal basis) this is the identity — the min-sym fast path. A
+    ``WithInner(s, g)`` space with an explicit numeric metric materializes ``g`` (+ SPD
+    assert) when its basis is the underlying (non-whitened) standard basis.
+
+    For a **non-orthonormal FFS basis** (``ImageBasis`` and its dual) the metric is the
+    *immersed Gram* ``G = colsᵀ · G_cod · cols`` where ``cols`` are the basis vectors
+    realized in the ambient/codomain coords (via the FFS realization seam, NOT the generic
+    ``cob``) and ``G_cod`` is the codomain metric (identity for a plain ``Base``).  For an
+    injective image this is ``JᵀJ``; the dual basis carries its (pseudo-)inverse.
     """
+    if _is_immersed_metric_basis(basis):
+        return _immersed_gram(ctx, space, basis, note=note + ":immersed")
     if isinstance(space, S.WithInner) and _is_numeric_metric(space.metric):
         g = _const(ctx, np.asarray(space.metric, dtype=float), note=note + ":explicit")
         _assert_spd(ctx, g, note=note + ":spd")
@@ -1632,6 +1782,92 @@ def _metric_matrix(ctx: _Ctx, space: S.Space, n: int, *, note: str) -> pa.SymArr
         _assert_spd(ctx, g, note=note + ":spd")
         return g
     return _const(ctx, np.eye(n), note=note + ":identity")
+
+
+def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
+    """Is ``basis`` a *non-orthonormal* FFS basis needing an immersed Gram (`73 Topic 2`)?
+
+    Only the **literal map-application** :class:`~grassmann.core.basis.ImageBasis` (and its
+    dual / metric-wrapped spellings) are non-orthonormal — their Gram is the immersed
+    ``colsᵀ·G_cod·cols`` (``JᵀJ`` for an injective image), NOT the identity.  Every other
+    basis here (the orthonormal ``ProjectedBasis``/``Q``, ``WithInnerBasis``, standard
+    bases) keeps the identity-metric fast path, so the orthonormal-default lowering is
+    byte-identical (``basis is None`` ⇒ False).
+    """
+    match basis:
+        case B.ImageBasis():
+            return True
+        case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
+            return _is_immersed_metric_basis(inner)
+        case _:
+            return False
+
+
+def _immersed_gram(
+    ctx: _Ctx, space: S.Space, basis: B.Basis, *, note: str,
+) -> pa.SymArray:
+    """The immersed Gram of an :class:`~grassmann.core.basis.ImageBasis` (`73 T2`, `50 §A`).
+
+    ``G = colsᵀ · G_cod · cols`` where ``cols`` are the literal map-application columns
+    ``f(eᵢ)`` realized in the codomain's coords (the FFS realization seam) and ``G_cod`` is
+    the codomain metric.  For an injective image with a plain ``Base`` codomain this is the
+    source-coordinate Gram ``JᵀJ`` (= ``RᵀR`` from the QR).  A **dual** ``ImageBasis``
+    carries the (pseudo-)inverse — the cotangent metric ``(JᵀJ)⁻¹`` — sharpened to a plain
+    inverse when ``f`` is injective (full column rank).
+    """
+    dual = _peel_dual(basis)
+    img = _unwrap_image_basis(basis)
+    f = img.f
+    dom, cod = map_domain_codomain(f)
+    n_dom, n_cod = _static_dim(dom), _static_dim(cod)
+    # cols : (cod, dom) — the literal map-application columns f(eᵢ) in codomain coords.
+    cols = _realize_image_basis(ctx, f)
+    # G_cod : the codomain metric in ITS orthonormal default basis (identity for a Base).
+    g_cod = _metric_matrix(ctx, cod, n_cod, note=note + ":G_cod")
+    # G = colsᵀ · G_cod · cols  (the immersed Gram, n_dom×n_dom).
+    [gram] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ca,cd,db->ab"), [cols, g_cod, cols],
+        [pa.OutSpec("immersed-gram", (n_dom, n_dom))],
+        note=note + ":colsᵀ·G_cod·cols",
+    )
+    if not dual:
+        return gram
+    # The dual (cotangent) basis carries the inverse Gram.  Sharpen to a plain inverse when
+    # f is injective (the Gram is then SPD/full-rank, RᵀR); else the Moore–Penrose pinv.
+    props = map_props(f)
+    if props is not None and props.inj:
+        [out] = ctx.prog.emit_stmt(
+            pa.InvOp(), [gram], [pa.OutSpec("immersed-gram-inv", (n_dom, n_dom))],
+            note=note + ":InvOp(JᵀJ)=cotangent",
+        )
+        return out
+    [out] = ctx.prog.emit_stmt(
+        pa.PinvOp(), [gram], [pa.OutSpec("immersed-gram-pinv", (n_dom, n_dom))],
+        note=note + ":PinvOp(JᵀJ)=cotangent",
+    )
+    return out
+
+
+def _peel_dual(basis: B.Basis) -> bool:
+    """True iff ``basis`` is a (possibly wrapped) **dual** FFS basis (odd # of DualBasis)."""
+    match basis:
+        case B.DualBasis(inner):
+            return not _peel_dual(inner)
+        case B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
+            return _peel_dual(inner)
+        case _:
+            return False
+
+
+def _unwrap_image_basis(basis: B.Basis) -> B.ImageBasis:
+    """Strip Dual/Primal/WithInner wrappers down to the underlying ``ImageBasis``."""
+    match basis:
+        case B.ImageBasis():
+            return basis
+        case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
+            return _unwrap_image_basis(inner)
+        case _:  # pragma: no cover - guarded by _is_immersed_metric_basis
+            raise RepresentError(f"_immersed_gram: not an ImageBasis: {basis!r}")
 
 
 def _is_numeric_metric(metric: object) -> bool:
