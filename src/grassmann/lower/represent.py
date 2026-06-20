@@ -918,34 +918,70 @@ def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.Sym
 def _same_map_ffs_cob(
     ctx: _Ctx, fp: B.Basis, tp: B.Basis,
 ) -> pa.SymArray | None:
-    """The cob between the literal ``ImageBasis(f)`` and the orthonormal ``ProjectedBasis(f,
-    "image")`` of the SAME injective map — the QR factor ``R`` (or ``R⁻¹``), or ``None`` if
-    the pair is not that case (falls back to the generic realize+pinv).
+    """The cob between the literal ``ImageBasis(f, source)`` and the orthonormal
+    ``ProjectedBasis(f, "image", source, target)`` of the SAME map — exploiting the
+    factorization directly instead of realize-both-and-pinv; ``None`` if the pair is not
+    that case (falls back to the generic path).
 
-    ``J = Q·R`` ⇒ an ``ImageBasis``-coord ``s`` is ``R·s`` in ``ProjectedBasis`` coords, so
-    ``cob(Image→Projected) = R`` and ``cob(Projected→Image) = R⁻¹`` (`Stage B`).
+    With ``J`` = the (source-mapped) image columns, ``U`` = the (target-metric-orthonormal)
+    range columns, and ``M_W`` = the target metric, the range coords of ``v = J·s`` are
+    ``c = Uᵀ·M_W·J·s`` (since ``Uᵀ M_W U = I``), so ``cob(Image→Projected) = Uᵀ·M_W·J`` and
+    ``cob(Projected→Image)`` is its inverse.  For the plain QR seam (no metric/source) this is
+    the upper-triangular ``R`` of ``J = Q·R`` (``M_W = I``), captured directly from ``QrOp``.
     """
-    def _kind(b: B.Basis) -> tuple[object, str] | None:
-        if isinstance(b, B.ImageBasis) and b.source is None:
-            return b.f, "image"
+    def _kind(b: B.Basis) -> tuple[object, B.Basis | None, str] | None:
+        if isinstance(b, B.ImageBasis):
+            return b.f, b.source, "image"
         if isinstance(b, B.ProjectedBasis) and b.which in ("image", "img"):
-            return b.f, "projected"
+            return b.f, b.source, "projected"
         return None
 
     fk, tk = _kind(fp), _kind(tp)
-    if fk is None or tk is None or fk[0] != tk[0] or fk[1] == tk[1]:
+    if fk is None or tk is None or fk[0] != tk[0] or fk[2] == tk[2]:
         return None
-    real = _realize_ffs_by_which(ctx, "img", fk[0])
-    if real.r is None:  # not the injective QR seam (SVD/GSVD) ⇒ no R
+    # The Image and Projected sides must share the source coordinate system for J = U·R.
+    img_kind, proj_kind = (fk, tk) if fk[2] == "image" else (tk, fk)
+    img_src, proj_src = img_kind[1], proj_kind[1]
+    if not _src_eq(img_src, proj_src):
         return None
-    if fk[1] == "image":  # Image → Projected = R
-        return real.r
-    # Projected → Image = R⁻¹.
-    n = _shape_of(real.r)[0]
+    proj_basis = tp if tk[2] == "projected" else fp
+    target = proj_basis.target if isinstance(proj_basis, B.ProjectedBasis) else None
+
+    real = _realize_ffs_by_which(ctx, "img", fk[0], source=proj_src, target=target)
+    if real.r is not None and proj_src is None and target is None:
+        r = real.r  # plain QR: exact upper-triangular
+    else:
+        # R = Uᵀ · M_W · J  (U = range cols, M_W = target metric or I, J = image cols).
+        block = real.cols
+        jcols = _realize_image_basis(ctx, fk[0], img_src)
+        rk = _shape_of(block)[1]
+        nd = _shape_of(jcols)[1]
+        if target is None:
+            [r] = ctx.prog.emit_stmt(
+                pa.EinsumStmtOp("cr,cs->rs"), [block, jcols],
+                [pa.OutSpec("cob:Uᵀ·J", (rk, nd))], note="ffs-cob:Uᵀ·J",
+            )
+        else:
+            m_w = _basis_metric(ctx, target)
+            [r] = ctx.prog.emit_stmt(
+                pa.EinsumStmtOp("cr,cw,ws->rs"), [block, m_w, jcols],
+                [pa.OutSpec("cob:Uᵀ·M_W·J", (rk, nd))], note="ffs-cob:Uᵀ·M_W·J",
+            )
+    if fk[2] == "image":  # Image → Projected = R
+        return r
+    # Projected → Image = R⁻¹ (square for an injective image).
+    n = _shape_of(r)[0]
     [out] = ctx.prog.emit_stmt(
-        pa.InvOp(), [real.r], [pa.OutSpec("cob:R-inv", (n, n))], note="ffs-cob:R⁻¹",
+        pa.InvOp(), [r], [pa.OutSpec("cob:R-inv", (n, n))], note="ffs-cob:R⁻¹",
     )
     return out
+
+
+def _src_eq(a: B.Basis | None, b: B.Basis | None) -> bool:
+    """Whether two optional source bases are the same (both ``None`` ⇒ standard ⇒ equal)."""
+    if a is None or b is None:
+        return a is b
+    return _basis_eq(a, b)
 
 
 def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
