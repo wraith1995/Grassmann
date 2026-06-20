@@ -449,7 +449,26 @@ def render_index(cat: str, rows: list[tuple[str, str, str]]) -> str:
     for name, status in rows:
         out.append(f"| [`{name}`]({slug(name)}.md) | {STATUS_BADGE.get(status, status)} |")
     out.append("")
+    if cat == "bases":
+        out.extend(_render_conversion_table())
     return "\n".join(out)
+
+
+def _render_conversion_table() -> list[str]:
+    """A matrix of which basis converts to which (of the same space) + the cob mechanism."""
+    out = ["## Conversion matrix", "",
+           "What each basis can be converted **to** (within the same space), and how `cob` "
+           "does it. Each row is run + asserted in `tests/test_doc_conversions.py`.", "",
+           "| from basis | → to basis | via (`cob` mechanism) |", "|---|---|---|"]
+    for name in sorted(DEX.CONVERSIONS):
+        for thunk in DEX.CONVERSIONS[name]:
+            c = thunk()
+            via = c.via if len(c.via) <= 90 else c.via[:87] + "…"
+            to = c.to.replace("|", "\\|")
+            via = via.replace("|", "\\|")
+            out.append(f"| [`{name}`]({slug(name)}.md) | {to} | {via} |")
+    out.append("")
+    return out
 
 
 def main() -> None:

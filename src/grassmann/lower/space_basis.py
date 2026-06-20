@@ -164,6 +164,11 @@ class FfsRealization:
     rank: pa.SymArray | None
     rank_dim: pa.DimAtom | None
     op: str
+    # The upper-triangular ``R`` of the injective QR (``J = Q·R``), captured so a change of
+    # basis between the literal ``ImageBasis`` and the orthonormal ``ProjectedBasis`` of the
+    # SAME map is ``R`` directly — no realize-both-and-pseudo-invert (`Stage B`).  ``None``
+    # for the SVD/GSVD seams.
+    r: pa.SymArray | None = None
 
 
 # block index of each SvdOp/GSvdOp output that carries the named subspace.
@@ -244,14 +249,14 @@ def _realize_via_qr(
     program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, label: str,
 ) -> FfsRealization:
     # f : (cod, dom); injective ⇒ Q has dom orthonormal columns (the range basis).
-    Q, _R = program.emit_stmt(
+    Q, R = program.emit_stmt(
         pa.QrOp(mode="reduced"),
         [f_matrix],
         [pa.OutSpec("Q_" + label, _qr_q_shape(f_matrix, dom_dim)),
          pa.OutSpec("R_" + label, (dom_dim, dom_dim))],
         note=f"ffs-basis:ImageBasis({label}):inj=>QrOp",
     )
-    return FfsRealization(cols=Q, rank=None, rank_dim=None, op="QrOp")
+    return FfsRealization(cols=Q, rank=None, rank_dim=None, op="QrOp", r=R)
 
 
 def _qr_q_shape(f_matrix: pa.SymArray, dom_dim: int) -> tuple[int, ...]:

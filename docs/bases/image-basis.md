@@ -40,24 +40,36 @@ How this basis converts to other bases of the **same space**, and how `cob` hand
  [ 0.246, -0.369]]
 ```
 
+### → the literal `ImageBasis(f)` (standard source) of the same map
+
+**Mechanism (`cob`):** the source basis re-expressed against the standard source ⇒ the source cob = S
+
+**Change-of-basis matrix**
+
+```
+[[1., 0.],
+ [1., 1.]]
+```
+
 ## Fields
 
 | field | type |
 |---|---|
 | `f` | `Term` |
+| `source` | `Basis | None` |
 
 ## Built by
 
-- **Core constructor** (`grassmann.core.basis`): `image_basis(f: 'Term') -> 'ImageBasis'`
+- **Core constructor** (`grassmann.core.basis`): `image_basis(f: 'Term', source: 'Basis | None' = None) -> 'ImageBasis'`
 - **Surface syntax** (`grassmann`): image_basis
 
-> ``ImageBasis(f)`` — the **literal map-application** basis of ``f``'s range.
+> ``ImageBasis(f, source?)`` — the **literal map-application** basis of ``f``'s range.
 > 
-> Its columns are ``f`` applied to the source/immersed basis (the ``f(eᵢ)`` vectors,
-> the R/fwd side), **not** orthonormalized.  This is the natural / iso side of the map
-> (FEMOracle's source-side ``IsoBasis``, realized by ``R`` for an injective non-square
-> map and ``fwd`` when full — `73 Topic 2`).  The *orthonormalized* range basis (the Q
-> of QR / first ``δ_f`` columns of the SVD ``U``) is :class:`ProjectedBasis` with
-> ``which == "image"``; the two are connected by a change of basis (``QrOp.R``/``Q`` or
-> the SVD factors), so a value in one is expressible in the other.
+> Its columns are ``f`` applied to the **source** basis of ``f``'s domain — ``f(sᵢ)``,
+> the R/fwd side — **not** orthonormalized.  ``source`` (a basis of ``dom f``) defaults to
+> the standard basis (``None``), giving the literal columns ``f(eᵢ)``; a non-standard
+> ``source`` (e.g. a ``ListBasis`` of immersed/source coordinates) maps those vectors
+> instead.  The *orthonormalized* range basis (the ``Q`` of QR / first ``δ_f`` columns of
+> the SVD ``U``) is :class:`ProjectedBasis` with ``which == "image"``; the two are
+> connected by a change of basis (``QrOp.R``/``Q`` or the SVD factors).
 
