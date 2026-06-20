@@ -43,6 +43,17 @@ How this basis converts to other bases of the **same space**, and how `cob` hand
  [-0.   , -0.369]]
 ```
 
+### → the standard-orthonormal `ProjectedBasis` (re-orthonormalize)
+
+**Mechanism (`cob`):** source/target feed the GSVD metric G=(B·Bᵀ)⁻¹ ⇒ orthonormal w.r.t. that basis; columns stay in the standard frame so cob composes
+
+**Change-of-basis matrix**
+
+```
+[[ 0.971,  1.07 ],
+ [-0.144,  1.498]]
+```
+
 ## Fields
 
 | field | type |

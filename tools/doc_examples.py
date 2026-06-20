@@ -869,6 +869,26 @@ def _c_proj_to_image():
                  projb, imgb, np.linalg.inv(_R), {J: _JSTORED})
 
 
+@_cv("ProjectedBasis")
+def _c_proj_target():
+    # source/target make the range orthonormal w.r.t. those bases' inner products: each is
+    # turned into a GSVD metric (G = (B·Bᵀ)⁻¹), columns kept in the standard frame so cob
+    # composes. cob to the standard-orthonormal ProjectedBasis is the metric reorthonormalize.
+    J, _imgb, projb = _img()
+    t0, t1, t2 = (C.var(f"t{i}", C.base("Re", 3)) for i in range(3))
+    tgt = B.list_basis(t0, t1, t2)
+    Tm = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.0, 0.0, 1.0]])
+    proj_t = B.projected_basis(J, "image", target=tgt)
+    feeds = {J: _JSTORED, t0: Tm[:, 0], t1: Tm[:, 1], t2: Tm[:, 2]}
+    m = _cob(proj_t, projb, feeds)
+    back = _cob(projb, proj_t, feeds)
+    _ck(np.allclose(m @ back, np.eye(2)))  # a genuine (invertible) reorthonormalization
+    return Conv("the standard-orthonormal `ProjectedBasis` (re-orthonormalize)",
+                "source/target feed the GSVD metric G=(B·Bᵀ)⁻¹ ⇒ orthonormal w.r.t. that "
+                "basis; columns stay in the standard frame so cob composes",
+                _show(m))
+
+
 # --- ImageBasis (Img(J)) --------------------------------------------------
 @_cv("ImageBasis")
 def _c_image_to_proj():
