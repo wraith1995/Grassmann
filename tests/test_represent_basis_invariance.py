@@ -33,7 +33,7 @@ import pytest
 
 import grassmann as G
 from grassmann.core import basis as B
-from grassmann.lower.represent import RepresentError, represent
+from grassmann.lower.represent import represent
 
 
 def _key(v: G.Expr) -> str:
@@ -317,31 +317,85 @@ def test_compose_output_invariant_across_bases() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The mismatched-pinning gap — guarded loudly (`43 §2c`).
+# The mismatched-pinning gap — auto-reconciled (`43 §2c`).
 #
 # `choose` and consistent `basis_env` never split the two contracted slots of a contraction
 # across an immersed and an orthonormal basis.  An inconsistent MANUAL pin used to silently
-# miscompute (the raw index contraction omits the change-of-basis); represent now raises.
+# miscompute (the raw index contraction omits the change-of-basis); represent now changes the
+# mismatched operand into the slot-consistent basis (through the FFS realization seam) so the
+# result is correct regardless of how the slots were pinned.
 # ---------------------------------------------------------------------------
 
 
-def test_dot_mismatched_operand_pinning_raises() -> None:
-    """``dot`` with one operand in ``ImageBasis`` and one in ``ProjectedBasis`` must raise.
+@pytest.mark.parametrize(("Jmath", "dom", "cod"), CASES)
+def test_dot_mismatched_operand_pinning_reconciles(
+    Jmath: np.ndarray, dom: int, cod: int,
+) -> None:
+    """``dot`` with operands in *different* bases is reconciled, not miscomputed.
 
-    (Before the guard this silently returned the raw ``aᵀb`` instead of ``aᵀ(JᵀJ)b``.)
+    Feed the SAME geometric vector ``v = J·s`` as ``a`` (``ImageBasis`` coords ``s``) and ``b``
+    (``ProjectedBasis`` coords ``R·s``); the inner product must be ``sᵀ(JᵀJ)s``.  (Before the
+    fix this silently returned the raw ``aᵀb``.)
     """
-    _Rt, _Re, J = _setup(2, 3)
+    _Rt, _Re, J = _setup(dom, cod)
     img = G.img(J)
     a = G.var("a", img)
     b = G.var("b", img)
     projb, imgb = _bases(J)
-    with pytest.raises(RepresentError, match="mismatched-pinning"):
-        represent(G.dot(a, b).node, basis_env={a.node.uid: imgb, b.node.uid: projb})
+    _Q, Rm = np.linalg.qr(Jmath)
+    gram = Jmath.T @ Jmath
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        s = rng.standard_normal(dom)
+        out = represent(
+            G.dot(a, b).node, basis_env={a.node.uid: imgb, b.node.uid: projb}
+        ).run({_key(a): s, _key(b): Rm @ s, _key(J): Jmath.T})["result"]
+        assert float(out) == pytest.approx(float(s @ gram @ s))
 
 
-def test_compose_mismatched_slot_pinning_raises() -> None:
-    """``compose`` whose contracted ``Img(J)`` slots are pinned to different bases must raise."""
-    _Rt, _Re, J = _setup(2, 3)
+@pytest.mark.parametrize(("Jmath", "dom", "cod"), CASES)
+def test_eval_mismatched_map_application_reconciles(
+    Jmath: np.ndarray, dom: int, cod: int,
+) -> None:
+    """A non-metric ``Eval`` reconciles a slot/arg basis mismatch to the consistent result.
+
+    ``M : Img(J) → Re2`` with its domain pinned ``ImageBasis``; the arg ``a`` pinned
+    ``ProjectedBasis``.  Feeding the SAME geometric ``v`` must give the SAME ``M(v)`` as the
+    all-``ImageBasis`` (consistent) run.
+    """
+    _Rt, _Re, J = _setup(dom, cod)
+    img = G.img(J)
+    Re2 = G.space("Re2", 2)
+    M = G.var("M", img >> Re2)
+    a = G.var("a", img)
+    projb, imgb = _bases(J)
+    base_re2 = B.base_basis(Re2.node)
+    map_basis = B.basis_prod(B.dual_basis(imgb), base_re2)
+    _Q, Rm = np.linalg.qr(Jmath)
+    rng = np.random.default_rng(1)
+    for _ in range(5):
+        s = rng.standard_normal(dom)
+        Mv = rng.standard_normal((dom, 2))  # M stored (|img|,|Re2|)
+        mismatched = represent(
+            M(a).node, basis_env={M.node.uid: map_basis, a.node.uid: projb}
+        ).run({_key(M): Mv, _key(a): Rm @ s, _key(J): Jmath.T})["result"]
+        consistent = represent(
+            M(a).node, basis_env={M.node.uid: map_basis, a.node.uid: imgb}
+        ).run({_key(M): Mv, _key(a): s, _key(J): Jmath.T})["result"]
+        assert np.asarray(mismatched, float) == pytest.approx(np.asarray(consistent, float))
+
+
+@pytest.mark.parametrize(("Jmath", "dom", "cod"), CASES)
+def test_compose_mismatched_slot_pinning_reconciles(
+    Jmath: np.ndarray, dom: int, cod: int,
+) -> None:
+    """``compose`` reconciles g's codomain into f's slot basis when they are pinned apart.
+
+    With f's domain pinned ``ImageBasis`` and g's codomain pinned ``ProjectedBasis``, feeding
+    the SAME geometric ``g`` (its codomain coords cobbed ``ImageBasis→ProjectedBasis`` by
+    ``R``) must reproduce the all-``ImageBasis`` (consistent) result.
+    """
+    _Rt, _Re, J = _setup(dom, cod)
     img = G.img(J)
     Re2 = G.space("Re2", 2)
     f = G.var("f", img >> Re2)
@@ -349,37 +403,31 @@ def test_compose_mismatched_slot_pinning_raises() -> None:
     b = G.var("b", Re2)
     projb, imgb = _bases(J)
     base_re2 = B.base_basis(Re2.node)
-    env = {
-        f.node.uid: B.basis_prod(B.dual_basis(imgb), base_re2),   # f domain slot: ImageBasis
-        g.node.uid: B.basis_prod(B.dual_basis(base_re2), projb),  # g codomain slot: Projected
-    }
-    with pytest.raises(RepresentError, match="mismatched-pinning"):
-        represent(G.compose(f, g)(b).node, basis_env=env)
+    fb = B.basis_prod(B.dual_basis(imgb), base_re2)
+    _Q, Rm = np.linalg.qr(Jmath)
+    rng = np.random.default_rng(2)
+    for _ in range(5):
+        fv = rng.standard_normal((dom, 2))
+        gv = rng.standard_normal((2, dom))   # g stored (|Re2|,|img|), img coords on axis 1
+        bv = rng.standard_normal(2)
+        consistent = represent(
+            G.compose(f, g)(b).node,
+            basis_env={f.node.uid: fb, g.node.uid: B.basis_prod(B.dual_basis(base_re2), imgb)},
+        ).run({_key(f): fv, _key(g): gv, _key(b): bv, _key(J): Jmath.T})["result"]
+        # Same geometric g, codomain re-expressed in ProjectedBasis: img→proj coords by R.
+        gv_proj = gv @ Rm.T
+        mismatched = represent(
+            G.compose(f, g)(b).node,
+            basis_env={f.node.uid: fb, g.node.uid: B.basis_prod(B.dual_basis(base_re2), projb)},
+        ).run({_key(f): fv, _key(g): gv_proj, _key(b): bv, _key(J): Jmath.T})["result"]
+        assert np.asarray(mismatched, float) == pytest.approx(np.asarray(consistent, float))
 
 
-def test_eval_mismatched_map_application_raises() -> None:
-    """A non-metric ``Eval`` (map application) with a slot/arg basis mismatch must raise."""
-    _Rt, _Re, J = _setup(2, 3)
-    img = G.img(J)
-    Re2 = G.space("Re2", 2)
-    M = G.var("M", img >> Re2)
-    a = G.var("a", img)
-    projb, imgb = _bases(J)
-    base_re2 = B.base_basis(Re2.node)
-    env = {
-        M.node.uid: B.basis_prod(B.dual_basis(imgb), base_re2),  # M domain slot: ImageBasis
-        a.node.uid: projb,                                        # arg: ProjectedBasis
-    }
-    with pytest.raises(RepresentError, match="mismatched-pinning"):
-        represent(M(a).node, basis_env=env)
-
-
-def test_consistent_pinning_does_not_raise() -> None:
-    """Consistent ImageBasis pins (the supported contract) compile without the guard firing."""
+def test_consistent_pinning_still_works() -> None:
+    """Consistent ImageBasis pins (the common case) compile and need no reconciliation."""
     _Rt, _Re, J = _setup(2, 3)
     img = G.img(J)
     a = G.var("a", img)
     b = G.var("b", img)
     _projb, imgb = _bases(J)
-    # Both operands in the SAME ImageBasis ⇒ fine.
     represent(G.dot(a, b).node, basis_env={a.node.uid: imgb, b.node.uid: imgb})

@@ -44,7 +44,7 @@ from grassmann.infer.properties import map_props
 
 from ._dims import DynamicDim, dim_of
 from .choose import choose
-from .cob import _basis_eq, cob, realize_basis
+from .cob import CobError, _basis_eq, cob, realize_basis
 from .provenance import LowerProv
 from .space_basis import (
     FfsRealization,
@@ -676,13 +676,14 @@ def _rep_eval_operands(
     metric_kind = _metric_node_kind(f)
     if metric_kind is not None:
         arg_reps = [_rep(a, ctx) for a in args]
+        # Auto-reconcile operands pinned to inconsistent bases to a single basis (`43 §2c`),
+        # so the metric is built once in a genuinely shared basis.
+        arg_reps = _reconcile_metric_operands(ctx, arg_reps)
         op_basis = _operand_metric_basis(arg_reps)
         if op_basis is not None:
             f_rep = _rep_metric(f, metric_kind, ctx, basis=op_basis)
             return f_rep, arg_reps
         # orthonormal operands ⇒ identity-metric default: lower f exactly as before.
-        # But reject an inconsistent immersed/orthonormal split (`43 §2c`) first.
-        _assert_metric_operands_consistent(arg_reps, note=f"eval:{metric_kind}")
         return _rep(f, ctx), arg_reps
     f_rep = _rep(f, ctx)
     arg_reps = [_rep(a, ctx) for a in args]
@@ -725,27 +726,30 @@ def _operand_metric_basis(arg_reps: list[Rep]) -> B.Basis | None:
     return b if _is_immersed_metric_basis(b) else None
 
 
-def _assert_metric_operands_consistent(arg_reps: list[Rep], *, note: str) -> None:
-    """Guard the `43 §2c` mismatched-pinning gap for a **metric** contraction.
+def _reconcile_metric_operands(ctx: _Ctx, arg_reps: list[Rep]) -> list[Rep]:
+    """Auto-reconcile a metric ``Eval``'s operands to a single basis (`43 §2c`).
 
     A metric ``Eval`` (``dot``/``Flat``/``Sharp`` application) builds its Gram in the
-    operands' *shared* basis (`43 §2b`).  If the operands are pinned to **different** bases
-    and at least one is a non-orthonormal ``ImageBasis``, that shared basis does not exist:
-    the metric would silently fall back to the identity in a non-orthonormal basis and the
-    contraction is wrong (the raw ``aᵀb`` instead of ``aᵀ·G·b``).  ``choose`` never produces
-    such a split (every operand of a space gets the same basis), so this only fires under an
-    inconsistent manual ``basis_env`` pin — which we reject loudly rather than miscompute.
+    operands' *shared* basis (`43 §2b`).  When the operands are pinned to **different** bases
+    and at least one is a non-orthonormal ``ImageBasis``, there is no shared basis — the raw
+    contraction would silently use the identity metric (``aᵀb`` instead of ``aᵀ·G·b``).
+    Rather than reject, we **change-of-basis** every later operand into the first operand's
+    basis (through the FFS realization seam, `43 §2c`), so the metric is built once in a
+    genuinely shared basis.  ``choose``/consistent pins never trigger this (all operands of a
+    space already agree) — the orthonormal path is byte-identical.
     """
+    if len(arg_reps) < 2:
+        return arg_reps
     bases = [r.basis for r in arg_reps]
     if not any(_is_immersed_metric_basis(b) for b in bases):
-        return  # orthonormal-only: out of scope, identity metric is correct.
-    first = bases[0]
-    if not all(_basis_eq(first, b) for b in bases[1:]):
-        raise RepresentError(
-            f"{note}: metric operands are pinned to inconsistent bases {bases!r}; a "
-            "non-orthonormal (ImageBasis) inner product requires every operand in the SAME "
-            "basis (the `43 §2c` mismatched-pinning gap)."
-        )
+        return arg_reps  # orthonormal-only: out of scope, identity metric is correct.
+    target = bases[0]
+    if all(_basis_eq(target, b) for b in bases[1:]):
+        return arg_reps
+    out = [arg_reps[0]]
+    for r in arg_reps[1:]:
+        out.append(_coerce_rep_to_basis(ctx, r, target, note="eval:metric-reconcile"))
+    return out
 
 
 def _basis_pairing_consistent(slot_basis: B.Basis, op_basis: B.Basis) -> bool:
@@ -760,27 +764,167 @@ def _basis_pairing_consistent(slot_basis: B.Basis, op_basis: B.Basis) -> bool:
     )
 
 
-def _assert_pairing_consistent(
-    slot_basis: B.Basis | None, op_basis: B.Basis | None, *, note: str,
-) -> None:
-    """Guard the `43 §2c` mismatched-pinning gap for a **natural-pairing** contraction.
+def _pairing_partner(slot_basis: B.Basis) -> B.Basis:
+    """The operand basis that a contraction ``slot_basis`` naturally pairs with.
 
-    Only fires when a non-orthonormal ``ImageBasis`` is involved on either contracted side
-    and the two are not mutually dual — the case the raw index contraction silently
-    miscomputes (it omits the change-of-basis between the slot and the operand).
-    Orthonormal-only contractions are out of scope (``choose`` keeps them consistent).
+    The pairing is correct when the operand is the *dual partner* of the slot: a covariant
+    (``DualBasis``) slot pairs with its primal; a primal slot pairs with its dual.
     """
-    if slot_basis is None or op_basis is None:
-        return
-    if not (_is_immersed_metric_basis(slot_basis) or _is_immersed_metric_basis(op_basis)):
-        return
-    if _basis_pairing_consistent(slot_basis, op_basis):
-        return
-    raise RepresentError(
-        f"{note}: contracted slots are pinned to inconsistent bases ({slot_basis!r} vs "
-        f"{op_basis!r}); a non-orthonormal (ImageBasis) contraction requires mutually-dual "
-        "bases (the `43 §2c` mismatched-pinning gap)."
+    match slot_basis:
+        case B.DualBasis(inner):
+            return inner
+        case _:
+            return B.dual_basis(slot_basis)
+
+
+def _reconcile_pairing(
+    ctx: _Ctx, slot_basis: B.Basis | None, op_rep: Rep, *, note: str,
+) -> Rep:
+    """Auto-reconcile a natural-pairing operand to ``slot_basis``'s dual partner (`43 §2c`).
+
+    For a non-metric ``Eval``/``Compose`` contraction whose slot and operand are pinned to
+    inconsistent FFS bases (one ``ImageBasis``, one orthonormal), change the operand into the
+    slot's dual-partner basis (through the FFS realization seam) so the raw index contraction
+    is the correct natural pairing.  Only fires when an immersed basis is involved and the two
+    are not already mutually dual — the orthonormal path is byte-identical.
+    """
+    if slot_basis is None:
+        return op_rep
+    if not (_is_immersed_metric_basis(slot_basis) or _is_immersed_metric_basis(op_rep.basis)):
+        return op_rep
+    if _basis_pairing_consistent(slot_basis, op_rep.basis):
+        return op_rep
+    return _coerce_rep_to_basis(ctx, op_rep, _pairing_partner(slot_basis), note=note)
+
+
+def _reconcile_compose_g(ctx: _Ctx, slot_basis: B.Basis | None, g_rep: Rep) -> Rep:
+    """Auto-reconcile a ``Compose`` ``g``'s codomain (axis 1) into f's slot partner (`43 §2c`).
+
+    ``g``'s codomain feeds f's slot ``pos``; the two must be mutually dual for the raw
+    contraction to be the correct natural pairing.  When they are pinned to inconsistent FFS
+    bases, change ``g``'s codomain axis into f's slot dual-partner basis (FFS seam).
+    """
+    if slot_basis is None:
+        return g_rep
+    gcod = _slot_basis_at(g_rep.basis, 1)
+    if gcod is None:
+        return g_rep
+    if not (_is_immersed_metric_basis(slot_basis) or _is_immersed_metric_basis(gcod)):
+        return g_rep
+    if _basis_pairing_consistent(slot_basis, gcod):
+        return g_rep
+    target = _pairing_partner(slot_basis)
+    m = _basis_cob_matrix(ctx, gcod, target)
+    arr = _apply_cob_on_axis(ctx, m, g_rep.array, 1, g_rep.free_labels, note="compose-reconcile-g")
+    new_basis = B.basis_prod(g_rep.basis.bases[0], target)
+    return Rep(arr, new_basis, g_rep.space, free_labels=g_rep.free_labels)
+
+
+def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> Rep:
+    """Change ``rep``'s space (axis-0) coordinates into ``target`` basis (FFS-aware)."""
+    if _basis_eq(rep.basis, target):
+        return rep
+    M = _basis_cob_matrix(ctx, rep.basis, target)
+    arr = _apply_cob_on_axis(ctx, M, rep.array, 0, rep.free_labels, note=note)
+    return Rep(arr, target, rep.space, free_labels=rep.free_labels)
+
+
+def _basis_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
+    """Change-of-basis matrix ``M`` (from-coords → to-coords), FFS-aware (`43 §2c`).
+
+    Uses the pure-matrix :func:`~grassmann.lower.cob.cob` when it applies; for an FFS basis
+    (which ``cob`` refuses) it realizes both sides toward the ambient coords through the FFS
+    SVD/QR seam and composes ``pinv(C_to) · C_from`` (the §2 "convert toward standard, then
+    out" shape, but with a pseudo-inverse for the non-square FFS column matrices).
+    """
+    try:
+        return cob(ctx.prog, from_basis, to_basis)
+    except CobError:
+        return _ffs_cob_matrix(ctx, from_basis, to_basis)
+
+
+def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
+    """The FFS change-of-basis matrix via the realization seam (`43 §2c`)."""
+    from_dual, to_dual = _peel_dual(from_basis), _peel_dual(to_basis)
+    if from_dual != to_dual:
+        raise RepresentError(
+            f"cannot reconcile FFS bases of differing variance: {from_basis!r} vs {to_basis!r}"
+        )
+    c_from, n_dom, n_cod = _realize_basis_ambient(ctx, _strip_to_ffs(from_basis))
+    c_to, _, _ = _realize_basis_ambient(ctx, _strip_to_ffs(to_basis))
+    # primal cob (from→to) = pinv(C_to) · C_from   (n_dom × n_dom).
+    [pinv_to] = ctx.prog.emit_stmt(
+        pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (n_dom, n_cod))],
+        note="ffs-cob:pinv(C_to)",
     )
+    [m_primal] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ij,jk->ik"), [pinv_to, c_from],
+        [pa.OutSpec("cob:pinv(C_to)·C_from", (n_dom, n_dom))],
+        note="ffs-cob:pinv(C_to)·C_from",
+    )
+    if not from_dual:
+        return m_primal
+    # dual (covector) cob = (M_primal)⁻ᵀ  (the `41 §2` DualBasis→DualBasis rule).
+    [m_inv] = ctx.prog.emit_stmt(
+        pa.InvOp(), [m_primal], [pa.OutSpec("cob:inv", (n_dom, n_dom))], note="ffs-cob:inv",
+    )
+    [out] = ctx.prog.emit_stmt(
+        _TransposeOp(), [m_inv], [pa.OutSpec("cob:inv-T", (n_dom, n_dom))], note="ffs-cob:⁻ᵀ",
+    )
+    return out
+
+
+def _realize_basis_ambient(ctx: _Ctx, basis: B.Basis) -> tuple[pa.SymArray, int, int]:
+    """Ambient (codomain-coords) column matrix of an FFS ``basis`` + ``(n_dom, n_cod)``.
+
+    Both the literal ``ImageBasis`` (columns ``f(eᵢ)``) and the orthonormal ``ProjectedBasis``
+    (``Q``/SVD-``U``) are realized in the codomain coords through the FFS seam, so a cob
+    between them composes consistently.
+    """
+    match basis:
+        case B.ImageBasis(f):
+            dom, cod = map_domain_codomain(f)
+            return _realize_image_basis(ctx, f), _static_dim(dom), _static_dim(cod)
+        case B.ProjectedBasis(f, which, _src, _tgt):
+            dom, cod = map_domain_codomain(f)
+            real = _realize_ffs_by_which(ctx, which, f)
+            return real.cols, _static_dim(dom), _static_dim(cod)
+        case _:  # pragma: no cover - guarded by _strip_to_ffs
+            raise RepresentError(f"_realize_basis_ambient: not an FFS basis: {basis!r}")
+
+
+def _strip_to_ffs(basis: B.Basis) -> B.Basis:
+    """Strip Dual/Primal/WithInner wrappers down to the underlying FFS basis."""
+    match basis:
+        case B.ImageBasis() | B.ProjectedBasis():
+            return basis
+        case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
+            return _strip_to_ffs(inner)
+        case _:
+            raise RepresentError(f"_strip_to_ffs: not an FFS basis: {basis!r}")
+
+
+def _apply_cob_on_axis(
+    ctx: _Ctx, m: pa.SymArray, arr: pa.SymArray, axis: int, free_labels: str, *, note: str,
+) -> pa.SymArray:
+    """Apply a cob matrix ``m`` (new←old) on ``arr``'s ``axis`` (an einsum), free axes ride."""
+    shape = _shape_of(arr)
+    n_free = len(free_labels)
+    n_space = len(shape) - n_free
+    space_labels = [chr(ord("A") + k) for k in range(n_space)]
+    in_labels = "".join(space_labels) + free_labels
+    fresh = chr(ord("A") + n_space + n_free)  # capital, disjoint from free (lowercase)
+    m_spec = fresh + space_labels[axis]
+    out_label_list = space_labels.copy()
+    out_label_list[axis] = fresh
+    out_labels = "".join(out_label_list) + free_labels
+    new_shape = list(shape)
+    new_shape[axis] = _shape_of(m)[0]
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp(f"{m_spec},{in_labels}->{out_labels}"), [m, arr],
+        [pa.OutSpec("cob-axis", tuple(new_shape))], note=note,
+    )
+    return out
 
 
 def _slot_basis_at(basis: B.Basis, pos: int) -> B.Basis | None:
@@ -842,13 +986,16 @@ def _rep_eval(
         # several factors, e.g. ``~(V⊗ᵏ)`` from an ``alt``/``Lift`` — and the arg presents
         # that value over multiple (unfused) space axes, fuse the arg's space axes into one
         # so the contraction matches (the explicit Lift/InvLift reassociation seam, `41 §3`).
+        # Non-metric contraction: reconcile the arg into f's slot dual-partner basis when
+        # they are pinned to inconsistent FFS bases (`43 §2c`). Metric f is handled in
+        # `_rep_eval_operands` (the Gram is built in the operand basis).
+        if not is_metric_f:
+            arg_rep = _reconcile_pairing(
+                ctx, _slot_basis_at(f_rep.basis, pos), arg_rep, note=f"eval-reconcile@{pos}",
+            )
         arg_rep = _fuse_arg_to_slot(ctx, f_rep.array, pos, arg_rep)
         # dim-agreement assert at the contraction site (`41 §4`).
         _assert_axis_dims(ctx, f_rep.array, pos, arg_rep, note=f"assert:eval-dim@{pos}")
-        if not is_metric_f:
-            _assert_pairing_consistent(
-                _slot_basis_at(f_rep.basis, pos), arg_rep.basis, note=f"eval@{pos}",
-            )
         operands.append(arg_rep.array)
         arg_labels = f_labels[pos] + arg_rep.free_labels
         arg_label_lists.append(arg_labels)
@@ -943,14 +1090,12 @@ def _rep_compose(
             raise RepresentError(f"Compose: slot {pos} out of range")
         # g : dom ⊸ cod stored (|dom|,|cod|): cod-axis (axis 1) shares f's slot label,
         # dom-axis (axis 0) is fresh and replaces f's slot in the output (`41 §3`).
+        # `43 §2c` natural-pairing: f's slot ``pos`` contracts g's codomain (axis 1); the two
+        # must be mutually dual. Reconcile g's codomain into f's slot partner if pinned to
+        # inconsistent FFS bases (before the dim assert, so the cobbed array is checked).
+        g_rep = _reconcile_compose_g(ctx, _slot_basis_at(f_rep.basis, pos), g_rep)
         _assert_axes_match(
             ctx, f_rep.array, pos, g_rep.array, 1, note=f"assert:compose-dim@{pos}",
-        )
-        # `43 §2c` natural-pairing guard: f's slot ``pos`` contracts g's codomain (axis 1);
-        # the two must be mutually dual for the raw index contraction to be correct.
-        _assert_pairing_consistent(
-            _slot_basis_at(f_rep.basis, pos), _slot_basis_at(g_rep.basis, 1),
-            note=f"compose@{pos}",
         )
         cod_label = f_labels[pos]
         dom_label = chr(next_fresh)
@@ -2080,12 +2225,21 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     is removed.
     """
     which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
-    f = space.f
-    key = (which, id(f))
+    return _realize_ffs_by_which(ctx, which, space.f)
+
+
+def _realize_ffs_by_which(ctx: _Ctx, which: str, f: object) -> FfsRealization:
+    """Realize the FFS basis ``which`` of map ``f`` via the SVD/QR/GSVD seam (`41 §1`).
+
+    Shares the same ``(which, id(f))`` memo as :func:`_realize_ffs_for_space` (``"image"``
+    normalizes to ``"img"``), so a ``ProjectedBasis(f, "image")`` realized for a
+    change-of-basis reuses an ``Img(f)`` factorization (and vice versa).
+    """
+    norm = "img" if which == "image" else which
+    key = (norm, id(f))
     cached = ctx.ffs_realizations.get(key)
     if cached is not None:
         return cached
-
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
     [f_cd] = ctx.prog.emit_stmt(
@@ -2094,7 +2248,7 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
         note="ffs-basis:to-(cod,dom)",
     )
     real = realize_ffs_basis(
-        ctx.prog, which, f_cd,
+        ctx.prog, norm, f_cd,
         dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
         props=map_props(f), label=getattr(f, "name", "f"),
     )
