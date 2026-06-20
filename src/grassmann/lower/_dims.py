@@ -43,13 +43,73 @@ def dim_of(space: S.Space) -> int:
         case S.WithInner(s, _):
             return dim_of(s)
         case S.Img() | S.CoImg() | S.Ker() | S.CoKer():
-            # FFS dims are runtime ranks unless source/target + props pin them; the
-            # substrate sizes these with a polyarray DimAtom (dynamic axis).
-            raise DynamicDim(f"FFS space {space!r} has a runtime (δ_f) dimension")
+            # FFS dims are runtime ranks UNLESS the defining map's asserted props
+            # (inj/surj/bij, rank/dim_img/dim_ker) pin a static rank (`20 §5`); when they
+            # don't, the substrate sizes these with a polyarray DimAtom (dynamic axis).
+            return _ffs_dim(space)
         case S.SVar() | S.App():
             raise DynamicDim(f"space {space!r} has no static dimension")
         case _:  # pragma: no cover - defensive
             raise DynamicDim(f"cannot statically size {space!r}")
+
+
+def _ffs_dim(space: S.Space) -> int:
+    """Static dim of an FFS space when the map's props pin its rank (`20 §5`), else raise.
+
+    Dimension laws: ``|Img| = |CoImg| = rank``, ``|Ker| = |dom| − rank``,
+    ``|CoKer| = |cod| − rank``.  The rank is static iff the defining map carries an
+    asserted ``rank``/``dim_img`` (or ``dim_ker``), or is ``inj`` (``rank = |dom|``),
+    ``surj`` (``rank = |cod|``), or ``bij`` (``rank = |dom| = |cod|``).
+    """
+    dom, cod = _ffs_endpoints(space)
+    rank = _static_rank(space, dom, cod)
+    match space:
+        case S.Img() | S.CoImg():
+            return rank
+        case S.Ker():
+            return dim_of(dom) - rank
+        case S.CoKer():
+            return dim_of(cod) - rank
+        case _:  # pragma: no cover - defensive
+            raise DynamicDim(f"not an FFS space: {space!r}")
+
+
+def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
+    """The (domain, codomain) spaces of an FFS map, from ``source``/``target`` or ``f``.
+
+    Prefers the node's explicit ``source``/``target``; falls back to reading the map
+    var's space ``~dom ⊗ cod`` (the ``OProd(Dual(dom), cod)`` linear-map encoding).
+    """
+    src = getattr(space, "source", None)
+    tgt = getattr(space, "target", None)
+    if src is not None and tgt is not None:
+        return src, tgt
+    f = getattr(space, "f", None)
+    fs = getattr(f, "space", None)
+    if isinstance(fs, S.OProd) and len(fs.spaces) == 2 and isinstance(fs.spaces[0], S.Dual):
+        dom = src if src is not None else fs.spaces[0].space
+        cod = tgt if tgt is not None else fs.spaces[1]
+        return dom, cod
+    raise DynamicDim(f"FFS space {space!r} has no resolvable source/target")
+
+
+def _static_rank(space: S.Space, dom: S.Space, cod: S.Space) -> int:
+    """The map's static rank from its asserted props, or raise :class:`DynamicDim`."""
+    props = getattr(getattr(space, "f", None), "props", None)
+    if props is not None:
+        if props.rank is not None:
+            return _dim_int(props.rank)
+        if props.dim_img is not None:
+            return _dim_int(props.dim_img)
+        if props.dim_ker is not None:
+            return dim_of(dom) - _dim_int(props.dim_ker)
+        if props.bij:
+            return dim_of(dom)  # = dim_of(cod) for a bijection
+        if props.inj:
+            return dim_of(dom)
+        if props.surj:
+            return dim_of(cod)
+    raise DynamicDim(f"FFS space {space!r} has a runtime (δ_f) rank (no asserted props)")
 
 
 def _dim_int(d: S.Dim) -> int:
