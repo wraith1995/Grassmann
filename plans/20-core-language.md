@@ -208,7 +208,10 @@ concrete bases; the higher constructs are **machinery to build them**.
 ```
 Basis  b ::=
   -- mirror Space (§5)
-  | ScalarBasis | BaseBasis(name, vectors?)
+  | ScalarBasis | BaseBasis(name, vectors?, space?, backup?)
+  |                                  vectors = numeric matrix OR Term frame (term basis);
+  |                                  space = the Space it is OF (self-sizing, even w/o vectors);
+  |                                  backup = basis to RREF-complete a rank-deficient frame
   | BVar(β)                          basis variable (the basis of an SVar α)
   | DualBasis(b) | PrimalBasis(b)
   | BasisSum(b…) | BasisProd(b…)     -- ⊕ / ⊗  (n-ary)

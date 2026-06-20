@@ -142,13 +142,20 @@ def basis_dim(b: B.Basis) -> int:
     match b:
         case B.ScalarBasis():
             return 1
-        case B.BaseBasis(_, vectors):
-            if vectors is None:
-                raise DynamicDim(f"BaseBasis {b!r} has no explicit vectors to size")
-            import numpy as np
+        case B.BaseBasis():
+            # The dimension of a BaseBasis is that of the space it is OF.  A declared
+            # ``space`` sizes it directly (so a standard basis is self-sizing); else a numeric
+            # ``vectors`` matrix is sized by its #columns; a backup-completed frame is the full
+            # space dim (needs ``space``).  A term-frame's *length* is NOT the dim (it may be
+            # rank-deficient / completed) — only ``space`` sizes those.
+            if b.space is not None:
+                return dim_of(b.space)
+            if b.vectors is not None and not isinstance(b.vectors, tuple):
+                import numpy as np
 
-            # columns of `vectors` are the basis vectors ⇒ dim = #columns.
-            return int(np.asarray(vectors, dtype=float).shape[1])
+                # columns of a numeric `vectors` are the basis vectors ⇒ dim = #columns.
+                return int(np.asarray(b.vectors, dtype=float).shape[1])
+            raise DynamicDim(f"BaseBasis {b!r} has no space/vectors to size")
         case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
             return basis_dim(inner)
         case B.BasisSum(bases):

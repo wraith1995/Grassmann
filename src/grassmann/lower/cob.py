@@ -123,12 +123,23 @@ def realize_basis(program: pa.Program, b: B.Basis) -> pa.SymArray:
         case B.ScalarBasis():
             return _identity(program, 1, "realize:scalar")
         case B.BaseBasis(name, vectors):
-            if vectors is None:
-                # the standard basis of a Base is the identity in its own coords.
+            # Term-frame vectors / a backup-completed basis need ``_rep`` (the realization seam
+            # in represent) — the pure-matrix path can't build them.
+            if isinstance(vectors, tuple) or b.backup is not None:
                 raise CobError(
-                    f"realize_basis: BaseBasis({name!r}) has no explicit vectors; it IS "
-                    "the standard basis (identity) — cob short-circuits instead"
+                    f"realize_basis: BaseBasis({name!r}) is a term-frame / backup-completed "
+                    "basis; realized via represent.realize_basis_cols, not as a static matrix"
                 )
+            if vectors is None:
+                # The standard basis of a Base is the ambient identity; size it from a declared
+                # ``space`` if present, else defer (cob short-circuits / the companion sizes it).
+                try:
+                    return _identity(program, basis_dim(b), "realize:base-std:" + name)
+                except DynamicDim as exc:
+                    raise CobError(
+                        f"realize_basis: BaseBasis({name!r}) has no explicit vectors and no "
+                        "static space; it IS the standard basis (identity) — sized from context"
+                    ) from exc
             mat = np.asarray(vectors, dtype=float)
             if mat.ndim != 2:
                 raise CobError(f"BaseBasis vectors must be a 2-D matrix, got {mat.shape}")
@@ -362,6 +373,13 @@ def _short(b: B.Basis) -> str:
     return type(b).__name__
 
 
+def _backup_eq(a: object, b: object) -> bool:
+    """Equality for an optional BaseBasis ``backup`` (a Basis or ``None``)."""
+    if a is None or b is None:
+        return a is b
+    return _basis_eq(a, b)
+
+
 def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
     """Structural basis equality that tolerates numpy ``vectors`` fields.
 
@@ -372,11 +390,16 @@ def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
     if type(a) is not type(b):
         return False
     match (a, b):
-        case (B.BaseBasis(na, va), B.BaseBasis(nb, vb)):
-            if na != nb:
+        case (B.BaseBasis(), B.BaseBasis()):
+            # ``space`` is sizing metadata, not part of the coordinate identity — compare
+            # name + vectors + backup (so a standard basis is equal with or without a space).
+            if a.name != b.name or not _backup_eq(a.backup, b.backup):
                 return False
+            va, vb = a.vectors, b.vectors
             if va is None or vb is None:
                 return va is vb
+            if isinstance(va, tuple) or isinstance(vb, tuple):
+                return va is vb  # term-frame vectors compare by identity (Terms)
             return np.array_equal(np.asarray(va, dtype=float), np.asarray(vb, dtype=float))
         case (B.CompleteBasis(sa, ca), B.CompleteBasis(sb, cb)):
             return _basis_eq(sa, sb) and np.array_equal(

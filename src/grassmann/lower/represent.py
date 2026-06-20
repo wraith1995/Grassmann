@@ -1901,8 +1901,42 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return _realize_image_basis(ctx, f)
         case B.ProjectedBasis(f, which, _src, _tgt):
             return _realize_ffs_by_which(ctx, which, f).cols
+        case B.BaseBasis() if isinstance(b.vectors, tuple) or b.backup is not None:
+            return _realize_base_basis(ctx, b)
         case _:
             return realize_basis(ctx.prog, b)
+
+
+def _realize_base_basis(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
+    """Realize a term-frame / backup-completed :class:`BaseBasis` (`20 §7`).
+
+    The ``vectors`` frame (Term vectors realized via ``_rep``, or a numeric matrix) supplies
+    the primary columns; a ``backup`` basis **completes** them to a full basis when the frame
+    is not a maximal independent set — keeping the independent columns of the frame (RREF /
+    pivoted greedy selection) and filling the missing directions from ``backup``.
+    """
+    frame = _realize_frame_vectors(ctx, b.vectors) if b.vectors is not None else None
+    if b.backup is None:
+        if frame is None:  # pragma: no cover - guarded by realize_basis_cols
+            raise RepresentError(f"BaseBasis {b!r}: nothing to realize")
+        return frame
+    backup = realize_basis_cols(ctx, b.backup)
+    n = _static_dim(b.space) if b.space is not None else _shape_of(backup)[0]
+    if frame is None:
+        return backup
+    [out] = ctx.prog.emit_stmt(
+        _CompleteColsOp(n), [frame, backup],
+        [pa.OutSpec("base-basis:complete", (_shape_of(backup)[0], n))],
+        note="base-basis:RREF-complete(frame|backup)",
+    )
+    return out
+
+
+def _realize_frame_vectors(ctx: _Ctx, vectors: object) -> pa.SymArray:
+    """Realize a ``BaseBasis``/frame ``vectors`` field — a Term tuple or a numeric matrix."""
+    if isinstance(vectors, tuple):
+        return _realize_list_basis(ctx, vectors)  # stack lowered Term columns
+    return _const(ctx, np.asarray(vectors, dtype=float), note="base-basis:numeric-frame")
 
 
 def _realize_list_basis(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
@@ -2466,6 +2500,36 @@ class _DynEyeRowsOp:
 
     def __call__(self, ref: np.ndarray) -> np.ndarray:  # ref is (ambient, k)
         return np.eye(int(np.asarray(ref).shape[0]))
+
+
+@dataclass(frozen=True)
+class _CompleteColsOp:
+    """Complete a (possibly rank-deficient) frame to an ``n``-column basis (`20 §7`).
+
+    Greedy RREF-style selection: keep the frame's linearly-independent columns first, then
+    fill the remaining directions from the backup's columns — each column accepted only if it
+    raises the rank.  The result is an ``(ambient, n)`` full-column-rank basis matrix.
+    """
+
+    n: int
+
+    def __call__(self, frame: np.ndarray, backup: np.ndarray) -> np.ndarray:
+        frame = np.asarray(frame, dtype=float)
+        backup = np.asarray(backup, dtype=float)
+        rows = frame.shape[0]
+        kept = np.zeros((rows, 0))
+        tol = 1e-9
+        for c in [*frame.T, *backup.T]:
+            if kept.shape[1] == self.n:
+                break
+            cand = np.column_stack([kept, c])
+            if np.linalg.matrix_rank(cand, tol=tol) > kept.shape[1]:
+                kept = cand
+        if kept.shape[1] != self.n:
+            raise ValueError(
+                f"BaseBasis completion: frame ⊕ backup span {kept.shape[1]} < {self.n} dims"
+            )
+        return kept
 
 
 @dataclass(frozen=True)
