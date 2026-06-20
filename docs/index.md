@@ -4,6 +4,8 @@ A node-by-node reference for the Grassmann IR: every **space**, **term**, and **
 
 The structural sections are extracted live from the code by `tools/gen_docs.py`; the **Meaning** prose is hand-authored and reviewed.
 
+Every behavior described here is pinned by a doc-tied test: `tests/test_doc_represent.py` covers every **represent scenario** (one per term, plus the space shape laws) and `tests/test_doc_cob.py` covers every **change-of-basis scenario** (one per basis). A doc claim that drifts from the code fails there.
+
 ## Approval dashboard
 
 | category | approved | in review | draft |

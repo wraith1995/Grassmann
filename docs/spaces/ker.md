@@ -1,11 +1,11 @@
 # `Ker`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces &nbsp;·&nbsp; **Paper:** def §FFS (def:ffs)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
 ## Meaning
 
 The **kernel** `Ker(f)` of a linear map `f : dom ⊸ cod` — the subspace of `dom` that `f`
-annihilates (`f·x = 0`), a fundamental subspace (`def:ffs`). Dimension `|dom| − rank(f)`:
+annihilates (`f·x = 0`), a fundamental subspace. Dimension `|dom| − rank(f)`:
 static when props pin the rank, else a runtime `δ_f`.
 
 `Ker` types null spaces, constraint manifolds, and gauge freedoms. Its basis is
@@ -34,4 +34,8 @@ A value of this space lowers to a polyarray array whose shape is `_shape_of_spac
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

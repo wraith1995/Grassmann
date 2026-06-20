@@ -3,7 +3,7 @@ status: review
 ---
 
 The **kernel** `Ker(f)` of a linear map `f : dom ⊸ cod` — the subspace of `dom` that `f`
-annihilates (`f·x = 0`), a fundamental subspace (`def:ffs`). Dimension `|dom| − rank(f)`:
+annihilates (`f·x = 0`), a fundamental subspace. Dimension `|dom| − rank(f)`:
 static when props pin the rank, else a runtime `δ_f`.
 
 `Ker` types null spaces, constraint manifolds, and gauge freedoms. Its basis is

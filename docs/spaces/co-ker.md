@@ -1,11 +1,11 @@
 # `CoKer`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces &nbsp;·&nbsp; **Paper:** def §FFS (def:ffs)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
 ## Meaning
 
 The **cokernel** `CoKer(f)` of `f : dom ⊸ cod` — the orthogonal complement of `Img(f)` inside
-`cod` (`def:ffs`). Dimension `|cod| − rank(f)`. It is what `f` *fails* to reach in the
+`cod`. Dimension `|cod| − rank(f)`. It is what `f` *fails* to reach in the
 codomain, so it captures the obstruction/residual directions of a least-squares problem.
 
 Basis [`ProjectedBasis(f,"coker")`](../bases/projected-basis.md) — the trailing left singular
@@ -33,4 +33,8 @@ A value of this space lowers to a polyarray array whose shape is `_shape_of_spac
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

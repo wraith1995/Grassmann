@@ -3,7 +3,7 @@ status: review
 ---
 
 The **image (range)** `Img(f)` of a linear map `f : dom ⊸ cod` — the subspace of `cod` spanned
-by `f`'s columns, one of the four fundamental subspaces (`def:ffs`). Its dimension is
+by `f`'s columns, one of the four fundamental subspaces. Its dimension is
 `rank(f)`: **static** (`= |dom|`) when `f` is asserted injective, otherwise a **runtime** rank
 `δ_f` resolved at evaluation.
 

@@ -1,12 +1,12 @@
 # `App`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces &nbsp;·&nbsp; **Paper:** def §types (App)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Spaces
 
 ## Meaning
 
 A **space-function application** `App(g, positions, args)` — applies a space/type-level function
 (a `SpaceFunction`, the `BLam`/`Lam` over space/nat domains) to space, dim, or term arguments,
-mirroring `Eval`/`NEval` at the type level (`def §types`).
+mirroring `Eval`/`NEval` at the type level.
 
 This is the reduction site for space polymorphism: `(λα. α⊗α)[V]` is an `App` that β-reduces to
 `V⊗V`. An *unreduced* `App` has no static dimension or default basis — it must be reduced (its
@@ -38,4 +38,8 @@ A value of this space lowers to a polyarray array whose shape is `_shape_of_spac
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 

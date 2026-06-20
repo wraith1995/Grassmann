@@ -1,11 +1,11 @@
 # `Project`
 
-**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms &nbsp;·&nbsp; **Paper:** def §nas (proj)
+**Status:** 🟡 in review &nbsp;·&nbsp; **Category:** Terms
 
 ## Meaning
 
 **Orthogonal projection onto a subspace** `Project(v, s')` — drop the complement coordinates,
-keeping `v`'s component in `s'` (`def §nas`, `proj = embed†`). For an FFS subspace the columns
+keeping `v`'s component in `s'` (`proj = embed†`). For an FFS subspace the columns
 come from the SVD/QR seam; the projected coords are `Pᵀ·⟦v⟧`. The space may be omitted and
 recovered by inference.
 
@@ -41,4 +41,8 @@ Lowered by **`represent._rep_project`**:
 ## Conversion
 
 A change of basis is a pullback (coordinate-free), realized by `cob` on the attached basis. See the [Bases](../bases/index.md) section.
+
+## Tested by
+
+The lowering scenario for this node is exercised in `tests/test_doc_represent.py`; change-of-basis behavior in `tests/test_doc_cob.py`.
 
