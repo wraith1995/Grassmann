@@ -67,6 +67,31 @@ Within a space, when no specialized rule applies, `cob(A → B) = pinv(realize B
 realizing a basis **is** its cob to the standard basis, and `cob(std → A)` is the inverse. So
 every basis must convert to/from its standard basis (`test_cob_via_standard`).
 
+### OrthonormalBasis changes coordinates (it is not metadata)
+A raw `WithInnerBasis(b, g)` carries the metric as *metadata* — its coordinates are `b`'s, so
+`cob(WithInner(b₁,g), WithInner(b₂,g)) = cob(b₁, b₂)` (the underlying cob).  An `OrthonormalBasis`
+**re-coordinates** (it g-orthonormalizes), so its cob must realize the orthonormal columns and
+compose (`pinv(Q_to)·Q_from`, which is `Q_toᵀ·G·Q_from`); recursing on the underlying
+(non-orthogonal) cob is *wrong*.  (Fixed after a `_cob_from_*` structure audit — was a latent bug
+exposed only by an `OrthonormalBasis ↔ OrthonormalBasis` with differing inner bases.)
+
+## Structure not yet maximally exploited (correctness-neutral; follow-ups)
+
+A `_cob_from_*` audit found these cases compute the right answer but via the generic
+`_cob_via_standard` (`pinv`) where a cheaper/exact structural factor exists — all reuse already-
+computed quantities, none change results:
+
+- **`_pinv_compose` always emits `PinvOp`.** When `C_to` is square-invertible (a full
+  `ListBasis`/`CompleteBasis`) it could be `InvOp`; when `C_to` is orthonormal
+  (`OrthonormalBasis`, or `reduce=ORTHONORMALIZE`) it could be a transpose. One site, several
+  handlers lifted.
+- **`_cob_from_projected` differing metric** → could use a GSVD factor (`Q_toᵀ·M·Q_from`) reusing
+  the two `_realize_ffs_by_which` realizations, like `_same_map_ffs_cob`, instead of realize+pinv.
+- **raw `WithInner` ↔ its `OrthonormalBasis`** → the Cholesky factor `L` (`LLᵀ=AᵀGA`) is already
+  computed in `_realize_orthonormal`; return `L`/`L⁻¹` instead of pinv.
+- **`ListBasis`/`CompleteBasis` ↔ standard** → the cob is just the realized columns (forward) /
+  their inverse, instead of `pinv`-of-identity.
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** A `ListBasis` of `k < n` ambient vectors is
