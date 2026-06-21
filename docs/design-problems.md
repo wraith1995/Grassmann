@@ -87,15 +87,14 @@ by `to`'s structure (`_inverse_cols` / `_is_standard_orthonormal`):
 - **exact inverse** (`InvOp`) when `to` is square (a full `ListBasis`/`CompleteBasis`, a
   *g*-orthonormal `OrthonormalBasis`); — this also covers `ListBasis`/`CompleteBasis ↔ standard`
   (the cob is then just the realized columns / their inverse, no `pinv`-of-identity);
+- **metric factor** `Cᵀ·G` when `to` is *g*-orthonormal (`UᵀGU = I` ⇒ `cob(std→to) = Uᵀ·G`),
+  via `_orthonormal_metric` — exact, no pseudo-inverse, even for a rectangular range:
+    - a metric `ProjectedBasis` reorthonormalize (`G` = the subspace's GSVD metric,
+      `_basis_metric(source|target)` by side) — handles rectangular *g*-orthonormal ranges that
+      the transpose rule deliberately excludes;
+    - raw `WithInnerBasis` → its `OrthonormalBasis` — here `Uᵀ·G·A = L⁻¹AᵀGA = Lᵀ`, exactly the
+      Cholesky factor of the metric Gram (no need to expose `L`).
 - **pseudo-inverse** only for genuinely rectangular columns with no known structure.
-
-Remaining follow-ups (still `pinv`, want an exact factor):
-
-- **`_cob_from_projected` differing metric** → a GSVD factor (`Q_toᵀ·M·Q_from`) reusing the two
-  `_realize_ffs_by_which` realizations, like `_same_map_ffs_cob` (handles rectangular *g*-orthonormal
-  ranges, which the transpose rule above deliberately excludes).
-- **raw `WithInner` ↔ its `OrthonormalBasis`** → the Cholesky factor `L` (`LLᵀ=AᵀGA`) is already
-  computed in `_realize_orthonormal`; return `Lᵀ`/`L⁻ᵀ` (a triangular solve vs the square `InvOp`).
 
 ## Open questions
 

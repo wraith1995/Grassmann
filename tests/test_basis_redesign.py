@@ -121,6 +121,36 @@ def test_orthonormalbasis_to_orthonormalbasis_is_orthogonal_reorthonormalize() -
     assert Q2 @ (m @ s) == pytest.approx(Q1 @ s)               # maps to the same vector
 
 
+def test_raw_to_orthonormal_cob_is_cholesky_factor() -> None:
+    # cob(raw WithInner(b,g) → OrthonormalBasis) = Uᵀ·G·A = L⁻¹AᵀGA = Lᵀ, the Cholesky factor of
+    # the metric Gram (exact, no pseudo-inverse).
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    A = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [1.0, 0.0, 1.0]])
+    Gm = np.array([[2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    av = [C.var(f"a{i}", V) for i in range(3)]
+    feeds = {**{_k(av[i]): A[:, i] for i in range(3)}, _k(g): Gm}
+    wib = B.with_inner_basis(B.list_basis(*av), g)
+    m = _cob(wib, B.orthonormal_basis(wib), feeds)
+    assert m == pytest.approx(np.linalg.cholesky(A.T @ Gm @ A).T)   # = Lᵀ
+
+
+def test_projectedbasis_metric_rectangular_reorthonormalize_roundtrips() -> None:
+    # A tall injective f (rank 2 < ambient 3): the metric ProjectedBasis range is a RECTANGULAR
+    # g-orthonormal basis — the differing-metric cob uses the exact Uᵀ·M factor and round-trips.
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
+    t = [C.var(f"t{i}", Re) for i in range(3)]
+    Tm = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.0, 0.0, 1.0]])
+    feeds = {_k(J): Jm.T, **{_k(t[i]): Tm[:, i] for i in range(3)}}
+    free = B.projected_basis(J, "image")
+    metric = B.projected_basis(J, "image", target=B.list_basis(*t))
+    m = _cob(free, metric, feeds)
+    assert m.shape == (2, 2)
+    assert m @ _cob(metric, free, feeds) == pytest.approx(np.eye(2))
+
+
 def test_orthonormalbasis_plain_is_qr() -> None:
     V = C.base("V", 3)
     M = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
