@@ -99,6 +99,49 @@ by `to`'s structure (`_inverse_cols` / `_is_standard_orthonormal`):
       Cholesky factor of the metric Gram (no need to expose `L`).
 - **pseudo-inverse** only for genuinely rectangular columns with no known structure.
 
+## Deferred: realize FFS bases in their own (in-space) coordinates
+
+**Decided design, not yet implemented** — blocked on substrate work (see below).
+
+Today `realize_basis_cols` is **coordinate-inconsistent** for FFS bases: a term basis (`ListBasis`)
+of `Img(f)` realizes to its `k`-dim *in-space* coords (its vectors are `Img(f)`-typed, so `_rep`
+gives `k`-dim), but `ImageBasis`/`ProjectedBasis` realize to the `n×k` **ambient immersion** `U`.
+Two bases of the *same* `Img(f)` thus come out in different frames (and would shape-mismatch in a
+cob). It is latent only because the tests cob the FFS factorization bases among themselves and
+never pin a term basis to an FFS space.
+
+The fix (every term/basis belongs to exactly one space ⇒ realize is always in that space's
+coords): `realize_basis_cols(B)` for an FFS basis returns `U_dᵀ·immersion(B)` — the vectors in
+the space's **canonical coordinates**, the *metric-free* `ProjectedBasis` `U_d` (so metric-free
+`ProjectedBasis` → `I`, metric `ProjectedBasis` → the reorthonormalization, `ImageBasis` → `R`
+where `J = U_d·R`). The **immersion** `U`/`V`/`J` (ambient — `U` for `Img`/`CoKer` cod-side, `V`
+for `Ker`/`CoImg` dom-side, `J` for the literal `ImageBasis`) becomes a *separate* seam used by
+`embed`/`project`/the metric, never by cob. A `ListBasis` of ambient vectors *projected* onto a
+subspace is then a different construct, not a plain FFS `ListBasis`. With this, every FFS cob is
+square (`InvOp`) and the rectangular pinv/transpose branches stop firing for FFS.
+
+This works for **static-rank** FFS (injective `image`) but is blocked on three independent
+**dynamic-rank (runtime δ) substrate gaps** — `Ker`/`CoImg`/`CoKer` always realize via `SvdOp`
+(dynamic δ), so all three bite there:
+
+1. **Rank-consistency assert** (`_make_var`): asserts `δ_var == f-rank`, correct for `Img`/`CoImg`
+   (`dim = rank`) but wrong for `Ker`/`CoKer` (`dim = ambient − rank`). Fix: compare `δ_var`
+   against the realized basis's **column count** (the subspace dim), not the raw rank.
+2. **Sibling-δ in term-stacking** (`_stack_term_cols`): two `Ker(f)` vars get *distinct* runtime-δ
+   atoms and stacking rejects them as inconsistent, though the sibling-agreement `AssertOp`
+   guarantees runtime equality. Fix: dynamic axes must defer to the sibling asserts, not a static
+   atom-identity check.
+3. **δ-atom unification across factorizations** (the in-space projection `U_dᵀ·immersion`): the
+   metric-free `U_d` and a metric `ProjectedBasis`'s immersion are different factorizations with
+   different δ atoms, so the einsum/`InvOp` can't see one square axis. Fix: sibling FFS
+   factorizations of one map must share a δ atom.
+
+**Plan (chosen: do the substrate first):** land the dynamic-δ unification in the polyarray FFS
+substrate (one δ atom per `(map, which)` shared across vars and factorizations; relax static
+dim-equality to the runtime sibling asserts), *then* the `realize_basis_cols` in-space flip +
+`_ffs_immersion` seam land cleanly on top. The cob is always between two bases of the same space,
+so the in-space form is the principled one — the only reason it isn't in yet is the δ plumbing.
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** A `ListBasis` of `k < n` ambient vectors is
