@@ -910,7 +910,8 @@ def _group_oprod():
     return bases, {**ft, **fs}, "V⊗W"
 
 
-# Group 6 — bases of WithInner(ℝ³, g): the g-orthonormal basis vs a term/complete basis.
+# Group 6 — bases of WithInner(ℝ³, g): this is its OWN space (≠ ℝ³), so all its bases are
+# WithInnerBasis(·, g) over the SAME metric g (crossing to ℝ³ would be an explicit remetric).
 def _group_withinner():
     V = C.base("V", 3)
     g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
@@ -918,12 +919,13 @@ def _group_withinner():
     term, ft, _ = _listb_sp(V, "y", [Mv[:, i] for i in range(3)])
     sub, fs, _ = _listb_sp(V, "x", [np.array([1.0, 0.0, 0.0])])
     comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
-    complete = B.complete_basis(sub, comp)
     bases = [
-        ("WithInnerBasis", "the g-orthonormal basis `WithInnerBasis(std₃, g)`",
+        ("WithInnerBasis", "the g-orthonormal standard basis `WithInnerBasis(std₃, g)`",
          B.with_inner_basis(_std(3), g), "WithInnerBasis(std₃, g)"),
-        ("ListBasis", "a term basis `ListBasis(y₀,y₁,y₂)`", term, "ListBasis(y0,y1,y2)"),
-        ("CompleteBasis", "a completed basis", complete, "CompleteBasis(ListBasis(x0), comp)"),
+        ("WithInnerBasis", "a g-metric term basis `WithInnerBasis(ListBasis(y…), g)`",
+         B.with_inner_basis(term, g), "WithInnerBasis(ListBasis(y0,y1,y2), g)"),
+        ("WithInnerBasis", "a g-metric completed basis `WithInnerBasis([x|comp], g)`",
+         B.with_inner_basis(B.complete_basis(sub, comp), g), "WithInnerBasis(CompleteBasis, g)"),
     ]
     return bases, {**ft, **fs}, "WithInner(ℝ³,g)"
 
@@ -1103,26 +1105,14 @@ def _c_image_source():
 
 
 @_cv("WithInnerBasis")
-def _c_wib():
-    V = C.base("V", 3)
-    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
-    return _conv("the underlying (un-whitened) basis",
-                 "the metric is metadata, not coordinates ⇒ cob strips it = identity",
-                 B.with_inner_basis(default_basis(V), g), default_basis(V), np.eye(3),
-                 to_node="BasisRep",
-                 code="cob(WithInnerBasis(BasisRep(3, ScalarBasis()), g), BasisRep(3, ScalarBasis()))")
-
-
-@_cv("BasisRep")
-def _c_rep_to_wib():
-    # Reverse of the metric strip: re-attaching a metric (WithInnerBasis) leaves coords alone.
-    V = C.base("V", 3)
-    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
-    return _conv("the g-orthonormal `WithInnerBasis` wrapping (metadata, reverse)",
-                 "attaching a metric is metadata, not coordinates ⇒ identity",
-                 default_basis(V), B.with_inner_basis(default_basis(V), g), np.eye(3),
-                 to_node="WithInnerBasis",
-                 code="cob(BasisRep(3, ScalarBasis()), WithInnerBasis(BasisRep(3, ScalarBasis()), g))")
+def _c_wib_to_underlying():
+    # WithInner(V, g) is its OWN space (≠ V): converting to a bare basis of V is NOT a cob — it
+    # is an explicit `remetric`.  Within WithInner(V, g) the metric is metadata, so a cob between
+    # two WithInnerBasis of the same g is just the cob of their underlying bases (the group above).
+    return Conv("a bare basis of the underlying V (NOT a cob — an explicit `remetric`)",
+                "WithInner(V, g) ≠ V: stripping/attaching the metric crosses spaces, so it must "
+                "be written as a `remetric`, not an implicit change of basis. Within WithInner(V, "
+                "g) (same metric) the cob is just the underlying bases' cob.")
 
 
 # Abstract bases: conversion is defined only after instantiation/reduction (no concrete cob).

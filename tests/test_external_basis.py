@@ -48,12 +48,11 @@ def test_basis_req_is_part_of_identity_and_hashable():
 
 
 def _pinned_nondefault_basis():
-    # A non-default basis of the SAME space (ℝ): the metricized (WithInner) basis — a distinct
-    # node from the default ScalarBasis, so a cob to standard is still emitted.  (A DualBasis
-    # would be a basis of ℝ*, a *different* space, and is correctly rejected — there are no
-    # implicit ℝ≅ℝ* conversions; see docs/design-problems.md.)
-    g = C.var("g", C.oprod(C.dual(R), C.dual(R)))
-    return B.with_inner_basis(B.scalar_basis(), g)
+    # A non-default basis of the SAME space (ℝ): a term (ListBasis) basis — distinct from the
+    # default ScalarBasis, so a cob to standard is emitted.  (A DualBasis is a basis of ℝ*, and
+    # a WithInner basis is the metricized space WithInner(ℝ, g) — both *different* spaces, and
+    # correctly rejected: no implicit conversions, even canonical.  See docs/design-problems.md.)
+    return B.list_basis(C.var("u", R))
 
 
 def test_standard_emits_cob_for_nondefault_operand():

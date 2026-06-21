@@ -29,6 +29,21 @@ conversions are exhaustive in `test_doc_conversions` / `test_ffs_basis_conversio
 `test_cob_via_standard`; the N×N `test_cob_matrix_closure` asserts each cell *converts (and
 round-trips) or cleanly rejects*.
 
+### `WithInner(V, g)` is its own space — crossing to `V` is an explicit `remetric`
+A `WithInnerBasis(b, g)` is a basis of the metricized space `WithInner(V, g)`, which is **not**
+the same space as `V`.  So `cob` does **not** silently strip/attach the metric:
+
+- a value in `WithInner(V, g)` pinned to a bare basis of `V` (or vice versa) is rejected;
+  converting between them is an explicit `remetric` term, not a change of basis;
+- within `WithInner(V, g)` (the *same* metric `g`), `cob(WithInnerBasis(b₁,g),
+  WithInnerBasis(b₂,g)) = cob(b₁, b₂)` (the metric is shared, so it's just the underlying cob).
+
+`_space_of_basis(WithInnerBasis(b,g)) = WithInner(space_of(b), g)` and `_norm_space` keeps the
+wrapper.  (Realization is unaffected: a `WithInnerBasis`'s coordinate *columns* are its inner
+basis's columns — the metric changes the inner product, not the columns.)  This fixed a latent
+bug where the pure cob read a non-existent `.inner` field on `WithInnerBasis` (it is `.basis`),
+exposed once `WithInner ↔ WithInner` cobs were actually exercised.
+
 ### The fallback is the standard basis
 Within a space, when no specialized rule applies, `cob(A → B) = pinv(realize B) · realize A`:
 realizing a basis **is** its cob to the standard basis, and `cob(std → A)` is the inverse. So
@@ -36,10 +51,6 @@ every basis must convert to/from its standard basis (`test_cob_via_standard`).
 
 ## Open questions
 
-- **Is `WithInner(V, g)` the same space as `V` for a cob?** Currently yes — the metric is treated
-  as metadata, so a `WithInnerBasis(b, g)` and `b` have the same coordinates and `cob` strips the
-  metric (an identity, not a conversion). If we later want the metricized space to be distinct,
-  this becomes an explicit `remetric`, not a silent strip.
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** A `ListBasis` of `k < n` ambient vectors is
   a basis of *some* `k`-D subspace, but *which* subspace is runtime (numeric), so
   `_space_of_basis` returns `None` and the guard falls back to variance parity for it. This means

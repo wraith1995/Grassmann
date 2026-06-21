@@ -173,24 +173,6 @@ Output — the `cob` matrix:
  [0., 0., 0., 0., 1., 1.]]
 ```
 
-### → the g-orthonormal `WithInnerBasis` wrapping (metadata, reverse)
-
-**Mechanism (`cob`):** attaching a metric is metadata, not coordinates ⇒ identity
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(BasisRep(3, ScalarBasis()), WithInnerBasis(BasisRep(3, ScalarBasis()), g))
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
-```
-
 ## Fields
 
 | field | type |
