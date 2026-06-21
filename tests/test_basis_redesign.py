@@ -120,6 +120,25 @@ def test_imagebasis_source_cob_is_source_basis_cob() -> None:
     assert m == pytest.approx(Sm)
 
 
+def test_imagebasis_cob_is_target_independent() -> None:
+    # SAME map: differing codomain *target* must NOT change the cob (target is embed-only); the
+    # cob is the source-basis cob whether or not the targets agree.
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
+    s0, s1 = C.var("s0", Rt), C.var("s1", Rt)
+    Sm = np.array([[1.0, 0.0], [1.0, 1.0]])
+    t = [C.var(f"t{i}", Re) for i in range(3)]
+    Tm = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.0, 0.0, 1.0]])
+    feeds = {_k(J): Jm.T, _k(s0): Sm[:, 0], _k(s1): Sm[:, 1],
+             **{_k(t[i]): Tm[:, i] for i in range(3)}}
+    src, tgt = B.list_basis(s0, s1), B.list_basis(*t)
+    plain = _cob(B.image_basis(J, source=src), B.image_basis(J), feeds)              # no targets
+    with_t = _cob(B.image_basis(J, source=src, target=tgt), B.image_basis(J), feeds)  # diff target
+    assert plain == pytest.approx(with_t)   # target-independent (target is embed-only)
+    assert plain == pytest.approx(Sm)        # = the source-basis cob (S)
+
+
 def test_imagebasis_target_reads_in_codomain_basis() -> None:
     Rt, Re = C.base("Rt", 2), C.base("Re", 3)
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
