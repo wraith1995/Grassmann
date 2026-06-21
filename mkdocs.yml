@@ -18,15 +18,19 @@ exclude_docs: |
   _authored/
 extra_javascript:
   - js/review.js
+  - js/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 markdown_extensions:
   - admonition
   - md_in_html
   - pymdownx.highlight
   - pymdownx.superfences
+  - pymdownx.arithmatex: {generic: true}
   - tables
   - toc: {permalink: true}
 nav:
   - Home: index.md
+  - Definitions: definitions.md
   - Testing: testing.md
   - Design problems: design-problems.md
   - Spaces:
