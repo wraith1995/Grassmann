@@ -91,12 +91,6 @@ def test_ker_typed_var_rank_assert_misfires() -> None:
 # ---------------------------------------------------------------------------
 # Gap 2 — sibling-δ in term-stacking: two FFS Vars of one space get distinct δ atoms.
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(
-    reason="substrate gap 2: _stack_term_cols rejects two CoImg(f)-typed Vars as "
-           "'inconsistent ambient dim' because they carry distinct runtime-δ DimAtoms, "
-           "though the sibling-agreement AssertOp makes them equal at runtime",
-    strict=True,
-)
 def test_coimg_listbasis_sibling_delta_stacking() -> None:
     """A ``ListBasis`` of two ``CoImg(f)``-typed Vars (coimg dim 2 = rank 2, so gap 1 does NOT
     fire) should stack into a 2-column basis, but distinct δ atoms trip the dim check."""
@@ -117,12 +111,6 @@ def test_coimg_listbasis_sibling_delta_stacking() -> None:
 # ---------------------------------------------------------------------------
 # Gap 3 — same sibling-δ root, two FFS Vars combined (different selector + map).
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(
-    reason="substrate gap 3 (same root as 2): combining two Ker(g)-typed Vars in one "
-           "ListBasis is rejected — the distinct runtime-δ DimAtoms of the siblings are not "
-           "unified, so the stack reports 'inconsistent ambient dim'",
-    strict=True,
-)
 def test_ker_listbasis_sibling_delta_combination() -> None:
     """Two ``Ker(g)``-typed Vars (g: ℝ⁴→ℝ², ker dim 2 = rank 2, so gap 1 does NOT fire)
     combined in one ``ListBasis`` should round-trip against themselves with the identity cob,

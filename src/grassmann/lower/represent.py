@@ -275,6 +275,18 @@ class _Ctx:
     # cached and its :class:`FfsRealization` outputs (cols, rank, δ DimAtom) are reused by
     # every later consumer — so each distinct factorization is emitted exactly once.
     ffs_realizations: dict[tuple[str, int], FfsRealization] = field(default_factory=dict)
+    # Canonical per-``(which, id(f))`` subspace-dimension ``DimAtom`` (`51 §FFS-δ`).
+    # The dynamic FFS dimension of a map ``f`` is metric-INDEPENDENT (the rank, or its
+    # complement for ker/coker), so the metric-free SVD and the metric GSVD of one
+    # ``(f, which)`` — and every FFS-typed Var of that space — must share ONE atom.  The
+    # space-basis seam mints the column-axis ``DimAtom`` once (on the first realization,
+    # sourced from that realization's rank/comp output) and records it here; subsequent
+    # realizations of the same ``(which, id(f))`` reuse it.  Because two Vars of the same
+    # FFS then literally carry the same atom, ``_stack_term_cols`` accepts their stack and
+    # einsums/InvOp unify — no per-input ``from_input`` δ atoms.  ``None`` for the SUBSPACE
+    # axis means "not yet minted".  For ker/coker the recorded atom IS the complement
+    # axis (``ambient − rank``), since that is the real subspace dimension there.
+    ffs_dim_atoms: dict[tuple[str, int], pa.DimAtom] = field(default_factory=dict)
 
 
 # ===========================================================================
@@ -405,11 +417,20 @@ def _make_dynamic_ffs_input(
     rank-consistency and sibling-agreement ``AssertOp``s (`42 §C4`) are emitted here.
     """
     name = _var_name(e)
-    # The input shape carries input-sourced DimAtoms for every dynamic axis (so the
-    # axis size is read from the supplied array's shape at run time, not a Stmt's rank).
+    # `51 §FFS-δ`: an FFS-typed Var's dynamic axis is sized by the **canonical** subspace
+    # atom of its ``(which, id(f))`` factorization — the very DimAtom that
+    # ``_shape_of_space_dyn`` reads off the realized basis's column axis (sourced from a
+    # prior Stmt's rank/comp output).  Reusing it (rather than minting a fresh per-input
+    # ``from_input`` δ) means two Vars of the same FFS literally SHARE one atom, so
+    # ``_stack_term_cols`` accepts their stack and einsums/InvOp unify.  Polyarray's input
+    # pre-bind defers binding such ``("stmt", …)`` axes to the producing Stmt; the
+    # ``rank_eq`` AssertOp below still validates the fed array's axis length against it.
+    # A ``from_input`` fallback covers any dynamic axis that is NOT a canonical stmt atom.
     in_shape: list[int | pa.DimAtom] = []
     for axis, d in enumerate(dyn_shape):
         if isinstance(d, int):
+            in_shape.append(d)
+        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "stmt":
             in_shape.append(d)
         else:
             in_shape.append(pa.DimAtom.from_input(f"δ:{name}@{axis}", name, axis))
@@ -3079,12 +3100,25 @@ def _realize_ffs_by_which(
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
         note="ffs-basis:to-(cod,dom)",
     )
+    # `51 §FFS-δ`: the dynamic subspace dimension is metric-INDEPENDENT, so the canonical
+    # column-axis atom is keyed by ``(which, id(f))`` ALONE (no source/target).  The metric
+    # GSVD and the metric-free SVD of one ``(f, which)`` thus share one atom — and so do all
+    # FFS-typed Vars of that space (`_make_dynamic_ffs_input`).  The atom is minted on the
+    # first realization (sourced from its rank/comp output) and reused thereafter.
+    dim_key = (norm, id(f))
     real = realize_ffs_basis(
         ctx.prog, norm, f_cd,
         dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
         props=map_props(f), metric_dom=metric_dom, metric_cod=metric_cod,
         label=getattr(f, "name", "f"),
+        dim_atom=ctx.ffs_dim_atoms.get(dim_key),
     )
+    # Record the canonical SUBSPACE atom (the column axis of ``cols``) the first time it is
+    # minted, so later realizations of the same ``(which, id(f))`` reuse the very same atom.
+    if dim_key not in ctx.ffs_dim_atoms:
+        col_dim = _shape_of(real.cols)[1]
+        if isinstance(col_dim, pa.DimAtom):
+            ctx.ffs_dim_atoms[dim_key] = col_dim
     ctx.ffs_realizations[key] = real
     return real
 
