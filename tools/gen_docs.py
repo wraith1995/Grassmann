@@ -679,9 +679,19 @@ _REVIEW_JS = r"""
 """
 
 
+_MATHJAX_JS = """
+window.MathJax = {
+  tex: {inlineMath: [["\\\\(", "\\\\)"]], displayMath: [["\\\\[", "\\\\]"]]},
+  options: {ignoreHtmlClass: ".*|", processHtmlClass: "arithmatex"}
+};
+document$.subscribe(() => { MathJax.typesetPromise(); });
+"""
+
+
 def _write_review_js() -> None:
     (DOCS / "js").mkdir(parents=True, exist_ok=True)
     (DOCS / "js" / "review.js").write_text(_REVIEW_JS.lstrip("\n"))
+    (DOCS / "js" / "mathjax.js").write_text(_MATHJAX_JS.lstrip("\n"))
 
 
 def _write_mkdocs(nav_cats) -> None:
@@ -706,15 +716,19 @@ def _write_mkdocs(nav_cats) -> None:
         "  _authored/",
         "extra_javascript:",
         "  - js/review.js",
+        "  - js/mathjax.js",
+        "  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js",
         "markdown_extensions:",
         "  - admonition",
         "  - md_in_html",
         "  - pymdownx.highlight",
         "  - pymdownx.superfences",
+        "  - pymdownx.arithmatex: {generic: true}",
         "  - tables",
         "  - toc: {permalink: true}",
         "nav:",
         "  - Home: index.md",
+        "  - Definitions: definitions.md",
         "  - Testing: testing.md",
         "  - Design problems: design-problems.md",
     ]
