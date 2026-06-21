@@ -1216,6 +1216,16 @@ def _inverse_cols(
             note="cob:std→to=Cᵀ (standard-orthonormal)",
         )
         return tr
+    g = _orthonormal_metric(ctx, to, n_amb) if to is not None else None
+    if g is not None:
+        # g-orthonormal `to` (UᵀGU = I) ⇒ cob(std → to) = Uᵀ·G — an exact factor (Cholesky for a
+        # metric OrthonormalBasis, GSVD reorthonormalization for a metric ProjectedBasis).
+        [gf] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("cr,cw->rw"), [c_to, g],
+            [pa.OutSpec("cob:std→to=Cᵀ·G", (k_to, n_amb))],
+            note="cob:std→to=Cᵀ·G (g-orthonormal)",
+        )
+        return gf
     if isinstance(n_amb, int) and isinstance(k_to, int) and n_amb == k_to:
         [iv] = ctx.prog.emit_stmt(
             pa.InvOp(), [c_to], [pa.OutSpec("cob:std→to=C⁻¹", (k_to, n_amb))],
@@ -1232,20 +1242,40 @@ def _inverse_cols(
 def _is_standard_orthonormal(b: B.Basis) -> bool:
     """Whether ``realize_basis_cols(b)`` has orthonormal columns in the STANDARD inner product
     (so ``pinv = transpose``).  Conservative: only the constructions that realize through a
-    standard QR/SVD (``_QrColsOp`` / FFS range without a metric), never a *g*-orthonormal one."""
+    standard QR/SVD (``_QrColsOp`` / FFS range without the relevant metric)."""
     match b:
         case B.ScalarBasis():
             return True
         case B.OrthonormalBasis(inner):
             return not isinstance(inner, B.WithInnerBasis)          # plain QR ⇒ QᵀQ = I
-        case B.ProjectedBasis(_f, _w, src, tgt):
-            return src is None and tgt is None                      # metric-free SVD/QR range
+        case B.ProjectedBasis(_f, which, src, tgt):
+            # the range is orthonormal in its subspace's metric: cod-side (target) for
+            # image/coker, dom-side (source) for ker/coimg; that metric absent ⇒ standard.
+            return (tgt is None) if which in ("image", "img", "coker") else (src is None)
         case B.ListBasis(_v, backup, reduce):
             return reduce is B.Reduce.ORTHONORMALIZE and backup is None
         case B.CompleteBasis(_s, _c, reduce):
             return reduce is B.Reduce.ORTHONORMALIZE
         case _:
             return False
+
+
+def _orthonormal_metric(ctx: _Ctx, b: B.Basis, n_amb: object) -> pa.SymArray | None:
+    """The metric ``G`` in which ``b``'s realized columns are orthonormal (``UᵀGU = I``), when
+    ``b`` is *g*-orthonormal rather than standard-orthonormal — so ``cob(std → b) = Uᵀ·G`` is an
+    exact factor (no pseudo-inverse).  ``None`` if ``b`` carries no such metric.
+
+    (For a raw ``WithInnerBasis`` → its ``OrthonormalBasis`` this makes the cob ``Uᵀ·G·A =
+    L⁻¹AᵀGA = Lᵀ``, the Cholesky factor; for a metric ``ProjectedBasis`` it is the GSVD
+    reorthonormalization ``Uᵀ·M·U_from``.)"""
+    match b:
+        case B.OrthonormalBasis(B.WithInnerBasis(_inner, g)):
+            return _metric_matrix_of(ctx, g, n_amb if isinstance(n_amb, int) else 0)
+        case B.ProjectedBasis(_f, which, src, tgt):
+            metric_basis = tgt if which in ("image", "img", "coker") else src
+            return _basis_metric(ctx, metric_basis) if metric_basis is not None else None
+        case _:
+            return None
 
 
 def _basis_variance(ctx: _Ctx, basis: B.Basis) -> bool:
