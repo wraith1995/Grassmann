@@ -186,20 +186,20 @@ Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-
    `_orthonormal_metric`, `_is_standard_orthonormal` all use it. Both `Orth(Dual(WithInner(b,g)))`
    and `Dual(Orth(WithInner(b,g)))` are accepted and realize `G⁻¹`-orthonormal (`QᵀG⁻¹Q=I`).
 
-### Sub-optimal (correct, cheaper/exacter possible)
-- `Primal↔Dual` are the same space, but `_cob_from_dual`/`_primal` only match their own wrapper, so
-  mixed pairs (`Dual(a)→Primal(b)`, `Dual(Primal(a))→b`) take `_cob_via_standard` instead of the
-  exact `(inner cob)⁻ᵀ`. Add the cross arms.
-- `ImageBasis→ProjectedBasis(image)` now goes generic (emits a redundant to-side `U_dᵀ·U_d=I`
-  realize + `InvOp` on `I`); a direct `case (_, ProjectedBasis same map, metric-free)` returning the
-  ImageBasis's `R` restores the old cheapness (dedup may already fold it).
-- `_inverse_cols` square detection is `int`-only, so a dynamic-δ FFS `to` (now realized square)
-  falls to `PinvOp` instead of `InvOp` (`pinv(square)=inv`, correct but costlier). Detect a shared
-  δ atom / pass a `square` hint.
-- `_identity_like` on a dynamic FFS basis emits the whole GSVD just to size a `δ×δ` eye; size it
-  from the canonical `ffs_dim_atoms` δ instead.
-- `_inv_transpose` uses `InvOp` even when the inner cob is orthogonal (could transpose); the
-  `_cob_from_projected` same-metric identity guard could short-circuit on the relevant side only.
+### Sub-optimal (correct, cheaper/exacter possible) — **batch FIXED** (except one micro-opt)
+- **[FIXED]** `Primal↔Dual` mixed pairs (`Dual(a)→Primal(b)`, `Dual(Primal(a))→b`) now take the
+  exact `(inner cob)⁻ᵀ` — `_cob_from_dual`/`_primal` match `DualBasis | PrimalBasis` as `to`.
+- **[FIXED]** `ImageBasis→ProjectedBasis(image)` of the same map (metric-free) returns the `R`
+  factor directly (`_cob_from_image` arm), skipping the redundant to-side `InvOp(I)`.
+- **[FIXED]** `_inverse_cols` treats a dynamic-δ FFS `to` as square (both axes the same canonical δ
+  `DimAtom`) ⇒ `InvOp` not `PinvOp` (`_axes_square`).
+- **[FIXED]** `_identity_like` on a dynamic FFS basis sizes the `δ×δ` eye from the memoized FFS
+  factorization's column axis, not a fresh in-space realize.
+- **[FIXED]** `_cob_from_projected` same-metric identity guard is now which-aware
+  (`_projected_own_metric_eq`): only the own-side metric (target for image/coker, source for
+  ker/coimg) is compared, so an irrelevant-side difference short-circuits to identity.
+- **[open, micro]** `_inv_transpose` still uses `InvOp` even when the inner cob is orthogonal
+  (could transpose) — low value, deferred.
 
 ## Open questions
 
