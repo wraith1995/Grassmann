@@ -1375,7 +1375,10 @@ def _is_standard_orthonormal(b: B.Basis) -> bool:
         case B.ScalarBasis():
             return True
         case B.OrthonormalBasis(inner):
-            return not isinstance(inner, B.WithInnerBasis)          # plain QR ⇒ QᵀQ = I
+            # standard-orthonormal ONLY when NO metric is carried (peel Dual/Primal to find it);
+            # a carried metric ⇒ g-orthonormal (or G⁻¹-orthonormal under a dual) (audit Fix 5).
+            g, _parity = _peel_orthonormal_metric(inner)
+            return g is None                                        # plain QR ⇒ QᵀQ = I
         case B.ListBasis(_v, backup, reduce):
             return reduce is B.Reduce.ORTHONORMALIZE and backup is None
         case B.CompleteBasis(_s, _c, reduce):
@@ -1393,8 +1396,13 @@ def _orthonormal_metric(ctx: _Ctx, b: B.Basis, n_amb: object) -> pa.SymArray | N
     L⁻¹AᵀGA = Lᵀ``, the Cholesky factor.  FFS bases are NOT here — they realize in-space and
     square, so the metric-factor branch never applies to them.)"""
     match b:
-        case B.OrthonormalBasis(B.WithInnerBasis(_inner, g)):
-            return _metric_matrix_of(ctx, g, n_amb if isinstance(n_amb, int) else 0)
+        case B.OrthonormalBasis(inner):
+            # peel Dual/Primal to the carried metric; ODD parity ⇒ the dual metric G⁻¹ is the
+            # effective inner product (Orth(Dual(WithInner(b,g)))), EVEN ⇒ G (audit Fix 5).
+            g, parity = _peel_orthonormal_metric(inner)
+            if g is None:
+                return None
+            return _effective_metric_matrix(ctx, g, n_amb, parity)
         case _:
             return None
 
@@ -2456,6 +2464,163 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Seam-aware (Dim-aware) structured-basis combinators (`41 §2`, audit Fix 1).
+#
+# The pure ``_block_diag``/``_kron``/``_block_repeat`` (below) do raw Python int shape
+# arithmetic, so they ``TypeError`` once a component dim is a runtime ``DimAtom`` (an FFS
+# subspace of dynamic rank).  These ``*_cols`` siblings recombine columns realized *seam-
+# aware* (via :func:`realize_basis_cols`) and size the output dynamically: when any
+# component dim is a ``DimAtom`` the combined row/col axis is itself a runtime ``DimAtom``
+# sourced from a tiny 0-d ``_SumDimOp``/``_ProdDimOp`` Stmt (mirroring the FFS complement
+# ``_comp_dim`` pattern) — so a ``BasisSum``/``BasisProd``/``BasisRep`` of a dynamic-rank
+# FFS component realizes instead of crashing.
+# ---------------------------------------------------------------------------
+
+
+def _axis_dims(mats: list[pa.SymArray], axis: int) -> list[int | pa.DimAtom]:
+    return [_shape_of(m)[axis] for m in mats]
+
+
+def _combined_dim(
+    ctx: _Ctx, dims: list[int | pa.DimAtom], op: str, refs: list[pa.SymArray],
+    ref_axis: int, *, label: str,
+) -> int | pa.DimAtom:
+    """The static-or-dynamic combined dim (``op`` ∈ ``"sum"``/``"prod"``) of ``dims``.
+
+    All-static ⇒ plain Python int (byte-identical to the pure combinators).  Otherwise a
+    runtime ``DimAtom`` sourced from a fresh 0-d Stmt that reads the components' ``ref_axis``
+    lengths at run time and combines them — so a mixed static/dynamic shape resolves correctly.
+    """
+    if all(isinstance(d, int) for d in dims):
+        acc = 0 if op == "sum" else 1
+        for d in dims:
+            acc = acc + d if op == "sum" else acc * d
+        return acc
+    out_op = _SumDimOp(ref_axis) if op == "sum" else _ProdDimOp(ref_axis)
+    [_dim] = ctx.prog.emit_stmt(
+        out_op, refs, [pa.OutSpec(f"{op}-dim:{label}", ())],
+        note=f"cob:{op}-dim({label})",
+    )
+    idx = len(ctx.prog.statements) - 1
+    return pa.DimAtom(name=f"{op}({label})", source=(idx, 0))
+
+
+def _block_diag_cols(ctx: _Ctx, mats: list[pa.SymArray]) -> pa.SymArray:
+    """``BasisSum`` realize — block-diagonal of seam-aware component columns (Dim-aware)."""
+    if len(mats) == 1:
+        return mats[0]
+    rows = _combined_dim(ctx, _axis_dims(mats, 0), "sum", mats, 0, label="blockdiag-r")
+    cols = _combined_dim(ctx, _axis_dims(mats, 1), "sum", mats, 1, label="blockdiag-c")
+    [m] = ctx.prog.emit_stmt(
+        _BlockDiagOp(), mats, [pa.OutSpec("blockdiag", (rows, cols))],
+        note="cob:BasisSum=block-diag",
+    )
+    return m
+
+
+def _kron_cols(ctx: _Ctx, mats: list[pa.SymArray]) -> pa.SymArray:
+    """``BasisProd`` realize — Kron of seam-aware component columns (Dim-aware)."""
+    if len(mats) == 1:
+        return mats[0]
+    rows = _combined_dim(ctx, _axis_dims(mats, 0), "prod", mats, 0, label="kron-r")
+    cols = _combined_dim(ctx, _axis_dims(mats, 1), "prod", mats, 1, label="kron-c")
+    [m] = ctx.prog.emit_stmt(
+        _KronOp(len(mats)), mats, [pa.OutSpec("kron", (rows, cols))],
+        note="cob:BasisProd=Kron",
+    )
+    return m
+
+
+def _block_repeat_cols(ctx: _Ctx, mat: pa.SymArray, count: object) -> pa.SymArray:
+    """``BasisRep`` realize — ``n`` block-diagonal copies of ``mat`` (Dim-aware count).
+
+    A static ``count`` is the plain ``_BlockRepeatOp``.  A runtime/symbolic ``count`` (a
+    ``DimAtom`` from the SymbolEnv, or a non-static :class:`~grassmann.core.space.Dim`) takes
+    a runtime block-repeat (``_DynBlockRepeatOp``) sized by the resolved count, with the output
+    axes themselves dynamic ``DimAtom``s (``count·rows`` / ``count·cols``)."""
+    r, c = _shape_of(mat)
+    n_static = _try_count_int(count)
+    if n_static is not None and isinstance(r, int) and isinstance(c, int):
+        [m] = ctx.prog.emit_stmt(
+            _BlockRepeatOp(n_static), [mat],
+            [pa.OutSpec("blockrep", (n_static * r, n_static * c))],
+            note="cob:BasisRep=block-repeat",
+        )
+        return m
+    # A static count repeating a DYNAMIC-dim component: the count is known, the per-copy
+    # axes are runtime, so the output axes are ``count · (runtime axis)`` DimAtoms read off
+    # ``mat`` at run time, but the block-repeat itself uses the static count.
+    if n_static is not None:
+        out_rows = _scaled_dim(ctx, n_static, mat, axis=0, label="blockrep-r")
+        out_cols = _scaled_dim(ctx, n_static, mat, axis=1, label="blockrep-c")
+        [m] = ctx.prog.emit_stmt(
+            _BlockRepeatOp(n_static), [mat],
+            [pa.OutSpec("blockrep-dyn", (out_rows, out_cols))],
+            note="cob:BasisRep=block-repeat(static-n,dyn-dim)",
+        )
+        return m
+    # A runtime/symbolic count: resolve it to a 0-d int, then size + repeat at run time.
+    n_arr = _count_dim_array(ctx, count)
+    out_rows = _scaled_by_array(ctx, n_arr, mat, axis=0, label="blockrep-r")
+    out_cols = _scaled_by_array(ctx, n_arr, mat, axis=1, label="blockrep-c")
+    [m] = ctx.prog.emit_stmt(
+        _DynBlockRepeatOp(), [mat, n_arr],
+        [pa.OutSpec("blockrep-dyn", (out_rows, out_cols))],
+        note="cob:BasisRep=block-repeat-dyn",
+    )
+    return m
+
+
+def _try_count_int(count: object) -> int | None:
+    """``count`` as a static int, or ``None`` if it is runtime/symbolic."""
+    try:
+        return _count_int(count)
+    except CobError:
+        return None
+
+
+def _count_dim_array(ctx: _Ctx, count: object) -> pa.SymArray:
+    """A 0-d runtime int SymArray carrying a ``BasisRep`` count's value.
+
+    A static count emits a const; a symbolic :class:`~grassmann.core.space.Dim` is resolved
+    from the program's :class:`~polyarray.SymbolEnv` (the dynamic-rank ``DimAtom``) via an
+    :class:`~polyarray.AxisLen`-style read.  Only the static path is exercised today; the
+    symbolic-count path raises a clear error rather than silently mis-sizing.
+    """
+    n = _try_count_int(count)
+    if n is not None:
+        return _const(ctx, np.asarray(int(n)), note="cob:BasisRep-count")
+    raise RepresentError(
+        f"cob: BasisRep with a runtime/symbolic count {count!r} is not yet supported "
+        "(no value source for the count at run time)"
+    )
+
+
+def _scaled_dim(
+    ctx: _Ctx, n_static: int, mat: pa.SymArray, *, axis: int, label: str,
+) -> pa.DimAtom:
+    """A runtime ``DimAtom`` = ``n_static · (mat's ``axis`` length)`` (static count, dyn axis)."""
+    [_dim] = ctx.prog.emit_stmt(
+        _ScaleAxisDimOp(n=n_static, axis=axis), [mat],
+        [pa.OutSpec(f"scaled-dim:{label}", ())], note=f"cob:scaled-dim({label})",
+    )
+    idx = len(ctx.prog.statements) - 1
+    return pa.DimAtom(name=f"scaled({label})", source=(idx, 0))
+
+
+def _scaled_by_array(
+    ctx: _Ctx, n_arr: pa.SymArray, mat: pa.SymArray, *, axis: int, label: str,
+) -> pa.DimAtom:
+    """A runtime ``DimAtom`` = ``n_arr · (mat's ``axis`` length)`` (runtime count, dyn axis)."""
+    [_dim] = ctx.prog.emit_stmt(
+        _MulAxisDimOp(axis=axis), [n_arr, mat],
+        [pa.OutSpec(f"scaled-dim:{label}", ())], note=f"cob:scaled-dim({label})",
+    )
+    idx = len(ctx.prog.statements) - 1
+    return pa.DimAtom(name=f"scaled({label})", source=(idx, 0))
+
+
 def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
     """Matrix whose columns are ``b``'s vectors in its space's OWN coords (`41 §2`).
 
@@ -2483,6 +2648,14 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return _realize_orthonormal(ctx, inner)
         case B.ImageBasis() | B.ProjectedBasis():
             return _realize_ffs_in_space(ctx, b)
+        case B.BasisSum(bases):
+            # SEAM-AWARE block-diag: recurse through realize_basis_cols so a seam component
+            # (FFS / term / orthonormal / complete) is realized, then stack block-diagonally.
+            return _block_diag_cols(ctx, [realize_basis_cols(ctx, x) for x in bases])
+        case B.BasisProd(bases):
+            return _kron_cols(ctx, [realize_basis_cols(ctx, x) for x in bases])
+        case B.BasisRep(count, inner):
+            return _block_repeat_cols(ctx, realize_basis_cols(ctx, inner), count)
         case B.ListBasis(vectors, backup, reduce):
             return _realize_list_basis(ctx, vectors, backup, reduce)
         case B.CompleteBasis(sub, complement, reduce):
@@ -2511,7 +2684,36 @@ def _realize_list_basis(
             _CompleteColsOp(n), [cols, bcols], [pa.OutSpec("listbasis:complete", (n, n))],
             note="listbasis:RREF-complete(frame|backup)",
         )
+    elif reduce is B.Reduce.RREF:
+        # ``RREF`` with NO backup: keep the frame's linearly-independent columns — a genuine
+        # basis of the frame's SPAN (not the raw, possibly singular, frame).  Full rank ⇒ all
+        # columns unchanged; rank-deficient ⇒ a ``(rows, rank)`` matrix whose column axis is a
+        # runtime ``DimAtom`` (``rank`` is numeric).  (Audit Fix 2.)
+        cols = _rref_select_cols(ctx, cols)
     return cols
+
+
+def _rref_select_cols(ctx: _Ctx, cols: pa.SymArray) -> pa.SymArray:
+    """Greedy-pivot column SELECTION — keep ``cols``'s linearly-independent columns (`20 §7`).
+
+    A ``ListBasis(reduce=RREF, backup=None)`` is a basis of its frame's *span*: the kept
+    columns are the frame's rank, which is **dynamic** when the frame is rank-deficient.  The
+    output column axis is a runtime ``DimAtom`` sourced from a 0-d ``_RankOp`` (the realized
+    rank), so a full-rank frame returns all columns and a rank-deficient one returns exactly
+    its independent columns (a non-singular subspace basis).
+    """
+    rows, n_cols = _shape_of(cols)
+    [rank] = ctx.prog.emit_stmt(
+        _RankOp(), [cols], [pa.OutSpec("listbasis:rank", ())],
+        note="listbasis:RREF-rank",
+    )
+    rank_idx = len(ctx.prog.statements) - 1
+    out_cols = pa.DimAtom(name="listbasis:rref-rank", source=(rank_idx, 0))
+    [sel] = ctx.prog.emit_stmt(
+        _RrefSelectColsOp(), [cols, rank], [pa.OutSpec("listbasis:rref-select", (rows, out_cols))],
+        note="listbasis:RREF-select-independent-columns",
+    )
+    return sel
 
 
 def _stack_term_cols(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
@@ -2571,18 +2773,62 @@ def _realize_complete_basis(
     return out
 
 
+def _peel_orthonormal_metric(inner: B.Basis) -> tuple[object | None, int]:
+    """Peel ``Dual``/``Primal`` wrappers off an ``OrthonormalBasis``'s inner basis to find the
+    carried metric (audit Fix 5).
+
+    Each ``DualBasis``/``PrimalBasis`` layer toggles the **variance parity**; a
+    ``WithInnerBasis`` captures its metric term ``g``.  Returns ``(g_or_None, parity)`` where
+    ``parity`` is the number of dual/primal layers mod 2.  When a metric is carried, ODD parity
+    means the basis lives in a **dual** space ⇒ its effective inner product is the *dual metric*
+    ``G⁻¹`` (EVEN parity ⇒ ``G``).  ``None`` (no ``WithInnerBasis``) ⇒ the standard product."""
+    parity = 0
+    b = inner
+    while True:
+        match b:
+            case B.DualBasis(x) | B.PrimalBasis(x):
+                parity ^= 1
+                b = x
+            case B.WithInnerBasis(_x, g):
+                return g, parity
+            case _:
+                return None, parity
+
+
 def _realize_orthonormal(ctx: _Ctx, inner: B.Basis) -> pa.SymArray:
-    """Realize ``OrthonormalBasis(inner)`` — orthonormalize ``inner``'s columns, w.r.t. its
-    metric when ``inner`` is a ``WithInnerBasis`` (g-orthonormal), else the standard product."""
+    """Realize ``OrthonormalBasis(inner)`` — orthonormalize ``inner``'s columns w.r.t. its
+    *effective* metric (audit Fix 5).
+
+    The columns are ``realize_basis_cols(inner)`` (already in the possibly-dual coords).  Peeling
+    ``Dual``/``Primal`` finds any carried ``WithInnerBasis`` metric ``g``: with NO metric we do a
+    standard QR (``QᵀQ = I``); with a metric we metric-orthonormalize against ``G`` (EVEN parity)
+    or the **dual metric** ``G⁻¹`` (ODD parity — e.g. ``Orth(Dual(WithInner(b,g)))`` gives
+    ``QᵀG⁻¹Q = I``)."""
     cols = realize_basis_cols(ctx, inner)
-    if isinstance(inner, B.WithInnerBasis):
-        g = _metric_matrix_of(ctx, inner.metric, _shape_of(cols)[0])
-        [out] = ctx.prog.emit_stmt(
-            _MetricOrthonormalOp(), [cols, g], [pa.OutSpec("orthonormal:g", _shape_of(cols))],
-            note="orthonormalize:g-Gram-Schmidt",
-        )
-        return out
-    return _orthonormalize_cols(ctx, cols)
+    g, parity = _peel_orthonormal_metric(inner)
+    if g is None:
+        return _orthonormalize_cols(ctx, cols)
+    g_eff = _effective_metric_matrix(ctx, g, _shape_of(cols)[0], parity)
+    [out] = ctx.prog.emit_stmt(
+        _MetricOrthonormalOp(), [cols, g_eff], [pa.OutSpec("orthonormal:g", _shape_of(cols))],
+        note="orthonormalize:g-Gram-Schmidt",
+    )
+    return out
+
+
+def _effective_metric_matrix(
+    ctx: _Ctx, metric: object, n: object, parity: int,
+) -> pa.SymArray:
+    """The metric matrix in which an ``OrthonormalBasis`` is orthonormal: ``G`` (EVEN parity) or
+    the dual metric ``G⁻¹`` (ODD parity — the basis lives in a dual space) (audit Fix 5)."""
+    g = _metric_matrix_of(ctx, metric, n if isinstance(n, int) else 0)
+    if parity == 0:
+        return g
+    [ginv] = ctx.prog.emit_stmt(
+        pa.InvOp(), [g], [pa.OutSpec("metric:G^-1", _shape_of(g))],
+        note="orthonormalize:dual-metric=G^-1",
+    )
+    return ginv
 
 
 def _metric_matrix_of(ctx: _Ctx, metric: object, n: int) -> pa.SymArray:
@@ -2691,6 +2937,44 @@ class _CompleteColsOp:
         if kept.shape[1] != self.n:
             raise ValueError(
                 f"basis completion: frame ⊕ backup span {kept.shape[1]} < {self.n} dims"
+            )
+        return kept
+
+
+@dataclass(frozen=True)
+class _RankOp:
+    """The numeric rank of a column matrix as a 0-d int — sizes a RREF-selected basis (`20 §7`)."""
+
+    tol: float = 1e-9
+
+    def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
+        return np.asarray(int(np.linalg.matrix_rank(np.asarray(A, dtype=float), tol=self.tol)))
+
+
+@dataclass(frozen=True)
+class _RrefSelectColsOp:
+    """Greedy-pivot column SELECTION — keep ``A``'s linearly-independent columns (`20 §7`).
+
+    Mirrors ``_CompleteColsOp``'s selection but with no backup and no fixed ``n``: it keeps
+    exactly the columns that raise the running rank (so a full-rank ``A`` returns all columns
+    unchanged, a rank-deficient ``A`` returns a ``(rows, rank)`` basis of ``A``'s span).  The
+    ``rank`` operand is the realized rank (it sets the dynamic output column axis); the op
+    selects independently and validates the kept count against it.
+    """
+
+    tol: float = 1e-9
+
+    def __call__(self, A: np.ndarray, rank: np.ndarray) -> np.ndarray:  # noqa: N803
+        a = np.asarray(A, dtype=float)
+        kept = np.zeros((a.shape[0], 0))
+        for c in a.T:
+            cand = np.column_stack([kept, c])
+            if np.linalg.matrix_rank(cand, tol=self.tol) > kept.shape[1]:
+                kept = cand
+        want = int(np.asarray(rank))
+        if kept.shape[1] != want:  # pragma: no cover - defensive (rank disagreement)
+            raise ValueError(
+                f"RREF column selection kept {kept.shape[1]} columns, expected rank {want}"
             )
         return kept
 
@@ -3597,6 +3881,63 @@ class _BlockRepeatOp:
         for i in range(self.n):
             out[i * a.shape[0]:(i + 1) * a.shape[0], i * a.shape[1]:(i + 1) * a.shape[1]] = a
         return out
+
+
+@dataclass(frozen=True)
+class _DynBlockRepeatOp:
+    """``BasisRep`` realize with a **runtime** count ``n`` — ``n`` block-diagonal copies of ``A``."""
+
+    def __call__(self, A: np.ndarray, n: np.ndarray) -> np.ndarray:  # noqa: N803
+        a = np.asarray(A, dtype=float)
+        count = int(np.asarray(n))
+        out = np.zeros((count * a.shape[0], count * a.shape[1]))
+        for i in range(count):
+            out[i * a.shape[0]:(i + 1) * a.shape[0], i * a.shape[1]:(i + 1) * a.shape[1]] = a
+        return out
+
+
+@dataclass(frozen=True)
+class _SumDimOp:
+    """Σ of the operands' ``axis`` lengths as a 0-d int — sizes a dynamic block-diag axis."""
+
+    axis: int = 0
+
+    def __call__(self, *mats: np.ndarray) -> np.ndarray:
+        return np.asarray(sum(int(np.asarray(m).shape[self.axis]) for m in mats))
+
+
+@dataclass(frozen=True)
+class _ProdDimOp:
+    """∏ of the operands' ``axis`` lengths as a 0-d int — sizes a dynamic Kron axis."""
+
+    axis: int = 0
+
+    def __call__(self, *mats: np.ndarray) -> np.ndarray:
+        out = 1
+        for m in mats:
+            out *= int(np.asarray(m).shape[self.axis])
+        return np.asarray(out)
+
+
+@dataclass(frozen=True)
+class _ScaleAxisDimOp:
+    """``n · (mat's ``axis`` length)`` as a 0-d int — static count, runtime per-copy axis."""
+
+    n: int
+    axis: int = 0
+
+    def __call__(self, mat: np.ndarray) -> np.ndarray:
+        return np.asarray(self.n * int(np.asarray(mat).shape[self.axis]))
+
+
+@dataclass(frozen=True)
+class _MulAxisDimOp:
+    """``count · (mat's ``axis`` length)`` as a 0-d int — runtime count, runtime axis."""
+
+    axis: int = 0
+
+    def __call__(self, n: np.ndarray, mat: np.ndarray) -> np.ndarray:
+        return np.asarray(int(np.asarray(n)) * int(np.asarray(mat).shape[self.axis]))
 
 
 # --- pure-cob emitters ------------------------------------------------------
