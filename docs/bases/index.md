@@ -25,26 +25,25 @@ Every base constructor, its meaning, how it is built, how it is represented, and
 
 Rows = the basis you convert **from**, columns = the basis you convert **to**, over every concrete basis node (the abstract `BVar`/`BLam`/`BApp` are omitted — they have no concrete cob until instantiated/reduced).
 
-**The fallback is the standard basis.** When no specific structural case applies, `cob(A → B) = cob(std → B) · cob(A → std)`: realizing a basis *is* its cob to the standard basis (its vectors as columns), and `cob(std → A)` is the inverse. Every basis converts to/from its standard basis (verified in `tests/test_cob_via_standard.py`), so — composing through that hub — **every concrete basis is inter-convertible with every other**. The relation is **symmetric** and **transitively closed**, so the matrix is complete (`I` on the diagonal, ✓/✓ᵗ everywhere else):
+A change of basis is only valid between **two bases of the same space** (`_basis_cob_matrix` determines each basis's space and requires them equal). Within a space the fallback is the **standard basis** — `cob(A → B) = cob(std → B) · cob(A → std)`, since realizing a basis *is* its cob to standard and `cob(std → A)` is the inverse (every basis converts to/from its standard basis — `tests/test_cob_via_standard.py`). Across different spaces (e.g. `Img(f)` vs a full space, or `ℝ⁴` flat vs `ℝ²⊕ℝ²`) there is no cob.
 
-- The *term basis* `ListBasis` is the **universal** basis — it lists vectors of *any* space (primal **or** covector), so it directly reaches every node.
-- `PrimalBasis` is the **universal primal basis** (`PrimalBasis(DualBasis(b)) ≡ b`); `DualBasis` is the **universal covector basis** (≈ a `ListBasis` of covectors); `CompleteBasis` completes a sub-basis in any space. All are universal hubs.
+Here each basis node is shown against a representative of its OWN space, so **✓** marks the (same-space) conversions that representative supports — the *term basis* `ListBasis` and `PrimalBasis` reach every other basis of their space, `DualBasis` every covector basis, `ImageBasis ↔ ProjectedBasis` via the QR/GSVD factor. **—** is either a different space or not exercised here.
 
 | from \ to | `ScalarBasis` | `DualBasis` | `PrimalBasis` | `BasisSum` | `BasisProd` | `BasisRep` | `ProjectedBasis` | `ImageBasis` | `ListBasis` | `WithInnerBasis` | `CompleteBasis` |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| [`ScalarBasis`](scalar-basis.md) | `I` | ✓ᵗ | [✓](#conv-scalar-basis-primal-basis) | ✓ᵗ | ✓ᵗ | ✓ᵗ | ✓ᵗ | ✓ᵗ | [✓](#conv-scalar-basis-list-basis) | ✓ᵗ | ✓ᵗ |
-| [`DualBasis`](dual-basis.md) | ✓ᵗ | `I` | ✓ᵗ | ✓ᵗ | ✓ᵗ | ✓ᵗ | ✓ᵗ | ✓ᵗ | [✓](#conv-dual-basis-list-basis) | ✓ᵗ | ✓ᵗ |
-| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | ✓ᵗ | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | [✓](#conv-primal-basis-with-inner-basis) | [✓](#conv-primal-basis-complete-basis) |
-| [`BasisSum`](basis-sum.md) | ✓ᵗ | ✓ᵗ | [✓](#conv-basis-sum-primal-basis) | `I` | ✓ᵗ | ✓ᵗ | ✓ᵗ | ✓ᵗ | [✓](#conv-basis-sum-list-basis) | ✓ᵗ | [✓](#conv-basis-sum-complete-basis) |
-| [`BasisProd`](basis-prod.md) | ✓ᵗ | ✓ᵗ | [✓](#conv-basis-prod-primal-basis) | ✓ᵗ | `I` | ✓ᵗ | ✓ᵗ | ✓ᵗ | [✓](#conv-basis-prod-list-basis) | ✓ᵗ | [✓](#conv-basis-prod-complete-basis) |
-| [`BasisRep`](basis-rep.md) | ✓ᵗ | ✓ᵗ | [✓](#conv-basis-rep-primal-basis) | ✓ᵗ | ✓ᵗ | `I` | ✓ᵗ | ✓ᵗ | [✓](#conv-basis-rep-list-basis) | [✓](#conv-basis-rep-with-inner-basis) | [✓](#conv-basis-rep-complete-basis) |
-| [`ProjectedBasis`](projected-basis.md) | ✓ᵗ | ✓ᵗ | [✓](#conv-projected-basis-primal-basis) | ✓ᵗ | ✓ᵗ | ✓ᵗ | `I` | [✓](#conv-projected-basis-image-basis) | [✓](#conv-projected-basis-list-basis) | ✓ᵗ | [✓](#conv-projected-basis-complete-basis) |
-| [`ImageBasis`](image-basis.md) | ✓ᵗ | ✓ᵗ | [✓](#conv-image-basis-primal-basis) | ✓ᵗ | ✓ᵗ | ✓ᵗ | [✓](#conv-image-basis-projected-basis) | `I` | [✓](#conv-image-basis-list-basis) | ✓ᵗ | [✓](#conv-image-basis-complete-basis) |
+| [`ScalarBasis`](scalar-basis.md) | `I` | — | [✓](#conv-scalar-basis-primal-basis) | — | — | — | — | — | [✓](#conv-scalar-basis-list-basis) | — | — |
+| [`DualBasis`](dual-basis.md) | — | `I` | — | — | — | — | — | — | [✓](#conv-dual-basis-list-basis) | — | — |
+| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | — | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | [✓](#conv-primal-basis-with-inner-basis) | [✓](#conv-primal-basis-complete-basis) |
+| [`BasisSum`](basis-sum.md) | — | — | [✓](#conv-basis-sum-primal-basis) | `I` | — | — | — | — | [✓](#conv-basis-sum-list-basis) | — | [✓](#conv-basis-sum-complete-basis) |
+| [`BasisProd`](basis-prod.md) | — | — | [✓](#conv-basis-prod-primal-basis) | — | `I` | — | — | — | [✓](#conv-basis-prod-list-basis) | — | [✓](#conv-basis-prod-complete-basis) |
+| [`BasisRep`](basis-rep.md) | — | — | [✓](#conv-basis-rep-primal-basis) | — | — | `I` | — | — | [✓](#conv-basis-rep-list-basis) | [✓](#conv-basis-rep-with-inner-basis) | [✓](#conv-basis-rep-complete-basis) |
+| [`ProjectedBasis`](projected-basis.md) | — | — | [✓](#conv-projected-basis-primal-basis) | — | — | — | `I` | [✓](#conv-projected-basis-image-basis) | [✓](#conv-projected-basis-list-basis) | — | [✓](#conv-projected-basis-complete-basis) |
+| [`ImageBasis`](image-basis.md) | — | — | [✓](#conv-image-basis-primal-basis) | — | — | — | [✓](#conv-image-basis-projected-basis) | `I` | [✓](#conv-image-basis-list-basis) | — | [✓](#conv-image-basis-complete-basis) |
 | [`ListBasis`](list-basis.md) | [✓](#conv-list-basis-scalar-basis) | [✓](#conv-list-basis-dual-basis) | [✓](#conv-list-basis-primal-basis) | [✓](#conv-list-basis-basis-sum) | [✓](#conv-list-basis-basis-prod) | [✓](#conv-list-basis-basis-rep) | [✓](#conv-list-basis-projected-basis) | [✓](#conv-list-basis-image-basis) | `I` | [✓](#conv-list-basis-with-inner-basis) | [✓](#conv-list-basis-complete-basis) |
-| [`WithInnerBasis`](with-inner-basis.md) | ✓ᵗ | ✓ᵗ | [✓](#conv-with-inner-basis-primal-basis) | ✓ᵗ | ✓ᵗ | [✓](#conv-with-inner-basis-basis-rep) | ✓ᵗ | ✓ᵗ | [✓](#conv-with-inner-basis-list-basis) | `I` | [✓](#conv-with-inner-basis-complete-basis) |
-| [`CompleteBasis`](complete-basis.md) | ✓ᵗ | ✓ᵗ | [✓](#conv-complete-basis-primal-basis) | [✓](#conv-complete-basis-basis-sum) | [✓](#conv-complete-basis-basis-prod) | [✓](#conv-complete-basis-basis-rep) | [✓](#conv-complete-basis-projected-basis) | [✓](#conv-complete-basis-image-basis) | [✓](#conv-complete-basis-list-basis) | [✓](#conv-complete-basis-with-inner-basis) | `I` |
+| [`WithInnerBasis`](with-inner-basis.md) | — | — | [✓](#conv-with-inner-basis-primal-basis) | — | — | [✓](#conv-with-inner-basis-basis-rep) | — | — | [✓](#conv-with-inner-basis-list-basis) | `I` | [✓](#conv-with-inner-basis-complete-basis) |
+| [`CompleteBasis`](complete-basis.md) | — | — | [✓](#conv-complete-basis-primal-basis) | [✓](#conv-complete-basis-basis-sum) | [✓](#conv-complete-basis-basis-prod) | [✓](#conv-complete-basis-basis-rep) | [✓](#conv-complete-basis-projected-basis) | [✓](#conv-complete-basis-image-basis) | [✓](#conv-complete-basis-list-basis) | [✓](#conv-complete-basis-with-inner-basis) | `I` |
 
-**`I`** identity · **✓** a direct conversion (links to its explanation + test below) · **✓ᵗ** transitive — reachable by composition through the universal term/standard basis (`cob(A→C) = cob(B→C)·cob(A→B)`). The relation is **transitively closed**: every concrete basis is inter-convertible with every other.
+**`I`** identity · **✓** a same-space conversion (links to its explanation + test below) · **—** a different space (not a cob) or not exercised here.
 
 ## Conversion details — explanations + tests
 
@@ -275,9 +274,9 @@ Input `u0` =
 Output — the `cob` matrix:
 
 ```
-[[ 1.,  0.,  0.],
- [ 0.,  1., -0.],
- [ 0., -0.,  1.]]
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
 ```
 
 <a id="conv-primal-basis-complete-basis"></a>
@@ -1694,9 +1693,9 @@ Input `u0` =
 Output — the `cob` matrix:
 
 ```
-[[ 1.,  0.,  0.],
- [ 0.,  1., -0.],
- [ 0., -0.,  1.]]
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
 ```
 
 <a id="conv-list-basis-image-basis"></a>

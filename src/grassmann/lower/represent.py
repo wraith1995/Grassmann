@@ -831,76 +831,227 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 # ===========================================================================
 # CHANGE OF BASIS (`41 §2` / `43 §2c`) — mirrors the docs "Conversion matrix".
 #
-# `cob` is TOTAL: any basis of a space converts to any other.  Two layers + the seam:
+# A cob relates two bases of the SAME space — there are NO implicit conversions, not even
+# canonical ones (ℝ≅ℝ* must be explicit; see docs/design-problems.md).  Pieces + the seam:
 #
-#   pure fast path     cob() / realize_basis()    static matrices, no term lowering (far below)
-#   total cob (HUB)    _basis_cob_matrix()        FFS/term-aware; the entry point
-#   realize to std     realize_basis_cols()       a basis → its columns in standard coords
-#   variance/peeling   _basis_variance / _strip_* / _peel_dual
+#   space guard        _space_of_basis / _same_space   the precondition (leads — see below)
+#   total cob (HUB)    _basis_cob_matrix()             guard, then dispatch to _basis_cob_rec
+#   per-basis dispatch _basis_cob_rec()                one case per representative (the table)
+#   pure fast path     cob() / realize_basis()         static matrices, no term lowering (below)
+#   realize to std     realize_basis_cols()            a basis → its columns in standard coords
 #
-# _basis_cob_matrix dispatch — the rule table (read top to bottom; matches the docs matrix):
+# _basis_cob_rec dispatch — the rule table (read top to bottom; one case per representative):
 #
 #   from → to                         mechanism
 #   ────────────────────────────────────────────────────────────────────────────────────
 #   pure-realizable pair              cob()        — fast path (identity / structural, static)
 #   A == A                            identity (sized to the basis)
-#   BasisProd → BasisProd             Kron        of the per-factor cobs
-#   BasisSum  → BasisSum              block-diag  of the per-summand cobs
-#   BasisRep  → BasisRep              block-repeat of the inner cob (n copies)
+#   ScalarBasis → ScalarBasis         identity (ℝ has a single basis)
 #   DualBasis → DualBasis             (inner cob)⁻ᵀ
+#   PrimalBasis(DualBasis(·))         peel the double-dual, recurse
+#   BasisSum  → BasisSum              block-diag  of the per-summand cobs
+#   BasisProd → BasisProd             Kron        of the per-factor cobs
+#   BasisRep  → BasisRep              block-repeat of the inner cob (n copies)
 #   WithInner ↔ anything              strip the metric (metadata, not coordinates), recurse
+#   ImageBasis ↔ ImageBasis (same f)  the source-basis cob (no need to realize f)
 #   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
+#   ProjectedBasis → ProjectedBasis   re-orthonormalize VIA STANDARD
+#   ListBasis / CompleteBasis ↔ …     realize the listed/completed columns, VIA STANDARD
+#   BVar / BLam / BApp                error — abstract, no concrete cob until reduced
 #   leaf A → leaf B                   VIA STANDARD: pinv(realize B) · realize A   (the fallback)
-#   variance mismatch (V vs V*)       error — a vector↔covector cob needs a metric, not a cob
+#
+# (Different spaces never reach here — the guard rejects them first.)
 # ===========================================================================
+
+
+def _dual_toggle(space: S.Space) -> S.Space:
+    """Toggle one ``Dual`` star (``Dual(Dual(X)) ≡ X``)."""
+    return space.space if isinstance(space, S.Dual) else S.Dual(space)
+
+
+def _norm_space(s: S.Space) -> S.Space:
+    """Canonicalize a space for **strict** equality — only the identifications the type system
+    itself makes: expand a static ``⊕ⁿ s`` to ``⊕(s,…,s)`` (as :func:`infer.unify` does), and
+    strip ``WithInner`` (the metric is metadata, not a coordinate).  Deliberately does NOT
+    collapse singletons (``⊕(s) ≠ s``) or cancel ``Dual(Dual(·))`` — those are *canonical isos*,
+    and cob makes **no implicit conversions, even canonical ones**."""
+    match s:
+        case S.OPlusRep(c, inner) if isinstance(c, S.DimLit):
+            return S.OPlus(tuple([_norm_space(inner)] * c.value))
+        case S.OPlus(sps):
+            return S.OPlus(tuple(_norm_space(x) for x in sps))
+        case S.OProd(sps):
+            return S.OProd(tuple(_norm_space(x) for x in sps))
+        case S.Dual(inner):
+            return S.Dual(_norm_space(inner))
+        case S.WithInner(inner, _):
+            return _norm_space(inner)
+        case _:
+            return s
+
+
+def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
+    """The space ``b`` is a basis **of** — used to guard a cob (it relates two bases of ONE
+    space).  ``None`` when undeterminable: an abstract ``BVar``/``BLam``/``BApp``, or a
+    ``ListBasis``/``CompleteBasis`` that spans a *subspace* (its exact identity is runtime)."""
+    match b:
+        case B.ScalarBasis():
+            return S.Scalar()
+        case B.DualBasis(inner) | B.PrimalBasis(inner):
+            si = _space_of_basis(ctx, inner)
+            return None if si is None else _dual_toggle(si)
+        case B.WithInnerBasis(inner, _):
+            return _space_of_basis(ctx, inner)
+        case B.BasisSum(bs):
+            ss = [_space_of_basis(ctx, x) for x in bs]
+            return None if any(s is None for s in ss) else S.OPlus(tuple(ss))
+        case B.BasisProd(bs):
+            ss = [_space_of_basis(ctx, x) for x in bs]
+            return None if any(s is None for s in ss) else S.OProd(tuple(ss))
+        case B.BasisRep(n, inner):
+            si = _space_of_basis(ctx, inner)
+            return None if si is None else S.OPlusRep(n, si)
+        case B.ImageBasis(f, _src):
+            return _ffs_space_of(S.Img, f)
+        case B.ProjectedBasis(f, which, _s, _t):
+            ctor = {"image": S.Img, "img": S.Img, "ker": S.Ker, "coimg": S.CoImg,
+                    "coker": S.CoKer}[which]
+            return _ffs_space_of(ctor, f)
+        case B.ListBasis(vectors):
+            return _term_basis_space(vectors)
+        case B.CompleteBasis(sub, complement):
+            return _complete_basis_space(sub, complement)
+        case _:
+            return None
+
+
+def _ffs_space_of(ctor, f) -> S.Space | None:
+    from grassmann.infer.synth import map_domain_codomain
+    try:
+        dom, cod = map_domain_codomain(f)
+    except Exception:
+        return None
+    return ctor(f, dom, cod)
+
+
+def _term_basis_space(vectors: tuple) -> S.Space | None:
+    """A ``ListBasis``'s space — its vectors' (ambient) space when it is a *full* basis; ``None``
+    when it spans a proper subspace (so the exact subspace, being runtime, can't be checked)."""
+    from grassmann.infer.synth import synth_space
+    if not vectors:
+        return None
+    try:
+        amb = synth_space(vectors[0])
+        return amb if dim_of(amb) == len(vectors) else None
+    except Exception:
+        return None
+
+
+def _complete_basis_space(sub: B.Basis, complement) -> S.Space | None:
+    from grassmann.infer.synth import synth_space
+    if not isinstance(sub, B.ListBasis) or not sub.vectors:
+        return None
+    comp = np.asarray(complement)
+    cols = comp.shape[1] if comp.ndim == 2 else 0
+    try:
+        amb = synth_space(sub.vectors[0])
+        return amb if dim_of(amb) == len(sub.vectors) + cols else None
+    except Exception:
+        return None
+
+
+def _same_space(ctx: _Ctx, a: B.Basis, b: B.Basis) -> bool:
+    """Whether ``a`` and ``b`` are bases of the same space (the precondition for a cob)."""
+    sa, sb = _space_of_basis(ctx, a), _space_of_basis(ctx, b)
+    if sa is None or sb is None:
+        # Undeterminable (abstract, or a subspace-spanning term basis) — fall back to the weaker
+        # variance parity so we at least never mix a vector basis with a covector one.
+        return _basis_variance(ctx, a) == _basis_variance(ctx, b)
+    return _norm_space(sa) == _norm_space(sb)
+
+
+def _src_or_std(ctx: _Ctx, source: B.Basis | None, f: object) -> B.Basis:
+    """A map's domain ``source`` basis, or its standard basis when ``source`` is ``None``."""
+    if source is not None:
+        return source
+    from grassmann.infer.synth import map_domain_codomain
+    dom, _cod = map_domain_codomain(f)
+    return default_basis(dom)
 
 
 def _basis_cob_matrix(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     """Change-of-basis matrix ``M`` (from-coords → to-coords) — **total** over bases (`43 §2c`).
 
-    The hub between *any two bases of the same space*.  One ``match`` whose cases are exactly
-    the rows of the rule table above — read top to bottom:
-
-    * pure fast path — bases realizable as static matrices go to :func:`cob` (byte-identical);
-    * identity, the structural §2 rules (``⊗``/``⊕``/``⊕ⁿ``/dual/metric-strip),
-    * the FFS same-map factor (``ImageBasis`` ↔ ``ProjectedBasis`` of one map ⇒ QR/GSVD R),
-    * the variance guard (``V`` vs ``V*`` is not a cob),
-    * and the catch-all fallback **via the standard basis** (:func:`_cob_via_standard`).
+    A cob relates two bases of the **same space** — and there are **NO implicit conversions,
+    not even canonical ones** (``ℝ ≅ ℝ*`` must be written explicitly).  So the space guard leads:
+    determine each basis's space and require them equal (:func:`_space_of_basis` /
+    :func:`_same_space`) *before* any dispatch; a different-space pair is an error, never a
+    silent musical/canonical iso.  Same-space pairs go to the exhaustive :func:`_basis_cob_rec`.
     """
-    # The pure-matrix fast path is not a structural pattern (it succeeds-or-raises), so it
-    # leads; everything it refuses (FFS / term / FFS-leaf) falls through to the table below.
+    if not _same_space(ctx, frm, to):
+        raise RepresentError(
+            f"cob: bases of different spaces — no implicit conversion (even a canonical ℝ≅ℝ* "
+            f"must be explicit): {frm!r} :: {_space_of_basis(ctx, frm)!r}  vs  "
+            f"{to!r} :: {_space_of_basis(ctx, to)!r}"
+        )
+    return _basis_cob_rec(ctx, frm, to)
+
+
+def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """The exhaustive change-of-basis dispatch — **one case per representative** (the rule table
+    above), each with its specialized rule; the standard-basis fallback is always the backstop.
+
+    The pure-matrix fast path leads (it succeeds-or-raises rather than matching a structure);
+    everything it refuses (FFS / term / FFS-leaf) is handled by an explicit case below.
+    """
     try:
-        return cob(ctx.prog, frm, to)                                  # pure-realizable ⇒ static cob
+        return cob(ctx.prog, frm, to)                                   # pure-realizable ⇒ static cob
     except (CobError, DynamicDim):
         pass
     match (frm, to):
-        case _ if _basis_eq(frm, to):                                  # A == A      ⇒ identity
+        case _ if _basis_eq(frm, to):                                   # A == A          ⇒ identity
             return _identity_like(ctx, frm)
-        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):  # ⊗ → ⊗      ⇒ Kron
-            return _kron(ctx.prog,
-                         [_basis_cob_matrix(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
-        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):    # ⊕ → ⊕      ⇒ block-diag
+        case (B.ScalarBasis(), B.ScalarBasis()):                        # ℝ: one basis    ⇒ identity
+            return _identity_like(ctx, frm)
+        case (B.DualBasis(fb), B.DualBasis(tb)):                        # dual → dual     ⇒ (cob)⁻ᵀ
+            return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, fb, tb))
+        case (B.PrimalBasis(B.DualBasis(fy)), _):                       # primal∘dual peels ⇒ recurse
+            return _basis_cob_rec(ctx, fy, to)
+        case (_, B.PrimalBasis(B.DualBasis(ty))):
+            return _basis_cob_rec(ctx, frm, ty)
+        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):    # ⊕ → ⊕           ⇒ block-diag
             return _block_diag(ctx.prog,
-                               [_basis_cob_matrix(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
-        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:      # ⊕ⁿ → ⊕ⁿ    ⇒ block-repeat
-            return _block_repeat(ctx.prog, _basis_cob_matrix(ctx, fb, tb), _count_int(fn))
-        case (B.DualBasis(fb), B.DualBasis(tb)):                        # dual → dual ⇒ (cob)⁻ᵀ
-            return _inv_transpose(ctx.prog, _basis_cob_matrix(ctx, fb, tb))
-        case (B.WithInnerBasis(fb, _), _):                             # WithInner ↔  ⇒ strip metric
-            return _basis_cob_matrix(ctx, fb, _strip_withinner(to))
-        case (_, B.WithInnerBasis(tb, _)):                            # WithInner ↔  ⇒ strip metric
-            return _basis_cob_matrix(ctx, _strip_withinner(frm), tb)
+                               [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
+        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):  # ⊗ → ⊗           ⇒ Kron
+            return _kron(ctx.prog,
+                         [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
+        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:      # ⊕ⁿ → ⊕ⁿ         ⇒ block-repeat
+            return _block_repeat(ctx.prog, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
+        case (B.WithInnerBasis(fb, _), _):                            # WithInner ↔       ⇒ strip metric
+            return _basis_cob_rec(ctx, fb, _strip_withinner(to))
+        case (_, B.WithInnerBasis(tb, _)):
+            return _basis_cob_rec(ctx, _strip_withinner(frm), tb)
+        case (B.ImageBasis(ff, fsrc), B.ImageBasis(tf, tsrc)) if ff is tf:  # same map ⇒ source cob
+            return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
         case (B.ImageBasis(), B.ProjectedBasis()) | (B.ProjectedBasis(), B.ImageBasis()):
-            # ImageBasis ↔ ProjectedBasis of the SAME map ⇒ the QR factor R (metric ⇒ GSVD
-            # Uᵀ·M_W·J) directly; else (e.g. a non-"image" projection) fall through to standard.
+            # ImageBasis ↔ ProjectedBasis of one map ⇒ the QR factor R (metric ⇒ GSVD Uᵀ·M_W·J)
+            # directly; a non-"image" projection has no such shortcut ⇒ via the standard basis.
             m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
             return m if m is not None else _cob_via_standard(ctx, frm, to)
-        case _ if _basis_variance(ctx, frm) != _basis_variance(ctx, to):  # V vs V*  ⇒ not a cob
+        case (B.ProjectedBasis(), B.ProjectedBasis()):                # range reorthonormalize ⇒ via std
+            return _cob_via_standard(ctx, frm, to)
+        case (B.ImageBasis(), _) | (_, B.ImageBasis()):              # literal f-columns   ⇒ via std
+            return _cob_via_standard(ctx, frm, to)
+        case (B.ListBasis(), _) | (_, B.ListBasis()):                # listed term columns ⇒ via std
+            return _cob_via_standard(ctx, frm, to)
+        case (B.CompleteBasis(), _) | (_, B.CompleteBasis()):        # [ sub | complement ] ⇒ via std
+            return _cob_via_standard(ctx, frm, to)
+        case (B.BVar(), _) | (_, B.BVar()) | (B.BLam(), _) | (_, B.BLam()) \
+                | (B.BApp(), _) | (_, B.BApp()):                     # abstract ⇒ no concrete cob
             raise RepresentError(
-                f"cob: bases of differing variance (a vector basis of V vs a covector basis of "
-                f"V*): {frm!r} vs {to!r}"
+                f"cob: abstract basis has no concrete cob until reduced: {frm!r} / {to!r}"
             )
-        case _:                                                       # leaf → leaf ⇒ via standard
+        case _:                                                       # any remaining leaf ⇒ via std
             return _cob_via_standard(ctx, frm, to)
 
 

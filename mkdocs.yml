@@ -28,6 +28,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Testing: testing.md
+  - Design problems: design-problems.md
   - Spaces:
     - Overview: spaces/index.md
     - scalar: spaces/scalar.md

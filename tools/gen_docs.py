@@ -508,21 +508,20 @@ def _render_conversion_table() -> list[str]:
            "Rows = the basis you convert **from**, columns = the basis you convert **to**, over "
            "every concrete basis node (the abstract `BVar`/`BLam`/`BApp` are omitted — they have "
            "no concrete cob until instantiated/reduced).", "",
-           "**The fallback is the standard basis.** When no specific structural case applies, "
-           "`cob(A → B) = cob(std → B) · cob(A → std)`: realizing a basis *is* its cob to the "
-           "standard basis (its vectors as columns), and `cob(std → A)` is the inverse. Every "
-           "basis converts to/from its standard basis (verified in `tests/test_cob_via_standard."
-           "py`), so — composing through that hub — **every concrete basis is inter-convertible "
-           "with every other**. The relation is **symmetric** and **transitively closed**, so "
-           "the matrix is complete (`I` on the diagonal, ✓/✓ᵗ everywhere else):", "",
-           "- The *term basis* `ListBasis` is the **universal** basis — it lists vectors of *any* "
-           "space (primal **or** covector), so it directly reaches every node.",
-           "- `PrimalBasis` is the **universal primal basis** (`PrimalBasis(DualBasis(b)) ≡ b`); "
-           "`DualBasis` is the **universal covector basis** (≈ a `ListBasis` of covectors); "
-           "`CompleteBasis` completes a sub-basis in any space. All are universal hubs.", ""]
+           "A change of basis is only valid between **two bases of the same space** "
+           "(`_basis_cob_matrix` determines each basis's space and requires them equal). Within "
+           "a space the fallback is the **standard basis** — `cob(A → B) = cob(std → B) · "
+           "cob(A → std)`, since realizing a basis *is* its cob to standard and `cob(std → A)` "
+           "is the inverse (every basis converts to/from its standard basis — "
+           "`tests/test_cob_via_standard.py`). Across different spaces (e.g. `Img(f)` vs a full "
+           "space, or `ℝ⁴` flat vs `ℝ²⊕ℝ²`) there is no cob.", "",
+           "Here each basis node is shown against a representative of its OWN space, so **✓** "
+           "marks the (same-space) conversions that representative supports — the *term basis* "
+           "`ListBasis` and `PrimalBasis` reach every other basis of their space, `DualBasis` "
+           "every covector basis, `ImageBasis ↔ ProjectedBasis` via the QR/GSVD factor. **—** is "
+           "either a different space or not exercised here.", ""]
     # Abstract bases (no concrete cob until reduced) are omitted from the matrix.
     nodes = [n for n in nodes if n not in _ABSTRACT_BASES]
-    closure = _transitive_closure(nodes, {p for p in pair if p[0] in nodes and p[1] in nodes})
     header = "| from \\ to | " + " | ".join(f"`{n}`" for n in nodes) + " |"
     out.append(header)
     out.append("|" + "---|" * (len(nodes) + 1))
@@ -532,18 +531,13 @@ def _render_conversion_table() -> list[str]:
             if r == col:
                 cells.append("`I`")
             elif (r, col) in pair:
-                cells.append(f"[✓](#{_conv_anchor(r, col)})")  # direct (tested below)
-            elif (r, col) in closure:
-                cells.append("✓ᵗ")  # transitive: composes via the universal term/standard basis
+                cells.append(f"[✓](#{_conv_anchor(r, col)})")  # a same-space conversion (tested)
             else:
                 cells.append("—")
         out.append(f"| [`{r}`]({slug(r)}.md) | " + " | ".join(cells) + " |")
     out.append("")
-    out.append("**`I`** identity · **✓** a direct conversion (links to its explanation + test "
-               "below) · **✓ᵗ** transitive — reachable by composition through the universal "
-               "term/standard basis (`cob(A→C) = cob(B→C)·cob(A→B)`). The relation is "
-               "**transitively closed**: every concrete basis is inter-convertible with every "
-               "other.")
+    out.append("**`I`** identity · **✓** a same-space conversion (links to its explanation + "
+               "test below) · **—** a different space (not a cob) or not exercised here.")
     out.append("")
 
     out.append("## Conversion details — explanations + tests")
@@ -562,28 +556,6 @@ def _render_conversion_table() -> list[str]:
 _ABSTRACT_BASES = ("BVar", "BLam", "BApp")
 
 
-def _transitive_closure(nodes: list[str], edges: set) -> set:
-    """The transitive closure of the (symmetric) direct-conversion relation over ``nodes``."""
-    adj = {n: {n} for n in nodes}
-    for a, b in edges:
-        adj[a].add(b)
-        adj[b].add(a)
-    # connected components (convertibility is symmetric + transitive ⇒ an equivalence relation).
-    seen, comp_of = set(), {}
-    for n in nodes:
-        if n in seen:
-            continue
-        stack, comp = [n], []
-        while stack:
-            x = stack.pop()
-            if x in seen:
-                continue
-            seen.add(x)
-            comp.append(x)
-            stack.extend(adj[x] - seen)
-        for x in comp:
-            comp_of[x] = frozenset(comp)
-    return {(a, b) for a in nodes for b in comp_of[a] if a != b}
 
 
 def _has_self(node: str) -> bool:
@@ -743,6 +715,7 @@ def _write_mkdocs(nav_cats) -> None:
         "nav:",
         "  - Home: index.md",
         "  - Testing: testing.md",
+        "  - Design problems: design-problems.md",
     ]
     for cat, (title, _m, _e) in CATS.items():
         lines.append(f"  - {title}:")
