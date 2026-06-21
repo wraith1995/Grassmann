@@ -1107,12 +1107,15 @@ def _cob_from_withinner(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _cob_from_orthonormal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``OrthonormalBasis`` — both orthonormalized ⇒ underlying cob; else the factor."""
-    match to:
-        case B.OrthonormalBasis(ti):
-            return _basis_cob_rec(ctx, frm.basis, ti)
-        case _:
-            return _cob_via_standard(ctx, frm, to)
+    """from ``OrthonormalBasis`` — orthonormalization CHANGES the coordinates (unlike a raw
+    ``WithInnerBasis``, where the metric is metadata), so the cob must realize both orthonormal
+    column matrices and compose; recursing on the *underlying* (non-orthogonal) cob is wrong.
+
+    (``OrthonormalBasis → OrthonormalBasis`` is the orthogonal reorthonormalization
+    ``pinv(Q_to)·Q_from``; ``OrthonormalBasis ↔ raw`` of the same metricized space is the
+    orthonormalization factor — both handled by the standard-basis route.)
+    """
+    return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:

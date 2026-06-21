@@ -98,6 +98,29 @@ def test_orthonormalbasis_g_orthonormal_and_cob() -> None:
     assert m @ back == pytest.approx(np.eye(3))
 
 
+def test_orthonormalbasis_to_orthonormalbasis_is_orthogonal_reorthonormalize() -> None:
+    # Two OrthonormalBasis of the SAME metricized space (different inner bases): the cob is the
+    # orthogonal reorthonormalization Q₂ᵀ·G·Q₁ — NOT the underlying (non-orthogonal) cob.  (This
+    # was a bug: recursing on the inner bases gave the wrong matrix.)
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    A = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [1.0, 0.0, 1.0]])
+    Bm = np.array([[2.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 1.0]])
+    Gm = np.array([[2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    av = [C.var(f"a{i}", V) for i in range(3)]
+    bv = [C.var(f"b{i}", V) for i in range(3)]
+    feeds = {**{_k(av[i]): A[:, i] for i in range(3)}, **{_k(bv[i]): Bm[:, i] for i in range(3)},
+             _k(g): Gm}
+    o1 = B.orthonormal_basis(B.with_inner_basis(B.list_basis(*av), g))
+    o2 = B.orthonormal_basis(B.with_inner_basis(B.list_basis(*bv), g))
+    Q1, Q2 = _realize(o1, feeds), _realize(o2, feeds)
+    m = _cob(o1, o2, feeds)
+    assert m == pytest.approx(Q2.T @ Gm @ Q1)                 # orthogonal reorthonormalization
+    assert m @ _cob(o2, o1, feeds) == pytest.approx(np.eye(3))  # round-trips
+    s = np.array([1.3, -0.7, 0.4])
+    assert Q2 @ (m @ s) == pytest.approx(Q1 @ s)               # maps to the same vector
+
+
 def test_orthonormalbasis_plain_is_qr() -> None:
     V = C.base("V", 3)
     M = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
