@@ -93,9 +93,9 @@ Input `u0` =
 Output — the `cob` matrix:
 
 ```
-[[ 1.,  0.,  0.],
- [ 0.,  1., -0.],
- [ 0., -0.,  1.]]
+[[1., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
 ```
 
 ### → a completed subspace basis `[ u | complement ]`

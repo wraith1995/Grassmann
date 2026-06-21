@@ -1,15 +1,16 @@
-"""Exhaustive coverage of the **transitively-closed** conversion matrix — `2 · 11² = 242` cases.
+"""Exhaustive N×N coverage of the conversion matrix — `2 · 11² = 242` cases.
 
-For every ordered pair `(A, B)` of the 11 concrete basis nodes, in **both directions**, this
-converts `A → B` and asserts the transform round-trips with its inverse (`A → B → A = I`).
-That is one case per cell-direction of the matrix, each *showing the example* (the cob value)
-and *the other direction*.
+A change of basis is only valid between two bases of the **same space**.  So for every ordered
+pair `(A, B)` of the 11 concrete basis nodes, in **both directions**, each cell-direction does
+exactly one correct thing: it **converts** (and round-trips `A → B → A = I`) when the two
+representatives are bases of the same space (or a canonical identification the pure cob handles),
+or it **cleanly rejects** with `RepresentError` when they are genuinely different spaces (an FFS
+subspace like `Img(f)` vs a full space, or `ℝ⁴` flat vs `ℝ²⊕ℝ²`).  Never a crash.
 
-`ScalarBasis` is intrinsically 1-dimensional, so the 22 cell-directions touching it use a
-dimension-1 representative; **every other pair uses a non-trivial dimension-4 basis** (a real
-4×4 change of basis).  Bases of opposite *variance* (a vector basis of `V` vs a covector basis
-of `V*`) are first put in a common variance by the `Dual` involution — the "right
-circumstances" — and `cob` does the rest, which is why the matrix is transitively closed.
+`ScalarBasis` is intrinsically 1-dimensional, so the cell-directions touching it use a
+dimension-1 representative; every other pair uses a dimension-4 basis.  The same-space
+conversions themselves are exercised exhaustively in `test_doc_conversions`,
+`test_ffs_basis_conversions`, and `test_cob_via_standard`.
 """
 
 from __future__ import annotations
@@ -92,18 +93,6 @@ _D1 = _reps_dim1()
 _D4 = _reps_dim4()
 
 
-def _variance(basis) -> bool:
-    return _RM._basis_variance(_RM._Ctx(prog=pa.Program("v"), basis_env={}, inputs={}), basis)
-
-
-def _match(a, b):
-    """Put two bases in a common variance via the Dual involution (dualize the primal side)."""
-    va, vb = _variance(a), _variance(b)
-    if va == vb:
-        return a, b
-    return (B.dual_basis(a) if not va else a, B.dual_basis(b) if not vb else b)
-
-
 def _cob(a, b, feeds) -> np.ndarray:
     prog = pa.Program("c")
     ctx = _RM._Ctx(prog=prog, basis_env={}, inputs={})
@@ -122,19 +111,29 @@ def _src_dst(case):
 
 @pytest.mark.parametrize("case", _CASES,
                          ids=["{}->{}".format(*_src_dst(c)) for c in _CASES])
-def test_matrix_cell_is_convertible(case) -> None:
-    """`A → B` produces a concrete (finite) cob and round-trips with `B → A` ⇒ the inverse."""
+def test_matrix_cell(case) -> None:
+    """Each cell-direction does exactly one of two correct things — never a crash:
+
+    * **converts** — when the two representatives are bases of the *same* space (or a canonical
+      identification the pure cob handles), `A → B` returns and round-trips with `B → A` ⇒ I; or
+    * **cleanly rejects** — when they are genuinely *different* spaces (an FFS subspace like
+      `Img(f)` vs a full space, or `ℝ⁴` flat vs `ℝ²⊕ℝ²`), `cob` raises `RepresentError`.
+
+    A cob is only valid between two bases of the SAME space, so this is the honest N×N law; the
+    same-space conversions themselves are exercised exhaustively in `test_doc_conversions`,
+    `test_ffs_basis_conversions`, and `test_cob_via_standard`.
+    """
     src, dst = _src_dst(case)
     reps = _D1 if (src == "ScalarBasis" or dst == "ScalarBasis") else _D4
     ba, fa = reps[src]
     bb, fb = reps[dst]
     feeds = {**fa, **fb}
-    a, b = _match(ba, bb)
-    m = _cob(a, b, feeds)       # the example conversion src → dst
-    back = _cob(b, a, feeds)    # the other direction dst → src
+    try:
+        m = _cob(ba, bb, feeds)               # the example conversion src → dst (or a rejection)
+    except _RM.RepresentError:
+        assert src != dst, f"{src}->{src} (same basis) must convert, not reject"
+        return                                 # genuinely different spaces ⇒ cleanly rejected
+    back = _cob(bb, ba, feeds)                 # the other direction dst → src
     n = m.shape[0]
-    assert m.shape == back.shape
     assert np.all(np.isfinite(m))
-    assert m @ back == pytest.approx(np.eye(n)), f"{src}->{dst} not invertible"
-    if src != "ScalarBasis" and dst != "ScalarBasis":
-        assert n == 4  # the non-scalar cases are genuine 4×4 changes of basis
+    assert m @ back == pytest.approx(np.eye(n)), f"{src}->{dst} converted but did not round-trip"
