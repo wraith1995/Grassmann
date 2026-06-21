@@ -54,7 +54,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 ### → a sub-basis RREF-completed from the ⊕ standard basis
@@ -138,7 +138,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 ### → another ⊕ basis (per-summand term bases changed)

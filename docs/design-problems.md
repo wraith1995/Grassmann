@@ -75,22 +75,27 @@ compose (`pinv(Q_to)·Q_from`, which is `Q_toᵀ·G·Q_from`); recursing on the 
 (non-orthogonal) cob is *wrong*.  (Fixed after a `_cob_from_*` structure audit — was a latent bug
 exposed only by an `OrthonormalBasis ↔ OrthonormalBasis` with differing inner bases.)
 
-## Structure not yet maximally exploited (correctness-neutral; follow-ups)
+## Structure exploitation in `_cob_via_standard` (correctness-neutral)
 
-A `_cob_from_*` audit found these cases compute the right answer but via the generic
-`_cob_via_standard` (`pinv`) where a cheaper/exact structural factor exists — all reuse already-
-computed quantities, none change results:
+A `_cob_from_*` audit found the standard-basis route computed the right answer but always via a
+`PinvOp`, where a cheaper/exact factor exists.  `cob(std → to) = (realize to)⁻¹` is now specialized
+by `to`'s structure (`_inverse_cols` / `_is_standard_orthonormal`):
 
-- **`_pinv_compose` always emits `PinvOp`.** When `C_to` is square-invertible (a full
-  `ListBasis`/`CompleteBasis`) it could be `InvOp`; when `C_to` is orthonormal
-  (`OrthonormalBasis`, or `reduce=ORTHONORMALIZE`) it could be a transpose. One site, several
-  handlers lifted.
-- **`_cob_from_projected` differing metric** → could use a GSVD factor (`Q_toᵀ·M·Q_from`) reusing
-  the two `_realize_ffs_by_which` realizations, like `_same_map_ffs_cob`, instead of realize+pinv.
+- **transpose** when `to` is standard-orthonormal (`pinv(Q) = Qᵀ`, exact even for a rectangular
+  FFS range — `OrthonormalBasis(plain)`, metric-free `ProjectedBasis`, `reduce=ORTHONORMALIZE`
+  list/complete, identity bases);
+- **exact inverse** (`InvOp`) when `to` is square (a full `ListBasis`/`CompleteBasis`, a
+  *g*-orthonormal `OrthonormalBasis`); — this also covers `ListBasis`/`CompleteBasis ↔ standard`
+  (the cob is then just the realized columns / their inverse, no `pinv`-of-identity);
+- **pseudo-inverse** only for genuinely rectangular columns with no known structure.
+
+Remaining follow-ups (still `pinv`, want an exact factor):
+
+- **`_cob_from_projected` differing metric** → a GSVD factor (`Q_toᵀ·M·Q_from`) reusing the two
+  `_realize_ffs_by_which` realizations, like `_same_map_ffs_cob` (handles rectangular *g*-orthonormal
+  ranges, which the transpose rule above deliberately excludes).
 - **raw `WithInner` ↔ its `OrthonormalBasis`** → the Cholesky factor `L` (`LLᵀ=AᵀGA`) is already
-  computed in `_realize_orthonormal`; return `L`/`L⁻¹` instead of pinv.
-- **`ListBasis`/`CompleteBasis` ↔ standard** → the cob is just the realized columns (forward) /
-  their inverse, instead of `pinv`-of-identity.
+  computed in `_realize_orthonormal`; return `Lᵀ`/`L⁻ᵀ` (a triangular solve vs the square `InvOp`).
 
 ## Open questions
 

@@ -55,7 +55,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 ### → a bare basis of the underlying V (NOT a cob — an explicit `remetric`)
