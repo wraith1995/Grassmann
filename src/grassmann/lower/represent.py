@@ -918,10 +918,13 @@ def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
             ctor = {"image": S.Img, "img": S.Img, "ker": S.Ker, "coimg": S.CoImg,
                     "coker": S.CoKer}[which]
             return _ffs_space_of(ctor, f)
-        case B.ListBasis(vectors):
+        case B.ListBasis(vectors, _backup, _reduce):
             return _term_basis_space(vectors)
-        case B.CompleteBasis(sub, complement):
-            return _complete_basis_space(sub, complement)
+        case B.OrthonormalBasis(inner):
+            return _space_of_basis(ctx, inner)  # orthonormalization keeps the space
+        case B.CompleteBasis(_sub, complement, _reduce):
+            # ambient = the complement's space (it supplies the completing ambient directions).
+            return _space_of_basis(ctx, complement)
         case _:
             return None
 
@@ -944,19 +947,6 @@ def _term_basis_space(vectors: tuple) -> S.Space | None:
     try:
         amb = synth_space(vectors[0])
         return amb if dim_of(amb) == len(vectors) else None
-    except Exception:
-        return None
-
-
-def _complete_basis_space(sub: B.Basis, complement) -> S.Space | None:
-    from grassmann.infer.synth import synth_space
-    if not isinstance(sub, B.ListBasis) or not sub.vectors:
-        return None
-    comp = np.asarray(complement)
-    cols = comp.shape[1] if comp.ndim == 2 else 0
-    try:
-        amb = synth_space(sub.vectors[0])
-        return amb if dim_of(amb) == len(sub.vectors) + cols else None
     except Exception:
         return None
 
@@ -2151,8 +2141,6 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
     :func:`realize_basis`.
     """
     match b:
-        case B.ListBasis(vectors):
-            return _realize_list_basis(ctx, vectors)
         case B.PrimalBasis(B.DualBasis(inner)) | B.DualBasis(B.PrimalBasis(inner)):
             return realize_basis_cols(ctx, inner)  # double involution cancels (FFS-safe)
         case B.DualBasis(inner) | B.PrimalBasis(inner):
@@ -2163,35 +2151,51 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return _inv_transpose(ctx.prog, realize_basis_cols(ctx, inner))
         case B.WithInnerBasis(inner, _):
             return realize_basis_cols(ctx, inner)  # metric is metadata, not coordinates
-        case B.ImageBasis(f, source):
-            return _realize_image_basis(ctx, f, source)
+        case B.OrthonormalBasis(inner):
+            return _realize_orthonormal(ctx, inner)
+        case B.ImageBasis(f, source, target):
+            return _realize_image_basis(ctx, f, source, target)
         case B.ProjectedBasis(f, which, src, tgt):
             return _realize_ffs_by_which(ctx, which, f, source=src, target=tgt).cols
-        case B.CompleteBasis(sub, complement):
-            # [ realize(sub) | complement ] — realize the sub through the seam (it may be a
-            # term/FFS basis the pure path can't build), then hstack the numeric complement.
-            sub_cols = realize_basis_cols(ctx, sub)
-            comp = _const(ctx, np.asarray(complement, dtype=float), note="complete:complement")
-            n_rows = _shape_of(sub_cols)[0]
-            k = _shape_of(sub_cols)[1] + _shape_of(comp)[1]
-            [out] = ctx.prog.emit_stmt(
-                _HStackOp(), [sub_cols, comp],
-                [pa.OutSpec("complete:hstack", (n_rows, k))], note="complete:[sub|comp]",
-            )
-            return out
+        case B.ListBasis(vectors, backup, reduce):
+            return _realize_list_basis(ctx, vectors, backup, reduce)
+        case B.CompleteBasis(sub, complement, reduce):
+            return _realize_complete_basis(ctx, sub, complement, reduce)
         case _:
             return realize_basis(ctx.prog, b)
 
 
-def _realize_list_basis(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
-    """Stack the lowered Term ``vectors`` as the columns of the basis matrix (`41 §2`)."""
+def _realize_list_basis(
+    ctx: _Ctx, vectors: tuple[object, ...],
+    backup: B.Basis | None = None, reduce: B.Reduce = B.Reduce.NONE,
+) -> pa.SymArray:
+    """Realize a ``ListBasis(vectors, backup?, reduce?)`` (`41 §2`, `20 §7`).
+
+    Stack the lowered Term ``vectors`` as the frame columns, then:
+    ``reduce=ORTHONORMALIZE`` ⇒ QR the frame; a ``backup`` ⇒ greedy RREF-complete the (possibly
+    rank-deficient) frame to a full basis, filling missing directions from the backup's columns.
+    """
+    cols = _stack_term_cols(ctx, vectors)
+    if reduce is B.Reduce.ORTHONORMALIZE:
+        cols = _orthonormalize_cols(ctx, cols)
+    if backup is not None:
+        bcols = realize_basis_cols(ctx, backup)
+        n = _shape_of(bcols)[0]  # ambient dim ⇒ a full (square) completed basis
+        [cols] = ctx.prog.emit_stmt(
+            _CompleteColsOp(n), [cols, bcols], [pa.OutSpec("listbasis:complete", (n, n))],
+            note="listbasis:RREF-complete(frame|backup)",
+        )
+    return cols
+
+
+def _stack_term_cols(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
+    """Stack the lowered Term ``vectors`` as the columns of a basis matrix."""
     cols: list[pa.SymArray] = []
     n_rows: int | None = None
     for v in vectors:
         if not T.is_term(v):
             raise RepresentError(f"ListBasis: a basis vector must be a Term, got {v!r}")
-        rep = _rep(v, ctx)
-        flat = _flatten_to_column(ctx, rep.array)
+        flat = _flatten_to_column(ctx, _rep(v, ctx).array)
         rows = _shape_of(flat)[0]
         if n_rows is None:
             n_rows = rows
@@ -2201,19 +2205,80 @@ def _realize_list_basis(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
             )
         cols.append(flat)
     [out] = ctx.prog.emit_stmt(
-        _ColStackOp(), cols,
-        [pa.OutSpec("list-basis", (n_rows, len(cols)))],
+        _ColStackOp(), cols, [pa.OutSpec("list-basis", (n_rows, len(cols)))],
         note="ffs-basis:ListBasis=stack-columns",
     )
     return out
 
 
-def _realize_image_basis(ctx: _Ctx, f: object, source: B.Basis | None = None) -> pa.SymArray:
-    """Realize ``ImageBasis(f, source?)`` — ``f`` applied to its ``source`` basis (`73 T2`).
+def _orthonormalize_cols(ctx: _Ctx, cols: pa.SymArray) -> pa.SymArray:
+    """Orthonormalize a column matrix (the ``Q`` of its QR) — standard inner product."""
+    [out] = ctx.prog.emit_stmt(
+        _QrColsOp(), [cols], [pa.OutSpec("orthonormal:Q", _shape_of(cols))],
+        note="orthonormalize:QR-Q",
+    )
+    return out
 
-    ``source is None`` ⇒ the literal columns ``f(eᵢ)`` (apply ``f`` to the standard domain
-    basis).  A non-standard ``source`` (a basis of ``dom f``) realizes its columns ``S`` in
-    domain coords and maps them: the image columns are ``fᵀ·S`` in codomain coords.
+
+def _realize_complete_basis(
+    ctx: _Ctx, sub: B.Basis, complement: B.Basis, reduce: B.Reduce,
+) -> pa.SymArray:
+    """Realize a ``CompleteBasis(sub, complement, reduce)`` — complete ``sub`` to the ambient
+    from ``complement``'s columns (`20 §7`)."""
+    sub_cols = realize_basis_cols(ctx, sub)
+    comp_cols = realize_basis_cols(ctx, complement)
+    n_rows = _shape_of(sub_cols)[0]
+    if reduce is B.Reduce.RREF:
+        [out] = ctx.prog.emit_stmt(
+            _CompleteColsOp(n_rows), [sub_cols, comp_cols],
+            [pa.OutSpec("complete:rref", (n_rows, n_rows))],
+            note="complete:RREF(sub|complement)",
+        )
+        return out
+    k = _shape_of(sub_cols)[1] + _shape_of(comp_cols)[1]
+    [out] = ctx.prog.emit_stmt(
+        _HStackOp(), [sub_cols, comp_cols],
+        [pa.OutSpec("complete:hstack", (n_rows, k))], note="complete:[sub|comp]",
+    )
+    if reduce is B.Reduce.ORTHONORMALIZE:
+        out = _orthonormalize_cols(ctx, out)
+    return out
+
+
+def _realize_orthonormal(ctx: _Ctx, inner: B.Basis) -> pa.SymArray:
+    """Realize ``OrthonormalBasis(inner)`` — orthonormalize ``inner``'s columns, w.r.t. its
+    metric when ``inner`` is a ``WithInnerBasis`` (g-orthonormal), else the standard product."""
+    cols = realize_basis_cols(ctx, inner)
+    if isinstance(inner, B.WithInnerBasis):
+        g = _metric_matrix_of(ctx, inner.metric, _shape_of(cols)[0])
+        [out] = ctx.prog.emit_stmt(
+            _MetricOrthonormalOp(), [cols, g], [pa.OutSpec("orthonormal:g", _shape_of(cols))],
+            note="orthonormalize:g-Gram-Schmidt",
+        )
+        return out
+    return _orthonormalize_cols(ctx, cols)
+
+
+def _metric_matrix_of(ctx: _Ctx, metric: object, n: int) -> pa.SymArray:
+    """Realize a metric Term as an ``(n, n)`` matrix (for g-orthonormalization)."""
+    arr = _rep(metric, ctx).array
+    if len(_shape_of(arr)) == 2:
+        return arr
+    [out] = ctx.prog.emit_stmt(
+        _ReshapeOp((n, n)), [arr], [pa.OutSpec("metric:(n,n)", (n, n))], note="metric:reshape",
+    )
+    return out
+
+
+def _realize_image_basis(
+    ctx: _Ctx, f: object, source: B.Basis | None = None, target: B.Basis | None = None,
+) -> pa.SymArray:
+    """Realize ``ImageBasis(f, source?, target?)`` — ``f`` applied to its ``source`` basis,
+    read in the ``target`` codomain basis (`73 T2`).
+
+    ``source is None`` ⇒ the literal columns ``f(eᵢ)``; a non-standard ``source`` (a basis of
+    ``dom f``) gives ``f·S``.  ``target`` (a basis of ``cod f``) re-expresses the columns in
+    target codomain coords: ``cols_target = (cob std_cod → target) · cols``.
     """
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
@@ -2223,20 +2288,29 @@ def _realize_image_basis(ctx: _Ctx, f: object, source: B.Basis | None = None) ->
         note="ffs-basis:to-(cod,dom)",
     )
     if source is None:
-        real = realize_image_application(
+        cols = realize_image_application(
             ctx.prog, f_cd, dom_dim=_static_dim(dom), cod_dim=_static_dim(cod),
             label=getattr(f, "name", "f"),
+        ).cols
+    else:
+        # f applied to the source basis: cols_cod = f_cd(cod,dom) · S(dom, k).
+        s_cols = realize_basis_cols(ctx, source)
+        n_cod, _n_dom = _shape_of(f_cd)
+        k = _shape_of(s_cols)[1]
+        [cols] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("cd,dk->ck"), [f_cd, s_cols],
+            [pa.OutSpec("imgbasis:f·source", (n_cod, k))], note="ffs-basis:ImageBasis(f,source)",
         )
-        return real.cols
-    # f applied to the source basis: cols_cod = f_cd(cod,dom) · S(dom, k).
-    s_cols = realize_basis_cols(ctx, source)
-    n_cod, n_dom = _shape_of(f_cd)
-    k = _shape_of(s_cols)[1]
-    [out] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("cd,dk->ck"), [f_cd, s_cols],
-        [pa.OutSpec("imgbasis:f·source", (n_cod, k))], note="ffs-basis:ImageBasis(f,source)",
-    )
-    return out
+    if target is not None:
+        # express the codomain columns in the target basis: (cob std_cod → target) · cols.
+        to_tgt = _basis_cob_matrix(ctx, default_basis(cod), target)
+        n_t = _shape_of(to_tgt)[0]
+        kk = _shape_of(cols)[1]
+        [cols] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("tc,ck->tk"), [to_tgt, cols],
+            [pa.OutSpec("imgbasis:in-target", (n_t, kk))], note="ffs-basis:ImageBasis(target)",
+        )
+    return cols
 
 
 def _flatten_to_column(ctx: _Ctx, arr: pa.SymArray) -> pa.SymArray:
@@ -2264,6 +2338,55 @@ class _ColStackOp:
 
     def __call__(self, *cols: np.ndarray) -> np.ndarray:
         return np.stack([np.asarray(c, dtype=float).reshape(-1) for c in cols], axis=1)
+
+
+@dataclass(frozen=True)
+class _CompleteColsOp:
+    """Complete a (possibly rank-deficient) frame to an ``n``-column basis (`20 §7`).
+
+    Greedy RREF-style selection: keep the frame's linearly-independent columns first, then fill
+    the remaining directions from the backup's columns — each accepted only if it raises the
+    rank.  Result is an ``(ambient, n)`` full-column-rank basis matrix.
+    """
+
+    n: int
+
+    def __call__(self, frame: np.ndarray, backup: np.ndarray) -> np.ndarray:
+        frame = np.asarray(frame, dtype=float)
+        backup = np.asarray(backup, dtype=float)
+        kept = np.zeros((frame.shape[0], 0))
+        tol = 1e-9
+        for c in [*frame.T, *backup.T]:
+            if kept.shape[1] == self.n:
+                break
+            cand = np.column_stack([kept, c])
+            if np.linalg.matrix_rank(cand, tol=tol) > kept.shape[1]:
+                kept = cand
+        if kept.shape[1] != self.n:
+            raise ValueError(
+                f"basis completion: frame ⊕ backup span {kept.shape[1]} < {self.n} dims"
+            )
+        return kept
+
+
+@dataclass(frozen=True)
+class _QrColsOp:
+    """Orthonormalize columns — the ``Q`` of the reduced QR (standard inner product)."""
+
+    def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
+        q, _r = np.linalg.qr(np.asarray(A, dtype=float))
+        return q
+
+
+@dataclass(frozen=True)
+class _MetricOrthonormalOp:
+    """Orthonormalize columns w.r.t. a metric ``G``: ``A·L⁻ᵀ`` with ``LLᵀ = AᵀGA`` (Cholesky)."""
+
+    def __call__(self, A: np.ndarray, G: np.ndarray) -> np.ndarray:  # noqa: N803
+        a = np.asarray(A, dtype=float)
+        gram = a.T @ np.asarray(G, dtype=float) @ a
+        L = np.linalg.cholesky(gram)
+        return a @ np.linalg.inv(L).T
 
 
 # ===========================================================================
@@ -3031,14 +3154,15 @@ def realize_basis(program: pa.Program, b: B.Basis) -> pa.SymArray:
             return _block_diag(program, [realize_basis(program, x) for x in bases])
         case B.BasisRep(count, inner):
             return _block_repeat(program, realize_basis(program, inner), _count_int(count))
-        case B.CompleteBasis(sub_basis, complement):
-            sub = realize_basis(program, sub_basis)
-            comp = _const_prog(program, np.asarray(complement, dtype=float), "realize:complement")
-            return _hstack(program, [sub, comp])
         case B.ImageBasis() | B.ProjectedBasis():
             raise CobError(
                 f"realize_basis: FFS basis {b!r} is realized via space_basis.realize_ffs_basis "
                 "(SvdOp/QrOp/GSvdOp), not as a static matrix"
+            )
+        case B.CompleteBasis() | B.ListBasis() | B.OrthonormalBasis():
+            raise CobError(
+                f"realize_basis: {type(b).__name__} (term/completion/orthonormal) is realized "
+                "via represent.realize_basis_cols, not as a static matrix"
             )
         case _:
             raise CobError(f"realize_basis: cannot realize {b!r}")
@@ -3212,22 +3336,25 @@ def _short(b: B.Basis) -> str:
 
 
 def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
-    """Structural basis equality that tolerates numpy ``vectors``/``complement`` fields.
-
-    A plain ``a == b`` raises ``ValueError`` when a :class:`CompleteBasis` carries a numpy
-    array (ambiguous array truth value), so compare those array-bearing fields with
-    :func:`numpy.array_equal`.
-    """
+    """Structural basis equality that recurses into basis-valued fields (so e.g. a
+    :class:`CompleteBasis` whose ``complement`` is a basis compares structurally)."""
     if type(a) is not type(b):
         return False
     match (a, b):
-        case (B.CompleteBasis(sa, ca), B.CompleteBasis(sb, cb)):
-            return _basis_eq(sa, sb) and np.array_equal(
-                np.asarray(ca, dtype=float), np.asarray(cb, dtype=float)
-            )
+        case (B.CompleteBasis(sa, ca, ra), B.CompleteBasis(sb, cb, rb)):
+            return ra == rb and _basis_eq(sa, sb) and _basis_eq(ca, cb)
+        case (B.ListBasis(va, bka, ra), B.ListBasis(vb, bkb, rb)):
+            return (ra == rb and va == vb
+                    and (bka is None) == (bkb is None)
+                    and (bka is None or _basis_eq(bka, bkb)))
+        case (B.ImageBasis(fa, sa, ta), B.ImageBasis(fb, sb, tb)):
+            return (fa == fb and (sa is None) == (sb is None) and (ta is None) == (tb is None)
+                    and (sa is None or _basis_eq(sa, sb))
+                    and (ta is None or _basis_eq(ta, tb)))
         case (B.BasisProd(fs), B.BasisProd(ts)) | (B.BasisSum(fs), B.BasisSum(ts)):
             return len(fs) == len(ts) and all(_basis_eq(x, y) for x, y in zip(fs, ts, strict=True))
-        case (B.DualBasis(x), B.DualBasis(y)) | (B.PrimalBasis(x), B.PrimalBasis(y)):
+        case (B.DualBasis(x), B.DualBasis(y)) | (B.PrimalBasis(x), B.PrimalBasis(y)) \
+                | (B.OrthonormalBasis(x), B.OrthonormalBasis(y)):
             return _basis_eq(x, y)
         case (B.BasisRep(nx, x), B.BasisRep(ny, y)):
             return nx == ny and _basis_eq(x, y)

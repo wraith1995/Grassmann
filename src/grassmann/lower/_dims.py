@@ -140,7 +140,8 @@ def basis_dim(b: B.Basis) -> int:
     match b:
         case B.ScalarBasis():
             return 1
-        case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
+        case (B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _)
+              | B.OrthonormalBasis(inner)):
             return basis_dim(inner)
         case B.BasisSum(bases):
             return sum(basis_dim(x) for x in bases)
@@ -151,15 +152,16 @@ def basis_dim(b: B.Basis) -> int:
             return out
         case B.BasisRep(count, inner):
             return _dim_int(count) * basis_dim(inner)
-        case B.ListBasis(vectors):
-            # an explicit list of basis vectors is statically sized by its length.
-            return len(vectors)
-        case B.CompleteBasis(_, _):
-            # ambient dim = sub + complement; complement is a realized matrix.
-            import numpy as np
-
-            comp = np.asarray(b.complement, dtype=float)
-            return basis_dim(b.sub_basis) + int(comp.shape[1] if comp.ndim == 2 else comp.shape[0])
+        case B.ListBasis(vectors, backup, _reduce):
+            # a list of vectors is sized by its length, unless a backup completes it to the
+            # backup's (ambient) dimension.
+            return basis_dim(backup) if backup is not None else len(vectors)
+        case B.CompleteBasis(sub_basis, complement, reduce):
+            # RREF/ORTHONORMALIZE complete to the ambient (the complement's dimension); else
+            # the stacked count sub + complement.
+            if reduce is B.Reduce.NONE:
+                return basis_dim(sub_basis) + basis_dim(complement)
+            return basis_dim(complement)
         case B.ImageBasis() | B.ProjectedBasis() | B.BVar() | B.BLam() | B.BApp():
             raise DynamicDim(f"basis {b!r} has a runtime/symbolic dimension")
         case _:  # pragma: no cover - defensive

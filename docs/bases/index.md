@@ -281,14 +281,14 @@ Output — the `cob` matrix:
 
 <a id="conv-primal-basis-complete-basis"></a>
 
-### `PrimalBasis` → a completed subspace basis `[ u | complement ]`
+### `PrimalBasis` → a sub-basis RREF-completed from the standard basis
 
 **Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(PrimalBasis(DualBasis(<the term basis>)), CompleteBasis(ListBasis(u0), comp))
+cob(PrimalBasis(DualBasis(<the term basis>)), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
 ```
 
 Input `v0` =
@@ -360,6 +360,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -402,6 +408,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -581,14 +593,14 @@ Output — the `cob` matrix:
 
 <a id="conv-basis-sum-complete-basis"></a>
 
-### `BasisSum` → a completed basis of V⊕W
+### `BasisSum` → a sub-basis RREF-completed from the ⊕ standard basis
 
 **Mechanism (`cob`):** realize both bases toward the V⊕W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(BasisSum(std₂, std₁), CompleteBasis(ListBasis(p0), comp))
+cob(BasisSum(std₂, std₁), CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF))
 ```
 
 Input `q0` =
@@ -763,14 +775,14 @@ Output — the `cob` matrix:
 
 <a id="conv-basis-prod-complete-basis"></a>
 
-### `BasisProd` → a completed basis of V⊗W
+### `BasisProd` → a sub-basis RREF-completed from the ⊗ standard basis
 
 **Mechanism (`cob`):** realize both bases toward the V⊗W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(BasisProd(std₂, std₂), CompleteBasis(ListBasis(r0), comp))
+cob(BasisProd(std₂, std₂), CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF))
 ```
 
 Input `w0` =
@@ -947,14 +959,14 @@ Output — the `cob` matrix:
 
 <a id="conv-basis-rep-complete-basis"></a>
 
-### `BasisRep` → a completed subspace basis `[ u | complement ]`
+### `BasisRep` → a sub-basis RREF-completed from the standard basis
 
 **Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(BasisRep(3, ScalarBasis()), CompleteBasis(ListBasis(u0), comp))
+cob(BasisRep(3, ScalarBasis()), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
 ```
 
 Input `v0` =
@@ -1105,6 +1117,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -1147,6 +1165,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -1193,6 +1217,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -1235,6 +1265,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -1325,6 +1361,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -1367,6 +1409,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -1413,6 +1461,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -1455,6 +1509,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -1548,14 +1608,14 @@ Output — the `cob` matrix:
 
 <a id="conv-list-basis-complete-basis"></a>
 
-### `ListBasis` → a completed subspace basis `[ u | complement ]`
+### `ListBasis` → a sub-basis RREF-completed from the standard basis
 
 **Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(ListBasis(v0, v1, v2), CompleteBasis(ListBasis(u0), comp))
+cob(ListBasis(v0, v1, v2), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
 ```
 
 Input `v0` =
@@ -1671,6 +1731,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -1713,6 +1779,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -1937,7 +2009,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), comp), BasisRep(3, ScalarBasis()))
+cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), BasisRep(3, ScalarBasis()))
 ```
 
 Input `v0` =
@@ -1981,7 +2053,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), comp), ListBasis(v0, v1, v2))
+cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), ListBasis(v0, v1, v2))
 ```
 
 Input `v0` =
@@ -2025,7 +2097,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), comp), PrimalBasis(DualBasis(<the term basis>)))
+cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), PrimalBasis(DualBasis(<the term basis>)))
 ```
 
 Input `v0` =
@@ -2097,6 +2169,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -2141,6 +2219,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -2157,7 +2241,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(p0), comp), BasisSum(std₂, std₁))
+cob(CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF), BasisSum(std₂, std₁))
 ```
 
 Input `q0` =
@@ -2201,7 +2285,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(r0), comp), BasisProd(std₂, std₂))
+cob(CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF), BasisProd(std₂, std₂))
 ```
 
 Input `w0` =

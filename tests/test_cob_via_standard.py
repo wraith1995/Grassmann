@@ -89,9 +89,9 @@ def _cases():
             Vn = C.base("V", n)
             M = _invertible(n)
             sub, f = _listb(Vn, f"sub{n}_{k}", M[:, :k])
-            comp = M[:, k:]
-            out.append((f"CompleteBasis ℝ^{n} (sub {k}+{n - k})",
-                        B.complete_basis(sub, comp), default_basis(Vn), f))
+            out.append((f"CompleteBasis ℝ^{n} (sub {k}, RREF-completed)",
+                        B.complete_basis(sub, default_basis(Vn), reduce=B.Reduce.RREF),
+                        default_basis(Vn), f))
 
     # --- BasisSum: arities + per-summand options -------------------------
     A2, W1, U2 = C.base("A", 2), C.base("W", 1), C.base("U", 2)

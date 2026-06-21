@@ -56,6 +56,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -96,6 +102,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -140,6 +152,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -180,6 +198,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:

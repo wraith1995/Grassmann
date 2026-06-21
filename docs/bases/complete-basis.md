@@ -23,7 +23,7 @@ How this basis converts to other bases of the **same space**, and how `cob` hand
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), comp), BasisRep(3, ScalarBasis()))
+cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), BasisRep(3, ScalarBasis()))
 ```
 
 Input `v0` =
@@ -65,7 +65,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), comp), ListBasis(v0, v1, v2))
+cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), ListBasis(v0, v1, v2))
 ```
 
 Input `v0` =
@@ -107,7 +107,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), comp), PrimalBasis(DualBasis(<the term basis>)))
+cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), PrimalBasis(DualBasis(<the term basis>)))
 ```
 
 Input `v0` =
@@ -177,6 +177,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -219,6 +225,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -233,7 +245,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(p0), comp), BasisSum(std₂, std₁))
+cob(CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF), BasisSum(std₂, std₁))
 ```
 
 Input `q0` =
@@ -275,7 +287,7 @@ Output — the `cob` matrix:
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(r0), comp), BasisProd(std₂, std₂))
+cob(CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF), BasisProd(std₂, std₂))
 ```
 
 Input `w0` =
@@ -327,14 +339,20 @@ Output — the `cob` matrix:
 | field | type |
 |---|---|
 | `sub_basis` | `Basis` |
-| `complement` | `object` |
+| `complement` | `Basis` |
+| `reduce` | `Reduce` |
 
 ## Built by
 
-- **Core constructor** (`grassmann.core.basis`): `complete_basis(sub_basis: 'Basis', complement: 'object') -> 'CompleteBasis'`
+- **Core constructor** (`grassmann.core.basis`): `complete_basis(sub_basis: 'Basis', complement: 'Basis', reduce: 'Reduce' = <Reduce.NONE: 'none'>) -> 'CompleteBasis'`
 - **Surface syntax** (`grassmann`): complete
 
-> ``CompleteBasis(subBasis, complement)`` — complete a subspace basis to its
-> ambient. ``complement`` is user-supplied. embed = pad-zeros, project =
-> drop-complement (realized FROM this; no Embed/ProjectBasis).
+> ``CompleteBasis(subBasis, complement, reduce?)`` — complete a basis of an EXPLICIT
+> subspace to its ambient, by filling the missing directions from ``complement``.
+> 
+> ``complement`` is a :class:`Basis` (e.g. the ambient standard basis) — the source of the
+> completing directions.  ``reduce`` (:class:`Reduce`) selects how ``[sub | complement]`` is
+> combined: ``RREF`` keeps the sub columns then greedily adds independent complement columns;
+> ``ORTHONORMALIZE`` orthonormalizes the stack; ``NONE`` stacks as-is.  embed = pad-zeros,
+> project = drop-complement (realized FROM this; no Embed/ProjectBasis).
 
