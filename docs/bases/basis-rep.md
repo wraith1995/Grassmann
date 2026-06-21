@@ -53,7 +53,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 ### → a sub-basis RREF-completed from the standard basis
@@ -137,7 +137,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 ### → another ⊕ⁿ basis (the repeated inner term basis changed)

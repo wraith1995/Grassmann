@@ -188,9 +188,9 @@ Input `r2` =
 Output — the `cob` matrix:
 
 ```
-[[ 2., -0.,  0.],
- [ 1.,  3.,  0.],
- [ 0.,  0.,  1.]]
+[[2., 0., 0.],
+ [1., 3., 0.],
+ [0., 0., 1.]]
 ```
 
 <a id="conv-primal-basis-basis-rep"></a>
@@ -422,7 +422,7 @@ Output — the `cob` matrix:
 
 ```
 [[-2.449, -4.082],
- [ 0.   , -2.708]]
+ [-0.   , -2.708]]
 ```
 
 <a id="conv-primal-basis-scalar-basis"></a>
@@ -590,7 +590,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 <a id="conv-basis-sum-complete-basis"></a>
@@ -678,7 +678,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 <a id="conv-basis-sum-basis-sum"></a>
@@ -772,7 +772,7 @@ Output — the `cob` matrix:
 [[ 1., -1.,  0.,  0.],
  [ 0.,  1., -1.,  0.],
  [ 0.,  0.,  1., -1.],
- [ 0.,  0., -0.,  1.]]
+ [ 0.,  0.,  0.,  1.]]
 ```
 
 <a id="conv-basis-prod-complete-basis"></a>
@@ -884,7 +884,7 @@ Output — the `cob` matrix:
 [[ 1., -1.,  0.,  0.],
  [ 0.,  1., -1.,  0.],
  [ 0.,  0.,  1., -1.],
- [ 0.,  0., -0.,  1.]]
+ [ 0.,  0.,  0.,  1.]]
 ```
 
 <a id="conv-basis-prod-basis-prod"></a>
@@ -956,7 +956,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 <a id="conv-basis-rep-complete-basis"></a>
@@ -1044,7 +1044,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 <a id="conv-basis-rep-basis-rep"></a>
@@ -1793,7 +1793,7 @@ Output — the `cob` matrix:
 
 ```
 [[-2.449, -4.082],
- [ 0.   , -2.708]]
+ [-0.   , -2.708]]
 ```
 
 <a id="conv-list-basis-scalar-basis"></a>
@@ -1999,7 +1999,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 <a id="conv-orthonormal-basis-with-inner-basis"></a>
@@ -2044,7 +2044,7 @@ Output — the `cob` matrix:
 
 ```
 [[ 0.577, -0.408,  0.   ],
- [-0.   ,  1.225,  0.   ],
+ [ 0.   ,  1.225,  0.   ],
  [ 0.   ,  0.   ,  1.   ]]
 ```
 
@@ -2133,7 +2133,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 <a id="conv-complete-basis-primal-basis"></a>
@@ -2177,7 +2177,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 <a id="conv-complete-basis-image-basis"></a>
@@ -2277,7 +2277,7 @@ Output — the `cob` matrix:
 
 ```
 [[-2.449, -1.633],
- [ 0.   , -2.708]]
+ [-0.   , -2.708]]
 ```
 
 <a id="conv-complete-basis-basis-sum"></a>

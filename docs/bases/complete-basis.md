@@ -97,7 +97,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 ### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
@@ -139,7 +139,7 @@ Output — the `cob` matrix:
 ```
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
+ [ 0.,  0.,  1.]]
 ```
 
 ### → the literal `ImageBasis(J)`
@@ -235,7 +235,7 @@ Output — the `cob` matrix:
 
 ```
 [[-2.449, -1.633],
- [ 0.   , -2.708]]
+ [-0.   , -2.708]]
 ```
 
 ### → the ⊕ basis `BasisSum(std₂, std₁)`

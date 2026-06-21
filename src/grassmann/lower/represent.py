@@ -1170,30 +1170,82 @@ def _cob_via_standard(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     """The fallback cob — **route through the standard basis** (`43 §2c`).
 
     Realizing a basis is exactly its cob **to** the standard basis (its vectors as columns in
-    standard coords), so ``cob(A → B) = cob(std → B) · cob(A → std) = pinv(realize B) · realize
-    A`` (``cob(std → B) = (realize B)⁻¹``, a pseudo-inverse since FFS column matrices are
-    non-square).  Total over every basis :func:`realize_basis_cols` can build (each converts to
-    and from its standard basis); ``realize_basis_cols`` puts each in its natural coords (primal
-    in standard primal, covariant in standard dual), and the caller's variance guard already
-    rejected mixing ``V`` with ``V*``.
+    standard coords), so ``cob(A → B) = cob(std → B) · cob(A → std)`` with ``cob(std → B) =
+    (realize B)⁻¹``.  That inverse is specialized to ``B``'s structure (see :func:`_inverse_cols`):
+    a transpose when ``B`` is standard-orthonormal, an exact inverse when ``B`` is square, and a
+    pseudo-inverse only for genuinely rectangular FFS columns.  Total over every basis
+    :func:`realize_basis_cols` can build; ``realize_basis_cols`` puts each in its natural coords
+    (primal in standard primal, covariant in standard dual), and the caller's variance guard
+    already rejected mixing ``V`` with ``V*``.
     """
-    return _pinv_compose(ctx, realize_basis_cols(ctx, frm), realize_basis_cols(ctx, to))
+    c_from, c_to = realize_basis_cols(ctx, frm), realize_basis_cols(ctx, to)
+    return _compose_via_inverse(ctx, c_from, c_to, to)
 
 
 def _pinv_compose(ctx: _Ctx, c_from: pa.SymArray, c_to: pa.SymArray) -> pa.SymArray:
-    """``pinv(C_to) · C_from`` — compose two same-ambient column matrices into a cob."""
+    """``(C_to)⁻¹ · C_from`` — compose two same-ambient column matrices into a cob, with the
+    inverse specialized by shape (transpose/inv/pinv) when the structure is known."""
+    return _compose_via_inverse(ctx, c_from, c_to, None)
+
+
+def _compose_via_inverse(
+    ctx: _Ctx, c_from: pa.SymArray, c_to: pa.SymArray, to: B.Basis | None,
+) -> pa.SymArray:
     n_amb, k_from = _shape_of(c_from)
     _, k_to = _shape_of(c_to)
-    [pinv_to] = ctx.prog.emit_stmt(           # cob(std → B) = (realize B)⁻¹ (pinv if non-square)
-        pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (k_to, n_amb))],
-        note="cob:std→to=pinv(C_to)",
-    )
+    inv_to = _inverse_cols(ctx, c_to, n_amb, k_to, to)   # cob(std → to) = (realize to)⁻¹
     [m] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("ij,jk->ik"), [pinv_to, c_from],
-        [pa.OutSpec("cob:pinv(C_to)·C_from", (k_to, k_from))],
+        pa.EinsumStmtOp("ij,jk->ik"), [inv_to, c_from],
+        [pa.OutSpec("cob:(std→to)·C_from", (k_to, k_from))],
         note="cob:(std→to)·(from→std)",
     )
     return m
+
+
+def _inverse_cols(
+    ctx: _Ctx, c_to: pa.SymArray, n_amb: object, k_to: object, to: B.Basis | None,
+) -> pa.SymArray:
+    """``cob(std → to) = (realize to)⁻¹``, with the cheapest exact inverse for ``to``'s structure:
+    a **transpose** for a standard-orthonormal basis (``Qᵀ = pinv(Q)``, exact even when ``Q`` is
+    a rectangular FFS range), an **exact inverse** for a square (full) basis, and a
+    **pseudo-inverse** only for the remaining rectangular columns.
+    """
+    if to is not None and _is_standard_orthonormal(to):
+        [tr] = ctx.prog.emit_stmt(
+            _TransposeOp(), [c_to], [pa.OutSpec("cob:std→to=Cᵀ", (k_to, n_amb))],
+            note="cob:std→to=Cᵀ (standard-orthonormal)",
+        )
+        return tr
+    if isinstance(n_amb, int) and isinstance(k_to, int) and n_amb == k_to:
+        [iv] = ctx.prog.emit_stmt(
+            pa.InvOp(), [c_to], [pa.OutSpec("cob:std→to=C⁻¹", (k_to, n_amb))],
+            note="cob:std→to=C⁻¹ (square)",
+        )
+        return iv
+    [pv] = ctx.prog.emit_stmt(
+        pa.PinvOp(), [c_to], [pa.OutSpec("cob:std→to=pinv(C)", (k_to, n_amb))],
+        note="cob:std→to=pinv(C) (rectangular)",
+    )
+    return pv
+
+
+def _is_standard_orthonormal(b: B.Basis) -> bool:
+    """Whether ``realize_basis_cols(b)`` has orthonormal columns in the STANDARD inner product
+    (so ``pinv = transpose``).  Conservative: only the constructions that realize through a
+    standard QR/SVD (``_QrColsOp`` / FFS range without a metric), never a *g*-orthonormal one."""
+    match b:
+        case B.ScalarBasis():
+            return True
+        case B.OrthonormalBasis(inner):
+            return not isinstance(inner, B.WithInnerBasis)          # plain QR ⇒ QᵀQ = I
+        case B.ProjectedBasis(_f, _w, src, tgt):
+            return src is None and tgt is None                      # metric-free SVD/QR range
+        case B.ListBasis(_v, backup, reduce):
+            return reduce is B.Reduce.ORTHONORMALIZE and backup is None
+        case B.CompleteBasis(_s, _c, reduce):
+            return reduce is B.Reduce.ORTHONORMALIZE
+        case _:
+            return False
 
 
 def _basis_variance(ctx: _Ctx, basis: B.Basis) -> bool:
