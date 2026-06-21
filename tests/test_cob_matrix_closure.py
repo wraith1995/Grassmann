@@ -59,8 +59,8 @@ def _reps_dim1():
         "ImageBasis": (B.image_basis(f), {_k(f): np.array([[2.0]])}),
         "ListBasis": (B.list_basis(lv), {_k(lv): np.array(3.0)}),
         "WithInnerBasis": (B.with_inner_basis(B.scalar_basis(), g), {}),
-        "CompleteBasis": (B.complete_basis(B.list_basis(v2), np.zeros((1, 0))),
-                          {_k(v2): np.array(1.0)}),
+        "CompleteBasis": (B.complete_basis(B.list_basis(v2), B.scalar_basis(),
+                                           reduce=B.Reduce.RREF), {_k(v2): np.array(1.0)}),
     }
 
 
@@ -74,7 +74,6 @@ def _reps_dim4():
     ff = {_k(f): M.T}
     g = C.var("g4", C.oprod(C.dual(R4), C.dual(R4)))
     sub, fsub = _listb("s", R4, M[:, :2])
-    comp = np.array([[0.0, 0], [0, 0], [1, 0], [0, 1.0]])
     return {
         "DualBasis": (B.dual_basis(lb), flb),
         "PrimalBasis": (B.primal_basis(B.dual_basis(lb)), flb),
@@ -85,7 +84,7 @@ def _reps_dim4():
         "ImageBasis": (B.image_basis(f), ff),
         "ListBasis": (lb2, flb2),
         "WithInnerBasis": (B.with_inner_basis(lb, g), flb),
-        "CompleteBasis": (B.complete_basis(sub, comp), fsub),
+        "CompleteBasis": (B.complete_basis(sub, default_basis(R4), reduce=B.Reduce.RREF), fsub),
     }
 
 

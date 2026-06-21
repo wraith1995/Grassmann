@@ -821,14 +821,13 @@ def _group_r3():
     Mv = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
     term, ft = _listb("v", Mv)
     sub, fsub = _listb("u", np.array([[1.0], [0.0], [0.0]]))
-    comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
-    complete = B.complete_basis(sub, comp)
+    complete = B.complete_basis(sub, _std(3), reduce=C.Reduce.RREF)
     bases = [
         ("BasisRep", "the standard basis `BasisRep(3, ScalarBasis)`", _std(3),
          "BasisRep(3, ScalarBasis())"),
         ("ListBasis", "a term basis `ListBasis(v₀,v₁,v₂)`", term, "ListBasis(v0, v1, v2)"),
-        ("CompleteBasis", "a completed subspace basis `[ u | complement ]`", complete,
-         "CompleteBasis(ListBasis(u0), comp)"),
+        ("CompleteBasis", "a sub-basis RREF-completed from the standard basis", complete,
+         "CompleteBasis(ListBasis(u0), std₃, reduce=RREF)"),
     ]
     return bases, {**ft, **fsub}, "ℝ³"
 
@@ -841,9 +840,9 @@ def _group_img():
     g0, g1 = C.var("g0", C.base("Re", 3)), C.var("g1", C.base("Re", 3))
     term = B.list_basis(g0, g1)
     sub = C.var("h0", C.base("Re", 3))
-    comp = _JMATH[:, [1]]  # second image column, a constant completion in the ℝ³ ambient
-    complete = B.complete_basis(B.list_basis(sub), comp)
-    feeds = {J: _JSTORED, g0: cols[:, 0], g1: cols[:, 1], sub: _JMATH[:, 0]}
+    mc = C.var("mc", C.base("Re", 3))  # the other image direction (a ℝ³ vector in Img(J))
+    complete = B.complete_basis(B.list_basis(sub), B.list_basis(mc))
+    feeds = {J: _JSTORED, g0: cols[:, 0], g1: cols[:, 1], sub: _JMATH[:, 0], mc: _JMATH[:, 1]}
     bases = [
         ("ImageBasis", "the literal `ImageBasis(J)`", imgb, "ImageBasis(J)"),
         ("ProjectedBasis", 'the orthonormal `ProjectedBasis(J,"image")`', projb,
@@ -880,13 +879,13 @@ def _group_oplus():
     Mv = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
     term, ft, _ = _listb_sp(VW, "q", [Mv[:, i] for i in range(3)])
     sub, fs, _ = _listb_sp(VW, "p", [np.array([1.0, 0.0, 0.0])])
-    comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
-    complete = B.complete_basis(sub, comp)
+    vw_std = B.basis_sum(_std(2), _std(1))
+    complete = B.complete_basis(sub, vw_std, reduce=C.Reduce.RREF)
     bases = [
-        ("BasisSum", "the ⊕ basis `BasisSum(std₂, std₁)`",
-         B.basis_sum(_std(2), _std(1)), "BasisSum(std₂, std₁)"),
+        ("BasisSum", "the ⊕ basis `BasisSum(std₂, std₁)`", vw_std, "BasisSum(std₂, std₁)"),
         ("ListBasis", "a term basis of V⊕W `ListBasis(q₀,q₁,q₂)`", term, "ListBasis(q0,q1,q2)"),
-        ("CompleteBasis", "a completed basis of V⊕W", complete, "CompleteBasis(ListBasis(p0), comp)"),
+        ("CompleteBasis", "a sub-basis RREF-completed from the ⊕ standard basis", complete,
+         "CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF)"),
     ]
     return bases, {**ft, **fs}, "V⊕W"
 
@@ -899,13 +898,13 @@ def _group_oprod():
             np.array([[1.0, 1.0], [1.0, 0.0]]), np.array([[1.0, 1.0], [1.0, 1.0]])]
     term, ft, _ = _listb_sp(VW, "w", mats)
     sub, fs, _ = _listb_sp(VW, "r", [np.array([[1.0, 0.0], [0.0, 0.0]])])
-    comp = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-    complete = B.complete_basis(sub, comp)
+    vw_std = B.basis_prod(_std(2), _std(2))
+    complete = B.complete_basis(sub, vw_std, reduce=C.Reduce.RREF)
     bases = [
-        ("BasisProd", "the ⊗ basis `BasisProd(std₂, std₂)`",
-         B.basis_prod(_std(2), _std(2)), "BasisProd(std₂, std₂)"),
+        ("BasisProd", "the ⊗ basis `BasisProd(std₂, std₂)`", vw_std, "BasisProd(std₂, std₂)"),
         ("ListBasis", "a term basis of V⊗W `ListBasis(w₀..w₃)`", term, "ListBasis(w0..w3)"),
-        ("CompleteBasis", "a completed basis of V⊗W", complete, "CompleteBasis(ListBasis(r0), comp)"),
+        ("CompleteBasis", "a sub-basis RREF-completed from the ⊗ standard basis", complete,
+         "CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF)"),
     ]
     return bases, {**ft, **fs}, "V⊗W"
 
@@ -918,14 +917,14 @@ def _group_withinner():
     Mv = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
     term, ft, _ = _listb_sp(V, "y", [Mv[:, i] for i in range(3)])
     sub, fs, _ = _listb_sp(V, "x", [np.array([1.0, 0.0, 0.0])])
-    comp = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    completed = B.complete_basis(sub, _std(3), reduce=C.Reduce.RREF)
     bases = [
-        ("WithInnerBasis", "the g-orthonormal standard basis `WithInnerBasis(std₃, g)`",
+        ("WithInnerBasis", "the metric standard basis `WithInnerBasis(std₃, g)`",
          B.with_inner_basis(_std(3), g), "WithInnerBasis(std₃, g)"),
         ("WithInnerBasis", "a g-metric term basis `WithInnerBasis(ListBasis(y…), g)`",
          B.with_inner_basis(term, g), "WithInnerBasis(ListBasis(y0,y1,y2), g)"),
-        ("WithInnerBasis", "a g-metric completed basis `WithInnerBasis([x|comp], g)`",
-         B.with_inner_basis(B.complete_basis(sub, comp), g), "WithInnerBasis(CompleteBasis, g)"),
+        ("WithInnerBasis", "a g-metric completed basis `WithInnerBasis([x|std], g)`",
+         B.with_inner_basis(completed, g), "WithInnerBasis(CompleteBasis, g)"),
     ]
     return bases, {**ft, **fs}, "WithInner(ℝ³,g)"
 

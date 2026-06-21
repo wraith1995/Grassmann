@@ -53,6 +53,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -93,6 +99,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -137,6 +149,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -177,6 +195,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -228,19 +252,20 @@ Output — the `cob` matrix:
 |---|---|
 | `f` | `Term` |
 | `source` | `Basis | None` |
+| `target` | `Basis | None` |
 
 ## Built by
 
-- **Core constructor** (`grassmann.core.basis`): `image_basis(f: 'Term', source: 'Basis | None' = None) -> 'ImageBasis'`
+- **Core constructor** (`grassmann.core.basis`): `image_basis(f: 'Term', source: 'Basis | None' = None, target: 'Basis | None' = None) -> 'ImageBasis'`
 - **Surface syntax** (`grassmann`): image_basis
 
-> ``ImageBasis(f, source?)`` — the **literal map-application** basis of ``f``'s range.
+> ``ImageBasis(f, source?, target?)`` — the **literal map-application** basis of ``f``'s range.
 > 
 > Its columns are ``f`` applied to the **source** basis of ``f``'s domain — ``f(sᵢ)``,
-> the R/fwd side — **not** orthonormalized.  ``source`` (a basis of ``dom f``) defaults to
-> the standard basis (``None``), giving the literal columns ``f(eᵢ)``; a non-standard
-> ``source`` (e.g. a ``ListBasis`` of immersed/source coordinates) maps those vectors
-> instead.  The *orthonormalized* range basis (the ``Q`` of QR / first ``δ_f`` columns of
-> the SVD ``U``) is :class:`ProjectedBasis` with ``which == "image"``; the two are
-> connected by a change of basis (``QrOp.R``/``Q`` or the SVD factors).
+> the R/fwd side — **not** orthonormalized, read in the codomain ``target`` basis.  ``source``
+> (a basis of ``dom f``) defaults to the standard basis (``None``), giving the literal columns
+> ``f(eᵢ)``; ``target`` (a basis of ``cod f``) likewise defaults to standard.  The
+> *orthonormalized* range basis (the ``Q`` of QR / first ``δ_f`` columns of the SVD ``U``) is
+> :class:`ProjectedBasis` with ``which == "image"``; the two are connected by a change of basis
+> (``QrOp.R``/``Q`` or the SVD factors).
 

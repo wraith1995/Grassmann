@@ -98,14 +98,14 @@ Output — the `cob` matrix:
  [0., 0., 1.]]
 ```
 
-### → a completed subspace basis `[ u | complement ]`
+### → a sub-basis RREF-completed from the standard basis
 
 **Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(PrimalBasis(DualBasis(<the term basis>)), CompleteBasis(ListBasis(u0), comp))
+cob(PrimalBasis(DualBasis(<the term basis>)), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
 ```
 
 Input `v0` =
@@ -175,6 +175,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -215,6 +221,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:

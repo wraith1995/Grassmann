@@ -227,11 +227,11 @@ def test_cob_roundtrip_is_inverse() -> None:
 
 
 def test_cob_completebasis_stacks_sub_and_complement() -> None:
-    # sub basis = e0; complement = e1; ambient = R^2.  cob to standard = [sub|comp] = I.
+    # sub basis = e0; complement basis = e1; ambient = R^2.  cob to standard = [sub|comp] = I.
     sub, fs = _listb("sub", np.array([[1.0], [0.0]]))
-    comp = np.array([[0.0], [1.0]])
+    comp, fc = _listb("ce", np.array([[0.0], [1.0]]))
     cb = C.complete_basis(sub, comp)
-    np.testing.assert_allclose(_cob_run(cb, _rb(2), fs), np.eye(2), atol=1e-9)
+    np.testing.assert_allclose(_cob_run(cb, _rb(2), {**fs, **fc}), np.eye(2), atol=1e-9)
 
 
 # ===========================================================================

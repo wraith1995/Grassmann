@@ -74,5 +74,10 @@ Output — the `cob` matrix:
 - **Core constructor** (`grassmann.core.basis`): `with_inner_basis(b: 'Basis', metric: 'Term') -> 'WithInnerBasis'`
 - **Surface syntax** (`grassmann`): with_inner_basis
 
-> ``WithInnerBasis(b, g)`` — a ``g``-orthonormal basis.
+> ``WithInnerBasis(b, g)`` — the basis ``b`` of the metricized space ``WithInner(V, g)``.
+> 
+> Carries the metric ``g`` as metadata; it is **not** assumed ``g``-orthonormal — it is just
+> ``b`` living in the metricized space.  To get the ``g``-orthonormal basis, wrap it in
+> :class:`OrthonormalBasis` (the explicit dual of ``remetric`` — orthonormalization is never
+> implicit in a change of basis).
 

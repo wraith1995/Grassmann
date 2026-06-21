@@ -57,14 +57,14 @@ Output — the `cob` matrix:
  [0., 0., 1.]]
 ```
 
-### → a completed subspace basis `[ u | complement ]`
+### → a sub-basis RREF-completed from the standard basis
 
 **Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(ListBasis(v0, v1, v2), CompleteBasis(ListBasis(u0), comp))
+cob(ListBasis(v0, v1, v2), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
 ```
 
 Input `v0` =
@@ -176,6 +176,12 @@ Input `h0` =
 [2., 1., 1.]
 ```
 
+Input `mc` =
+
+```
+[0., 3., 1.]
+```
+
 Output — the `cob` matrix:
 
 ```
@@ -216,6 +222,12 @@ Input `h0` =
 
 ```
 [2., 1., 1.]
+```
+
+Input `mc` =
+
+```
+[0., 3., 1.]
 ```
 
 Output — the `cob` matrix:
@@ -384,16 +396,22 @@ Output — the `cob` matrix:
 | field | type |
 |---|---|
 | `vectors` | `tuple[Term, ...]` |
+| `backup` | `Basis | None` |
+| `reduce` | `Reduce` |
 
 ## Built by
 
-- **Core constructor** (`grassmann.core.basis`): `list_basis(*vectors: 'Term') -> 'ListBasis'`
+- **Core constructor** (`grassmann.core.basis`): `list_basis(*vectors: 'Term', backup: 'Basis | None' = None, reduce: 'Reduce' = <Reduce.NONE: 'none'>) -> 'ListBasis'`
 - **Surface syntax** (`grassmann`): list_basis
 
-> ``ListBasis(vectors…)`` — a basis given as an EXPLICIT LIST OF TERM VECTORS.
+> ``ListBasis(vectors…, backup?, reduce?)`` — a basis as an EXPLICIT LIST OF TERM VECTORS.
 > 
-> A first-class basis given as explicit Term vectors
-> numpy array: each entry is a :class:`~grassmann.core.term.Term` vector (all of the
-> same space), and the basis is their span in the listed order.  At lowering each
-> vector is represented and the columns are stacked into the basis matrix.
+> Each entry is a :class:`~grassmann.core.term.Term` vector (all of the same space); the basis
+> is their span in the listed order, stacked into the basis matrix at lowering.  The
+> *term-level* successor of the old ``BaseBasis`` frame:
+> 
+> * ``reduce`` (:class:`Reduce`) — how to combine the vectors: ``NONE`` (assume independent),
+>   ``RREF`` (keep the linearly-independent columns), ``ORTHONORMALIZE`` (QR);
+> * ``backup`` — a fallback :class:`Basis` used to **complete** the (reduced) frame to a full
+>   basis when it is rank-deficient/incomplete (default: the space's standard basis).
 
