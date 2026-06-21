@@ -169,6 +169,33 @@ def test_qr_sign_convention_positive_diagonal_r() -> None:
     assert np.all(np.diag(U.T @ A) > 0)
 
 
+def test_primalbasis_to_primalbasis_is_inverse_transpose() -> None:
+    # A lone PrimalBasis realizes like a dual ((realize inner)⁻ᵀ), so PrimalBasis → PrimalBasis is
+    # the inverse-transpose of the inner cob, exactly like DualBasis → DualBasis.
+    V = C.base("V", 2)
+    A = np.array([[1.0, 1.0], [0.0, 1.0]])
+    Bm = np.array([[2.0, 0.0], [1.0, 1.0]])
+    av, fa = _listb(V, "pa", A)
+    bv, fb = _listb(V, "pb", Bm)
+    feeds = {**fa, **fb}
+    p1 = B.primal_basis(B.list_basis(*av))
+    p2 = B.primal_basis(B.list_basis(*bv))
+    m = _cob(p1, p2, feeds)
+    assert m == pytest.approx(np.linalg.inv(np.linalg.inv(Bm) @ A).T)   # (cob lb1→lb2)⁻ᵀ
+    assert m @ _cob(p2, p1, feeds) == pytest.approx(np.eye(2))           # round-trips
+
+
+def test_imagebasis_different_maps_are_rejected() -> None:
+    # Two ImageBasis of DIFFERENT maps are bases of different image spaces ⇒ no cob (the maps
+    # must be the same).  The space guard rejects them rather than mapping between distinct images.
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    f1 = C.var("F1", C.linear_map_space(Rt, Re), props=C.props.inj)
+    f2 = C.var("F2", C.linear_map_space(Rt, Re), props=C.props.inj)
+    feeds = {_k(f1): np.zeros((2, 3)), _k(f2): np.zeros((2, 3))}
+    with pytest.raises(_RM.RepresentError):
+        _cob(B.image_basis(f1), B.image_basis(f2), feeds)
+
+
 def test_basisrep_to_basissum_same_space_is_block_diag() -> None:
     # BasisRep(n, b) and BasisSum(b,…,b) spell the SAME ⊕ⁿ space; with a non-pure (term) inner the
     # cob is the block-diagonal of the per-summand cobs (not a full realize-and-invert).

@@ -58,9 +58,12 @@ specialized case per representative (the standard basis is only the *backstop*):
 - **`OrthonormalBasis(b)`** — the explicit dual of `remetric`; g-orthonormalizes `b` (a basis
   node, so orthonormalization is never an implicit cob).  raw `WithInnerBasis` ↔ its
   `OrthonormalBasis` is the (explicit) orthonormalization factor.
-- **`ImageBasis(f, source?, target?)`** — `source`/`target` are the dom/cod bases; same-map
-  `ImageBasis(f,s₁) ↔ ImageBasis(f,s₂)` is the *source cob* (no need to realize `f`), a different
-  map of the same image is its own (realize-both) case — not the generic leaf fallback.
+- **`ImageBasis(f, source?, target?)`** — `source`/`target` are the dom/cod bases.  An
+  `ImageBasis` is a basis of `Img(f)`, so two image bases form a cob pair **only when they share
+  the same map** `f` (a different map is a different image space — rejected); the cob is then just
+  the *source cob* (no need to realize `f`), and `target` is embed-only (it does not enter the cob).
+- **`PrimalBasis(b)`** — a lone primal realizes like a dual (`(realize b)⁻ᵀ`), so
+  `PrimalBasis → PrimalBasis` is `(inner cob)⁻ᵀ`, exactly like `DualBasis → DualBasis`.
 
 ### The fallback is the standard basis
 Within a space, when no specialized rule applies, `cob(A → B) = pinv(realize B) · realize A`:

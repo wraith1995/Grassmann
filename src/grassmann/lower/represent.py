@@ -851,6 +851,7 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   ScalarBasis → ScalarBasis         identity (ℝ has a single basis)
 #   DualBasis → DualBasis             (inner cob)⁻ᵀ
 #   PrimalBasis(DualBasis(·))         peel the double-dual, recurse
+#   PrimalBasis → PrimalBasis         (inner cob)⁻ᵀ   (a lone primal, like DualBasis)
 #   BasisSum  → BasisSum              block-diag  of the per-summand cobs
 #   BasisSum  ↔ BasisRep (same ⊕ⁿ)    block-diag  against the repeated inner (same-space spelling)
 #   BasisProd → BasisProd             Kron        of the per-factor cobs
@@ -858,9 +859,8 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   WithInner ↔ WithInner (same g)    cob the underlying bases (≠ a bare V — that's a remetric)
 #   OrthonormalBasis ↔ OrthonormalBasis   cob the underlying bases
 #   OrthonormalBasis ↔ raw (same space)   the orthonormalization factor, VIA STANDARD
-#   ImageBasis ↔ ImageBasis (same f, same tgt)  the source-basis cob (no need to realize f)
-#   ImageBasis ↔ ImageBasis (same f, diff tgt)  STILL the source cob (target is embed-only)
-#   ImageBasis ↔ ImageBasis (diff map)          realize both images in the STANDARD cod frame
+#   ImageBasis → ImageBasis (same f)  the source-basis cob (target is embed-only); a DIFFERENT
+#                                     map is a different image space ⇒ rejected (maps must match)
 #   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
 #   ProjectedBasis ↔ ProjectedBasis (same metric)   identity (same orthonormal range)
 #   ProjectedBasis ↔ ProjectedBasis (diff metric)   reorthonormalize the range, VIA STANDARD
@@ -1024,7 +1024,7 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
         case B.DualBasis():
             return _cob_from_dual(ctx, frm, to)
         case B.PrimalBasis():
-            return _cob_via_standard(ctx, frm, to)  # lone primal (no inner DualBasis to peel)
+            return _cob_from_primal(ctx, frm, to)  # lone primal (no inner DualBasis to peel)
         case B.BasisSum():
             return _cob_from_sum(ctx, frm, to)
         case B.BasisProd():
@@ -1067,6 +1067,19 @@ def _cob_from_dual(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, frm.basis, tb))
         case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric/metricized covector basis
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_primal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``PrimalBasis`` — a lone primal (``PrimalBasis(DualBasis(·))`` was already peeled).
+    It realizes like a dual (``(realize inner)⁻ᵀ``), so a ``PrimalBasis → PrimalBasis`` of the
+    same kind is the inverse-transpose of the inner cob, exactly like ``DualBasis → DualBasis``."""
+    match to:
+        case B.PrimalBasis(tb):
+            return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, frm.basis, tb))
+        case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
+            return _cob_via_standard(ctx, frm, to)
         case _:
             return _cob_via_standard(ctx, frm, to)
 
@@ -1154,21 +1167,24 @@ def _cob_from_orthonormal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``ImageBasis`` — the literal map-application range basis."""
-    match (frm, to):
-        case (B.ImageBasis(ff, fsrc, ftgt),
-              B.ImageBasis(tf, tsrc, ttgt)) if ff is tf and _src_eq(ftgt, ttgt):
-            # SAME map & target ⇒ the source-basis cob (no need to realize f).
+    """from ``ImageBasis`` — the literal map-application range basis.
+
+    An ``ImageBasis`` is a basis of ``Img(f)``; two image bases can only be a cob pair when they
+    are bases of the SAME image, i.e. the **same map** ``f`` (a different map is a different image
+    space).  Then the cob never needs to realize ``f`` — it is just the source-basis cob, and the
+    target is embed-only (the realized ambient frame), so it does not enter the cob.
+    """
+    match to:
+        case B.ImageBasis(tf, tsrc, _ttgt):
+            ff, fsrc = frm.f, frm.source
+            if ff is not tf and ff != tf:
+                # different maps ⇒ different image spaces (normally the space guard already
+                # rejected this; force the invariant explicitly).
+                raise RepresentError(
+                    f"ImageBasis cob: maps differ ⇒ different image spaces: {ff!r} vs {tf!r}"
+                )
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
-        case (B.ImageBasis(ff, fsrc, _), B.ImageBasis(tf, tsrc, _)) if ff is tf:
-            # SAME map, DIFFERENT target ⇒ STILL the source cob (target is the realized ambient
-            # frame, embed-only; realize-both-and-pinv would wrongly mix the two target frames).
-            return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
-        case (B.ImageBasis(ff, fsrc, _), B.ImageBasis(tf, tsrc, _)):
-            # DIFFERENT map of the same image ⇒ realize both in the STANDARD codomain frame.
-            return _pinv_compose(ctx, _realize_image_basis(ctx, ff, fsrc, None),
-                                 _realize_image_basis(ctx, tf, tsrc, None))
-        case (_, B.ProjectedBasis()):
+        case B.ProjectedBasis():
             # ImageBasis ↔ ProjectedBasis of one map ⇒ the QR factor R (metric ⇒ GSVD Uᵀ·M_W·J).
             m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
             return m if m is not None else _cob_via_standard(ctx, frm, to)
