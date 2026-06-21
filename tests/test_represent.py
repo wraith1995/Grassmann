@@ -488,20 +488,30 @@ def test_list_basis_inconsistent_dim_raises() -> None:
 
 
 def test_image_basis_node_realizes_literal_map_application() -> None:
-    """``realize_basis_cols(ImageBasis(f))`` is the literal ``f(eᵢ)`` columns (`73 T2`)."""
-    from grassmann.lower.represent import _Ctx, realize_basis_cols
+    """The LITERAL ``f(eᵢ)`` columns are the ambient immersion ``_ffs_immersion(ImageBasis)``;
+    ``realize_basis_cols`` now realizes the FFS basis **in-space** (the square ``R`` of
+    ``J = U_d·R``) (`73 T2`, `51 §FFS-δ`)."""
+    from grassmann.lower.represent import _Ctx, _ffs_immersion, realize_basis_cols
 
     V, W = C.base("V", 2), C.base("W", 3)
     f = C.var("f", C.linear_map_space(V, W))  # stored (|V|,|W|) = (2,3)
+    fmat = np.arange(6.0).reshape(2, 3)  # stored (dom,cod)
+
+    # The ambient immersion is the literal map application: f(eᵢ) = the (cod,dom) matrix = fmatᵀ.
     prog = pa.Program("ib", budget=pa.SymbolicBudget.force_stmts())
     ctx = _Ctx(prog=prog, basis_env={}, inputs={})
-    prog.add_output("B", realize_basis_cols(ctx, C.image_basis(f)))
-    fmat = np.arange(6.0).reshape(2, 3)  # stored (dom,cod)
+    prog.add_output("B", _ffs_immersion(ctx, C.image_basis(f)))
     res = prog.run({_var_key(f): fmat})["B"]
-    # columns = f applied to source basis = the (cod,dom) matrix = fmatᵀ (not orthonormal).
     assert res.shape == (3, 2)
     np.testing.assert_allclose(res, fmat.T)
     assert any("ImageBasis" in n and "map-application" in n for n in _notes(prog))
+
+    # In-space realize is the square R (J = U_d·R), so U_d·R reconstructs the immersion J.
+    prog2 = pa.Program("ib2", budget=pa.SymbolicBudget.force_stmts())
+    ctx2 = _Ctx(prog=prog2, basis_env={}, inputs={})
+    prog2.add_output("R", realize_basis_cols(ctx2, C.image_basis(f)))
+    r = prog2.run({_var_key(f): fmat})["R"]
+    assert r.shape == (2, 2)  # square in-space
 
 
 # Permute — tensor axis reorder / (0,2)-form transpose (the reordering Lift/InvLift can't do).

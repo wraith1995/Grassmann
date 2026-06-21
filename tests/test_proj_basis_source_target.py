@@ -34,6 +34,18 @@ def _realize(basis, feeds):
     return np.asarray(prog.run(feeds)["C"], float)
 
 
+def _immersion(basis, feeds):
+    """The ambient immersion columns (``U``/``J``) — the embed/project/metric seam.
+
+    ``realize_basis_cols`` now realizes an FFS basis **in-space** (square), so the ambient
+    columns come from the separate :func:`_ffs_immersion` seam.
+    """
+    prog = pa.Program("r")
+    ctx = _RM._Ctx(prog=prog, basis_env={}, inputs={})
+    prog.add_output("C", _RM._ffs_immersion(ctx, basis))
+    return np.asarray(prog.run(feeds)["C"], float)
+
+
 def _cob(a, b, feeds):
     prog = pa.Program("c")
     ctx = _RM._Ctx(prog=prog, basis_env={}, inputs={})
@@ -54,7 +66,7 @@ def test_projected_basis_target_is_metric_orthonormal() -> None:
     Tm = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.0, 0.0, 1.0]])
     pb = B.ProjectedBasis(J.node, "image", target=B.list_basis(*[ti.node for ti in t]))
     feeds = {_k(J): _JSTORED, **{_k(t[i]): Tm[:, i] for i in range(3)}}
-    C = _realize(pb, feeds)
+    C = _immersion(pb, feeds)  # ambient U (the embed/project/metric seam)
     g_t = np.linalg.inv(Tm @ Tm.T)
     assert C.T @ g_t @ C == pytest.approx(np.eye(2))  # orthonormal in the target metric
     # and it spans the SAME image (range of J).
@@ -65,8 +77,11 @@ def test_projected_basis_target_default_is_plain_q() -> None:
     """`target=None` is byte-identical to the plain orthonormal range `Q` (standard metric)."""
     J, _Re = _img()
     pb = B.ProjectedBasis(J.node, "image")
-    C = _realize(pb, {_k(J): _JSTORED})
+    C = _immersion(pb, {_k(J): _JSTORED})  # ambient U
+    assert C.shape == (3, 2)                 # ambient (3) × rank (2)
     assert C.T @ C == pytest.approx(np.eye(2))  # standard-orthonormal
+    # in-space realize is square (the canonical U_d coords ⇒ identity here).
+    assert _realize(pb, {_k(J): _JSTORED}) == pytest.approx(np.eye(2))
 
 
 def test_projected_basis_target_cob_roundtrips() -> None:
@@ -96,7 +111,7 @@ def test_image_to_metric_projected_uses_gsvd_factor() -> None:
     m = _cob(imgb, projb_t, feeds)
     back = _cob(projb_t, imgb, feeds)
     assert m @ back == pytest.approx(np.eye(2))  # invertible pair
-    u = _realize(projb_t, feeds)
+    u = _immersion(projb_t, feeds)  # ambient U (the embed/project seam)
     rng = np.random.default_rng(0)
     for _ in range(5):
         s = rng.standard_normal(2)
@@ -110,7 +125,7 @@ def test_image_basis_source_maps_the_source_basis() -> None:
     s0, s1 = G.var("s0", Rt), G.var("s1", Rt)
     Sm = np.array([[1.0, 0.0], [1.0, 1.0]])
     imgs = B.ImageBasis(J.node, source=B.list_basis(s0.node, s1.node))
-    C = _realize(imgs, {_k(J): _JSTORED, _k(s0): Sm[:, 0], _k(s1): Sm[:, 1]})
+    C = _immersion(imgs, {_k(J): _JSTORED, _k(s0): Sm[:, 0], _k(s1): Sm[:, 1]})
     assert C == pytest.approx(_JMATH @ Sm)
 
 

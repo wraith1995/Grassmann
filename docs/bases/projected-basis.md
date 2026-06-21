@@ -41,35 +41,35 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
 [[ 0.408, -0.246],
- [ 0.   ,  0.369]]
+ [-0.   ,  0.369]]
 ```
 
-### → a term basis spanning the image `ListBasis(g₀,g₁)`
+### → an FFS-typed term basis spanning the image `ListBasis(g₀,g₁)`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -89,35 +89,35 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.615],
- [ 0.   ,  0.369]]
+[[ 1., -1.],
+ [ 0.,  1.]]
 ```
 
-### → a completed image basis `[ h₀ | J col ]`
+### → an FFS-typed completed image basis `[ h₀ | mc ]`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -137,32 +137,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.246],
- [ 0.   ,  0.369]]
+[[1., 0.],
+ [0., 1.]]
 ```
 
 ### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
@@ -185,32 +185,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.615],
- [ 0.   ,  0.369]]
+[[ 1., -1.],
+ [ 0.,  1.]]
 ```
 
 ### → the standard-orthonormal `ProjectedBasis` (re-orthonormalize)

@@ -7,6 +7,10 @@ non-trivial and build its valid bases — the orthonormal `ProjectedBasis`, a me
 `ProjectedBasis` (source/target ⇒ GSVD), a term `ListBasis` spanning the subspace, and (for
 the image) the literal `ImageBasis` with/without a source — then convert **every ordered pair
 in both directions** and assert each round-trips with its inverse.
+
+The spanning `ListBasis` is **FFS-typed** (its vectors are `k`-dim, living in the subspace's
+OWN coordinates — `C.img(f)`/`C.ker(f)`/`C.coimg(f)`/`C.coker(f)`), matching the in-space
+`realize_basis_cols` contract; FFS realize is square (`k×k`) and every cob stays square.
 """
 
 from __future__ import annotations
@@ -62,6 +66,9 @@ _FFS = [
 ]
 
 
+_FFS_SPACE = {"image": C.img, "coker": C.coker, "ker": C.ker, "coimg": C.coimg}
+
+
 def _ffs_bases(which: str, dom: int, cod: int):
     """The valid bases of the ``which`` subspace + a shared feed dict."""
     Rt, Re = C.base("Rt", dom), C.base("Re", cod)
@@ -70,15 +77,18 @@ def _ffs_bases(which: str, dom: int, cod: int):
     feeds = {_k(f): Jm.T}
 
     projb = B.projected_basis(f, which)
-    cols = _realize(projb, feeds)                 # ambient×k columns spanning the subspace
-    n, k = cols.shape
+    cols = _realize(projb, feeds)                 # k×k in-space columns (= identity)
+    n, k = cols.shape                             # in-space realize is square ⇒ n == k
     ambient = Re if which in ("image", "coker") else Rt
-    # A term basis spanning the same subspace (a shear of the orthonormal columns).
-    span = cols @ _invertible(k)
-    listb, fl = _listb(ambient, f"t_{which}", span)
-    # A metric-twisted ProjectedBasis (source on the dom side, target on the cod side).
+    # A term basis spanning the same subspace — FFS-typed: its vectors are k-dim, living in
+    # the subspace's OWN coords (``C.img(f)``/…), so the ListBasis realizes in-space (k×k).
+    sub_space = _FFS_SPACE[which](f)
+    listb, fl = _listb(sub_space, f"t_{which}", _invertible(k))
+    # A metric-twisted ProjectedBasis (source on the dom side, target on the cod side); the
+    # metric basis is an AMBIENT basis (it metricizes the dom/cod, not the subspace).
     side = "target" if which in ("image", "coker") else "source"
-    mb, fm = _listb(ambient, f"m_{which}", _invertible(n))
+    amb_dim = cod if which in ("image", "coker") else dom
+    mb, fm = _listb(ambient, f"m_{which}", _invertible(amb_dim))
     pmetric = B.projected_basis(f, which, **{side: mb})
 
     bases = [("ProjectedBasis", projb, {}),
