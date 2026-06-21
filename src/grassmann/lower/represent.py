@@ -855,8 +855,9 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   WithInner ↔ WithInner (same g)    cob the underlying bases (≠ a bare V — that's a remetric)
 #   OrthonormalBasis ↔ OrthonormalBasis   cob the underlying bases
 #   OrthonormalBasis ↔ raw (same space)   the orthonormalization factor, VIA STANDARD
-#   ImageBasis ↔ ImageBasis (same f,tgt)  the source-basis cob (no need to realize f)
-#   ImageBasis ↔ ImageBasis (diff map)    realize both images, VIA STANDARD (own case)
+#   ImageBasis ↔ ImageBasis (same f, same tgt)  the source-basis cob (no need to realize f)
+#   ImageBasis ↔ ImageBasis (same f, diff tgt)  STILL the source cob (target is embed-only)
+#   ImageBasis ↔ ImageBasis (diff map)          realize both images in the STANDARD cod frame
 #   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
 #   ProjectedBasis → ProjectedBasis   identity (equal params) / metric reorthonormalize VIA STD
 #   ListBasis / CompleteBasis ↔ …     realize the listed/completed columns, VIA STANDARD
@@ -1031,13 +1032,22 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _cob_via_standard(ctx, frm, to)
         case (B.ImageBasis(ff, fsrc, ftgt),
               B.ImageBasis(tf, tsrc, ttgt)) if ff is tf and _src_eq(ftgt, ttgt):
-            # SAME map (`is`) & same target ⇒ the cob is just the source-basis cob — no need to
-            # realize f at all (f(s₁) → f(s₂) is s₁ → s₂ for an injective f).
+            # SAME map (`is`) & SAME codomain target ⇒ the cob is just the source-basis cob —
+            # no need to realize f (f(s₁) → f(s₂) is s₁ → s₂ for an injective f).
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
-        case (B.ImageBasis(), B.ImageBasis()):
-            # NOT the same map object (or differing target): two literal image bases of the same
-            # image — its OWN case (realize both, compose), never the generic leaf fallback.
-            return _cob_via_standard(ctx, frm, to)
+        case (B.ImageBasis(ff, fsrc, _ftgt), B.ImageBasis(tf, tsrc, _ttgt)) if ff is tf:
+            # SAME map, DIFFERENT codomain target ⇒ STILL the source-basis cob: the target only
+            # sets the realized ambient frame (an embed), it does NOT change the image
+            # *coordinates*, so realize-both-and-pinv (which mixes the two target frames) would be
+            # wrong here — the source cob is target-independent and correct.
+            return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
+        case (B.ImageBasis(ff, fsrc, _ftgt), B.ImageBasis(tf, tsrc, _ttgt)):
+            # DIFFERENT map representative of the same image (ff is not tf) ⇒ realize both literal
+            # images in the STANDARD codomain frame (targets dropped — they are embed-only, and a
+            # common frame is required) and compose pinv(C_to)·C_from.
+            c_from = _realize_image_basis(ctx, ff, fsrc, None)
+            c_to = _realize_image_basis(ctx, tf, tsrc, None)
+            return _pinv_compose(ctx, c_from, c_to)
         case (B.ImageBasis(), B.ProjectedBasis()) | (B.ProjectedBasis(), B.ImageBasis()):
             # ImageBasis ↔ ProjectedBasis of one map ⇒ the QR factor R (metric ⇒ GSVD Uᵀ·M_W·J)
             # directly; a non-"image" projection has no such shortcut ⇒ via the standard basis.
@@ -1074,8 +1084,11 @@ def _cob_via_standard(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     in standard primal, covariant in standard dual), and the caller's variance guard already
     rejected mixing ``V`` with ``V*``.
     """
-    c_from = realize_basis_cols(ctx, frm)   # cob(A → std): A's columns in standard coords
-    c_to = realize_basis_cols(ctx, to)       # cob(B → std): B's columns in standard coords
+    return _pinv_compose(ctx, realize_basis_cols(ctx, frm), realize_basis_cols(ctx, to))
+
+
+def _pinv_compose(ctx: _Ctx, c_from: pa.SymArray, c_to: pa.SymArray) -> pa.SymArray:
+    """``pinv(C_to) · C_from`` — compose two same-ambient column matrices into a cob."""
     n_amb, k_from = _shape_of(c_from)
     _, k_to = _shape_of(c_to)
     [pinv_to] = ctx.prog.emit_stmt(           # cob(std → B) = (realize B)⁻¹ (pinv if non-square)
