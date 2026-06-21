@@ -3,7 +3,7 @@
 Turn an **already-typed** Grassmann core :class:`~grassmann.core.term.Term` into a
 :class:`polyarray.Program`. This is the heart of the IW4 lowering (`40`/`41`): recurse
 over the core Term ADT, emitting polyarray ``Stmt``s, using the substrate
-(:mod:`grassmann.lower.space_basis` / :mod:`~grassmann.lower.cob` /
+(:mod:`grassmann.lower.space_basis` / the cob section below /
 :mod:`~grassmann.lower.choose`) for bases / change-of-basis, :class:`~polyarray.AssertOp`
 for the `41 §4` D-scope checks, and finishing with the `41 §5` build-then-simplify
 post-pass (``analyze`` → ``partial_eval``).
@@ -42,20 +42,8 @@ from grassmann.core.kinds import SpaceSort as _SpaceSort
 from grassmann.infer import map_domain_codomain, synth_space
 from grassmann.infer.properties import map_props
 
-from ._dims import DynamicDim, dim_of
+from ._dims import DynamicDim, basis_dim, dim_of
 from .choose import choose
-from .cob import (
-    CobError,
-    _basis_eq,
-    _block_diag,
-    _block_repeat,
-    _count_int,
-    _identity,
-    _inv_transpose,
-    _kron,
-    cob,
-    realize_basis,
-)
 from .provenance import LowerProv
 from .space_basis import (
     FfsRealization,
@@ -844,7 +832,7 @@ def _basis_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.S
     """Change-of-basis matrix ``M`` (from-coords → to-coords) — **total** over bases (`43 §2c`).
 
     Goes between *any two bases of the same space*.  The pure-matrix
-    :func:`~grassmann.lower.cob.cob` is the fast path (byte-identical) for bases it can
+    :func:`cob` is the fast path (byte-identical) for bases it can
     realize; for a basis it refuses — an FFS basis (``ImageBasis``/``ProjectedBasis``, whose
     columns come from the SVD/QR seam) or a structured basis with an FFS leaf — this mirrors
     the `41 §2` structural rules (Kron over ``BasisProd``, block-diag over ``BasisSum``,
@@ -1977,14 +1965,14 @@ def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.S
 def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
     """Matrix whose columns are ``b``'s vectors in ambient std coords (`41 §2`).
 
-    Term-bearing basis nodes that the pure-matrix :func:`grassmann.lower.cob.realize_basis`
+    Term-bearing basis nodes that the pure-matrix :func:`realize_basis`
     cannot handle are realized here (they need ``_rep``): a :class:`~grassmann.core.basis.
     ListBasis` lowers each Term vector and stacks the coordinate columns; an
     :class:`~grassmann.core.basis.ImageBasis` realizes the LITERAL map-application columns
     (the raw ``f(eᵢ)``, the R/fwd side — `73 Topic 2`); a :class:`~grassmann.core.basis.
     ProjectedBasis` realizes the orthonormal Q/SVD-U columns through the FFS seam (which the
-    pure-matrix :func:`~grassmann.lower.cob.realize_basis` refuses).  Everything else defers to
-    :func:`grassmann.lower.cob.realize_basis`.
+    pure-matrix :func:`realize_basis` refuses).  Everything else defers to
+    :func:`realize_basis`.
     """
     match b:
         case B.ListBasis(vectors):
@@ -2775,3 +2763,302 @@ class _ExternalOp:
 
     def __call__(self, *xs: np.ndarray) -> np.ndarray:
         return np.asarray(self.fn(*[np.asarray(x, dtype=float) for x in xs]), dtype=float)
+
+
+# ===========================================================================
+# Change of basis — the pure, static-matrix fast path (`41 §2`).
+#
+# Moved here from the former ``cob.py`` so all change-of-basis lives in one module: this
+# layer realizes the bases whose columns are known WITHOUT lowering a term (Scalar / Dual /
+# Prod / Sum / Rep / WithInner / Complete) and composes ``cob = R_to⁻¹ · R_from``.  The FFS
+# bases (ImageBasis / ProjectedBasis) and the term ListBasis are NOT realized here — they need
+# the runtime SVD/QR/GSVD seam or ``_rep`` of a term; ``realize_basis`` raises ``CobError`` for
+# them and the seam-aware TOTAL cob :func:`_basis_cob_matrix` (above) catches that, mirrors
+# these same §2 structural rules, and realizes the FFS/term leaves through the seam.
+# ===========================================================================
+
+
+class CobError(Exception):
+    """Raised when two bases cannot be related by a (pure-matrix) change of basis."""
+
+
+def _numeric_dim(metric: object) -> int | None:
+    """The dimension ``n`` of a numeric ``(n, n)`` metric, or ``None`` if not numeric."""
+    try:
+        a = np.asarray(metric, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if a.ndim == 2 and a.shape[0] == a.shape[1]:
+        return int(a.shape[0])
+    return None
+
+
+def cob(program: pa.Program, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
+    """Change-of-basis matrix ``M`` (from_basis-coords → to_basis-coords) (`41 §2`).
+
+    Emits the matrix-building ``Stmt``s into ``program`` and returns the resulting
+    :class:`~polyarray.SymArray`. Identical bases short-circuit to the identity. Raises
+    :class:`CobError` for FFS / term bases (use :func:`_basis_cob_matrix` for those).
+    """
+    if _basis_eq(from_basis, to_basis):
+        return _identity(program, basis_dim(from_basis), "cob:id")
+
+    match (from_basis, to_basis):
+        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):
+            return _cob_prod(program, fs, ts)
+        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):
+            return _cob_sum(program, fs, ts)
+        case (B.DualBasis(fb), B.DualBasis(tb)):
+            return _inv_transpose(program, cob(program, fb, tb))
+        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:
+            return _block_repeat(program, cob(program, fb, tb), _count_int(fn))
+        # A ``WithInnerBasis`` shares its inner basis's *vectors* (the metric is metadata, not a
+        # coordinate change), so a cob to/from it strips the wrapper. When the strip makes the
+        # two sides equal we size the identity from the (numeric) metric, since the inner basis
+        # of an *abstract* Base carries no explicit dimension.
+        case (B.WithInnerBasis(fb, fg), _):
+            inner_to = to_basis.inner if isinstance(to_basis, B.WithInnerBasis) else to_basis
+            n = _numeric_dim(fg)
+            if n is not None and _basis_eq(fb, inner_to):
+                return _identity(program, n, "cob:wib-id")
+            return cob(program, fb, to_basis)
+        case (_, B.WithInnerBasis(tb, tg)):
+            n = _numeric_dim(tg)
+            if n is not None and _basis_eq(from_basis, tb):
+                return _identity(program, n, "cob:wib-id")
+            return cob(program, from_basis, tb)
+
+    # General case: realize both toward standard coords and compose R_to⁻¹ · R_from.
+    r_from = realize_basis(program, from_basis)
+    r_to = realize_basis(program, to_basis)
+    return _compose_via_standard(program, r_from, r_to, from_basis, to_basis)
+
+
+def realize_basis(program: pa.Program, b: B.Basis) -> pa.SymArray:
+    """Matrix whose columns are ``b``'s vectors in the ambient standard coords (`41 §2`).
+
+    The static-matrix realization: identity for the orthonormal ``ScalarBasis``, ``(·)⁻ᵀ`` for
+    a ``DualBasis``, Kron/block-diag/block-repeat for the structured bases, ``[ sub | comp ]``
+    for a ``CompleteBasis``. FFS bases (ImageBasis/ProjectedBasis) raise :class:`CobError` —
+    they are realized through the seam by :func:`realize_basis_cols`.
+    """
+    match b:
+        case B.ScalarBasis():
+            return _identity(program, 1, "realize:scalar")
+        case B.DualBasis(inner):
+            return _inv_transpose(program, realize_basis(program, inner))
+        case B.WithInnerBasis(inner, _):
+            return realize_basis(program, inner)
+        case B.BasisProd(bases):
+            return _kron(program, [realize_basis(program, x) for x in bases])
+        case B.BasisSum(bases):
+            return _block_diag(program, [realize_basis(program, x) for x in bases])
+        case B.BasisRep(count, inner):
+            return _block_repeat(program, realize_basis(program, inner), _count_int(count))
+        case B.CompleteBasis(sub_basis, complement):
+            sub = realize_basis(program, sub_basis)
+            comp = _const_prog(program, np.asarray(complement, dtype=float), "realize:complement")
+            return _hstack(program, [sub, comp])
+        case B.ImageBasis() | B.ProjectedBasis():
+            raise CobError(
+                f"realize_basis: FFS basis {b!r} is realized via space_basis.realize_ffs_basis "
+                "(SvdOp/QrOp/GSvdOp), not as a static matrix"
+            )
+        case _:
+            raise CobError(f"realize_basis: cannot realize {b!r}")
+
+
+def _cob_prod(program, fs, ts) -> pa.SymArray:
+    """BasisProd → BasisProd: Kron of the per-factor cobs (`41 §2`)."""
+    return _kron(program, [cob(program, f, t) for f, t in zip(fs, ts, strict=True)])
+
+
+def _cob_sum(program, fs, ts) -> pa.SymArray:
+    """BasisSum → BasisSum: block-diagonal of the per-summand cobs (`41 §2`)."""
+    return _block_diag(program, [cob(program, f, t) for f, t in zip(fs, ts, strict=True)])
+
+
+def _compose_via_standard(program, r_from, r_to, from_basis, to_basis) -> pa.SymArray:
+    """cob = R_to⁻¹ · R_from (realize both toward standard, compose) (`41 §2`)."""
+    [out] = program.emit_stmt(
+        _ComposeViaStdOp(), [r_to, r_from],
+        [pa.OutSpec("cob", (basis_dim(to_basis), basis_dim(from_basis)))],
+        note=f"cob:R_to^-1·R_from ({_short(from_basis)}→{_short(to_basis)})",
+    )
+    return out
+
+
+# --- pure-cob numeric ops (the structural §2 combinators) -------------------
+# ``_ConstOp`` / ``_HStackOp`` are shared with the seam path (defined above).
+
+
+@dataclass(frozen=True)
+class _IdentityMatOp:
+    n: int
+
+    def __call__(self) -> np.ndarray:
+        return np.eye(self.n)
+
+
+@dataclass(frozen=True)
+class _InvTransposeOp:
+    def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
+        return np.linalg.inv(np.asarray(A, dtype=float)).T
+
+
+@dataclass(frozen=True)
+class _ComposeViaStdOp:
+    def __call__(self, R_to: np.ndarray, R_from: np.ndarray) -> np.ndarray:  # noqa: N803
+        return np.linalg.solve(np.asarray(R_to, dtype=float), np.asarray(R_from, dtype=float))
+
+
+@dataclass(frozen=True)
+class _KronOp:
+    n: int
+
+    def __call__(self, *mats: np.ndarray) -> np.ndarray:
+        out = np.asarray(mats[0], dtype=float)
+        for m in mats[1:]:
+            out = np.kron(out, np.asarray(m, dtype=float))
+        return out
+
+
+@dataclass(frozen=True)
+class _BlockDiagOp:
+    def __call__(self, *mats: np.ndarray) -> np.ndarray:
+        arrs = [np.asarray(m, dtype=float) for m in mats]
+        rows = sum(a.shape[0] for a in arrs)
+        cols = sum(a.shape[1] for a in arrs)
+        out = np.zeros((rows, cols))
+        r = c = 0
+        for a in arrs:
+            out[r:r + a.shape[0], c:c + a.shape[1]] = a
+            r += a.shape[0]
+            c += a.shape[1]
+        return out
+
+
+@dataclass(frozen=True)
+class _BlockRepeatOp:
+    n: int
+
+    def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
+        a = np.asarray(A, dtype=float)
+        out = np.zeros((self.n * a.shape[0], self.n * a.shape[1]))
+        for i in range(self.n):
+            out[i * a.shape[0]:(i + 1) * a.shape[0], i * a.shape[1]:(i + 1) * a.shape[1]] = a
+        return out
+
+
+# --- pure-cob emitters ------------------------------------------------------
+
+
+def _identity(program: pa.Program, n: int, note: str) -> pa.SymArray:
+    [m] = program.emit_stmt(_IdentityMatOp(n), [], [pa.OutSpec("I", (n, n))], note=note)
+    return m
+
+
+def _const_prog(program: pa.Program, mat: np.ndarray, note: str) -> pa.SymArray:
+    """A numeric constant array as a Stmt (program-based; the ``ctx``-based sibling is
+    :func:`_const`)."""
+    mat = np.ascontiguousarray(np.asarray(mat, dtype=float))
+    op = _ConstOp(key=note, data_bytes=mat.tobytes(), shape=mat.shape, dtype=str(mat.dtype))
+    [m] = program.emit_stmt(op, [], [pa.OutSpec("const", mat.shape)], note=note)
+    return m
+
+
+def _inv_transpose(program: pa.Program, mat: pa.SymArray) -> pa.SymArray:
+    [m] = program.emit_stmt(
+        _InvTransposeOp(), [mat], [pa.OutSpec("invT", _shape_of(mat))],
+        note="cob:DualBasis=(cob)^-T",
+    )
+    return m
+
+
+def _kron(program: pa.Program, mats: list[pa.SymArray]) -> pa.SymArray:
+    if len(mats) == 1:
+        return mats[0]
+    rows = cols = 1
+    for r, c in (_shape_of(m) for m in mats):
+        rows *= r
+        cols *= c
+    [m] = program.emit_stmt(
+        _KronOp(len(mats)), mats, [pa.OutSpec("kron", (rows, cols))], note="cob:BasisProd=Kron",
+    )
+    return m
+
+
+def _block_diag(program: pa.Program, mats: list[pa.SymArray]) -> pa.SymArray:
+    if len(mats) == 1:
+        return mats[0]
+    shapes = [_shape_of(m) for m in mats]
+    rows = sum(s[0] for s in shapes)
+    cols = sum(s[1] for s in shapes)
+    [m] = program.emit_stmt(
+        _BlockDiagOp(), mats, [pa.OutSpec("blockdiag", (rows, cols))],
+        note="cob:BasisSum=block-diag",
+    )
+    return m
+
+
+def _block_repeat(program: pa.Program, mat: pa.SymArray, n: int) -> pa.SymArray:
+    r, c = _shape_of(mat)
+    [m] = program.emit_stmt(
+        _BlockRepeatOp(n), [mat], [pa.OutSpec("blockrep", (n * r, n * c))],
+        note="cob:BasisRep=block-repeat",
+    )
+    return m
+
+
+def _hstack(program: pa.Program, mats: list[pa.SymArray]) -> pa.SymArray:
+    shapes = [_shape_of(m) for m in mats]
+    rows = shapes[0][0]
+    cols = sum(s[1] for s in shapes)
+    [m] = program.emit_stmt(
+        _HStackOp(), mats, [pa.OutSpec("hstack", (rows, cols))],
+        note="cob:CompleteBasis=[sub|comp]",
+    )
+    return m
+
+
+# --- pure-cob misc helpers --------------------------------------------------
+
+
+def _count_int(count) -> int:
+    try:
+        return basis_dim(B.basis_rep(count, B.scalar_basis()))
+    except DynamicDim as exc:  # pragma: no cover - defensive
+        raise CobError(f"BasisRep count must be static, got {count!r}") from exc
+
+
+def _short(b: B.Basis) -> str:
+    return type(b).__name__
+
+
+def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
+    """Structural basis equality that tolerates numpy ``vectors``/``complement`` fields.
+
+    A plain ``a == b`` raises ``ValueError`` when a :class:`CompleteBasis` carries a numpy
+    array (ambiguous array truth value), so compare those array-bearing fields with
+    :func:`numpy.array_equal`.
+    """
+    if type(a) is not type(b):
+        return False
+    match (a, b):
+        case (B.CompleteBasis(sa, ca), B.CompleteBasis(sb, cb)):
+            return _basis_eq(sa, sb) and np.array_equal(
+                np.asarray(ca, dtype=float), np.asarray(cb, dtype=float)
+            )
+        case (B.BasisProd(fs), B.BasisProd(ts)) | (B.BasisSum(fs), B.BasisSum(ts)):
+            return len(fs) == len(ts) and all(_basis_eq(x, y) for x, y in zip(fs, ts, strict=True))
+        case (B.DualBasis(x), B.DualBasis(y)) | (B.PrimalBasis(x), B.PrimalBasis(y)):
+            return _basis_eq(x, y)
+        case (B.BasisRep(nx, x), B.BasisRep(ny, y)):
+            return nx == ny and _basis_eq(x, y)
+        case (B.WithInnerBasis(x, _), B.WithInnerBasis(y, _)):
+            return _basis_eq(x, y)
+        case _:
+            try:
+                return bool(a == b)
+            except ValueError:
+                return False
