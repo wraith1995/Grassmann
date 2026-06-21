@@ -44,6 +44,24 @@ basis's columns — the metric changes the inner product, not the columns.)  Thi
 bug where the pure cob read a non-existent `.inner` field on `WithInnerBasis` (it is `.basis`),
 exposed once `WithInner ↔ WithInner` cobs were actually exercised.
 
+### Term/completion/metric bases carry their own structure (no lost specialization)
+The basis nodes carry the combination/completion choices explicitly, and the cob dispatch has a
+specialized case per representative (the standard basis is only the *backstop*):
+
+- **`Reduce` enum** (`NONE`/`RREF`/`ORTHONORMALIZE`) on `ListBasis` and `CompleteBasis` — how a
+  frame is combined: keep the independent columns (RREF pivot), or orthonormalize (QR).
+- **`ListBasis(vectors, backup?, reduce?)`** — the term basis; a `backup` basis RREF-completes a
+  rank-deficient frame (recovering the old `BaseBasis` machinery, now where it belongs).
+- **`CompleteBasis(sub, complement, reduce?)`** — `complement` is a **`Basis`** (not raw columns)
+  completing a basis of an *explicit subspace* to its ambient.
+- **`WithInnerBasis(b, g)`** is `b` carrying the metric — *raw*, not assumed orthonormal.
+- **`OrthonormalBasis(b)`** — the explicit dual of `remetric`; g-orthonormalizes `b` (a basis
+  node, so orthonormalization is never an implicit cob).  raw `WithInnerBasis` ↔ its
+  `OrthonormalBasis` is the (explicit) orthonormalization factor.
+- **`ImageBasis(f, source?, target?)`** — `source`/`target` are the dom/cod bases; same-map
+  `ImageBasis(f,s₁) ↔ ImageBasis(f,s₂)` is the *source cob* (no need to realize `f`), a different
+  map of the same image is its own (realize-both) case — not the generic leaf fallback.
+
 ### The fallback is the standard basis
 Within a space, when no specialized rule applies, `cob(A → B) = pinv(realize B) · realize A`:
 realizing a basis **is** its cob to the standard basis, and `cob(std → A)` is the inverse. So

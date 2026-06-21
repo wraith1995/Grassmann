@@ -853,9 +853,12 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   BasisProd → BasisProd             Kron        of the per-factor cobs
 #   BasisRep  → BasisRep              block-repeat of the inner cob (n copies)
 #   WithInner ↔ WithInner (same g)    cob the underlying bases (≠ a bare V — that's a remetric)
-#   ImageBasis ↔ ImageBasis (same f)  the source-basis cob (no need to realize f)
+#   OrthonormalBasis ↔ OrthonormalBasis   cob the underlying bases
+#   OrthonormalBasis ↔ raw (same space)   the orthonormalization factor, VIA STANDARD
+#   ImageBasis ↔ ImageBasis (same f,tgt)  the source-basis cob (no need to realize f)
+#   ImageBasis ↔ ImageBasis (diff map)    realize both images, VIA STANDARD (own case)
 #   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
-#   ProjectedBasis → ProjectedBasis   re-orthonormalize VIA STANDARD
+#   ProjectedBasis → ProjectedBasis   identity (equal params) / metric reorthonormalize VIA STD
 #   ListBasis / CompleteBasis ↔ …     realize the listed/completed columns, VIA STANDARD
 #   BVar / BLam / BApp                error — abstract, no concrete cob until reduced
 #   leaf A → leaf B                   VIA STANDARD: pinv(realize B) · realize A   (the fallback)
@@ -1020,14 +1023,30 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _block_repeat(ctx.prog, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
         case (B.WithInnerBasis(fb, _), B.WithInnerBasis(tb, _)):     # same metricized space ⇒
             return _basis_cob_rec(ctx, fb, tb)                       # cob the underlying bases
-        case (B.ImageBasis(ff, fsrc), B.ImageBasis(tf, tsrc)) if ff is tf:  # same map ⇒ source cob
+        case (B.OrthonormalBasis(fi), B.OrthonormalBasis(ti)):       # both orthonormalized ⇒
+            return _basis_cob_rec(ctx, fi, ti)                       # cob the underlying bases
+        case (B.OrthonormalBasis(), _) | (_, B.OrthonormalBasis()):
+            # raw ↔ orthonormalized of the SAME (metricized) space ⇒ the orthonormalization
+            # factor — realize each in standard coords (one g-orthonormal, one raw) and compose.
+            return _cob_via_standard(ctx, frm, to)
+        case (B.ImageBasis(ff, fsrc, ftgt),
+              B.ImageBasis(tf, tsrc, ttgt)) if ff is tf and _src_eq(ftgt, ttgt):
+            # SAME map (`is`) & same target ⇒ the cob is just the source-basis cob — no need to
+            # realize f at all (f(s₁) → f(s₂) is s₁ → s₂ for an injective f).
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
+        case (B.ImageBasis(), B.ImageBasis()):
+            # NOT the same map object (or differing target): two literal image bases of the same
+            # image — its OWN case (realize both, compose), never the generic leaf fallback.
+            return _cob_via_standard(ctx, frm, to)
         case (B.ImageBasis(), B.ProjectedBasis()) | (B.ProjectedBasis(), B.ImageBasis()):
             # ImageBasis ↔ ProjectedBasis of one map ⇒ the QR factor R (metric ⇒ GSVD Uᵀ·M_W·J)
             # directly; a non-"image" projection has no such shortcut ⇒ via the standard basis.
             m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
             return m if m is not None else _cob_via_standard(ctx, frm, to)
-        case (B.ProjectedBasis(), B.ProjectedBasis()):                # range reorthonormalize ⇒ via std
+        case (B.ProjectedBasis(), B.ProjectedBasis()):
+            # Same FFS subspace (the guard ensures same map & `which`).  Equal params ⇒ identity
+            # (caught above); differing source/target metric ⇒ a metric reorthonormalization of
+            # the orthonormal range — realize both (GSVD-orthonormal columns) and compose.
             return _cob_via_standard(ctx, frm, to)
         case (B.ImageBasis(), _) | (_, B.ImageBasis()):              # literal f-columns   ⇒ via std
             return _cob_via_standard(ctx, frm, to)

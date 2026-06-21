@@ -100,6 +100,7 @@ nav:
     - image-basis: bases/image-basis.md
     - list-basis: bases/list-basis.md
     - with-inner-basis: bases/with-inner-basis.md
+    - orthonormal-basis: bases/orthonormal-basis.md
     - complete-basis: bases/complete-basis.md
     - b-lam: bases/b-lam.md
     - b-app: bases/b-app.md

@@ -982,6 +982,29 @@ def _c_scalar_self():
                  to_node="ScalarBasis", code="cob(ScalarBasis(), ScalarBasis())")
 
 
+@_cv("OrthonormalBasis")
+def _c_orthonormal():
+    # OrthonormalBasis is the explicit dual of remetric: raw WithInnerBasis(b,g) ↔ its
+    # g-orthonormalization, within the SAME metricized space WithInner(V,g).
+    V = C.base("V", 3)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))
+    Mv = np.array([[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    Gm = np.array([[2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    y0, y1, y2 = (C.var(f"y{i}", V) for i in range(3))
+    wib = B.with_inner_basis(B.list_basis(y0, y1, y2), g)
+    ob = B.orthonormal_basis(wib)
+    feeds = {y0: Mv[:, 0], y1: Mv[:, 1], y2: Mv[:, 2], g: Gm}
+    m = _cob(ob, wib, feeds)
+    back = _cob(wib, ob, feeds)
+    _ck(np.allclose(m @ back, np.eye(3)))  # an invertible (orthonormalization) factor
+    return Conv("the raw `WithInnerBasis` it orthonormalizes (same metricized space)",
+                "the explicit orthonormalization factor (g-Gram–Schmidt) — never an implicit "
+                "cob; OrthonormalBasis ↔ OrthonormalBasis is the underlying cob",
+                _show(m), to_node="WithInnerBasis",
+                code="cob(OrthonormalBasis(WithInnerBasis(ListBasis(y…), g)), "
+                     "WithInnerBasis(ListBasis(y…), g))", inputs=_feed_rows(feeds))
+
+
 @_cv("DualBasis")
 def _c_dual():
     rot, feeds = _listb("r", _ROT)
