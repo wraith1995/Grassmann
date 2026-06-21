@@ -73,6 +73,20 @@ def test_projected_basis_target_is_metric_orthonormal() -> None:
     assert np.linalg.matrix_rank(np.hstack([C, _JMATH])) == 2
 
 
+def test_projected_basis_irrelevant_side_metric_is_noop() -> None:
+    """Only the subspace's OWN-side metric matters: a `source` (dom) metric on an `image`
+    (cod-side) `ProjectedBasis` must NOT change the realized range (audit #4)."""
+    Rt, Re = G.space("Rt", 2), G.space("Re", 3)
+    J = G.var("J", Rt >> Re, props=G.inj)
+    s = [G.var(f"s{i}", Rt) for i in range(2)]
+    Sm = np.array([[1.0, 0.0], [1.0, 1.0]])
+    feeds = {_k(J): _JSTORED, **{_k(s[i]): Sm[:, i] for i in range(2)}}
+    free = _immersion(B.ProjectedBasis(J.node, "image"), feeds)
+    with_src = _immersion(
+        B.ProjectedBasis(J.node, "image", source=B.list_basis(*[si.node for si in s])), feeds)
+    assert with_src == pytest.approx(free)  # the dom-side metric is a no-op for the image
+
+
 def test_projected_basis_target_default_is_plain_q() -> None:
     """`target=None` is byte-identical to the plain orthonormal range `Q` (standard metric)."""
     J, _Re = _img()

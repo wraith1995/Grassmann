@@ -3378,8 +3378,13 @@ def _realize_ffs_by_which(
     plain SVD/QR (byte-identical).
     """
     norm = "img" if which == "image" else which
-    metric_dom = _basis_metric(ctx, source) if source is not None else None
-    metric_cod = _basis_metric(ctx, target) if target is not None else None
+    # Only the subspace's OWN-side metric matters — cod (``target``) for image/coker, dom
+    # (``source``) for ker/coimg.  The other side's metric would still rotate the GSVD frame (it
+    # co-orthonormalizes both factors), so a metric that ought to be a no-op would change the
+    # answer; ignore it (`audit #4`).
+    cod_side = norm in ("img", "coker")
+    metric_dom = _basis_metric(ctx, source) if (source is not None and not cod_side) else None
+    metric_cod = _basis_metric(ctx, target) if (target is not None and cod_side) else None
     key = (norm, id(f), id(source), id(target))
     cached = ctx.ffs_realizations.get(key)
     if cached is not None:
