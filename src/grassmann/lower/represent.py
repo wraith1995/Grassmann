@@ -852,6 +852,7 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   DualBasis → DualBasis             (inner cob)⁻ᵀ
 #   PrimalBasis(DualBasis(·))         peel the double-dual, recurse
 #   BasisSum  → BasisSum              block-diag  of the per-summand cobs
+#   BasisSum  ↔ BasisRep (same ⊕ⁿ)    block-diag  against the repeated inner (same-space spelling)
 #   BasisProd → BasisProd             Kron        of the per-factor cobs
 #   BasisRep  → BasisRep              block-repeat of the inner cob (n copies)
 #   WithInner ↔ WithInner (same g)    cob the underlying bases (≠ a bare V — that's a remetric)
@@ -1059,63 +1060,97 @@ def _cob_from_scalar(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _cob_from_dual(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``DualBasis`` — covariant cob ⇒ ``(primal cob)⁻ᵀ``."""
-    match (frm, to):
-        case (B.DualBasis(fb), B.DualBasis(tb)):
-            return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, fb, tb))
+    """from ``DualBasis`` — a covariant (``V*``) basis.  Same dual space only."""
+    match to:
+        case B.DualBasis(tb):
+            # dual → dual ⇒ (the primal cob)⁻ᵀ (the inner bases' cob, inverse-transposed).
+            return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, frm.basis, tb))
+        case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
+            return _cob_via_standard(ctx, frm, to)           # numeric/metricized covector basis
         case _:
             return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_from_sum(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``BasisSum`` — ⊕ → ⊕ is the block-diagonal of the per-summand cobs."""
-    match (frm, to):
-        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):
+    """from ``BasisSum`` — a ⊕ basis.  Same ⊕ space; a partner may be another ``BasisSum``, the
+    ``BasisRep`` spelling of the same ``⊕ⁿ``, or a numeric (list/complete) basis."""
+    fs = frm.bases
+    match to:
+        case B.BasisSum(ts) if len(ts) == len(fs):
+            # ⊕ → ⊕ ⇒ block-diagonal of the per-summand cobs.
             return _block_diag(ctx.prog,
                                [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
+        case B.BasisRep(tn, tb) if _count_int(tn) == len(fs):
+            # ⊕ → ⊕ⁿ (same space, repeat spelling) ⇒ block-diag of each summand → the repeated inner.
+            return _block_diag(ctx.prog, [_basis_cob_rec(ctx, f, tb) for f in fs])
+        case B.ListBasis() | B.CompleteBasis():
+            return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
         case _:
             return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_from_prod(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``BasisProd`` — ⊗ → ⊗ is the Kronecker product of the per-factor cobs."""
-    match (frm, to):
-        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):
+    """from ``BasisProd`` — a ⊗ basis.  Same ⊗ space; a partner is another ``BasisProd`` or a
+    numeric (list/complete) basis (a ⊗ space has no ``BasisRep``/``BasisSum`` spelling)."""
+    fs = frm.bases
+    match to:
+        case B.BasisProd(ts) if len(ts) == len(fs):
+            # ⊗ → ⊗ ⇒ Kronecker product of the per-factor cobs.
             return _kron(ctx.prog,
                          [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
+        case B.ListBasis() | B.CompleteBasis():
+            return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
         case _:
             return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_from_rep(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``BasisRep`` — ⊕ⁿ → ⊕ⁿ is the block-repeat of the inner cob."""
-    match (frm, to):
-        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:
+    """from ``BasisRep`` — a ``⊕ⁿ`` basis.  Same ``⊕ⁿ`` space; a partner may be another
+    ``BasisRep``, the explicit ``BasisSum`` spelling, or a numeric (list/complete) basis."""
+    fn, fb = frm.count, frm.basis
+    match to:
+        case B.BasisRep(tn, tb) if fn == tn:
+            # ⊕ⁿ → ⊕ⁿ ⇒ block-repeat of the single inner cob.
             return _block_repeat(ctx.prog, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
+        case B.BasisSum(ts) if len(ts) == _count_int(fn):
+            # ⊕ⁿ → ⊕ (same space, sum spelling) ⇒ block-diag of the inner → each summand.
+            return _block_diag(ctx.prog, [_basis_cob_rec(ctx, fb, t) for t in ts])
+        case B.ListBasis() | B.CompleteBasis():
+            return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
         case _:
             return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_from_withinner(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``WithInnerBasis`` (raw, metric metadata) — same metricized space only."""
+    """from ``WithInnerBasis`` (raw — the metric is metadata, not coordinates).  Same metricized
+    space ``WithInner(V, g)`` only; the two bases of it are ``WithInnerBasis`` and its
+    ``OrthonormalBasis`` (any other ``to`` is a different space ⇒ the guard rejected it)."""
     match to:
         case B.WithInnerBasis(tb, _):
-            return _basis_cob_rec(ctx, frm.basis, tb)        # same g ⇒ cob the underlying bases
-        case _:
-            # raw ↔ its OrthonormalBasis (same metricized space) ⇒ the orthonormalization factor.
+            # same g ⇒ the metric is shared metadata ⇒ just cob the underlying bases.
+            return _basis_cob_rec(ctx, frm.basis, tb)
+        case B.OrthonormalBasis():
+            # raw → its g-orthonormalization ⇒ the orthonormalization factor: cob(std→to)=Uᵀ·G,
+            # which is the Cholesky `Lᵀ` of the metric Gram (see `_orthonormal_metric`).
             return _cob_via_standard(ctx, frm, to)
+        case _:
+            return _cob_via_standard(ctx, frm, to)           # total backstop (guard-rejected here)
 
 
 def _cob_from_orthonormal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     """from ``OrthonormalBasis`` — orthonormalization CHANGES the coordinates (unlike a raw
-    ``WithInnerBasis``, where the metric is metadata), so the cob must realize both orthonormal
-    column matrices and compose; recursing on the *underlying* (non-orthogonal) cob is wrong.
-
-    (``OrthonormalBasis → OrthonormalBasis`` is the orthogonal reorthonormalization
-    ``pinv(Q_to)·Q_from``; ``OrthonormalBasis ↔ raw`` of the same metricized space is the
-    orthonormalization factor — both handled by the standard-basis route.)
-    """
-    return _cob_via_standard(ctx, frm, to)
+    ``WithInnerBasis``, where the metric is metadata), so every case realizes the orthonormal
+    columns and composes (``cob(std→to)`` specialized in :func:`_inverse_cols`); recursing on the
+    *underlying* (non-orthogonal) cob would be wrong.  Same metricized space only."""
+    match to:
+        case B.OrthonormalBasis():
+            # both orthonormalized ⇒ the orthogonal reorthonormalization pinv(Q_to)·Q_from.
+            return _cob_via_standard(ctx, frm, to)
+        case B.WithInnerBasis():
+            # orthonormalized → raw ⇒ the inverse orthonormalization factor (L⁻ᵀ).
+            return _cob_via_standard(ctx, frm, to)
+        case _:
+            return _cob_via_standard(ctx, frm, to)           # total backstop (guard-rejected here)
 
 
 def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
@@ -1149,7 +1184,9 @@ def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return m if m is not None else _cob_via_standard(ctx, frm, to)
         case (B.ProjectedBasis(_f1, _w1, fs, ft),
               B.ProjectedBasis(_f2, _w2, ts, tt)) if _src_eq(fs, ts) and _src_eq(ft, tt):
-            return _identity_like(ctx, frm)                  # same subspace & metric ⇒ identity
+            # same source/target metric ⇒ identity.  (Same map & `which` are guard-guaranteed: a
+            # different `f`/`which` is a different FFS space, already rejected before this handler.)
+            return _identity_like(ctx, frm)
         case (B.ProjectedBasis(), B.ProjectedBasis()):
             return _cob_via_standard(ctx, frm, to)           # differing metric ⇒ reorthonormalize
         case _:
@@ -1157,13 +1194,43 @@ def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _cob_from_list(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``ListBasis`` — realize the listed term columns and compose via the standard basis."""
-    return _cob_via_standard(ctx, frm, to)
+    """from ``ListBasis`` — a basis given by literal term columns.  It has **no** cheaper
+    structural cob to any target: its columns are arbitrary numbers, so realize them and compose
+    via the standard basis (``cob(std→to)`` is still specialized to ``to``'s structure in
+    :func:`_inverse_cols`).  The ``to`` cases are spelled out to record that none is special."""
+    match to:
+        case B.ScalarBasis() | B.DualBasis() | B.PrimalBasis():
+            return _cob_via_standard(ctx, frm, to)           # scalar / variance-toggled full space
+        case B.BasisSum() | B.BasisProd() | B.BasisRep():
+            return _cob_via_standard(ctx, frm, to)           # a structured basis of the same space
+        case B.ListBasis() | B.CompleteBasis():
+            return _cob_via_standard(ctx, frm, to)           # another term/completed basis
+        case B.WithInnerBasis() | B.OrthonormalBasis():
+            return _cob_via_standard(ctx, frm, to)           # (metricized: different space unless
+            #                                                   the ListBasis is itself metricized)
+        case B.ImageBasis() | B.ProjectedBasis():
+            return _cob_via_standard(ctx, frm, to)           # same subspace via the variance fallback
+        case _:
+            return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_from_complete(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``CompleteBasis`` — realize ``[ sub | complement ]`` and compose via standard."""
-    return _cob_via_standard(ctx, frm, to)
+    """from ``CompleteBasis`` — ``[ sub | complement ]`` completed/reduced columns.  Like
+    ``ListBasis`` it has no cheaper structural cob (the completion is numeric), so realize and
+    compose via the standard basis; the ``to`` cases are spelled out for the same reason."""
+    match to:
+        case B.ScalarBasis() | B.DualBasis() | B.PrimalBasis():
+            return _cob_via_standard(ctx, frm, to)
+        case B.BasisSum() | B.BasisProd() | B.BasisRep():
+            return _cob_via_standard(ctx, frm, to)
+        case B.ListBasis() | B.CompleteBasis():
+            return _cob_via_standard(ctx, frm, to)
+        case B.WithInnerBasis() | B.OrthonormalBasis():
+            return _cob_via_standard(ctx, frm, to)
+        case B.ImageBasis() | B.ProjectedBasis():
+            return _cob_via_standard(ctx, frm, to)
+        case _:
+            return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_via_standard(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:

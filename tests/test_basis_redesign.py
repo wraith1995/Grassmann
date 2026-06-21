@@ -169,6 +169,26 @@ def test_qr_sign_convention_positive_diagonal_r() -> None:
     assert np.all(np.diag(U.T @ A) > 0)
 
 
+def test_basisrep_to_basissum_same_space_is_block_diag() -> None:
+    # BasisRep(n, b) and BasisSum(b,…,b) spell the SAME ⊕ⁿ space; with a non-pure (term) inner the
+    # cob is the block-diagonal of the per-summand cobs (not a full realize-and-invert).
+    V = C.base("V", 2)
+    A = np.array([[1.0, 1.0], [0.0, 1.0]])
+    B0 = np.array([[2.0, 0.0], [1.0, 1.0]])
+    B1 = np.array([[1.0, 0.0], [0.0, 3.0]])
+    ai, fa = _listb(V, "ri", A)
+    s0, f0 = _listb(V, "s0", B0)
+    s1, f1 = _listb(V, "s1", B1)
+    feeds = {**fa, **f0, **f1}
+    rep = B.basis_rep(2, B.list_basis(*ai))
+    summ = B.basis_sum(B.list_basis(*s0), B.list_basis(*s1))
+    m = _cob(rep, summ, feeds)
+    assert m.shape == (4, 4)
+    assert m[:2, 2:] == pytest.approx(np.zeros((2, 2)))    # block-diagonal (off-blocks vanish)
+    assert m[2:, :2] == pytest.approx(np.zeros((2, 2)))
+    assert m @ _cob(summ, rep, feeds) == pytest.approx(np.eye(4))   # round-trips
+
+
 def test_orthonormalbasis_plain_is_qr() -> None:
     V = C.base("V", 3)
     M = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
