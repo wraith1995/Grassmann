@@ -117,6 +117,7 @@ BASES = [
     ("ImageBasis", "image_basis", "image_basis"),
     ("ListBasis", "list_basis", "list_basis"),
     ("WithInnerBasis", "with_inner_basis", "with_inner_basis"),
+    ("OrthonormalBasis", "orthonormal_basis", "orthonormal_basis"),
     ("CompleteBasis", "complete_basis", "complete"),
     ("BLam", "blam", None),
     ("BApp", "bapp", None),

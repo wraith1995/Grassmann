@@ -2,7 +2,7 @@
 
 Every base constructor, its meaning, how it is built, how it is represented, and how it converts. Approve each by setting `status: approved` in its `docs/_authored/` file and re-running `python tools/gen_docs.py`.
 
-**Progress: 0 approved · 14 in review · 0 draft (of 14)**
+**Progress: 0 approved · 14 in review · 1 draft (of 15)**
 
 | node | status |
 |---|---|
@@ -17,6 +17,7 @@ Every base constructor, its meaning, how it is built, how it is represented, and
 | [`ImageBasis`](image-basis.md) | 🟡 in review |
 | [`ListBasis`](list-basis.md) | 🟡 in review |
 | [`WithInnerBasis`](with-inner-basis.md) | 🟡 in review |
+| [`OrthonormalBasis`](orthonormal-basis.md) | ⬜ draft |
 | [`CompleteBasis`](complete-basis.md) | 🟡 in review |
 | [`BLam`](b-lam.md) | 🟡 in review |
 | [`BApp`](b-app.md) | 🟡 in review |
@@ -29,19 +30,20 @@ A change of basis is only valid between **two bases of the same space** (`_basis
 
 Here each basis node is shown against a representative of its OWN space, so **✓** marks the (same-space) conversions that representative supports — the *term basis* `ListBasis` and `PrimalBasis` reach every other basis of their space, `DualBasis` every covector basis, `ImageBasis ↔ ProjectedBasis` via the QR/GSVD factor. **—** is either a different space or not exercised here.
 
-| from \ to | `ScalarBasis` | `DualBasis` | `PrimalBasis` | `BasisSum` | `BasisProd` | `BasisRep` | `ProjectedBasis` | `ImageBasis` | `ListBasis` | `WithInnerBasis` | `CompleteBasis` |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| [`ScalarBasis`](scalar-basis.md) | `I` | — | [✓](#conv-scalar-basis-primal-basis) | — | — | — | — | — | [✓](#conv-scalar-basis-list-basis) | — | — |
-| [`DualBasis`](dual-basis.md) | — | `I` | — | — | — | — | — | — | [✓](#conv-dual-basis-list-basis) | — | — |
-| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | — | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | — | [✓](#conv-primal-basis-complete-basis) |
-| [`BasisSum`](basis-sum.md) | — | — | [✓](#conv-basis-sum-primal-basis) | `I` | — | — | — | — | [✓](#conv-basis-sum-list-basis) | — | [✓](#conv-basis-sum-complete-basis) |
-| [`BasisProd`](basis-prod.md) | — | — | [✓](#conv-basis-prod-primal-basis) | — | `I` | — | — | — | [✓](#conv-basis-prod-list-basis) | — | [✓](#conv-basis-prod-complete-basis) |
-| [`BasisRep`](basis-rep.md) | — | — | [✓](#conv-basis-rep-primal-basis) | — | — | `I` | — | — | [✓](#conv-basis-rep-list-basis) | — | [✓](#conv-basis-rep-complete-basis) |
-| [`ProjectedBasis`](projected-basis.md) | — | — | [✓](#conv-projected-basis-primal-basis) | — | — | — | `I` | [✓](#conv-projected-basis-image-basis) | [✓](#conv-projected-basis-list-basis) | — | [✓](#conv-projected-basis-complete-basis) |
-| [`ImageBasis`](image-basis.md) | — | — | [✓](#conv-image-basis-primal-basis) | — | — | — | [✓](#conv-image-basis-projected-basis) | `I` | [✓](#conv-image-basis-list-basis) | — | [✓](#conv-image-basis-complete-basis) |
-| [`ListBasis`](list-basis.md) | [✓](#conv-list-basis-scalar-basis) | [✓](#conv-list-basis-dual-basis) | [✓](#conv-list-basis-primal-basis) | [✓](#conv-list-basis-basis-sum) | [✓](#conv-list-basis-basis-prod) | [✓](#conv-list-basis-basis-rep) | [✓](#conv-list-basis-projected-basis) | [✓](#conv-list-basis-image-basis) | `I` | — | [✓](#conv-list-basis-complete-basis) |
-| [`WithInnerBasis`](with-inner-basis.md) | — | — | — | — | — | — | — | — | — | `I` | — |
-| [`CompleteBasis`](complete-basis.md) | — | — | [✓](#conv-complete-basis-primal-basis) | [✓](#conv-complete-basis-basis-sum) | [✓](#conv-complete-basis-basis-prod) | [✓](#conv-complete-basis-basis-rep) | [✓](#conv-complete-basis-projected-basis) | [✓](#conv-complete-basis-image-basis) | [✓](#conv-complete-basis-list-basis) | — | `I` |
+| from \ to | `ScalarBasis` | `DualBasis` | `PrimalBasis` | `BasisSum` | `BasisProd` | `BasisRep` | `ProjectedBasis` | `ImageBasis` | `ListBasis` | `WithInnerBasis` | `OrthonormalBasis` | `CompleteBasis` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| [`ScalarBasis`](scalar-basis.md) | `I` | — | [✓](#conv-scalar-basis-primal-basis) | — | — | — | — | — | [✓](#conv-scalar-basis-list-basis) | — | — | — |
+| [`DualBasis`](dual-basis.md) | — | `I` | — | — | — | — | — | — | [✓](#conv-dual-basis-list-basis) | — | — | — |
+| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | — | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | — | — | [✓](#conv-primal-basis-complete-basis) |
+| [`BasisSum`](basis-sum.md) | — | — | [✓](#conv-basis-sum-primal-basis) | `I` | — | — | — | — | [✓](#conv-basis-sum-list-basis) | — | — | [✓](#conv-basis-sum-complete-basis) |
+| [`BasisProd`](basis-prod.md) | — | — | [✓](#conv-basis-prod-primal-basis) | — | `I` | — | — | — | [✓](#conv-basis-prod-list-basis) | — | — | [✓](#conv-basis-prod-complete-basis) |
+| [`BasisRep`](basis-rep.md) | — | — | [✓](#conv-basis-rep-primal-basis) | — | — | `I` | — | — | [✓](#conv-basis-rep-list-basis) | — | — | [✓](#conv-basis-rep-complete-basis) |
+| [`ProjectedBasis`](projected-basis.md) | — | — | [✓](#conv-projected-basis-primal-basis) | — | — | — | `I` | [✓](#conv-projected-basis-image-basis) | [✓](#conv-projected-basis-list-basis) | — | — | [✓](#conv-projected-basis-complete-basis) |
+| [`ImageBasis`](image-basis.md) | — | — | [✓](#conv-image-basis-primal-basis) | — | — | — | [✓](#conv-image-basis-projected-basis) | `I` | [✓](#conv-image-basis-list-basis) | — | — | [✓](#conv-image-basis-complete-basis) |
+| [`ListBasis`](list-basis.md) | [✓](#conv-list-basis-scalar-basis) | [✓](#conv-list-basis-dual-basis) | [✓](#conv-list-basis-primal-basis) | [✓](#conv-list-basis-basis-sum) | [✓](#conv-list-basis-basis-prod) | [✓](#conv-list-basis-basis-rep) | [✓](#conv-list-basis-projected-basis) | [✓](#conv-list-basis-image-basis) | `I` | — | — | [✓](#conv-list-basis-complete-basis) |
+| [`WithInnerBasis`](with-inner-basis.md) | — | — | — | — | — | — | — | — | — | `I` | — | — |
+| [`OrthonormalBasis`](orthonormal-basis.md) | — | — | — | — | — | — | — | — | — | [✓](#conv-orthonormal-basis-with-inner-basis) | `I` | — |
+| [`CompleteBasis`](complete-basis.md) | — | — | [✓](#conv-complete-basis-primal-basis) | [✓](#conv-complete-basis-basis-sum) | [✓](#conv-complete-basis-basis-prod) | [✓](#conv-complete-basis-basis-rep) | [✓](#conv-complete-basis-projected-basis) | [✓](#conv-complete-basis-image-basis) | [✓](#conv-complete-basis-list-basis) | — | — | `I` |
 
 **`I`** identity · **✓** a same-space conversion (links to its explanation + test below) · **—** a different space (not a cob) or not exercised here.
 
@@ -1998,6 +2000,52 @@ Output — the `cob` matrix:
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
  [ 0., -0.,  1.]]
+```
+
+<a id="conv-orthonormal-basis-with-inner-basis"></a>
+
+### `OrthonormalBasis` → the raw `WithInnerBasis` it orthonormalizes (same metricized space)
+
+**Mechanism (`cob`):** the explicit orthonormalization factor (g-Gram–Schmidt) — never an implicit cob; OrthonormalBasis ↔ OrthonormalBasis is the underlying cob
+
+**Test** — run + asserted in `tests/test_doc_conversions.py`:
+
+```python
+cob(OrthonormalBasis(WithInnerBasis(ListBasis(y…), g)), WithInnerBasis(ListBasis(y…), g))
+```
+
+Input `y0` =
+
+```
+[1., 1., 0.]
+```
+
+Input `y1` =
+
+```
+[0., 1., 0.]
+```
+
+Input `y2` =
+
+```
+[0., 0., 1.]
+```
+
+Input `g` =
+
+```
+[[2., 0., 0.],
+ [0., 1., 0.],
+ [0., 0., 1.]]
+```
+
+Output — the `cob` matrix:
+
+```
+[[ 0.577, -0.408,  0.   ],
+ [-0.   ,  1.225,  0.   ],
+ [ 0.   ,  0.   ,  1.   ]]
 ```
 
 <a id="conv-complete-basis-basis-rep"></a>
