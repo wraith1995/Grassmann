@@ -75,6 +75,14 @@ def _ck(cond: bool) -> None:
         raise AssertionError("doc example output did not match the expected value")
 
 
+def _signed_qr(M):
+    """QR in the lowering's +diagonal-R sign convention (matches `_realize_via_qr`/`_QrColsOp`)."""
+    q, r = np.linalg.qr(np.asarray(M, dtype=float))
+    s = np.sign(np.diag(r))
+    s[s == 0] = 1.0
+    return q * s, s[:, None] * r
+
+
 EXAMPLES: dict[str, callable] = {}
 
 
@@ -290,7 +298,7 @@ def _project():
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
     x = C.var("x", Re)
     Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
-    Q, _ = np.linalg.qr(Jm)
+    Q, _ = _signed_qr(Jm)
     xv = [1.0, -2.0, 0.5]
     got = _run(C.project(x, C.img(J)), {x: xv, J: Jm.T})
     _ck(np.allclose(got, Q.T @ np.asarray(xv)))
@@ -304,7 +312,7 @@ def _embed():
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
     a = C.var("a", C.img(J))
     Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
-    Q, _ = np.linalg.qr(Jm)
+    Q, _ = _signed_qr(Jm)
     av = [1.0, 2.0]
     got = _run(C.embed(a, Re), {a: av, J: Jm.T})
     _ck(np.allclose(got, Q @ np.asarray(av)))
@@ -418,7 +426,7 @@ def _remetric():
 
 _JMATH = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
 _JSTORED = _JMATH.T
-_Q, _R = np.linalg.qr(_JMATH)
+_Q, _R = _signed_qr(_JMATH)
 
 
 def _img():

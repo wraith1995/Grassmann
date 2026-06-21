@@ -65,8 +65,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.246],
- [-0.   , -0.369]]
+[[ 0.408, -0.246],
+ [ 0.   ,  0.369]]
 ```
 
 ### → a term basis spanning the image `ListBasis(g₀,g₁)`
@@ -113,8 +113,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.615],
- [-0.   , -0.369]]
+[[ 0.408, -0.615],
+ [ 0.   ,  0.369]]
 ```
 
 ### → a completed image basis `[ h₀ | J col ]`
@@ -161,8 +161,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.246],
- [-0.   , -0.369]]
+[[ 0.408, -0.246],
+ [ 0.   ,  0.369]]
 ```
 
 ### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
@@ -209,8 +209,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.615],
- [-0.   , -0.369]]
+[[ 0.408, -0.615],
+ [ 0.   ,  0.369]]
 ```
 
 ### → the standard-orthonormal `ProjectedBasis` (re-orthonormalize)
@@ -251,8 +251,8 @@ Input `t2` =
 Output — the `cob` matrix:
 
 ```
-[[ 0.971,  1.07 ],
- [-0.144,  1.498]]
+[[-0.971, -1.07 ],
+ [ 0.144, -1.498]]
 ```
 
 ## Fields

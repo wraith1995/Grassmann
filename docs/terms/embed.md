@@ -36,7 +36,7 @@ embed(a, Re)
 **Output**
 
 ```
-[ 0.168, -2.132, -0.654]
+[-0.168,  2.132,  0.654]
 ```
 
 ??? note "Test (literal source — input · run · expected assertion)"
@@ -46,7 +46,7 @@ embed(a, Re)
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
     a = C.var("a", C.img(J))
     Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
-    Q, _ = np.linalg.qr(Jm)
+    Q, _ = _signed_qr(Jm)
     av = [1.0, 2.0]
     got = _run(C.embed(a, Re), {a: av, J: Jm.T})
     _ck(np.allclose(got, Q @ np.asarray(av)))

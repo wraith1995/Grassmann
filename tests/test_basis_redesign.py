@@ -151,6 +151,24 @@ def test_projectedbasis_metric_rectangular_reorthonormalize_roundtrips() -> None
     assert m @ _cob(metric, free, feeds) == pytest.approx(np.eye(2))
 
 
+def test_qr_sign_convention_positive_diagonal_r() -> None:
+    # All our QRs use the +diagonal-R convention (R upper-triangular with a positive diagonal ⇒
+    # the QR is unique and Q keeps the orientation of the columns).  A matrix that numpy's qr
+    # returns with negative diagonal entries must, here, give a positive-diagonal R.
+    V = C.base("V", 3)
+    A = np.array([[-2.0, 1.0, 0.0], [0.0, -3.0, 1.0], [1.0, 0.0, -1.0]])
+    assert np.any(np.diag(np.linalg.qr(A)[1]) < 0)            # numpy's raw QR is mixed-sign here
+    vs, f = _listb(V, "q", A)
+    # OrthonormalBasis (the _QrColsOp path): R = Qᵀ·A has a positive diagonal.
+    Q = _realize(B.orthonormal_basis(B.list_basis(*vs)), f)
+    assert np.all(np.diag(Q.T @ A) > 0)
+    # FFS image (the QrOp seam): R = Qᵀ·J has a positive diagonal.
+    Rt, Re = C.base("Rt", 3), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    U = _realize(B.projected_basis(J, "image"), {_k(J): A.T})
+    assert np.all(np.diag(U.T @ A) > 0)
+
+
 def test_orthonormalbasis_plain_is_qr() -> None:
     V = C.base("V", 3)
     M = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])

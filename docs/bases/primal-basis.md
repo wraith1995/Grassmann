@@ -232,8 +232,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-2.449, -4.082],
- [-0.   , -2.708]]
+[[2.449, 4.082],
+ [0.   , 2.708]]
 ```
 
 ### → the unit basis of ℝ (the scalar 1)

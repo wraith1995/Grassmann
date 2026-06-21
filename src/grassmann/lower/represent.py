@@ -2578,11 +2578,21 @@ class _CompleteColsOp:
 
 @dataclass(frozen=True)
 class _QrColsOp:
-    """Orthonormalize columns — the ``Q`` of the reduced QR (standard inner product)."""
+    """Orthonormalize columns — the ``Q`` of the reduced QR (standard inner product), in the
+    **positive-diagonal-R sign convention** (``R`` has a positive diagonal ⇒ the QR is unique and
+    ``Q``'s columns keep the orientation of ``A``'s).  numpy's ``qr`` does not fix the sign, so we
+    flip each ``Q`` column by ``sign(Rᵢᵢ)``."""
 
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
-        q, _r = np.linalg.qr(np.asarray(A, dtype=float))
-        return q
+        q, r = np.linalg.qr(np.asarray(A, dtype=float))
+        return q * _qr_diag_signs(r)
+
+
+def _qr_diag_signs(r: np.ndarray) -> np.ndarray:
+    """The per-column signs that make ``R``'s diagonal positive (zeros ⇒ +1)."""
+    s = np.sign(np.diag(r))
+    s[s == 0] = 1.0
+    return s
 
 
 @dataclass(frozen=True)

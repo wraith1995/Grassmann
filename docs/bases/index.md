@@ -421,8 +421,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-2.449, -4.082],
- [-0.   , -2.708]]
+[[2.449, 4.082],
+ [0.   , 2.708]]
 ```
 
 <a id="conv-primal-basis-scalar-basis"></a>
@@ -909,10 +909,10 @@ Input `J` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408, -0.   , -0.   , -0.   ],
- [-0.   , -0.408, -0.   , -0.   ],
- [ 0.246,  0.   , -0.369, -0.   ],
- [ 0.   ,  0.246, -0.   , -0.369]]
+[[ 0.408,  0.   ,  0.   ,  0.   ],
+ [ 0.   ,  0.408,  0.   ,  0.   ],
+ [-0.246, -0.   ,  0.369,  0.   ],
+ [-0.   , -0.246,  0.   ,  0.369]]
 ```
 
 <a id="conv-basis-rep-list-basis"></a>
@@ -1128,8 +1128,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.246],
- [-0.   , -0.369]]
+[[ 0.408, -0.246],
+ [ 0.   ,  0.369]]
 ```
 
 <a id="conv-projected-basis-list-basis"></a>
@@ -1178,8 +1178,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.615],
- [-0.   , -0.369]]
+[[ 0.408, -0.615],
+ [ 0.   ,  0.369]]
 ```
 
 <a id="conv-projected-basis-complete-basis"></a>
@@ -1228,8 +1228,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.246],
- [-0.   , -0.369]]
+[[ 0.408, -0.246],
+ [ 0.   ,  0.369]]
 ```
 
 <a id="conv-projected-basis-primal-basis"></a>
@@ -1278,8 +1278,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-0.408,  0.615],
- [-0.   , -0.369]]
+[[ 0.408, -0.615],
+ [ 0.   ,  0.369]]
 ```
 
 <a id="conv-projected-basis-projected-basis"></a>
@@ -1322,8 +1322,8 @@ Input `t2` =
 Output — the `cob` matrix:
 
 ```
-[[ 0.971,  1.07 ],
- [-0.144,  1.498]]
+[[-0.971, -1.07 ],
+ [ 0.144, -1.498]]
 ```
 
 <a id="conv-image-basis-projected-basis"></a>
@@ -1372,8 +1372,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-2.449, -1.633],
- [ 0.   , -2.708]]
+[[ 2.449,  1.633],
+ [-0.   ,  2.708]]
 ```
 
 <a id="conv-image-basis-list-basis"></a>
@@ -1792,8 +1792,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-2.449, -4.082],
- [-0.   , -2.708]]
+[[2.449, 4.082],
+ [0.   , 2.708]]
 ```
 
 <a id="conv-list-basis-scalar-basis"></a>
@@ -2276,8 +2276,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-2.449, -1.633],
- [-0.   , -2.708]]
+[[2.449, 1.633],
+ [0.   , 2.708]]
 ```
 
 <a id="conv-complete-basis-basis-sum"></a>
