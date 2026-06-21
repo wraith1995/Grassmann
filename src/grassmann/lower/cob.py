@@ -14,9 +14,22 @@ BasisProd(bᵢ)→BasisProd(b'ᵢ)  ⇒ Kron/Einsum of cob(bᵢ→b'ᵢ)
 BasisSum(bᵢ) →BasisSum(b'ᵢ)   ⇒ block-diagonal of cob(bᵢ→b'ᵢ)
 DualBasis b  →DualBasis b'    ⇒ (cob(b→b'))⁻ᵀ
 BasisRep(n,b)                 ⇒ block-repeat of cob(b→b')
-ProjectedBasis/ImageBasis     ⇒ from the SVD/QR factors (§1)
+WithInnerBasis(b, g)          ⇒ strip the metric (metadata, not a coordinate change)
 CompleteBasis(sub, comp)      ⇒ [ realize(sub) | realize(comp) ] stacked
 ```
+
+**Scope — this is the pure, static-matrix fast path only.** It handles the bases whose
+columns are known *without lowering a term*: ``Scalar``/``Dual``/``Prod``/``Sum``/``Rep``/
+``WithInner``/``Complete`` (and identical-basis short-circuits). The FFS bases
+(:class:`~grassmann.core.basis.ImageBasis`, :class:`~grassmann.core.basis.ProjectedBasis`)
+and the term :class:`~grassmann.core.basis.ListBasis` are **NOT** realized here — they need
+the runtime SVD/QR/GSVD seam (``space_basis.realize_ffs_basis``) or ``_rep`` of a map/vector
+term, which this module has no access to. :func:`realize_basis` raises :class:`CobError` for
+them, and the seam-aware **total** cob — ``represent._basis_cob_matrix`` — catches that,
+mirrors these same §2 structural rules, and realizes the FFS/term leaves through the seam
+(it also adds the structure-exploiting ``ImageBasis ↔ ProjectedBasis`` QR/GSVD-factor path
+and the standard-basis fallback). So a change of basis involving an ``ImageBasis`` IS
+supported — through ``_basis_cob_matrix``, not through this fast path.
 
 **Min-sym (`41 §1b`):** these matrices are *numeric* ``Stmt``s — a well-chosen basis
 keeps the cob numeric so symbolics never enter the change-of-basis; and an identical
