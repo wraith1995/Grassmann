@@ -24,7 +24,7 @@ from grassmann.lower import (
     score_basis,
     space_basis,
 )
-from grassmann.lower.cob import _basis_eq
+from grassmann.lower.represent import _basis_eq
 
 _RM = sys.modules["grassmann.lower.represent"]
 

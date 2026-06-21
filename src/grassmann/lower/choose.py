@@ -126,7 +126,7 @@ def _is_orthonormal_default(space: S.Space, candidate: B.Basis) -> bool:
 
 
 def _eq(a: B.Basis, b: B.Basis) -> bool:
-    """Numpy-tolerant structural basis equality (shared with :mod:`cob`)."""
-    from .cob import _basis_eq
+    """Numpy-tolerant structural basis equality (shared with represent's cob)."""
+    from .represent import _basis_eq
 
     return _basis_eq(a, b)

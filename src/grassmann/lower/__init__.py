@@ -21,8 +21,14 @@ seam) and :func:`default_basis` / :func:`candidate_bases` / :func:`score_basis`.
 from __future__ import annotations
 
 from .choose import choose, score_basis
-from .cob import CobError, cob, realize_basis
-from .represent import Rep, RepresentError, represent
+from .represent import (
+    CobError,
+    Rep,
+    RepresentError,
+    cob,
+    realize_basis,
+    represent,
+)
 from .space_basis import (
     FfsRealization,
     candidate_bases,
