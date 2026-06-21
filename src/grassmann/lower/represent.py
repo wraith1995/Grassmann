@@ -1100,9 +1100,15 @@ def _cob_from_scalar(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _cob_from_dual(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``DualBasis`` — a covariant (``V*``) basis.  Same dual space only."""
+    """from ``DualBasis`` — a covariant (``V*``) basis.  Same dual space only.
+
+    ``DualBasis`` and ``PrimalBasis`` wrap the SAME (covariant) space (``_space_of_basis``
+    treats them identically), so a ``PrimalBasis(tb)`` ``to`` is interchangeable with
+    ``DualBasis(tb)`` here — both realize as ``(realize inner)⁻ᵀ`` — and the exact
+    inverse-transpose rule applies just the same (no need to fall to ``_cob_via_standard``).
+    """
     match to:
-        case B.DualBasis(tb):
+        case B.DualBasis(tb) | B.PrimalBasis(tb):
             # dual → dual ⇒ (the primal cob)⁻ᵀ (the inner bases' cob, inverse-transposed).
             return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, frm.basis, tb))
         case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
@@ -1114,9 +1120,12 @@ def _cob_from_dual(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 def _cob_from_primal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     """from ``PrimalBasis`` — a lone primal (``PrimalBasis(DualBasis(·))`` was already peeled).
     It realizes like a dual (``(realize inner)⁻ᵀ``), so a ``PrimalBasis → PrimalBasis`` of the
-    same kind is the inverse-transpose of the inner cob, exactly like ``DualBasis → DualBasis``."""
+    same kind is the inverse-transpose of the inner cob, exactly like ``DualBasis → DualBasis``.
+
+    A ``DualBasis(tb)`` ``to`` is the same covariant space as ``PrimalBasis(tb)`` (the two
+    variance wrappers are interchangeable space-wise), so it takes the same exact rule."""
     match to:
-        case B.PrimalBasis(tb):
+        case B.PrimalBasis(tb) | B.DualBasis(tb):
             return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, frm.basis, tb))
         case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
             return _cob_via_standard(ctx, frm, to)
@@ -1215,9 +1224,13 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     target is embed-only (the realized ambient frame), so it does not enter the cob.
 
     ``ImageBasis ↔ ProjectedBasis`` of one map (the ``R``/``R⁻¹`` factor of ``J = U_d·R``) is
-    now subsumed by the generic standard route: with in-space realize both sides are **square**,
-    so :func:`_cob_via_standard` composes them with a plain ``InvOp`` — no realize-ambient + QR
-    factor (the old ``_same_map_ffs_cob`` special case is therefore gone).
+    otherwise subsumed by the generic standard route: with in-space realize both sides are
+    **square**, so :func:`_cob_via_standard` composes them with a plain ``InvOp`` — no
+    realize-ambient + QR factor (the old ``_same_map_ffs_cob`` special case is gone).  But for the
+    canonical *metric-free* ``ProjectedBasis(f,"image")`` ``to`` of the SAME map, the to-side
+    in-space realize is exactly ``I`` (``U_dᵀ·U_d``), so the standard route wastes an ``InvOp(I)``
+    plus a compose; the cob is just the ImageBasis's own in-space ``R`` (``U_dᵀ·J``).  Return that
+    ``R`` directly (still keyed by the shared ``(which, id(f))`` δ atom ⇒ square ⇒ round-trips).
     """
     match to:
         case B.ImageBasis(tf, tsrc, _ttgt):
@@ -1229,6 +1242,12 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
                     f"ImageBasis cob: maps differ ⇒ different image spaces: {ff!r} vs {tf!r}"
                 )
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
+        case B.ProjectedBasis(tf, tw, None, None) if (
+            tw in ("image", "img") and (frm.f is tf or frm.f == tf)
+        ):
+            # to = canonical metric-free ProjectedBasis of the SAME map ⇒ its in-space realize is
+            # I, so cob = (realize to)⁻¹·(realize from) = I·R = R = the ImageBasis's own in-space.
+            return _realize_ffs_in_space(ctx, frm)
         case _:
             return _cob_via_standard(ctx, frm, to)
 
@@ -1239,17 +1258,34 @@ def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     ``ProjectedBasis → ImageBasis`` of one map is subsumed by the generic standard route (both
     realize square in-space ⇒ plain ``InvOp``), so only the ``ProjectedBasis → ProjectedBasis``
     same-/different-metric cases are special here.
+
+    The identity short-circuit compares only the **own-side** metric (cod/``target`` for
+    image/coker, dom/``source`` for ker/coimg — `audit #4`): the irrelevant side is dropped by the
+    GSVD seam (it only orthonormalizes the own-side subspace), so two ProjectedBases of the same
+    map/which that differ only on the irrelevant side are the SAME basis and need no
+    reorthonormalize.  (Map & ``which`` are guard-guaranteed equal here.)
     """
     match (frm, to):
-        case (B.ProjectedBasis(_f1, _w1, fs, ft),
-              B.ProjectedBasis(_f2, _w2, ts, tt)) if _src_eq(fs, ts) and _src_eq(ft, tt):
-            # same source/target metric ⇒ identity.  (Same map & `which` are guard-guaranteed: a
-            # different `f`/`which` is a different FFS space, already rejected before this handler.)
+        case (B.ProjectedBasis(_f1, w1, fs, ft),
+              B.ProjectedBasis(_f2, _w2, ts, tt)) if _projected_own_metric_eq(w1, fs, ft, ts, tt):
+            # same own-side metric ⇒ identity (the irrelevant side is ignored by the seam).
             return _identity_like(ctx, frm)
         case (B.ProjectedBasis(), B.ProjectedBasis()):
             return _cob_via_standard(ctx, frm, to)           # differing metric ⇒ reorthonormalize
         case _:
             return _cob_via_standard(ctx, frm, to)
+
+
+def _projected_own_metric_eq(
+    which: str, fs: B.Basis | None, ft: B.Basis | None,
+    ts: B.Basis | None, tt: B.Basis | None,
+) -> bool:
+    """Whether two ProjectedBases of the same map/``which`` carry the same OWN-side metric — the
+    only side that affects the realized subspace (cod/target for image/coker, dom/source for
+    ker/coimg, `audit #4`).  The irrelevant side is ignored (the seam drops it)."""
+    if which in ("image", "img", "coker"):
+        return _src_eq(ft, tt)        # cod-side (target) metric is the own side
+    return _src_eq(fs, ts)            # ker/coimg ⇒ dom-side (source) metric is the own side
 
 
 def _cob_from_list(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
@@ -1352,7 +1388,7 @@ def _inverse_cols(
             note="cob:std→to=Cᵀ·G (g-orthonormal)",
         )
         return gf
-    if isinstance(n_amb, int) and isinstance(k_to, int) and n_amb == k_to:
+    if _axes_square(n_amb, k_to):
         [iv] = ctx.prog.emit_stmt(
             pa.InvOp(), [c_to], [pa.OutSpec("cob:std→to=C⁻¹", (k_to, n_amb))],
             note="cob:std→to=C⁻¹ (square)",
@@ -1363,6 +1399,21 @@ def _inverse_cols(
         note="cob:std→to=pinv(C) (rectangular)",
     )
     return pv
+
+
+def _axes_square(n_amb: object, k_to: object) -> bool:
+    """Whether the two axis extents are provably equal ⇒ ``to`` is square ⇒ exact ``InvOp``.
+
+    Equal static ``int``s, or — for a dynamic-δ FFS ``to`` realized in-space — the SAME runtime
+    ``DimAtom`` on both axes (`51 §FFS-δ`: the in-space realize keys both the row and column axis
+    by one canonical ``(which, id(f))`` δ atom, so they are equal by value).  Without this, a
+    dynamic-rank FFS ``to`` falls to ``PinvOp`` (``pinv(square)=inv``, correct but costlier and
+    less stable)."""
+    if isinstance(n_amb, int) and isinstance(k_to, int):
+        return n_amb == k_to
+    if isinstance(n_amb, pa.DimAtom) and isinstance(k_to, pa.DimAtom):
+        return n_amb == k_to
+    return False
 
 
 def _is_standard_orthonormal(b: B.Basis) -> bool:
@@ -1443,8 +1494,20 @@ def _src_eq(a: B.Basis | None, b: B.Basis | None) -> bool:
 
 
 def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
-    """A cob identity sized to ``basis`` — static ``eye`` or a runtime ``δ×δ`` from the seam."""
-    cols = realize_basis_cols(ctx, _strip_variance(basis))
+    """A cob identity sized to ``basis`` — static ``eye`` or a runtime ``δ×δ`` from the seam.
+
+    For an FFS basis (``ImageBasis``/``ProjectedBasis``) the size is the canonical ``(which,
+    id(f))`` δ atom, sourced from the **memoized** metric-free FFS realization's column axis
+    (`51 §FFS-δ`) — so a dynamic-rank FFS basis sizes its δ×δ eye from the already-emitted
+    SVD/QR ``cols`` rather than re-running the full in-space immersion+einsum that
+    ``realize_basis_cols`` would (purely fewer emitted stmts; the static path is unchanged).
+    """
+    stripped = _strip_variance(basis)
+    if _is_ffs_basis(stripped):
+        which, f = _ffs_which_and_map(stripped)
+        cols = _realize_ffs_by_which(ctx, which, f, source=None, target=None).cols
+    else:
+        cols = realize_basis_cols(ctx, stripped)
     k = _shape_of(cols)[1]
     if isinstance(k, int):
         return _identity(ctx.prog, k, "cob:id-ffs")
@@ -1452,6 +1515,11 @@ def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
         _DynEyeOp(), [cols], [pa.OutSpec("cob:id-dyn", (k, k))], note="cob:id-dyn",
     )
     return out
+
+
+def _is_ffs_basis(basis: B.Basis) -> bool:
+    """Whether ``basis`` is an FFS basis (``ImageBasis`` or ``ProjectedBasis``)."""
+    return isinstance(basis, (B.ImageBasis, B.ProjectedBasis))
 
 
 def _strip_variance(basis: B.Basis) -> B.Basis:
