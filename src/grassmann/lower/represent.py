@@ -859,7 +859,8 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   ImageBasis ↔ ImageBasis (same f, diff tgt)  STILL the source cob (target is embed-only)
 #   ImageBasis ↔ ImageBasis (diff map)          realize both images in the STANDARD cod frame
 #   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
-#   ProjectedBasis → ProjectedBasis   identity (equal params) / metric reorthonormalize VIA STD
+#   ProjectedBasis ↔ ProjectedBasis (same metric)   identity (same orthonormal range)
+#   ProjectedBasis ↔ ProjectedBasis (diff metric)   reorthonormalize the range, VIA STANDARD
 #   ListBasis / CompleteBasis ↔ …     realize the listed/completed columns, VIA STANDARD
 #   BVar / BLam / BApp                error — abstract, no concrete cob until reduced
 #   leaf A → leaf B                   VIA STANDARD: pinv(realize B) · realize A   (the fallback)
@@ -1053,10 +1054,15 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             # directly; a non-"image" projection has no such shortcut ⇒ via the standard basis.
             m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
             return m if m is not None else _cob_via_standard(ctx, frm, to)
+        case (B.ProjectedBasis(_f1, _w1, fs, ft),
+              B.ProjectedBasis(_f2, _w2, ts, tt)) if _src_eq(fs, ts) and _src_eq(ft, tt):
+            # Same FFS subspace (guard ⇒ same map & `which`) AND same source/target metric ⇒ the
+            # SAME orthonormal range ⇒ identity (sized through the seam for the dynamic rank).
+            return _identity_like(ctx, frm)
         case (B.ProjectedBasis(), B.ProjectedBasis()):
-            # Same FFS subspace (the guard ensures same map & `which`).  Equal params ⇒ identity
-            # (caught above); differing source/target metric ⇒ a metric reorthonormalization of
-            # the orthonormal range — realize both (GSVD-orthonormal columns) and compose.
+            # Same FFS subspace, DIFFERENT source/target metric ⇒ re-orthonormalize the range
+            # from one metric to the other.  source/target feed the GSVD metric and the columns
+            # stay in the standard frame, so realize both (GSVD-orthonormal) and pinv-compose.
             return _cob_via_standard(ctx, frm, to)
         case (B.ImageBasis(), _) | (_, B.ImageBasis()):              # literal f-columns   ⇒ via std
             return _cob_via_standard(ctx, frm, to)

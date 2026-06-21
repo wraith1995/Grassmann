@@ -139,6 +139,23 @@ def test_imagebasis_cob_is_target_independent() -> None:
     assert plain == pytest.approx(Sm)        # = the source-basis cob (S)
 
 
+def test_projectedbasis_same_metric_is_identity() -> None:
+    # Same FFS subspace & same source/target metric ⇒ identity; a differing target metric ⇒ a
+    # non-trivial (invertible) reorthonormalization.
+    Rt, Re = C.base("Rt", 2), C.base("Re", 3)
+    J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
+    Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
+    t = [C.var(f"t{i}", Re) for i in range(3)]
+    Tm = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.0, 0.0, 1.0]])
+    feeds = {_k(J): Jm.T, **{_k(t[i]): Tm[:, i] for i in range(3)}}
+    plain = B.projected_basis(J, "image")
+    tgt = B.projected_basis(J, "image", target=B.list_basis(*t))
+    assert _cob(plain, plain, feeds) == pytest.approx(np.eye(2))            # same metric ⇒ I
+    m = _cob(plain, tgt, feeds)
+    assert m @ _cob(tgt, plain, feeds) == pytest.approx(np.eye(2))           # diff metric ⇒ invertible
+    assert not np.allclose(m, np.eye(2))                                     # ...and non-trivial
+
+
 def test_imagebasis_target_reads_in_codomain_basis() -> None:
     Rt, Re = C.base("Rt", 2), C.base("Re", 3)
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
