@@ -187,6 +187,7 @@ def realize_ffs_basis(
     metric_dom: pa.SymArray | None = None,
     metric_cod: pa.SymArray | None = None,
     label: str = "f",
+    dim_atom: pa.DimAtom | None = None,
 ) -> FfsRealization:
     """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``) (`41 §1`).
 
@@ -200,6 +201,14 @@ def realize_ffs_basis(
       *static* ``rank = dom_dim`` (recovers the dropped ``IsoSpace``);
     * **metric present** ⇒ :class:`GSvdOp` (orthonormal in the metrics);
     * otherwise ⇒ :class:`SvdOp`, with the runtime rank ``δ_f`` sizing a dynamic axis.
+
+    ``dim_atom`` (`51 §FFS-δ`) — a caller-supplied **canonical subspace-dimension** atom
+    for the dynamic column axis.  The FFS dimension is metric-independent (the rank, or its
+    complement for ker/coker), so a single atom is shared across the metric-free SVD and the
+    metric GSVD of one ``(f, which)`` and across every FFS-typed Var of that space.  ``None``
+    ⇒ the seam mints a fresh atom (the legacy behaviour) and reports it in
+    :attr:`FfsRealization.rank_dim` (and, for ker/coker, the complement atom is the subspace
+    axis of ``cols``) so the caller can record it and pass it back next time.
     """
     if which == "image":
         which = "img"
@@ -214,9 +223,11 @@ def realize_ffs_basis(
     if has_metric:
         return _realize_via_gsvd(
             program, which, f_matrix, dom_dim, cod_dim,
-            metric_dom, metric_cod, label,
+            metric_dom, metric_cod, label, dim_atom=dim_atom,
         )
-    return _realize_via_svd(program, which, f_matrix, dom_dim, cod_dim, label)
+    return _realize_via_svd(
+        program, which, f_matrix, dom_dim, cod_dim, label, dim_atom=dim_atom,
+    )
 
 
 def realize_image_application(
@@ -289,6 +300,7 @@ def _qr_q_shape(f_matrix: pa.SymArray, dom_dim: int) -> tuple[int, ...]:
 def _realize_via_svd(
     program: pa.Program, which: str, f_matrix: pa.SymArray,
     dom_dim: int, cod_dim: int, label: str,
+    *, dim_atom: pa.DimAtom | None = None,
 ) -> FfsRealization:
     U, S, Vh, rank = program.emit_stmt(
         pa.SvdOp(full_matrices=True),
@@ -300,8 +312,19 @@ def _realize_via_svd(
         note=f"ffs-basis:SvdOp({label})",
     )
     svd_idx = len(program.statements) - 1
-    delta = pa.DimAtom(name=f"rank:{label}", source=(svd_idx, 3))
-    cols = _take_ffs_block(program, which, U, Vh, rank, delta, cod_dim, dom_dim, label)
+    # For img/coimg the canonical subspace atom IS the rank atom δ; reuse a caller-supplied
+    # one (so the metric-free SVD and the metric GSVD share it), else mint from this rank
+    # output.  For ker/coker the rank atom is internal and the SUBSPACE atom is the
+    # complement; ``dim_atom`` (when given) flows to ``_take_ffs_block`` as the comp atom.
+    if which in ("img", "coimg") and dim_atom is not None:
+        delta = dim_atom
+    else:
+        delta = pa.DimAtom(name=f"rank:{label}", source=(svd_idx, 3))
+    comp_atom = dim_atom if which in ("ker", "coker") else None
+    cols = _take_ffs_block(
+        program, which, U, Vh, rank, delta, cod_dim, dom_dim, label,
+        comp_atom=comp_atom,
+    )
     return FfsRealization(cols=cols, rank=rank, rank_dim=delta, op="SvdOp")
 
 
@@ -309,6 +332,7 @@ def _realize_via_gsvd(
     program: pa.Program, which: str, f_matrix: pa.SymArray,
     dom_dim: int, cod_dim: int,
     metric_dom: pa.SymArray | None, metric_cod: pa.SymArray | None, label: str,
+    *, dim_atom: pa.DimAtom | None = None,
 ) -> FfsRealization:
     m_v = metric_dom if metric_dom is not None else _eye(program, dom_dim, label + "_Mv")
     m_w = metric_cod if metric_cod is not None else _eye(program, cod_dim, label + "_Mw")
@@ -327,7 +351,12 @@ def _realize_via_gsvd(
         note=f"ffs-basis:GSvdOp({label})",
     )
     gsvd_idx = len(program.statements) - 1
-    delta = pa.DimAtom(name=f"rank:{label}", source=(gsvd_idx, 3))
+    # img/coimg: canonical subspace atom IS δ (shared with the metric-free SVD); ker/coker:
+    # the subspace atom is the complement (see `51 §FFS-δ`).
+    if which in ("img", "coimg") and dim_atom is not None:
+        delta = dim_atom
+    else:
+        delta = pa.DimAtom(name=f"rank:{label}", source=(gsvd_idx, 3))
     # Block↔FFS: image = first δ of Ufull, coker = last (cod−δ) of Ufull;
     #            coimg = first δ of Vfull, ker = last (dom−δ) of Vfull.
     factor, ambient = (Ufull, cod_dim) if which in ("img", "coker") else (Vfull, dom_dim)
@@ -338,7 +367,7 @@ def _realize_via_gsvd(
             note=f"ffs-basis(metric):{which}=first-δ({label})",
         )
     else:
-        comp = _comp_dim(program, rank, ambient, label)
+        comp = dim_atom if dim_atom is not None else _comp_dim(program, rank, ambient, label)
         [block] = program.emit_stmt(
             _LastColsOp(), [factor, rank],
             [pa.OutSpec("ffs_" + which + "_" + label, (ambient, comp))],
@@ -350,6 +379,7 @@ def _realize_via_gsvd(
 def _take_ffs_block(
     program: pa.Program, which: str, U: pa.SymArray, Vh: pa.SymArray,
     rank: pa.SymArray, delta: pa.DimAtom, cod_dim: int, dom_dim: int, label: str,
+    *, comp_atom: pa.DimAtom | None = None,
 ) -> pa.SymArray:
     """Slice the rank-δ FFS block from the full SVD factors (`41 §1`).
 
@@ -377,7 +407,7 @@ def _take_ffs_block(
             note=f"ffs-basis:{which}=first-δ({label})",
         )
     else:  # coker / ker: last (ambient - δ) cols
-        comp = _comp_dim(program, rank, ambient, label)
+        comp = comp_atom if comp_atom is not None else _comp_dim(program, rank, ambient, label)
         [cols] = program.emit_stmt(
             _LastColsOp(),
             [factor, rank],
