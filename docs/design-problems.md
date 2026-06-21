@@ -143,8 +143,13 @@ transpose, block-diag/Kron/block-repeat, WithInner-is-metadata, OrthonormalBasis
 Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-completeness,
 `_norm_space` FFS-endpoint soundness, pre-step order). Open items, by severity:
 
-### Correctness (verified real)
-1. **Structured basis with a seam component crashes `realize_basis_cols`.** `BasisSum`/`BasisProd`/
+### Correctness (verified real)  — items 1, 2, 5 **FIXED**; 3, 4 open
+1. **[FIXED] Structured basis with a seam component crashes `realize_basis_cols`.**
+   Added seam-aware `BasisSum`/`BasisProd`/`BasisRep` arms (recurse `realize_basis_cols`, recombine
+   with Dim-aware `_block_diag_cols`/`_kron_cols`/`_block_repeat_cols` that source a runtime δ atom
+   when a component dim is dynamic). Remainder: a **symbolic-count** `BasisRep` (e.g.
+   `BasisRep(DimVar('m'), …)`) raises a clear error (no run-time value source for the count yet) —
+   static-count + dynamic-component (the reported crash) is fixed. `BasisSum`/`BasisProd`/
    `BasisRep` have no seam-aware arm in `realize_basis_cols`, so a basis like
    `BasisSum(ProjectedBasis(f,"image"), ScalarBasis())` (a legitimate basis of `Img(f)⊕ℝ`, =
    `default_basis(OPlus(Img(f), ℝ))`) falls to the pure `realize_basis`, which raises `CobError`
@@ -154,7 +159,10 @@ Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-
    `_block_diag`/`_kron`/`_block_repeat`); make those combinators Dim-aware for mixed
    static/dynamic component dims; add a runtime-`n` path for a dynamic `BasisRep` count
    (`_count_int` currently raises). Pre-existing (not a flip regression).
-2. **`ListBasis(reduce=RREF, backup=None)` never applies RREF.** The RREF pivot runs only inside
+2. **[FIXED] `ListBasis(reduce=RREF, backup=None)` never applies RREF.** Added `_rref_select_cols`
+   (greedy-pivot `_RrefSelectColsOp`, dynamic `rank`-sized column axis): a rank-deficient frame now
+   yields a genuine `(rows, rank)` subspace basis; a full-rank frame is unchanged. `basis_dim` of
+   such a basis is now `DynamicDim` (its dim is the runtime rank). The RREF pivot runs only inside
    `_CompleteColsOp` (i.e. only with a `backup`); without one, a rank-deficient frame is returned
    raw — a singular "basis" → a silent `InvOp`/`PinvOp` of a rank-deficient matrix in cob. **Fix:**
    apply RREF column-selection in `_realize_list_basis` when `reduce is RREF` (keep the LI columns;
@@ -171,11 +179,12 @@ Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-
    orthonormality + subspace preserved, round-trips) but a metric that should be a no-op changes
    the answer and defeats the same-metric identity check. **Fix:** pass only the `which`-relevant
    metric (cod for image/coker, dom for ker/coimg).
-5. **`OrthonormalBasis` is metric-blind under a `DualBasis`/`PrimalBasis` wrapper** (untested
-   combo). `Orth(Dual(WithInner(b,g)))` orthonormalizes against the *standard* product, not the
-   dual metric `G⁻¹` (internally consistent — round-trips — but the wrong inner product). **Fix:**
-   peel `Dual`/`Primal` to find a carried metric (use `G⁻¹` for a dual), or reject the construction
-   at `OrthonormalBasis.__post_init__`. *Design decision: is `Orth(Dual(...))` a supported spelling?*
+5. **[FIXED] `OrthonormalBasis` was metric-blind under a `DualBasis`/`PrimalBasis` wrapper.**
+   `_peel_orthonormal_metric` now strips `Dual`/`Primal` (toggling parity) to find a carried
+   `WithInnerBasis` metric; `_effective_metric_matrix` uses `G` (even parity) or `G⁻¹` (odd parity,
+   via `InvOp`), `None` (standard) when no metric is carried. `_realize_orthonormal`,
+   `_orthonormal_metric`, `_is_standard_orthonormal` all use it. Both `Orth(Dual(WithInner(b,g)))`
+   and `Dual(Orth(WithInner(b,g)))` are accepted and realize `G⁻¹`-orthonormal (`QᵀG⁻¹Q=I`).
 
 ### Sub-optimal (correct, cheaper/exacter possible)
 - `Primal↔Dual` are the same space, but `_cob_from_dual`/`_primal` only match their own wrapper, so

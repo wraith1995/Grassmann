@@ -152,10 +152,18 @@ def basis_dim(b: B.Basis) -> int:
             return out
         case B.BasisRep(count, inner):
             return _dim_int(count) * basis_dim(inner)
-        case B.ListBasis(vectors, backup, _reduce):
+        case B.ListBasis(vectors, backup, reduce):
             # a list of vectors is sized by its length, unless a backup completes it to the
-            # backup's (ambient) dimension.
-            return basis_dim(backup) if backup is not None else len(vectors)
+            # backup's (ambient) dimension.  An ``RREF`` reduce with NO backup keeps only the
+            # frame's independent columns — the **runtime rank** — so its dim is dynamic (the
+            # length is just an upper bound), routing the cob through the seam (audit Fix 2).
+            if backup is not None:
+                return basis_dim(backup)
+            if reduce is B.Reduce.RREF:
+                raise DynamicDim(
+                    f"ListBasis(reduce=RREF, backup=None) {b!r} is sized by its runtime rank"
+                )
+            return len(vectors)
         case B.CompleteBasis(sub_basis, complement, reduce):
             # RREF/ORTHONORMALIZE complete to the ambient (the complement's dimension); else
             # the stacked count sub + complement.
