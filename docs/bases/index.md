@@ -33,15 +33,15 @@ Here each basis node is shown against a representative of its OWN space, so **�
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | [`ScalarBasis`](scalar-basis.md) | `I` | — | [✓](#conv-scalar-basis-primal-basis) | — | — | — | — | — | [✓](#conv-scalar-basis-list-basis) | — | — |
 | [`DualBasis`](dual-basis.md) | — | `I` | — | — | — | — | — | — | [✓](#conv-dual-basis-list-basis) | — | — |
-| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | — | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | [✓](#conv-primal-basis-with-inner-basis) | [✓](#conv-primal-basis-complete-basis) |
+| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | — | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | — | [✓](#conv-primal-basis-complete-basis) |
 | [`BasisSum`](basis-sum.md) | — | — | [✓](#conv-basis-sum-primal-basis) | `I` | — | — | — | — | [✓](#conv-basis-sum-list-basis) | — | [✓](#conv-basis-sum-complete-basis) |
 | [`BasisProd`](basis-prod.md) | — | — | [✓](#conv-basis-prod-primal-basis) | — | `I` | — | — | — | [✓](#conv-basis-prod-list-basis) | — | [✓](#conv-basis-prod-complete-basis) |
-| [`BasisRep`](basis-rep.md) | — | — | [✓](#conv-basis-rep-primal-basis) | — | — | `I` | — | — | [✓](#conv-basis-rep-list-basis) | [✓](#conv-basis-rep-with-inner-basis) | [✓](#conv-basis-rep-complete-basis) |
+| [`BasisRep`](basis-rep.md) | — | — | [✓](#conv-basis-rep-primal-basis) | — | — | `I` | — | — | [✓](#conv-basis-rep-list-basis) | — | [✓](#conv-basis-rep-complete-basis) |
 | [`ProjectedBasis`](projected-basis.md) | — | — | [✓](#conv-projected-basis-primal-basis) | — | — | — | `I` | [✓](#conv-projected-basis-image-basis) | [✓](#conv-projected-basis-list-basis) | — | [✓](#conv-projected-basis-complete-basis) |
 | [`ImageBasis`](image-basis.md) | — | — | [✓](#conv-image-basis-primal-basis) | — | — | — | [✓](#conv-image-basis-projected-basis) | `I` | [✓](#conv-image-basis-list-basis) | — | [✓](#conv-image-basis-complete-basis) |
-| [`ListBasis`](list-basis.md) | [✓](#conv-list-basis-scalar-basis) | [✓](#conv-list-basis-dual-basis) | [✓](#conv-list-basis-primal-basis) | [✓](#conv-list-basis-basis-sum) | [✓](#conv-list-basis-basis-prod) | [✓](#conv-list-basis-basis-rep) | [✓](#conv-list-basis-projected-basis) | [✓](#conv-list-basis-image-basis) | `I` | [✓](#conv-list-basis-with-inner-basis) | [✓](#conv-list-basis-complete-basis) |
-| [`WithInnerBasis`](with-inner-basis.md) | — | — | [✓](#conv-with-inner-basis-primal-basis) | — | — | [✓](#conv-with-inner-basis-basis-rep) | — | — | [✓](#conv-with-inner-basis-list-basis) | `I` | [✓](#conv-with-inner-basis-complete-basis) |
-| [`CompleteBasis`](complete-basis.md) | — | — | [✓](#conv-complete-basis-primal-basis) | [✓](#conv-complete-basis-basis-sum) | [✓](#conv-complete-basis-basis-prod) | [✓](#conv-complete-basis-basis-rep) | [✓](#conv-complete-basis-projected-basis) | [✓](#conv-complete-basis-image-basis) | [✓](#conv-complete-basis-list-basis) | [✓](#conv-complete-basis-with-inner-basis) | `I` |
+| [`ListBasis`](list-basis.md) | [✓](#conv-list-basis-scalar-basis) | [✓](#conv-list-basis-dual-basis) | [✓](#conv-list-basis-primal-basis) | [✓](#conv-list-basis-basis-sum) | [✓](#conv-list-basis-basis-prod) | [✓](#conv-list-basis-basis-rep) | [✓](#conv-list-basis-projected-basis) | [✓](#conv-list-basis-image-basis) | `I` | — | [✓](#conv-list-basis-complete-basis) |
+| [`WithInnerBasis`](with-inner-basis.md) | — | — | — | — | — | — | — | — | — | `I` | — |
+| [`CompleteBasis`](complete-basis.md) | — | — | [✓](#conv-complete-basis-primal-basis) | [✓](#conv-complete-basis-basis-sum) | [✓](#conv-complete-basis-basis-prod) | [✓](#conv-complete-basis-basis-rep) | [✓](#conv-complete-basis-projected-basis) | [✓](#conv-complete-basis-image-basis) | [✓](#conv-complete-basis-list-basis) | — | `I` |
 
 **`I`** identity · **✓** a same-space conversion (links to its explanation + test below) · **—** a different space (not a cob) or not exercised here.
 
@@ -533,50 +533,6 @@ Output — the `cob` matrix:
  [0., 1., 1., 1.],
  [0., 0., 1., 1.],
  [0., 0., 0., 1.]]
-```
-
-<a id="conv-primal-basis-with-inner-basis"></a>
-
-### `PrimalBasis` → the g-orthonormal basis `WithInnerBasis(std₃, g)`
-
-**Mechanism (`cob`):** realize both bases toward the WithInner(ℝ³,g) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(PrimalBasis(DualBasis(<the term basis>)), WithInnerBasis(std₃, g))
-```
-
-Input `y0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `y1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `y2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `x0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 1.],
- [0., 1., 1.],
- [0., 0., 1.]]
 ```
 
 <a id="conv-basis-sum-list-basis"></a>
@@ -1110,26 +1066,6 @@ Output — the `cob` matrix:
  [0., 0., 1., 1., 0., 0.],
  [0., 0., 0., 0., 2., 0.],
  [0., 0., 0., 0., 1., 1.]]
-```
-
-<a id="conv-basis-rep-with-inner-basis"></a>
-
-### `BasisRep` → the g-orthonormal `WithInnerBasis` wrapping (metadata, reverse)
-
-**Mechanism (`cob`):** attaching a metric is metadata, not coordinates ⇒ identity
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(BasisRep(3, ScalarBasis()), WithInnerBasis(BasisRep(3, ScalarBasis()), g))
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
 ```
 
 <a id="conv-projected-basis-image-basis"></a>
@@ -1910,50 +1846,6 @@ Output — the `cob` matrix:
  [0., 0., 0., 1.]]
 ```
 
-<a id="conv-list-basis-with-inner-basis"></a>
-
-### `ListBasis` → the g-orthonormal basis `WithInnerBasis(std₃, g)`
-
-**Mechanism (`cob`):** realize both bases toward the WithInner(ℝ³,g) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(ListBasis(y0,y1,y2), WithInnerBasis(std₃, g))
-```
-
-Input `y0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `y1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `y2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `x0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 1.],
- [0., 1., 1.],
- [0., 0., 1.]]
-```
-
 <a id="conv-list-basis-dual-basis"></a>
 
 ### `ListBasis` → the standard dual basis `DualBasis(std₃)`
@@ -1992,16 +1884,16 @@ Output — the `cob` matrix:
  [0., 0., 1.]]
 ```
 
-<a id="conv-with-inner-basis-list-basis"></a>
+<a id="conv-with-inner-basis-with-inner-basis"></a>
 
-### `WithInnerBasis` → a term basis `ListBasis(y₀,y₁,y₂)`
+### `WithInnerBasis` → a g-metric term basis `WithInnerBasis(ListBasis(y…), g)`
 
 **Mechanism (`cob`):** realize both bases toward the WithInner(ℝ³,g) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(WithInnerBasis(std₃, g), ListBasis(y0,y1,y2))
+cob(WithInnerBasis(std₃, g), WithInnerBasis(ListBasis(y0,y1,y2), g))
 ```
 
 Input `y0` =
@@ -2034,114 +1926,6 @@ Output — the `cob` matrix:
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
  [ 0., -0.,  1.]]
-```
-
-<a id="conv-with-inner-basis-complete-basis"></a>
-
-### `WithInnerBasis` → a completed basis
-
-**Mechanism (`cob`):** realize both bases toward the WithInner(ℝ³,g) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(WithInnerBasis(std₃, g), CompleteBasis(ListBasis(x0), comp))
-```
-
-Input `y0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `y1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `y2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `x0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
-```
-
-<a id="conv-with-inner-basis-primal-basis"></a>
-
-### `WithInnerBasis` → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
-
-**Mechanism (`cob`):** realize both bases toward the WithInner(ℝ³,g) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(WithInnerBasis(std₃, g), PrimalBasis(DualBasis(<the term basis>)))
-```
-
-Input `y0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `y1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `y2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `x0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[ 1.,  0., -1.],
- [ 0.,  1., -1.],
- [ 0., -0.,  1.]]
-```
-
-<a id="conv-with-inner-basis-basis-rep"></a>
-
-### `WithInnerBasis` → the underlying (un-whitened) basis
-
-**Mechanism (`cob`):** the metric is metadata, not coordinates ⇒ cob strips it = identity
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(WithInnerBasis(BasisRep(3, ScalarBasis()), g), BasisRep(3, ScalarBasis()))
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
 ```
 
 <a id="conv-complete-basis-basis-rep"></a>
@@ -2462,49 +2246,5 @@ Output — the `cob` matrix:
  [0., 1., 0., 0.],
  [0., 0., 1., 0.],
  [0., 0., 0., 1.]]
-```
-
-<a id="conv-complete-basis-with-inner-basis"></a>
-
-### `CompleteBasis` → the g-orthonormal basis `WithInnerBasis(std₃, g)`
-
-**Mechanism (`cob`):** realize both bases toward the WithInner(ℝ³,g) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(x0), comp), WithInnerBasis(std₃, g))
-```
-
-Input `y0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `y1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `y2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `x0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
 ```
 

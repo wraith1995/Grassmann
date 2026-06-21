@@ -852,7 +852,7 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   BasisSum  → BasisSum              block-diag  of the per-summand cobs
 #   BasisProd → BasisProd             Kron        of the per-factor cobs
 #   BasisRep  → BasisRep              block-repeat of the inner cob (n copies)
-#   WithInner ↔ anything              strip the metric (metadata, not coordinates), recurse
+#   WithInner ↔ WithInner (same g)    cob the underlying bases (≠ a bare V — that's a remetric)
 #   ImageBasis ↔ ImageBasis (same f)  the source-basis cob (no need to realize f)
 #   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
 #   ProjectedBasis → ProjectedBasis   re-orthonormalize VIA STANDARD
@@ -871,10 +871,10 @@ def _dual_toggle(space: S.Space) -> S.Space:
 
 def _norm_space(s: S.Space) -> S.Space:
     """Canonicalize a space for **strict** equality — only the identifications the type system
-    itself makes: expand a static ``⊕ⁿ s`` to ``⊕(s,…,s)`` (as :func:`infer.unify` does), and
-    strip ``WithInner`` (the metric is metadata, not a coordinate).  Deliberately does NOT
-    collapse singletons (``⊕(s) ≠ s``) or cancel ``Dual(Dual(·))`` — those are *canonical isos*,
-    and cob makes **no implicit conversions, even canonical ones**."""
+    itself makes: expand a static ``⊕ⁿ s`` to ``⊕(s,…,s)`` (as :func:`infer.unify` does).
+    Deliberately does NOT collapse singletons (``⊕(s) ≠ s``), cancel ``Dual(Dual(·))``, or strip
+    ``WithInner`` — those are *canonical isos*, and cob makes **no implicit conversions, even
+    canonical ones** (``WithInner(V, g) ≠ V``; crossing it is an explicit ``remetric``)."""
     match s:
         case S.OPlusRep(c, inner) if isinstance(c, S.DimLit):
             return S.OPlus(tuple([_norm_space(inner)] * c.value))
@@ -884,8 +884,8 @@ def _norm_space(s: S.Space) -> S.Space:
             return S.OProd(tuple(_norm_space(x) for x in sps))
         case S.Dual(inner):
             return S.Dual(_norm_space(inner))
-        case S.WithInner(inner, _):
-            return _norm_space(inner)
+        case S.WithInner(inner, g):
+            return S.WithInner(_norm_space(inner), g)
         case _:
             return s
 
@@ -900,8 +900,9 @@ def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
         case B.DualBasis(inner) | B.PrimalBasis(inner):
             si = _space_of_basis(ctx, inner)
             return None if si is None else _dual_toggle(si)
-        case B.WithInnerBasis(inner, _):
-            return _space_of_basis(ctx, inner)
+        case B.WithInnerBasis(inner, g):
+            si = _space_of_basis(ctx, inner)
+            return None if si is None else S.WithInner(si, g)
         case B.BasisSum(bs):
             ss = [_space_of_basis(ctx, x) for x in bs]
             return None if any(s is None for s in ss) else S.OPlus(tuple(ss))
@@ -1027,10 +1028,8 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
                          [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
         case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:      # ⊕ⁿ → ⊕ⁿ         ⇒ block-repeat
             return _block_repeat(ctx.prog, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
-        case (B.WithInnerBasis(fb, _), _):                            # WithInner ↔       ⇒ strip metric
-            return _basis_cob_rec(ctx, fb, _strip_withinner(to))
-        case (_, B.WithInnerBasis(tb, _)):
-            return _basis_cob_rec(ctx, _strip_withinner(frm), tb)
+        case (B.WithInnerBasis(fb, _), B.WithInnerBasis(tb, _)):     # same metricized space ⇒
+            return _basis_cob_rec(ctx, fb, tb)                       # cob the underlying bases
         case (B.ImageBasis(ff, fsrc), B.ImageBasis(tf, tsrc)) if ff is tf:  # same map ⇒ source cob
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
         case (B.ImageBasis(), B.ProjectedBasis()) | (B.ProjectedBasis(), B.ImageBasis()):
@@ -1202,7 +1201,7 @@ def _strip_variance(basis: B.Basis) -> B.Basis:
 
 def _strip_withinner(basis: B.Basis) -> B.Basis:
     """Strip a single ``WithInnerBasis`` wrapper (the metric is metadata, not coordinates)."""
-    return basis.inner if isinstance(basis, B.WithInnerBasis) else basis
+    return basis.basis if isinstance(basis, B.WithInnerBasis) else basis
 
 
 def _apply_cob_on_axis(
@@ -2994,7 +2993,7 @@ def cob(program: pa.Program, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymAr
         # two sides equal we size the identity from the (numeric) metric, since the inner basis
         # of an *abstract* Base carries no explicit dimension.
         case (B.WithInnerBasis(fb, fg), _):
-            inner_to = to_basis.inner if isinstance(to_basis, B.WithInnerBasis) else to_basis
+            inner_to = to_basis.basis if isinstance(to_basis, B.WithInnerBasis) else to_basis
             n = _numeric_dim(fg)
             if n is not None and _basis_eq(fb, inner_to):
                 return _identity(program, n, "cob:wib-id")

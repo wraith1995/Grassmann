@@ -73,13 +73,15 @@ def _cases():
         out.append((f"PrimalBasis(DualBasis(ListBasis)) ℝ^{n}",
                     B.primal_basis(B.dual_basis(lb2)), default_basis(Vn), f2))
 
-    # --- WithInnerBasis (metric is metadata) -----------------------------
+    # --- WithInnerBasis: WithInner(V, g) is its OWN space, so the "standard" basis here is the
+    #     g-orthonormal WithInnerBasis(std, g) — NOT the bare V default (crossing to V needs an
+    #     explicit remetric).  Both bases are of WithInner(V, g).
     for n in (2, 3):
         Vn = C.base("V", n)
         g = C.var(f"g{n}", C.oprod(C.dual(Vn), C.dual(Vn)))
         lb, f = _listb(Vn, f"wi{n}", _invertible(n))
         out.append((f"WithInnerBasis(ListBasis,g) ℝ^{n}",
-                    B.with_inner_basis(lb, g), default_basis(Vn), f))
+                    B.with_inner_basis(lb, g), B.with_inner_basis(default_basis(Vn), g), f))
 
     # --- CompleteBasis: vary ambient n and sub width k -------------------
     for n in (2, 3, 4):
