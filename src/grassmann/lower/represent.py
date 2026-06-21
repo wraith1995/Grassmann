@@ -840,7 +840,9 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   pure fast path     cob() / realize_basis()         static matrices, no term lowering (below)
 #   realize to std     realize_basis_cols()            a basis → its columns in standard coords
 #
-# _basis_cob_rec dispatch — the rule table (read top to bottom; one case per representative):
+# _basis_cob_rec dispatches on `frm` to a per-from-basis handler `_cob_from_<frm>` which then
+# matches on `to`; each (from, to) cell has its specialized rule and bottoms out on the standard
+# basis.  The rule table (the from→to cells; read top to bottom):
 #
 #   from → to                         mechanism
 #   ────────────────────────────────────────────────────────────────────────────────────
@@ -994,89 +996,171 @@ def _basis_cob_matrix(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """The exhaustive change-of-basis dispatch — **one case per representative** (the rule table
-    above), each with its specialized rule; the standard-basis fallback is always the backstop.
+    """Change-of-basis dispatch — **match on ``frm``, then dispatch to a per-from-basis handler**
+    (``_cob_from_*``) which matches on ``to``.  Each handler has the specialized rule for its
+    (from, to) cases and bottoms out on the standard-basis fallback (:func:`_cob_via_standard`).
 
-    The pure-matrix fast path leads (it succeeds-or-raises rather than matching a structure);
-    everything it refuses (FFS / term / FFS-leaf) is handled by an explicit case below.
+    Universal pre-steps first: the pure-matrix fast path (succeeds-or-raises), the identity
+    short-circuit, double-dual peeling on either side, and the abstract-basis rejection.
     """
     try:
-        return cob(ctx.prog, frm, to)                                   # pure-realizable ⇒ static cob
+        return cob(ctx.prog, frm, to)                                  # pure-realizable ⇒ static cob
     except (CobError, DynamicDim):
         pass
+    if _basis_eq(frm, to):                                             # A == A ⇒ identity
+        return _identity_like(ctx, frm)
+    if isinstance(frm, B.PrimalBasis) and isinstance(frm.basis, B.DualBasis):
+        return _basis_cob_rec(ctx, frm.basis.basis, to)               # PrimalBasis(DualBasis(x)) ≡ x
+    if isinstance(to, B.PrimalBasis) and isinstance(to.basis, B.DualBasis):
+        return _basis_cob_rec(ctx, frm, to.basis.basis)
+    if isinstance(frm, (B.BVar, B.BLam, B.BApp)) or isinstance(to, (B.BVar, B.BLam, B.BApp)):
+        raise RepresentError(
+            f"cob: abstract basis has no concrete cob until reduced: {frm!r} / {to!r}"
+        )
+    match frm:
+        case B.ScalarBasis():
+            return _cob_from_scalar(ctx, frm, to)
+        case B.DualBasis():
+            return _cob_from_dual(ctx, frm, to)
+        case B.PrimalBasis():
+            return _cob_via_standard(ctx, frm, to)  # lone primal (no inner DualBasis to peel)
+        case B.BasisSum():
+            return _cob_from_sum(ctx, frm, to)
+        case B.BasisProd():
+            return _cob_from_prod(ctx, frm, to)
+        case B.BasisRep():
+            return _cob_from_rep(ctx, frm, to)
+        case B.WithInnerBasis():
+            return _cob_from_withinner(ctx, frm, to)
+        case B.OrthonormalBasis():
+            return _cob_from_orthonormal(ctx, frm, to)
+        case B.ImageBasis():
+            return _cob_from_image(ctx, frm, to)
+        case B.ProjectedBasis():
+            return _cob_from_projected(ctx, frm, to)
+        case B.ListBasis():
+            return _cob_from_list(ctx, frm, to)
+        case B.CompleteBasis():
+            return _cob_from_complete(ctx, frm, to)
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+# --- per-from-basis cob handlers (each matches on `to`; backstop = _cob_via_standard) ---------
+
+
+def _cob_from_scalar(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``ScalarBasis`` — ℝ has a single basis."""
+    match to:
+        case B.ScalarBasis():
+            return _identity_like(ctx, frm)
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_dual(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``DualBasis`` — covariant cob ⇒ ``(primal cob)⁻ᵀ``."""
     match (frm, to):
-        case _ if _basis_eq(frm, to):                                   # A == A          ⇒ identity
-            return _identity_like(ctx, frm)
-        case (B.ScalarBasis(), B.ScalarBasis()):                        # ℝ: one basis    ⇒ identity
-            return _identity_like(ctx, frm)
-        case (B.DualBasis(fb), B.DualBasis(tb)):                        # dual → dual     ⇒ (cob)⁻ᵀ
+        case (B.DualBasis(fb), B.DualBasis(tb)):
             return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, fb, tb))
-        case (B.PrimalBasis(B.DualBasis(fy)), _):                       # primal∘dual peels ⇒ recurse
-            return _basis_cob_rec(ctx, fy, to)
-        case (_, B.PrimalBasis(B.DualBasis(ty))):
-            return _basis_cob_rec(ctx, frm, ty)
-        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):    # ⊕ → ⊕           ⇒ block-diag
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_sum(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``BasisSum`` — ⊕ → ⊕ is the block-diagonal of the per-summand cobs."""
+    match (frm, to):
+        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):
             return _block_diag(ctx.prog,
                                [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
-        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):  # ⊗ → ⊗           ⇒ Kron
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_prod(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``BasisProd`` — ⊗ → ⊗ is the Kronecker product of the per-factor cobs."""
+    match (frm, to):
+        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):
             return _kron(ctx.prog,
                          [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
-        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:      # ⊕ⁿ → ⊕ⁿ         ⇒ block-repeat
-            return _block_repeat(ctx.prog, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
-        case (B.WithInnerBasis(fb, _), B.WithInnerBasis(tb, _)):     # same metricized space ⇒
-            return _basis_cob_rec(ctx, fb, tb)                       # cob the underlying bases
-        case (B.OrthonormalBasis(fi), B.OrthonormalBasis(ti)):       # both orthonormalized ⇒
-            return _basis_cob_rec(ctx, fi, ti)                       # cob the underlying bases
-        case (B.OrthonormalBasis(), _) | (_, B.OrthonormalBasis()):
-            # raw ↔ orthonormalized of the SAME (metricized) space ⇒ the orthonormalization
-            # factor — realize each in standard coords (one g-orthonormal, one raw) and compose.
+        case _:
             return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_rep(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``BasisRep`` — ⊕ⁿ → ⊕ⁿ is the block-repeat of the inner cob."""
+    match (frm, to):
+        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:
+            return _block_repeat(ctx.prog, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_withinner(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``WithInnerBasis`` (raw, metric metadata) — same metricized space only."""
+    match to:
+        case B.WithInnerBasis(tb, _):
+            return _basis_cob_rec(ctx, frm.basis, tb)        # same g ⇒ cob the underlying bases
+        case _:
+            # raw ↔ its OrthonormalBasis (same metricized space) ⇒ the orthonormalization factor.
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_orthonormal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``OrthonormalBasis`` — both orthonormalized ⇒ underlying cob; else the factor."""
+    match to:
+        case B.OrthonormalBasis(ti):
+            return _basis_cob_rec(ctx, frm.basis, ti)
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``ImageBasis`` — the literal map-application range basis."""
+    match (frm, to):
         case (B.ImageBasis(ff, fsrc, ftgt),
               B.ImageBasis(tf, tsrc, ttgt)) if ff is tf and _src_eq(ftgt, ttgt):
-            # SAME map (`is`) & SAME codomain target ⇒ the cob is just the source-basis cob —
-            # no need to realize f (f(s₁) → f(s₂) is s₁ → s₂ for an injective f).
+            # SAME map & target ⇒ the source-basis cob (no need to realize f).
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
-        case (B.ImageBasis(ff, fsrc, _ftgt), B.ImageBasis(tf, tsrc, _ttgt)) if ff is tf:
-            # SAME map, DIFFERENT codomain target ⇒ STILL the source-basis cob: the target only
-            # sets the realized ambient frame (an embed), it does NOT change the image
-            # *coordinates*, so realize-both-and-pinv (which mixes the two target frames) would be
-            # wrong here — the source cob is target-independent and correct.
+        case (B.ImageBasis(ff, fsrc, _), B.ImageBasis(tf, tsrc, _)) if ff is tf:
+            # SAME map, DIFFERENT target ⇒ STILL the source cob (target is the realized ambient
+            # frame, embed-only; realize-both-and-pinv would wrongly mix the two target frames).
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
-        case (B.ImageBasis(ff, fsrc, _ftgt), B.ImageBasis(tf, tsrc, _ttgt)):
-            # DIFFERENT map representative of the same image (ff is not tf) ⇒ realize both literal
-            # images in the STANDARD codomain frame (targets dropped — they are embed-only, and a
-            # common frame is required) and compose pinv(C_to)·C_from.
-            c_from = _realize_image_basis(ctx, ff, fsrc, None)
-            c_to = _realize_image_basis(ctx, tf, tsrc, None)
-            return _pinv_compose(ctx, c_from, c_to)
-        case (B.ImageBasis(), B.ProjectedBasis()) | (B.ProjectedBasis(), B.ImageBasis()):
-            # ImageBasis ↔ ProjectedBasis of one map ⇒ the QR factor R (metric ⇒ GSVD Uᵀ·M_W·J)
-            # directly; a non-"image" projection has no such shortcut ⇒ via the standard basis.
+        case (B.ImageBasis(ff, fsrc, _), B.ImageBasis(tf, tsrc, _)):
+            # DIFFERENT map of the same image ⇒ realize both in the STANDARD codomain frame.
+            return _pinv_compose(ctx, _realize_image_basis(ctx, ff, fsrc, None),
+                                 _realize_image_basis(ctx, tf, tsrc, None))
+        case (_, B.ProjectedBasis()):
+            # ImageBasis ↔ ProjectedBasis of one map ⇒ the QR factor R (metric ⇒ GSVD Uᵀ·M_W·J).
+            m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
+            return m if m is not None else _cob_via_standard(ctx, frm, to)
+        case _:
+            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``ProjectedBasis`` — the orthonormal FFS-subspace range basis."""
+    match (frm, to):
+        case (_, B.ImageBasis()):
             m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
             return m if m is not None else _cob_via_standard(ctx, frm, to)
         case (B.ProjectedBasis(_f1, _w1, fs, ft),
               B.ProjectedBasis(_f2, _w2, ts, tt)) if _src_eq(fs, ts) and _src_eq(ft, tt):
-            # Same FFS subspace (guard ⇒ same map & `which`) AND same source/target metric ⇒ the
-            # SAME orthonormal range ⇒ identity (sized through the seam for the dynamic rank).
-            return _identity_like(ctx, frm)
+            return _identity_like(ctx, frm)                  # same subspace & metric ⇒ identity
         case (B.ProjectedBasis(), B.ProjectedBasis()):
-            # Same FFS subspace, DIFFERENT source/target metric ⇒ re-orthonormalize the range
-            # from one metric to the other.  source/target feed the GSVD metric and the columns
-            # stay in the standard frame, so realize both (GSVD-orthonormal) and pinv-compose.
+            return _cob_via_standard(ctx, frm, to)           # differing metric ⇒ reorthonormalize
+        case _:
             return _cob_via_standard(ctx, frm, to)
-        case (B.ImageBasis(), _) | (_, B.ImageBasis()):              # literal f-columns   ⇒ via std
-            return _cob_via_standard(ctx, frm, to)
-        case (B.ListBasis(), _) | (_, B.ListBasis()):                # listed term columns ⇒ via std
-            return _cob_via_standard(ctx, frm, to)
-        case (B.CompleteBasis(), _) | (_, B.CompleteBasis()):        # [ sub | complement ] ⇒ via std
-            return _cob_via_standard(ctx, frm, to)
-        case (B.BVar(), _) | (_, B.BVar()) | (B.BLam(), _) | (_, B.BLam()) \
-                | (B.BApp(), _) | (_, B.BApp()):                     # abstract ⇒ no concrete cob
-            raise RepresentError(
-                f"cob: abstract basis has no concrete cob until reduced: {frm!r} / {to!r}"
-            )
-        case _:                                                       # any remaining leaf ⇒ via std
-            return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_list(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``ListBasis`` — realize the listed term columns and compose via the standard basis."""
+    return _cob_via_standard(ctx, frm, to)
+
+
+def _cob_from_complete(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
+    """from ``CompleteBasis`` — realize ``[ sub | complement ]`` and compose via standard."""
+    return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_via_standard(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
