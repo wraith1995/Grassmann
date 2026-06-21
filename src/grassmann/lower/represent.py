@@ -426,12 +426,20 @@ def _make_dynamic_ffs_input(
                 [pa.OutSpec("delta_in", ())],
                 note=f"ffs-input:δ({e.name})",
             )
+            # The input's δ must equal the SUBSPACE dimension = the realized basis's column count
+            # (``dim Img = dim CoImg = rank`` but ``dim Ker = |dom| − rank``, ``dim CoKer = |cod| −
+            # rank``) — NOT the raw map rank, so compare against ``real.cols``'s column axis.
+            [delta_sub] = ctx.prog.emit_stmt(
+                _AxisLenOp(axis=1), [real.cols],
+                [pa.OutSpec("delta_sub", ())],
+                note=f"ffs-input:δ-subspace({space!r})",
+            )
             ctx.prog.emit_stmt(
                 pa.AssertOp(
                     kind="rank_eq",
-                    msg=f"FFS input {e.name!r}: δ must equal svd_rank({space!r})",
+                    msg=f"FFS input {e.name!r}: δ must equal dim({space!r})",
                 ),
-                [arr, real.rank, delta_in],
+                [arr, delta_sub, delta_in],
                 [pa.OutSpec("rank_ok", tuple(in_shape))],
                 note=f"assert:ffs-input-rank-consistency({e.name})",
             )
