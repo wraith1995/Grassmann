@@ -828,41 +828,69 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
     return Rep(arr, target, rep.space, free_labels=rep.free_labels)
 
 
+# ===========================================================================
+# CHANGE OF BASIS (`41 §2` / `43 §2c`) — mirrors the docs "Conversion matrix".
+#
+# `cob` is TOTAL: any basis of a space converts to any other.  Two layers + the seam:
+#
+#   pure fast path     cob() / realize_basis()    static matrices, no term lowering (far below)
+#   total cob (HUB)    _basis_cob_matrix()        FFS/term-aware; the entry point
+#   realize to std     realize_basis_cols()       a basis → its columns in standard coords
+#   variance/peeling   _basis_variance / _strip_* / _peel_dual
+#
+# _basis_cob_matrix dispatch — the rule table (read top to bottom; matches the docs matrix):
+#
+#   from → to                         mechanism
+#   ────────────────────────────────────────────────────────────────────────────────────
+#   pure-realizable pair              cob()        — fast path (identity / structural, static)
+#   A == A                            identity (sized to the basis)
+#   BasisProd → BasisProd             Kron        of the per-factor cobs
+#   BasisSum  → BasisSum              block-diag  of the per-summand cobs
+#   BasisRep  → BasisRep              block-repeat of the inner cob (n copies)
+#   DualBasis → DualBasis             (inner cob)⁻ᵀ
+#   WithInner ↔ anything              strip the metric (metadata, not coordinates), recurse
+#   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
+#   leaf A → leaf B                   VIA STANDARD: pinv(realize B) · realize A   (the fallback)
+#   variance mismatch (V vs V*)       error — a vector↔covector cob needs a metric, not a cob
+# ===========================================================================
+
+
 def _basis_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
     """Change-of-basis matrix ``M`` (from-coords → to-coords) — **total** over bases (`43 §2c`).
 
-    Goes between *any two bases of the same space*.  The pure-matrix
-    :func:`cob` is the fast path (byte-identical) for bases it can
-    realize; for a basis it refuses — an FFS basis (``ImageBasis``/``ProjectedBasis``, whose
-    columns come from the SVD/QR seam) or a structured basis with an FFS leaf — this mirrors
-    the `41 §2` structural rules (Kron over ``BasisProd``, block-diag over ``BasisSum``,
-    block-repeat over ``BasisRep``, inv-transpose over ``DualBasis``, strip ``WithInnerBasis``)
-    and realizes the leaves through the FFS seam, composing ``pinv(C_to)·C_from`` (a
-    pseudo-inverse, since the FFS column matrices are non-square).
+    The hub between *any two bases of the same space*; see the rule table above.  Tries the
+    pure-matrix :func:`cob` first (byte-identical static path); for a basis it refuses — an FFS
+    basis (``ImageBasis``/``ProjectedBasis``) or a structured basis with an FFS/term leaf — it
+    mirrors the `41 §2` structural rules here and realizes the leaves through the seam
+    (:func:`_ffs_cob_matrix`, which routes via the standard basis).
     """
+    # 0. Pure-matrix fast path — handles the bases realizable as static matrices.
     try:
-        return cob(ctx.prog, from_basis, to_basis)  # pure-matrix fast path (byte-identical)
+        return cob(ctx.prog, from_basis, to_basis)
     except (CobError, DynamicDim):
         pass
+    # 1. Identity — same basis (sized through the seam for FFS/term bases).
     if _basis_eq(from_basis, to_basis):
         return _identity_like(ctx, from_basis)
+    # 2. Structural §2 rules — recurse on children, combine by constructor.
     match (from_basis, to_basis):
-        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):
+        case (B.BasisProd(fs), B.BasisProd(ts)) if len(fs) == len(ts):          # ⊗ ⇒ Kron
             return _kron(ctx.prog, [
                 _basis_cob_matrix(ctx, f, t) for f, t in zip(fs, ts, strict=True)
             ])
-        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):
+        case (B.BasisSum(fs), B.BasisSum(ts)) if len(fs) == len(ts):            # ⊕ ⇒ block-diag
             return _block_diag(ctx.prog, [
                 _basis_cob_matrix(ctx, f, t) for f, t in zip(fs, ts, strict=True)
             ])
-        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:
+        case (B.BasisRep(fn, fb), B.BasisRep(tn, tb)) if fn == tn:              # ⊕ⁿ ⇒ block-repeat
             return _block_repeat(ctx.prog, _basis_cob_matrix(ctx, fb, tb), _count_int(fn))
-        case (B.DualBasis(fb), B.DualBasis(tb)):
+        case (B.DualBasis(fb), B.DualBasis(tb)):                                # dual ⇒ (cob)⁻ᵀ
             return _inv_transpose(ctx.prog, _basis_cob_matrix(ctx, fb, tb))
-        case (B.WithInnerBasis(fb, _), _):
+        case (B.WithInnerBasis(fb, _), _):                                      # strip the metric
             return _basis_cob_matrix(ctx, fb, _strip_withinner(to_basis))
-        case (_, B.WithInnerBasis(tb, _)):
+        case (_, B.WithInnerBasis(tb, _)):                                      # strip the metric
             return _basis_cob_matrix(ctx, _strip_withinner(from_basis), tb)
+        # 3. Leaf — FFS same-map factor, else the standard-basis fallback (see _ffs_cob_matrix).
         case _:
             return _ffs_cob_matrix(ctx, from_basis, to_basis)
 
@@ -883,24 +911,26 @@ def _ffs_cob_matrix(ctx: _Ctx, from_basis: B.Basis, to_basis: B.Basis) -> pa.Sym
     dual coords — so the only thing this guards is mixing a basis of ``V`` with one of ``V*``
     (different spaces; that needs a metric, not a cob).
     """
+    # 1. Variance guard: a vector basis of V and a covector basis of V* are different spaces.
     vf, vt = _basis_variance(ctx, from_basis), _basis_variance(ctx, to_basis)
     if vf != vt:
         raise RepresentError(
             f"cob: bases of differing variance (a vector basis of V vs a covector basis of V*): "
             f"{from_basis!r} vs {to_basis!r}"
         )
-    # Structure-exploiting fast path: ImageBasis(f) ↔ ProjectedBasis(f,"image") of the SAME
-    # injective map is the QR/GSVD factor directly — no realize-both-and-pinv.
+    # 2. Structure-exploiting shortcut: ImageBasis(f) ↔ ProjectedBasis(f,"image") of the SAME
+    #    map is the QR factor R (or GSVD Uᵀ·M_W·J) directly — no realize-both-and-pinv.
     if not vf:
         m = _same_map_ffs_cob(ctx, _strip_withinner(from_basis), _strip_withinner(to_basis))
         if m is not None:
             return m
-    # Fallback: realize both in their natural (standard) coords and compose A → std → B.
-    c_from = realize_basis_cols(ctx, from_basis)
-    c_to = realize_basis_cols(ctx, to_basis)
+    # 3. The fallback — VIA THE STANDARD BASIS: realize both (their columns in standard coords)
+    #    and compose  cob(A→B) = cob(std→B)·cob(A→std) = pinv(realize B) · realize A.
+    c_from = realize_basis_cols(ctx, from_basis)   # cob(A → std)
+    c_to = realize_basis_cols(ctx, to_basis)        # cob(B → std)
     n_amb, k_from = _shape_of(c_from)
     _, k_to = _shape_of(c_to)
-    [pinv_to] = ctx.prog.emit_stmt(  # cob(std → B) = (realize B)⁻¹ (pseudo-inverse if non-square)
+    [pinv_to] = ctx.prog.emit_stmt(                  # cob(std → B) = (realize B)⁻¹ (pinv if non-square)
         pa.PinvOp(), [c_to], [pa.OutSpec("cob:pinv(C_to)", (k_to, n_amb))],
         note="ffs-cob:std→to=pinv(C_to)",
     )
@@ -1960,6 +1990,13 @@ def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.S
     # Non-FFS subspace: realize its (standard) basis columns directly.
     sub_basis = default_basis(sub)
     return sub_basis, realize_basis_cols(ctx, sub_basis)
+
+
+# ===========================================================================
+# CHANGE OF BASIS — realize a basis to its standard columns (= its cob TO the standard basis).
+# The seam-aware counterpart of the pure :func:`realize_basis`: it routes FFS/term leaves
+# through the SVD/QR/GSVD seam and ``_rep``.  Used by the standard-basis fallback above.
+# ===========================================================================
 
 
 def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
