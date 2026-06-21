@@ -34,6 +34,15 @@ def _realize(basis, feeds):
     return np.asarray(prog.run(feeds)["C"], float)
 
 
+def _immersion(basis, feeds):
+    """The ambient immersion columns (``U``/``J``) — FFS realize is now in-space, so the
+    ambient columns come from the separate :func:`_ffs_immersion` seam."""
+    prog = pa.Program("r")
+    ctx = _RM._Ctx(prog=prog, basis_env={}, inputs={})
+    prog.add_output("C", _RM._ffs_immersion(ctx, basis))
+    return np.asarray(prog.run(feeds)["C"], float)
+
+
 def _cob(a, b, feeds):
     prog = pa.Program("c")
     ctx = _RM._Ctx(prog=prog, basis_env={}, inputs={})
@@ -165,7 +174,7 @@ def test_qr_sign_convention_positive_diagonal_r() -> None:
     # FFS image (the QrOp seam): R = Qᵀ·J has a positive diagonal.
     Rt, Re = C.base("Rt", 3), C.base("Re", 3)
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
-    U = _realize(B.projected_basis(J, "image"), {_k(J): A.T})
+    U = _immersion(B.projected_basis(J, "image"), {_k(J): A.T})  # ambient range columns
     assert np.all(np.diag(U.T @ A) > 0)
 
 
@@ -282,6 +291,6 @@ def test_imagebasis_target_reads_in_codomain_basis() -> None:
     Tm = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.0, 0.0, 1.0]])
     tgt = B.list_basis(*t)
     feeds = {_k(J): Jm.T, **{_k(t[i]): Tm[:, i] for i in range(3)}}
-    cols = _realize(B.image_basis(J, target=tgt), feeds)
+    cols = _immersion(B.image_basis(J, target=tgt), feeds)  # ambient immersion (keeps target)
     # columns expressed in the target basis: T · cols_target = J (the standard image columns).
     assert Tm @ cols == pytest.approx(Jm)

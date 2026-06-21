@@ -347,32 +347,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[1., 1.],
- [0., 1.]]
+[[ 0.408,  0.162],
+ [-0.   ,  0.369]]
 ```
 
 <a id="conv-primal-basis-projected-basis"></a>
@@ -397,32 +397,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[2.449, 4.082],
- [0.   , 2.708]]
+[[ 1.,  1.],
+ [-0.,  1.]]
 ```
 
 <a id="conv-primal-basis-scalar-basis"></a>
@@ -909,8 +909,8 @@ Input `J` =
 Output — the `cob` matrix:
 
 ```
-[[ 0.408,  0.   ,  0.   ,  0.   ],
- [ 0.   ,  0.408,  0.   ,  0.   ],
+[[ 0.408,  0.   , -0.   , -0.   ],
+ [ 0.   ,  0.408, -0.   , -0.   ],
  [-0.246, -0.   ,  0.369,  0.   ],
  [-0.   , -0.246,  0.   ,  0.369]]
 ```
@@ -1104,37 +1104,37 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
 [[ 0.408, -0.246],
- [ 0.   ,  0.369]]
+ [-0.   ,  0.369]]
 ```
 
 <a id="conv-projected-basis-list-basis"></a>
 
-### `ProjectedBasis` → a term basis spanning the image `ListBasis(g₀,g₁)`
+### `ProjectedBasis` → an FFS-typed term basis spanning the image `ListBasis(g₀,g₁)`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -1154,37 +1154,37 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.615],
- [ 0.   ,  0.369]]
+[[ 1., -1.],
+ [ 0.,  1.]]
 ```
 
 <a id="conv-projected-basis-complete-basis"></a>
 
-### `ProjectedBasis` → a completed image basis `[ h₀ | J col ]`
+### `ProjectedBasis` → an FFS-typed completed image basis `[ h₀ | mc ]`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -1204,32 +1204,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.246],
- [ 0.   ,  0.369]]
+[[1., 0.],
+ [0., 1.]]
 ```
 
 <a id="conv-projected-basis-primal-basis"></a>
@@ -1254,32 +1254,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.615],
- [ 0.   ,  0.369]]
+[[ 1., -1.],
+ [ 0.,  1.]]
 ```
 
 <a id="conv-projected-basis-projected-basis"></a>
@@ -1348,37 +1348,37 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 2.449,  1.633],
- [-0.   ,  2.708]]
+[[2.449, 1.633],
+ [0.   , 2.708]]
 ```
 
 <a id="conv-image-basis-list-basis"></a>
 
-### `ImageBasis` → a term basis spanning the image `ListBasis(g₀,g₁)`
+### `ImageBasis` → an FFS-typed term basis spanning the image `ListBasis(g₀,g₁)`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -1398,37 +1398,37 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 1., -1.],
- [ 0.,  1.]]
+[[ 2.449, -1.075],
+ [ 0.   ,  2.708]]
 ```
 
 <a id="conv-image-basis-complete-basis"></a>
 
-### `ImageBasis` → a completed image basis `[ h₀ | J col ]`
+### `ImageBasis` → an FFS-typed completed image basis `[ h₀ | mc ]`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -1448,32 +1448,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[1., 0.],
- [0., 1.]]
+[[2.449, 1.633],
+ [0.   , 2.708]]
 ```
 
 <a id="conv-image-basis-primal-basis"></a>
@@ -1498,32 +1498,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 1., -1.],
- [ 0.,  1.]]
+[[ 2.449, -1.075],
+ [ 0.   ,  2.708]]
 ```
 
 <a id="conv-image-basis-image-basis"></a>
@@ -1718,32 +1718,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[1., 1.],
- [0., 1.]]
+[[ 0.408,  0.162],
+ [-0.   ,  0.369]]
 ```
 
 <a id="conv-list-basis-projected-basis"></a>
@@ -1768,32 +1768,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[2.449, 4.082],
- [0.   , 2.708]]
+[[ 1.,  1.],
+ [-0.,  1.]]
 ```
 
 <a id="conv-list-basis-scalar-basis"></a>
@@ -2202,32 +2202,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[1., 0.],
- [0., 1.]]
+[[ 0.408, -0.246],
+ [-0.   ,  0.369]]
 ```
 
 <a id="conv-complete-basis-projected-basis"></a>
@@ -2252,32 +2252,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[2.449, 1.633],
- [0.   , 2.708]]
+[[ 1., -0.],
+ [-0.,  1.]]
 ```
 
 <a id="conv-complete-basis-basis-sum"></a>

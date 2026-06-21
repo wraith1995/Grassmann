@@ -867,7 +867,10 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   total cob (HUB)    _basis_cob_matrix()             guard, then dispatch to _basis_cob_rec
 #   per-basis dispatch _basis_cob_rec()                one case per representative (the table)
 #   pure fast path     cob() / realize_basis()         static matrices, no term lowering (below)
-#   realize to std     realize_basis_cols()            a basis → its columns in standard coords
+#   realize in-space   realize_basis_cols()            a basis → its columns in its space's OWN
+#                                                      coords (FFS: the square U_dᵀ·immersion;
+#                                                      the AMBIENT immersion is _ffs_immersion,
+#                                                      used by embed/project/metric, NOT by cob)
 #
 # _basis_cob_rec dispatches on `frm` to a per-from-basis handler `_cob_from_<frm>` which then
 # matches on `to`; each (from, to) cell has its specialized rule and bottoms out on the standard
@@ -890,7 +893,8 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 #   OrthonormalBasis ↔ raw (same space)   the orthonormalization factor, VIA STANDARD
 #   ImageBasis → ImageBasis (same f)  the source-basis cob (target is embed-only); a DIFFERENT
 #                                     map is a different image space ⇒ rejected (maps must match)
-#   ImageBasis ↔ ProjectedBasis(img)  QR factor R   (metric → GSVD Uᵀ·M_W·J)   [SAME map]
+#   ImageBasis ↔ ProjectedBasis(img)  VIA STANDARD — both realize SQUARE in-space ⇒ plain InvOp
+#                                     (the R/R⁻¹ factor is subsumed; no special _same_map case)
 #   ProjectedBasis ↔ ProjectedBasis (same metric)   identity (same orthonormal range)
 #   ProjectedBasis ↔ ProjectedBasis (diff metric)   reorthonormalize the range, VIA STANDARD
 #   ListBasis / CompleteBasis ↔ …     realize the listed/completed columns, VIA STANDARD
@@ -923,6 +927,13 @@ def _norm_space(s: S.Space) -> S.Space:
             return S.Dual(_norm_space(inner))
         case S.WithInner(inner, g):
             return S.WithInner(_norm_space(inner), g)
+        case S.Img(f) | S.Ker(f) | S.CoImg(f) | S.CoKer(f):
+            # An FFS space's identity is its map `f` ALONE — the `source`/`target` (the dom/cod
+            # spaces) are recoverable from `f` and are not all spelled out everywhere (e.g.
+            # ``C.img(f)`` leaves them ``None`` while ``map_domain_codomain`` populates them),
+            # so strip them for strict equality.  An FFS-typed term basis of ``Img(f)`` and a
+            # ``ProjectedBasis(f, "image")`` are bases of the SAME space.
+            return type(s)(f)
         case _:
             return s
 
@@ -1202,6 +1213,11 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     are bases of the SAME image, i.e. the **same map** ``f`` (a different map is a different image
     space).  Then the cob never needs to realize ``f`` — it is just the source-basis cob, and the
     target is embed-only (the realized ambient frame), so it does not enter the cob.
+
+    ``ImageBasis ↔ ProjectedBasis`` of one map (the ``R``/``R⁻¹`` factor of ``J = U_d·R``) is
+    now subsumed by the generic standard route: with in-space realize both sides are **square**,
+    so :func:`_cob_via_standard` composes them with a plain ``InvOp`` — no realize-ambient + QR
+    factor (the old ``_same_map_ffs_cob`` special case is therefore gone).
     """
     match to:
         case B.ImageBasis(tf, tsrc, _ttgt):
@@ -1213,20 +1229,18 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
                     f"ImageBasis cob: maps differ ⇒ different image spaces: {ff!r} vs {tf!r}"
                 )
             return _basis_cob_rec(ctx, _src_or_std(ctx, fsrc, ff), _src_or_std(ctx, tsrc, ff))
-        case B.ProjectedBasis():
-            # ImageBasis ↔ ProjectedBasis of one map ⇒ the QR factor R (metric ⇒ GSVD Uᵀ·M_W·J).
-            m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
-            return m if m is not None else _cob_via_standard(ctx, frm, to)
         case _:
             return _cob_via_standard(ctx, frm, to)
 
 
 def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """from ``ProjectedBasis`` — the orthonormal FFS-subspace range basis."""
+    """from ``ProjectedBasis`` — the orthonormal FFS-subspace range basis.
+
+    ``ProjectedBasis → ImageBasis`` of one map is subsumed by the generic standard route (both
+    realize square in-space ⇒ plain ``InvOp``), so only the ``ProjectedBasis → ProjectedBasis``
+    same-/different-metric cases are special here.
+    """
     match (frm, to):
-        case (_, B.ImageBasis()):
-            m = _same_map_ffs_cob(ctx, _strip_withinner(frm), _strip_withinner(to))
-            return m if m is not None else _cob_via_standard(ctx, frm, to)
         case (B.ProjectedBasis(_f1, _w1, fs, ft),
               B.ProjectedBasis(_f2, _w2, ts, tt)) if _src_eq(fs, ts) and _src_eq(ft, tt):
             # same source/target metric ⇒ identity.  (Same map & `which` are guard-guaranteed: a
@@ -1354,16 +1368,14 @@ def _inverse_cols(
 def _is_standard_orthonormal(b: B.Basis) -> bool:
     """Whether ``realize_basis_cols(b)`` has orthonormal columns in the STANDARD inner product
     (so ``pinv = transpose``).  Conservative: only the constructions that realize through a
-    standard QR/SVD (``_QrColsOp`` / FFS range without the relevant metric)."""
+    standard QR/SVD (``_QrColsOp``).  FFS bases (``ImageBasis``/``ProjectedBasis``) are NOT
+    listed: they now realize **in-space** (square ``U_dᵀ·immersion``), so their ``cob(std→to)``
+    is the plain square ``InvOp``, not the rectangular transpose/``Cᵀ·G`` branches."""
     match b:
         case B.ScalarBasis():
             return True
         case B.OrthonormalBasis(inner):
             return not isinstance(inner, B.WithInnerBasis)          # plain QR ⇒ QᵀQ = I
-        case B.ProjectedBasis(_f, which, src, tgt):
-            # the range is orthonormal in its subspace's metric: cod-side (target) for
-            # image/coker, dom-side (source) for ker/coimg; that metric absent ⇒ standard.
-            return (tgt is None) if which in ("image", "img", "coker") else (src is None)
         case B.ListBasis(_v, backup, reduce):
             return reduce is B.Reduce.ORTHONORMALIZE and backup is None
         case B.CompleteBasis(_s, _c, reduce):
@@ -1378,14 +1390,11 @@ def _orthonormal_metric(ctx: _Ctx, b: B.Basis, n_amb: object) -> pa.SymArray | N
     exact factor (no pseudo-inverse).  ``None`` if ``b`` carries no such metric.
 
     (For a raw ``WithInnerBasis`` → its ``OrthonormalBasis`` this makes the cob ``Uᵀ·G·A =
-    L⁻¹AᵀGA = Lᵀ``, the Cholesky factor; for a metric ``ProjectedBasis`` it is the GSVD
-    reorthonormalization ``Uᵀ·M·U_from``.)"""
+    L⁻¹AᵀGA = Lᵀ``, the Cholesky factor.  FFS bases are NOT here — they realize in-space and
+    square, so the metric-factor branch never applies to them.)"""
     match b:
         case B.OrthonormalBasis(B.WithInnerBasis(_inner, g)):
             return _metric_matrix_of(ctx, g, n_amb if isinstance(n_amb, int) else 0)
-        case B.ProjectedBasis(_f, which, src, tgt):
-            metric_basis = tgt if which in ("image", "img", "coker") else src
-            return _basis_metric(ctx, metric_basis) if metric_basis is not None else None
         case _:
             return None
 
@@ -1418,68 +1427,6 @@ def _term_is_dual(vector: object) -> bool:
         return False
 
 
-def _same_map_ffs_cob(
-    ctx: _Ctx, fp: B.Basis, tp: B.Basis,
-) -> pa.SymArray | None:
-    """The cob between the literal ``ImageBasis(f, source)`` and the orthonormal
-    ``ProjectedBasis(f, "image", source, target)`` of the SAME map — exploiting the
-    factorization directly instead of realize-both-and-pinv; ``None`` if the pair is not
-    that case (falls back to the generic path).
-
-    With ``J`` = the (source-mapped) image columns, ``U`` = the (target-metric-orthonormal)
-    range columns, and ``M_W`` = the target metric, the range coords of ``v = J·s`` are
-    ``c = Uᵀ·M_W·J·s`` (since ``Uᵀ M_W U = I``), so ``cob(Image→Projected) = Uᵀ·M_W·J`` and
-    ``cob(Projected→Image)`` is its inverse.  For the plain QR seam (no metric/source) this is
-    the upper-triangular ``R`` of ``J = Q·R`` (``M_W = I``), captured directly from ``QrOp``.
-    """
-    def _kind(b: B.Basis) -> tuple[object, B.Basis | None, str] | None:
-        if isinstance(b, B.ImageBasis):
-            return b.f, b.source, "image"
-        if isinstance(b, B.ProjectedBasis) and b.which in ("image", "img"):
-            return b.f, b.source, "projected"
-        return None
-
-    fk, tk = _kind(fp), _kind(tp)
-    if fk is None or tk is None or fk[0] != tk[0] or fk[2] == tk[2]:
-        return None
-    # The Image and Projected sides must share the source coordinate system for J = U·R.
-    img_kind, proj_kind = (fk, tk) if fk[2] == "image" else (tk, fk)
-    img_src, proj_src = img_kind[1], proj_kind[1]
-    if not _src_eq(img_src, proj_src):
-        return None
-    proj_basis = tp if tk[2] == "projected" else fp
-    target = proj_basis.target if isinstance(proj_basis, B.ProjectedBasis) else None
-
-    real = _realize_ffs_by_which(ctx, "img", fk[0], source=proj_src, target=target)
-    if real.r is not None and proj_src is None and target is None:
-        r = real.r  # plain QR: exact upper-triangular
-    else:
-        # R = Uᵀ · M_W · J  (U = range cols, M_W = target metric or I, J = image cols).
-        block = real.cols
-        jcols = _realize_image_basis(ctx, fk[0], img_src)
-        rk = _shape_of(block)[1]
-        nd = _shape_of(jcols)[1]
-        if target is None:
-            [r] = ctx.prog.emit_stmt(
-                pa.EinsumStmtOp("cr,cs->rs"), [block, jcols],
-                [pa.OutSpec("cob:Uᵀ·J", (rk, nd))], note="ffs-cob:Uᵀ·J",
-            )
-        else:
-            m_w = _basis_metric(ctx, target)
-            [r] = ctx.prog.emit_stmt(
-                pa.EinsumStmtOp("cr,cw,ws->rs"), [block, m_w, jcols],
-                [pa.OutSpec("cob:Uᵀ·M_W·J", (rk, nd))], note="ffs-cob:Uᵀ·M_W·J",
-            )
-    if fk[2] == "image":  # Image → Projected = R
-        return r
-    # Projected → Image = R⁻¹ (square for an injective image).
-    n = _shape_of(r)[0]
-    [out] = ctx.prog.emit_stmt(
-        pa.InvOp(), [r], [pa.OutSpec("cob:R-inv", (n, n))], note="ffs-cob:R⁻¹",
-    )
-    return out
-
-
 def _src_eq(a: B.Basis | None, b: B.Basis | None) -> bool:
     """Whether two optional source bases are the same (both ``None`` ⇒ standard ⇒ equal)."""
     if a is None or b is None:
@@ -1506,11 +1453,6 @@ def _strip_variance(basis: B.Basis) -> B.Basis:
             return _strip_variance(inner)
         case _:
             return basis
-
-
-def _strip_withinner(basis: B.Basis) -> B.Basis:
-    """Strip a single ``WithInnerBasis`` wrapper (the metric is metadata, not coordinates)."""
-    return basis.basis if isinstance(basis, B.WithInnerBasis) else basis
 
 
 def _apply_cob_on_axis(
@@ -2171,7 +2113,7 @@ def _rep_embed(e: T.Embed, vector: T.Term, big: S.Space, ctx: _Ctx) -> Rep:
     # ``P · ⟦v⟧`` reconstructs the ambient value.  A non-default (``ImageBasis``) pin realizes
     # its literal columns (`43 §2c`); the default path is byte-identical via ``_subspace_cols``.
     if _is_immersed_metric_basis(v_rep.basis):
-        P = realize_basis_cols(ctx, v_rep.basis)
+        P = _ffs_immersion(ctx, v_rep.basis)  # embed needs the AMBIENT columns, not in-space
     else:
         _sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
     big_shape = _shape_of_space(big)  # ambient layout (static); P has rows = Σ|axes|.
@@ -2447,17 +2389,84 @@ def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.S
 # ===========================================================================
 
 
+def _ffs_which_and_map(basis: B.Basis) -> tuple[str, object]:
+    """The ``(which, f)`` of an FFS basis (``ImageBasis`` ⇒ ``"image"``)."""
+    match basis:
+        case B.ImageBasis(f, _src, _tgt):
+            return "image", f
+        case B.ProjectedBasis(f, which, _src, _tgt):
+            return which, f
+        case _:
+            raise RepresentError(f"_ffs_which_and_map: not an FFS basis: {basis!r}")
+
+
+def _ffs_immersion(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
+    """The **ambient immersion** columns of an FFS basis (`51 §FFS-δ`).
+
+    The ambient (``n×k``) frame ``U``/``V``/``J`` — the separate seam used only by
+    ``embed``/``project``/the metric (NOT by cob).  An ``ImageBasis`` is the literal
+    map-application ``J`` (in its ``target`` codomain frame when given); a ``ProjectedBasis``
+    is the (metric-)orthonormal range ``U``; anything else realizes its columns directly.
+    """
+    match basis:
+        case B.ProjectedBasis(f, which, src, tgt):
+            return _realize_ffs_by_which(ctx, which, f, source=src, target=tgt).cols
+        case B.ImageBasis(f, source, target):
+            return _realize_image_basis(ctx, f, source, target)
+        case _:
+            return realize_basis_cols(ctx, basis)
+
+
+def _ffs_immersion_std(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
+    """The ambient immersion in the **standard ambient frame** (`51 §FFS-δ`).
+
+    Like :func:`_ffs_immersion` but an ``ImageBasis``'s ``target`` is dropped (the
+    in-space realization projects onto the canonical metric-free range ``U_d``, which lives
+    in the standard ambient frame; ``target`` is embed-only).
+    """
+    match basis:
+        case B.ProjectedBasis(f, which, src, tgt):
+            return _realize_ffs_by_which(ctx, which, f, source=src, target=tgt).cols
+        case B.ImageBasis(f, source, _target):
+            return _realize_image_basis(ctx, f, source, None)
+        case _:
+            return realize_basis_cols(ctx, basis)
+
+
+def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
+    """Realize an FFS basis in the **space's own (in-space) coordinates** (`51 §FFS-δ`).
+
+    Every term/basis belongs to exactly one space, so realize is always in that space's
+    coords — here the canonical *metric-free* ``ProjectedBasis`` ``U_d`` of ``(which, f)``.
+    The result is ``U_dᵀ·immersion(basis)``: a **square** ``k×k`` matrix (metric-free
+    ``ProjectedBasis`` ⇒ ``I``; metric ``ProjectedBasis`` ⇒ the reorthonormalization
+    ``U_dᵀ·U_g``; ``ImageBasis`` ⇒ the ``R`` factor where ``J = U_d·R``).  Square because
+    the canonical δ atom is keyed by ``(which, id(f))`` alone, so ``u_d`` and ``imm`` share
+    the column axis.
+    """
+    which, f = _ffs_which_and_map(basis)
+    imm = _ffs_immersion_std(ctx, basis)
+    u_d = _realize_ffs_by_which(ctx, which, f, source=None, target=None).cols
+    r = _shape_of(u_d)[1]
+    k = _shape_of(imm)[1]
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("nr,nk->rk"), [u_d, imm],
+        [pa.OutSpec("ffs-in-space:U_dᵀ·imm", (r, k))], note="ffs-basis:in-space=U_dᵀ·imm",
+    )
+    return out
+
+
 def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
-    """Matrix whose columns are ``b``'s vectors in ambient std coords (`41 §2`).
+    """Matrix whose columns are ``b``'s vectors in its space's OWN coords (`41 §2`).
 
     Term-bearing basis nodes that the pure-matrix :func:`realize_basis`
     cannot handle are realized here (they need ``_rep``): a :class:`~grassmann.core.basis.
     ListBasis` lowers each Term vector and stacks the coordinate columns; an
-    :class:`~grassmann.core.basis.ImageBasis` realizes the LITERAL map-application columns
-    (the raw ``f(eᵢ)``, the R/fwd side — `73 Topic 2`); a :class:`~grassmann.core.basis.
-    ProjectedBasis` realizes the orthonormal Q/SVD-U columns through the FFS seam (which the
-    pure-matrix :func:`realize_basis` refuses).  Everything else defers to
-    :func:`realize_basis`.
+    :class:`~grassmann.core.basis.ImageBasis` / :class:`~grassmann.core.basis.
+    ProjectedBasis` realizes **in the FFS space's own (canonical metric-free
+    ``ProjectedBasis``) coordinates** — a square ``k×k`` matrix (``U_dᵀ·immersion``), NOT
+    the ambient immersion (which is the separate :func:`_ffs_immersion` seam used by
+    embed/project/the metric).  Everything else defers to :func:`realize_basis`.
     """
     match b:
         case B.PrimalBasis(B.DualBasis(inner)) | B.DualBasis(B.PrimalBasis(inner)):
@@ -2472,10 +2481,8 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return realize_basis_cols(ctx, inner)  # metric is metadata, not coordinates
         case B.OrthonormalBasis(inner):
             return _realize_orthonormal(ctx, inner)
-        case B.ImageBasis(f, source, target):
-            return _realize_image_basis(ctx, f, source, target)
-        case B.ProjectedBasis(f, which, src, tgt):
-            return _realize_ffs_by_which(ctx, which, f, source=src, target=tgt).cols
+        case B.ImageBasis() | B.ProjectedBasis():
+            return _realize_ffs_in_space(ctx, b)
         case B.ListBasis(vectors, backup, reduce):
             return _realize_list_basis(ctx, vectors, backup, reduce)
         case B.CompleteBasis(sub, complement, reduce):

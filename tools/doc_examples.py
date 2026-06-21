@@ -841,23 +841,30 @@ def _group_r3():
 
 
 # Group 2 — bases of Img(J) (J injective ℝ²↪ℝ³): literal image, orthonormal range, term, complete.
+# Every basis here realizes **in-space** (the canonical metric-free `ProjectedBasis` `U_d`
+# coords ⇒ a square 2×2 matrix), so the term/completed bases are FFS-typed: their vectors are
+# `Img(J)`-typed (2-dim, in-space), NOT ambient ℝ³ vectors.
 def _group_img():
     J, imgb, projb = _img()
-    sh = np.array([[1.0, 1.0], [0.0, 1.0]])
-    cols = _JMATH @ sh  # two ℝ³ vectors spanning Img(J) (a sheared image basis)
-    g0, g1 = C.var("g0", C.base("Re", 3)), C.var("g1", C.base("Re", 3))
+    ImgJ = C.img(J)
+    # An FFS-typed term basis spanning the image: 2-dim (in-space) vectors, a shear of the canon.
+    g0 = C.var("g0", ImgJ)
+    g1 = C.var("g1", ImgJ)
     term = B.list_basis(g0, g1)
-    sub = C.var("h0", C.base("Re", 3))
-    mc = C.var("mc", C.base("Re", 3))  # the other image direction (a ℝ³ vector in Img(J))
+    # An FFS-typed completed image basis: [ sub | complement ] in the subspace's own coords.
+    sub = C.var("h0", ImgJ)
+    mc = C.var("mc", ImgJ)
     complete = B.complete_basis(B.list_basis(sub), B.list_basis(mc))
-    feeds = {J: _JSTORED, g0: cols[:, 0], g1: cols[:, 1], sub: _JMATH[:, 0], mc: _JMATH[:, 1]}
+    feeds = {J: _JSTORED,
+             g0: np.array([1.0, 0.0]), g1: np.array([1.0, 1.0]),
+             sub: np.array([1.0, 0.0]), mc: np.array([0.0, 1.0])}
     bases = [
         ("ImageBasis", "the literal `ImageBasis(J)`", imgb, "ImageBasis(J)"),
         ("ProjectedBasis", 'the orthonormal `ProjectedBasis(J,"image")`', projb,
          'ProjectedBasis(J, "image")'),
-        ("ListBasis", "a term basis spanning the image `ListBasis(g₀,g₁)`", term,
+        ("ListBasis", "an FFS-typed term basis spanning the image `ListBasis(g₀,g₁)`", term,
          "ListBasis(g0, g1)"),
-        ("CompleteBasis", "a completed image basis `[ h₀ | J col ]`", complete,
+        ("CompleteBasis", "an FFS-typed completed image basis `[ h₀ | mc ]`", complete,
          "CompleteBasis(ListBasis(h0), comp)"),
     ]
     return bases, feeds, "Img(J)"

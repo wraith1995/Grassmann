@@ -183,11 +183,18 @@ Orthonormalization **changes coordinates**, so its cob realizes the orthonormal 
 *not* recurse on $b$'s cob). *Parameter:* `basis` — $b$ (raw, or a `WithInnerBasis`).
 
 ### `ImageBasis(f, source, target)` — the literal range basis of $f$
-A basis of $\operatorname{Img}(f)$ whose columns are $f$ applied to the **source** basis of
-$\operatorname{dom} f$ — $f(s_i)$, the raw (R / forward) side, **not** orthonormalized — read in
-the **target** codomain basis. With $J$ the matrix of $f$, source columns $S$, target $T$:
+A basis of $\operatorname{Img}(f)$ whose vectors are $f$ applied to the **source** basis of
+$\operatorname{dom} f$ — $f(s_i)$, the raw (R / forward) side, **not** orthonormalized.
 
-$$ C = (\text{cob } \mathrm{std}_{\mathrm{cod}} \to T)\cdot J\,S. $$
+Like every FFS basis, `ImageBasis` **realizes in its space's own (in-space) coordinates** — the
+*canonical metric-free* `ProjectedBasis` $U_d$ of $(\,\text{"image"}, f)$. So its realized column
+matrix is the square $k\times k$ factor
+
+$$ C_B = U_d^{\mathsf T}\,J\,S \qquad(\,J = U_d\,R \;\Rightarrow\; C_B = R\,), $$
+
+NOT the ambient immersion. The **ambient immersion** $J$ (the literal $f(s_i)$ columns, read in the
+**target** codomain basis, $\;(\text{cob } \mathrm{std}_{\mathrm{cod}}\to T)\cdot J\,S$) is a
+*separate* seam (`_ffs_immersion`), used only by `embed`/`project`/the metric — never by `cob`.
 
 Two `ImageBasis` form a cob pair **only when they share the same map** $f$ (a different map is a
 different image space); the cob is then the *source* cob $\operatorname{cob}(s\to s')$, and
@@ -198,13 +205,19 @@ $\operatorname{cod} f$ (default: standard).
 ### `ProjectedBasis(f, which, source, target)` — the orthonormal FFS basis
 The **orthonormal** basis of one of $f$'s four fundamental subspaces, built by factorization. For
 `which = "image"` it is the $Q$ / orthonormal range $U[:,:\delta_f]$ of the SVD of $f$ (the
-orthonormalized counterpart of `ImageBasis`). `source`/`target` are bases of
-$\operatorname{dom}/\operatorname{cod} f$ whose inner products $G$ define the metric the range is
-orthonormal in (each $G = (BB^{\mathsf T})^{-1}$, fed to a GSVD); both default to standard, giving
-the plain SVD/QR range with $C^{\mathsf T}C = I$. With a metric the range is $G$-orthonormal
-($C^{\mathsf T} G\,C = I$). *Parameters:* `f` — the map; `which` — one of
-`image`/`ker`/`coimg`/`coker`; `source` — a basis of $\operatorname{dom} f$; `target` — a basis
-of $\operatorname{cod} f$.
+orthonormalized counterpart of `ImageBasis`).
+
+Like every FFS basis it **realizes in-space** — in the canonical metric-free $U_d$ coordinates of
+$(\text{which}, f)$. So the metric-free `ProjectedBasis` realizes to the **identity** ($U_d^{\mathsf
+T}U_d = I$); a *metric* `ProjectedBasis` realizes to the reorthonormalization $U_d^{\mathsf T} U_g$.
+The ambient orthonormal range $U_g$ itself is the separate `_ffs_immersion` seam (embed/project).
+
+`source`/`target` are bases of $\operatorname{dom}/\operatorname{cod} f$ whose inner products $G$
+define the metric the *ambient* range is orthonormal in (each $G = (BB^{\mathsf T})^{-1}$, fed to a
+GSVD); both default to standard, giving the plain SVD/QR range with $U^{\mathsf T}U = I$. With a
+metric the ambient range is $G$-orthonormal ($U^{\mathsf T} G\,U = I$). *Parameters:* `f` — the
+map; `which` — one of `image`/`ker`/`coimg`/`coker`; `source` — a basis of $\operatorname{dom} f$;
+`target` — a basis of $\operatorname{cod} f$.
 
 ### `ListBasis(vectors, backup, reduce)` — an explicit list of term vectors
 A basis given as an explicit list of **term** vectors (each a value of $S$); $C$ stacks their

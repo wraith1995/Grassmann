@@ -38,35 +38,35 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 2.449,  1.633],
- [-0.   ,  2.708]]
+[[2.449, 1.633],
+ [0.   , 2.708]]
 ```
 
-### → a term basis spanning the image `ListBasis(g₀,g₁)`
+### → an FFS-typed term basis spanning the image `ListBasis(g₀,g₁)`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -86,35 +86,35 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 1., -1.],
- [ 0.,  1.]]
+[[ 2.449, -1.075],
+ [ 0.   ,  2.708]]
 ```
 
-### → a completed image basis `[ h₀ | J col ]`
+### → an FFS-typed completed image basis `[ h₀ | mc ]`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
@@ -134,32 +134,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[1., 0.],
- [0., 1.]]
+[[2.449, 1.633],
+ [0.   , 2.708]]
 ```
 
 ### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
@@ -182,32 +182,32 @@ Input `J` =
 Input `g0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `g1` =
 
 ```
-[2., 4., 2.]
+[1., 1.]
 ```
 
 Input `h0` =
 
 ```
-[2., 1., 1.]
+[1., 0.]
 ```
 
 Input `mc` =
 
 ```
-[0., 3., 1.]
+[0., 1.]
 ```
 
 Output — the `cob` matrix:
 
 ```
-[[ 1., -1.],
- [ 0.,  1.]]
+[[ 2.449, -1.075],
+ [ 0.   ,  2.708]]
 ```
 
 ### → the literal `ImageBasis(J)` (standard source) of the same map
