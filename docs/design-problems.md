@@ -135,6 +135,63 @@ A `ListBasis` of ambient vectors *projected* onto a subspace would be a differen
 plain FFS `ListBasis`; an FFS-typed `ListBasis` (its vectors `Img(f)`/`Ker(f)`/… -typed, `k`-dim)
 realizes square in-space and cobs against the factorization bases (`test_ffs_basis_conversions`).
 
+## Cob audit (round 2) — findings
+
+A per-rule audit (one intensive pass per `_cob_from_*` handler + a shared-machinery pass) after
+the in-space FFS flip. The dispatch is **correct** on all the core math (dual/primal inverse-
+transpose, block-diag/Kron/block-repeat, WithInner-is-metadata, OrthonormalBasis re-coordinates,
+Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-completeness,
+`_norm_space` FFS-endpoint soundness, pre-step order). Open items, by severity:
+
+### Correctness (verified real)
+1. **Structured basis with a seam component crashes `realize_basis_cols`.** `BasisSum`/`BasisProd`/
+   `BasisRep` have no seam-aware arm in `realize_basis_cols`, so a basis like
+   `BasisSum(ProjectedBasis(f,"image"), ScalarBasis())` (a legitimate basis of `Img(f)⊕ℝ`, =
+   `default_basis(OPlus(Img(f), ℝ))`) falls to the pure `realize_basis`, which raises `CobError`
+   on the FFS component. Hits the identity short-circuit (`_identity_like`) and the
+   `_cob_via_standard` fallback. **Fix:** add recursive `BasisSum`/`BasisProd`/`BasisRep` arms to
+   `realize_basis_cols` (realize each component seam-aware, recombine with
+   `_block_diag`/`_kron`/`_block_repeat`); make those combinators Dim-aware for mixed
+   static/dynamic component dims; add a runtime-`n` path for a dynamic `BasisRep` count
+   (`_count_int` currently raises). Pre-existing (not a flip regression).
+2. **`ListBasis(reduce=RREF, backup=None)` never applies RREF.** The RREF pivot runs only inside
+   `_CompleteColsOp` (i.e. only with a `backup`); without one, a rank-deficient frame is returned
+   raw — a singular "basis" → a silent `InvOp`/`PinvOp` of a rank-deficient matrix in cob. **Fix:**
+   apply RREF column-selection in `_realize_list_basis` when `reduce is RREF` (keep the LI columns;
+   a subspace basis when rank-deficient), or reject the `RREF, backup=None, rank-deficient` combo.
+3. **Cross-subspace pairs admitted via the `None`-space variance fallback.** Two
+   `OrthonormalBasis`/`ListBasis` over *different* k-planes of one ambient both have
+   `_space_of_basis == None` ⇒ `_same_space` degrades to variance parity ⇒ a wrong cob is produced
+   instead of a reject. Pre-existing (subspace identity is runtime; the doc already notes the
+   weakening). **Mitigation:** when a `backup`/`complement`/ambient is present (so the ambient *is*
+   determinable), compare that before the bare-variance fallback.
+4. **Wrong-side metric consumed in the GSVD per `which`.** `realize_ffs_basis` feeds both
+   `metric_dom` and `metric_cod` regardless of `which`; the irrelevant side (e.g. a `source` on an
+   `image`/cod-side basis) still rotates the frame — not mathematically wrong (intended-metric
+   orthonormality + subspace preserved, round-trips) but a metric that should be a no-op changes
+   the answer and defeats the same-metric identity check. **Fix:** pass only the `which`-relevant
+   metric (cod for image/coker, dom for ker/coimg).
+5. **`OrthonormalBasis` is metric-blind under a `DualBasis`/`PrimalBasis` wrapper** (untested
+   combo). `Orth(Dual(WithInner(b,g)))` orthonormalizes against the *standard* product, not the
+   dual metric `G⁻¹` (internally consistent — round-trips — but the wrong inner product). **Fix:**
+   peel `Dual`/`Primal` to find a carried metric (use `G⁻¹` for a dual), or reject the construction
+   at `OrthonormalBasis.__post_init__`. *Design decision: is `Orth(Dual(...))` a supported spelling?*
+
+### Sub-optimal (correct, cheaper/exacter possible)
+- `Primal↔Dual` are the same space, but `_cob_from_dual`/`_primal` only match their own wrapper, so
+  mixed pairs (`Dual(a)→Primal(b)`, `Dual(Primal(a))→b`) take `_cob_via_standard` instead of the
+  exact `(inner cob)⁻ᵀ`. Add the cross arms.
+- `ImageBasis→ProjectedBasis(image)` now goes generic (emits a redundant to-side `U_dᵀ·U_d=I`
+  realize + `InvOp` on `I`); a direct `case (_, ProjectedBasis same map, metric-free)` returning the
+  ImageBasis's `R` restores the old cheapness (dedup may already fold it).
+- `_inverse_cols` square detection is `int`-only, so a dynamic-δ FFS `to` (now realized square)
+  falls to `PinvOp` instead of `InvOp` (`pinv(square)=inv`, correct but costlier). Detect a shared
+  δ atom / pass a `square` hint.
+- `_identity_like` on a dynamic FFS basis emits the whole GSVD just to size a `δ×δ` eye; size it
+  from the canonical `ffs_dim_atoms` δ instead.
+- `_inv_transpose` uses `InvOp` even when the inner cob is orthogonal (could transpose); the
+  `_cob_from_projected` same-metric identity guard could short-circuit on the relevant side only.
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** A `ListBasis` of `k < n` ambient vectors is
