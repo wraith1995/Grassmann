@@ -37,6 +37,13 @@ from grassmann.lower.represent import represent
 from grassmann.lower.space_basis import default_basis
 
 
+def _signed_qr(M):
+    """QR in the lowering's +diagonal-R sign convention (matches the realized FFS basis)."""
+    q, r = np.linalg.qr(np.asarray(M, dtype=float))
+    s = np.sign(np.diag(r))
+    s[s == 0] = 1.0
+    return q * s, s[:, None] * r
+
 def _key(v: G.Expr) -> str:
     return f"{v.node.name}_{v.node.uid}"
 
@@ -190,7 +197,7 @@ def test_flat_pairing_is_basis_invariant(
     scal = G.flat(img)(v)(v)  # (Flat v) : Img* applied to v ⇒ ⟨v, v⟩_g
 
     projb, imgb = _bases(J)
-    _Q, Rm = np.linalg.qr(Jmath)
+    _Q, Rm = _signed_qr(Jmath)
     gram = Jmath.T @ Jmath
     rng = np.random.default_rng(1)
     for _ in range(5):
@@ -217,7 +224,7 @@ def test_sharp_flat_roundtrip_is_basis_invariant(
     scal = G.inner(img)(rt, v)          # ⟨sharp(flat(v)), v⟩ == ⟨v, v⟩
 
     projb, imgb = _bases(J)
-    _Q, Rm = np.linalg.qr(Jmath)
+    _Q, Rm = _signed_qr(Jmath)
     gram = Jmath.T @ Jmath
     rng = np.random.default_rng(2)
     for _ in range(5):
@@ -286,7 +293,7 @@ def test_compose_output_invariant_across_bases() -> None:
     composed = G.compose(f, g)(b)
     projb, imgb = _bases(J)
     base_re2 = default_basis(Re2.node)
-    _Q, Rm = np.linalg.qr(Jmath)
+    _Q, Rm = _signed_qr(Jmath)
 
     # The SAME geometric g (codomain in Img(J)): ImageBasis coords vs ProjectedBasis coords
     # of g's columns differ by R, so feed g_proj = R · g_img on the codomain axis.
@@ -343,7 +350,7 @@ def test_dot_mismatched_operand_pinning_reconciles(
     a = G.var("a", img)
     b = G.var("b", img)
     projb, imgb = _bases(J)
-    _Q, Rm = np.linalg.qr(Jmath)
+    _Q, Rm = _signed_qr(Jmath)
     gram = Jmath.T @ Jmath
     rng = np.random.default_rng(0)
     for _ in range(5):
@@ -372,7 +379,7 @@ def test_eval_mismatched_map_application_reconciles(
     projb, imgb = _bases(J)
     base_re2 = default_basis(Re2.node)
     map_basis = B.basis_prod(B.dual_basis(imgb), base_re2)
-    _Q, Rm = np.linalg.qr(Jmath)
+    _Q, Rm = _signed_qr(Jmath)
     rng = np.random.default_rng(1)
     for _ in range(5):
         s = rng.standard_normal(dom)
@@ -405,7 +412,7 @@ def test_compose_mismatched_slot_pinning_reconciles(
     projb, imgb = _bases(J)
     base_re2 = default_basis(Re2.node)
     fb = B.basis_prod(B.dual_basis(imgb), base_re2)
-    _Q, Rm = np.linalg.qr(Jmath)
+    _Q, Rm = _signed_qr(Jmath)
     rng = np.random.default_rng(2)
     for _ in range(5):
         fv = rng.standard_normal((dom, 2))
@@ -458,7 +465,7 @@ def test_embed_uses_operand_basis(
     v = G.var("v", img)
     term = embed(v, Re)
     projb, imgb = _bases(J)
-    _Q, Rm = np.linalg.qr(Jmath)
+    _Q, Rm = _signed_qr(Jmath)
     rng = np.random.default_rng(0)
     for _ in range(5):
         s = rng.standard_normal(dom)

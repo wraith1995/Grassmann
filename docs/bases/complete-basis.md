@@ -234,8 +234,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-2.449, -1.633],
- [-0.   , -2.708]]
+[[2.449, 1.633],
+ [0.   , 2.708]]
 ```
 
 ### → the ⊕ basis `BasisSum(std₂, std₁)`

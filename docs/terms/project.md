@@ -36,7 +36,7 @@ project(x, img(J))
 **Output**
 
 ```
-[-0.204,  2.154]
+[ 0.204, -2.154]
 ```
 
 ??? note "Test (literal source — input · run · expected assertion)"
@@ -46,7 +46,7 @@ project(x, img(J))
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
     x = C.var("x", Re)
     Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
-    Q, _ = np.linalg.qr(Jm)
+    Q, _ = _signed_qr(Jm)
     xv = [1.0, -2.0, 0.5]
     got = _run(C.project(x, C.img(J)), {x: xv, J: Jm.T})
     _ck(np.allclose(got, Q.T @ np.asarray(xv)))

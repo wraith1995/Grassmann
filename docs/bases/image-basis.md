@@ -62,8 +62,8 @@ Input `mc` =
 Output — the `cob` matrix:
 
 ```
-[[-2.449, -1.633],
- [ 0.   , -2.708]]
+[[ 2.449,  1.633],
+ [-0.   ,  2.708]]
 ```
 
 ### → a term basis spanning the image `ListBasis(g₀,g₁)`

@@ -256,7 +256,29 @@ def _realize_via_qr(
          pa.OutSpec("R_" + label, (dom_dim, dom_dim))],
         note=f"ffs-basis:ImageBasis({label}):inj=>QrOp",
     )
+    # Positive-diagonal-R sign convention (numpy's qr does not fix the sign): with s=sign(diag R),
+    # Q·diag(s) and diag(s)·R is the unique QR whose Q keeps the orientation of f's columns.
+    Q, R = program.emit_stmt(
+        _QrSignConventionOp(),
+        [Q, R],
+        [pa.OutSpec("Qs_" + label, _qr_q_shape(f_matrix, dom_dim)),
+         pa.OutSpec("Rs_" + label, (dom_dim, dom_dim))],
+        note=f"ffs-basis:ImageBasis({label}):QR-sign(+diag R)",
+    )
     return FfsRealization(cols=Q, rank=None, rank_dim=None, op="QrOp", r=R)
+
+
+@dataclass(frozen=True)
+class _QrSignConventionOp:
+    """Apply the +diagonal-R sign convention to a ``(Q, R)`` factorization: ``Q·diag(s)``,
+    ``diag(s)·R`` with ``s = sign(diag R)`` (zeros ⇒ +1) ⇒ ``R`` has a positive diagonal."""
+
+    def __call__(self, Q: np.ndarray, R: np.ndarray):  # noqa: N803
+        Q = np.asarray(Q, dtype=float)
+        R = np.asarray(R, dtype=float)
+        s = np.sign(np.diag(R))
+        s[s == 0] = 1.0
+        return Q * s, s[:, None] * R
 
 
 def _qr_q_shape(f_matrix: pa.SymArray, dom_dim: int) -> tuple[int, ...]:

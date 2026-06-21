@@ -22,6 +22,13 @@ from grassmann.lower import represent
 from grassmann.lower.space_basis import default_basis, space_basis
 
 
+def _signed_qr(M):
+    """QR in the lowering's +diagonal-R sign convention (matches the realized FFS basis)."""
+    q, r = np.linalg.qr(np.asarray(M, dtype=float))
+    s = np.sign(np.diag(r))
+    s[s == 0] = 1.0
+    return q * s, s[:, None] * r
+
 def _k(v: C.Var) -> str:
     return f"{v.name}_{v.uid}"
 
@@ -231,7 +238,7 @@ def test_project_onto_ffs_subspace() -> None:
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
     x = C.var("x", Re)
     Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])  # math (cod,dom); stored = Jm.T
-    Q, _R = np.linalg.qr(Jm)
+    Q, _R = _signed_qr(Jm)
     xv = np.array([1.0, -2.0, 0.5])
     got = np.asarray(_run(C.project(x, C.img(J)), {_k(x): xv, _k(J): Jm.T}), float)
     assert got == pytest.approx(Q.T @ xv)  # projected coords in the orthonormal range basis
@@ -243,7 +250,7 @@ def test_embed_from_ffs_subspace() -> None:
     J = C.var("J", C.linear_map_space(Rt, Re), props=C.props.inj)
     a = C.var("a", C.img(J))
     Jm = np.array([[2.0, 0.0], [1.0, 3.0], [1.0, 1.0]])
-    Q, _R = np.linalg.qr(Jm)
+    Q, _R = _signed_qr(Jm)
     av = np.array([1.0, 2.0])  # ProjectedBasis (Q) coords
     got = np.asarray(_run(C.embed(a, Re), {_k(a): av, _k(J): Jm.T}), float)
     assert got == pytest.approx(Q @ av)
