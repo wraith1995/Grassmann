@@ -72,8 +72,12 @@ def test_mod_one_folds_to_zero_even_symbolic():
 
 
 def test_static_zero_modulus_in_infer_raises():
-    # Build past the constructor guard via a symbolic-looking modulus that folds to 0.
-    bad = DimMod(DimLit(5), dim_sum(DimLit(0)))
+    # Build past the constructor guard via a symbolic modulus that folds to 0.
+    # ``DimMod.__post_init__`` now rejects a *literal* ``DimLit(0)`` modulus, so we
+    # use ``n mod 1`` — symbolic (not a ``DimLit``) at construction, hence accepted,
+    # but it folds to 0 in the infer layer, where the constant-folder must catch it.
+    sym_zero = DimMod(n, DimLit(1))  # symbolic at construction, folds to 0
+    bad = DimMod(DimLit(5), sym_zero)
     with pytest.raises(DimError):
         dim_eq(bad, DimLit(0))
 

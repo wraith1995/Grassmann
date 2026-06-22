@@ -180,6 +180,8 @@ class OPlusV:
     vectors: tuple[Term, ...]
 
     def __post_init__(self) -> None:
+        if not self.vectors:
+            raise TermError("OPlus needs at least one summand")
         for v in self.vectors:
             _require_term(v, "OPlus")
 
@@ -261,6 +263,10 @@ class NEval:
             if not isinstance(p, int) or p < 0:
                 raise TermError(f"NEval: positions must be non-negative ints, got {p!r}")
         # args may be Terms, Spaces or Nats (explicit space/nat application).
+        from .space import is_dim
+        for a in self.args:
+            if not (is_term(a) or is_space(a) or is_dim(a)):
+                raise TermError(f"NEval.arg: expected a Term/Space/Dim, got {a!r}")
 
     def __repr__(self) -> str:
         return f"NEval({self.f!r}, {_tuple_repr(self.positions)}, {_tuple_repr(self.args)})"
@@ -513,6 +519,7 @@ class Remetric:
 
     def __post_init__(self) -> None:
         _require_term(self.vector, "Remetric.vector")
+        _require_term(self.metric, "Remetric.metric")
 
     def __repr__(self) -> str:
         return f"Remetric({self.vector!r}, {self.metric!r})"
@@ -652,6 +659,9 @@ class Lam:
             raise TermError(
                 f"Lam body must be a Term, Space, Type, or Dim; got {self.body!r}"
             )
+        for v in self.term_vars:
+            if not isinstance(v, Var):
+                raise TermError(f"Lam: term_vars must be Var, got {v!r}")
 
     def __repr__(self) -> str:
         binders = _tuple_repr(self.binders)
@@ -677,6 +687,11 @@ class Frame:
     def __post_init__(self) -> None:
         if not isinstance(self.var, Var):
             raise TermError(f"Frame: var must be a Var, got {self.var!r}")
+        from .basis import is_basis
+        if not is_basis(self.basis_body):
+            raise TermError(
+                f"Frame.basis_body: expected a Basis, got {self.basis_body!r}"
+            )
 
     def __repr__(self) -> str:
         return f"Frame({self.var!r}, {self.basis_body!r})"

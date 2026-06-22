@@ -85,6 +85,9 @@ class DimOf:
 
     space: Space
 
+    def __post_init__(self) -> None:
+        _require_space(self.space, "DimOf")
+
     def __repr__(self) -> str:
         return f"DimOf({self.space!r})"
 
@@ -99,6 +102,9 @@ class DimAtomRef:
 
     key: Term
 
+    def __post_init__(self) -> None:
+        _require_term(self.key, "DimAtomRef.key")
+
     def __repr__(self) -> str:
         return f"DimAtomRef({self.key!r})"
 
@@ -109,6 +115,9 @@ class DimSum:
 
     terms: tuple[Dim, ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "terms", tuple(as_dim(t) for t in self.terms))
+
     def __repr__(self) -> str:
         return f"DimSum({_tuple_repr(self.terms)})"
 
@@ -118,6 +127,9 @@ class DimProd:
     """``n · m · …`` (n-ary product of dims)."""
 
     terms: tuple[Dim, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "terms", tuple(as_dim(t) for t in self.terms))
 
     def __repr__(self) -> str:
         return f"DimProd({_tuple_repr(self.terms)})"
@@ -130,6 +142,9 @@ class DimNeg:
     differences the FFS dimension laws require (`20 §5`)."""
 
     term: Dim
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "term", as_dim(self.term))
 
     def __repr__(self) -> str:
         return f"DimNeg({self.term!r})"
@@ -146,6 +161,13 @@ class DimMod:
 
     term: Dim
     modulus: Dim
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "term", as_dim(self.term))
+        modulus = as_dim(self.modulus)
+        if isinstance(modulus, DimLit) and modulus.value == 0:
+            raise SpaceError("DimMod: modulus must be non-zero")
+        object.__setattr__(self, "modulus", modulus)
 
     def __repr__(self) -> str:
         return f"DimMod({self.term!r}, {self.modulus!r})"
@@ -378,6 +400,8 @@ class App:
     args: tuple[Space | Dim | Term, ...]
 
     def __post_init__(self) -> None:
+        from .term import is_term
+        _require_term(self.g, "App.g")
         if len(self.positions) != len(self.args):
             raise SpaceError(
                 f"App: positions ({len(self.positions)}) and args "
@@ -386,6 +410,9 @@ class App:
         for p in self.positions:
             if not isinstance(p, int) or p < 0:
                 raise SpaceError(f"App: positions must be non-negative ints, got {p!r}")
+        for a in self.args:
+            if not (is_space(a) or is_dim(a) or is_term(a)):
+                raise SpaceError(f"App.arg: expected a Space/Dim/Term, got {a!r}")
 
     def __repr__(self) -> str:
         return f"App({self.g!r}, {_tuple_repr(self.positions)}, {_tuple_repr(self.args)})"
@@ -456,9 +483,10 @@ def _check_ffs_endpoints(node: object) -> None:
         _require_space(src, f"{cls}.source")
     if tgt is not None:
         _require_space(tgt, f"{cls}.target")
-    # f must be present; full "f is a linear map" check is IW3.
+    # f must be present and a Term; full "f is a linear map" check is IW3.
     if getattr(node, "f") is None:
         raise SpaceError(f"{cls}: linear-map argument `f` is required")
+    _require_term(getattr(node, "f"), f"{cls}.f")
 
 
 def _ffs_repr(name: str, node: object) -> str:

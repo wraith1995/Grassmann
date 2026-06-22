@@ -37,7 +37,7 @@ from enum import Enum
 
 from .kinds import Kind, is_kind
 from .space import Dim, Space, _tuple_repr, as_dim
-from .term import Term, Var
+from .term import Term, Var, is_term
 
 
 class Reduce(Enum):
@@ -204,6 +204,7 @@ class ProjectedBasis:
     def __post_init__(self) -> None:
         if self.f is None:
             raise BasisError("ProjectedBasis: linear-map argument `f` is required")
+        _require_term(self.f, "ProjectedBasis.f")
         if self.which not in PROJECTED_WHICH:
             raise BasisError(
                 f"ProjectedBasis: which must be one of {PROJECTED_WHICH!r}, got {self.which!r}"
@@ -242,6 +243,7 @@ class ImageBasis:
     def __post_init__(self) -> None:
         if self.f is None:
             raise BasisError("ImageBasis: linear-map argument `f` is required")
+        _require_term(self.f, "ImageBasis.f")
         if self.source is not None:
             _require_basis(self.source, "ImageBasis.source")
         if self.target is not None:
@@ -286,8 +288,7 @@ class ListBasis:
         if not self.vectors:
             raise BasisError("ListBasis needs at least one vector")
         for v in self.vectors:
-            if v is None:
-                raise BasisError("ListBasis: a basis vector must be a Term, got None")
+            _require_term(v, "ListBasis.vector")
         if self.backup is not None:
             _require_basis(self.backup, "ListBasis.backup")
         if not isinstance(self.reduce, Reduce):
@@ -316,6 +317,7 @@ class WithInnerBasis:
 
     def __post_init__(self) -> None:
         _require_basis(self.basis, "WithInnerBasis")
+        _require_term(self.metric, "WithInnerBasis.metric (must be a Term, not an array)")
 
     def __repr__(self) -> str:
         return f"WithInnerBasis({self.basis!r}, {self.metric!r})"
@@ -396,6 +398,10 @@ class BLam:
             if not is_kind(sort):
                 raise BasisError(f"BLam: binder sort must be a sort/kind, got {sort!r}")
         _require_basis(self.body, "BLam.body")
+        if self.term_var is not None and not isinstance(self.term_var, Var):
+            raise BasisError(f"BLam.term_var: expected a Var or None, got {self.term_var!r}")
+        if self.basis_var is not None and not isinstance(self.basis_var, BVar):
+            raise BasisError(f"BLam.basis_var: expected a BVar or None, got {self.basis_var!r}")
 
     def __repr__(self) -> str:
         binders = _tuple_repr(self.binders)
@@ -414,6 +420,7 @@ class BApp:
     args: tuple[Term | Space | Dim | Basis, ...]
 
     def __post_init__(self) -> None:
+        from .space import is_dim, is_space
         _require_basis(self.f, "BApp.f")
         if len(self.positions) != len(self.args):
             raise BasisError(
@@ -423,6 +430,11 @@ class BApp:
         for p in self.positions:
             if not isinstance(p, int) or p < 0:
                 raise BasisError(f"BApp: positions must be non-negative ints, got {p!r}")
+        for a in self.args:
+            if not (is_term(a) or is_basis(a) or is_dim(a) or is_space(a)):
+                raise BasisError(
+                    f"BApp.arg: expected a Term/Basis/Dim/Space, got {a!r}"
+                )
 
     def __repr__(self) -> str:
         return f"BApp({self.f!r}, {_tuple_repr(self.positions)}, {_tuple_repr(self.args)})"
@@ -457,6 +469,11 @@ def is_basis(b: object) -> bool:
 def _require_basis(b: object, ctx: str) -> None:
     if not is_basis(b):
         raise BasisError(f"{ctx}: expected a Basis, got {b!r}")
+
+
+def _require_term(t: object, ctx: str) -> None:
+    if not is_term(t):
+        raise BasisError(f"{ctx}: expected a Term, got {t!r}")
 
 
 # ---------------------------------------------------------------------------
