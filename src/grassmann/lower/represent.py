@@ -4203,65 +4203,87 @@ def _dyn_identity(ctx: _Ctx, space: S.Space, *, note: str) -> pa.SymArray:
 
 
 def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
-    """Is ``basis`` a *non-orthonormal* FFS basis needing an immersed Gram (`73 Topic 2`)?
+    """Is ``basis`` a *non-orthonormal* basis needing an explicit Gram (`73 Topic 2`)?
 
-    Only the **literal map-application** :class:`~grassmann.core.basis.ImageBasis` (and its
-    dual / metric-wrapped spellings) are non-orthonormal — their Gram is the immersed
-    ``colsᵀ·G_cod·cols`` (``JᵀJ`` for an injective image), NOT the identity.  Every other
-    basis here (the orthonormal ``ProjectedBasis``/``Q``, ``WithInnerBasis``, standard
-    bases) keeps the identity-metric fast path, so the orthonormal-default lowering is
-    byte-identical (``basis is None`` ⇒ False).
+    A non-orthonormal basis has Gram ``colsᵀ·G·cols`` ≠ the identity, so the metric (Inner /
+    Flat / Sharp / dot / Dagger) must materialize it rather than take the identity fast path:
+
+    * the **literal map-application** :class:`~grassmann.core.basis.ImageBasis` (Gram ``JᵀJ``);
+    * a **``ListBasis``/``CompleteBasis`` that was NOT orthonormalized** (``reduce`` ≠
+      ``ORTHONORMALIZE`` ⇒ an arbitrary frame, Gram ``CᵀC`` ≠ I).
+
+    The genuinely orthonormal bases (standard / ``ProjectedBasis``/``Q`` / ``WithInnerBasis`` /
+    a ``reduce=ORTHONORMALIZE`` list) keep the identity fast path, so the orthonormal-default
+    lowering is byte-identical (``basis is None`` ⇒ False).  Dual / metric-wrapped spellings
+    inherit from their inner basis.
     """
     match basis:
         case B.ImageBasis():
             return True
+        case B.ListBasis(_, _, reduce) | B.CompleteBasis(_, _, reduce):
+            return reduce is not B.Reduce.ORTHONORMALIZE
         case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
             return _is_immersed_metric_basis(inner)
         case _:
             return False
 
 
+def _peel_to_core(basis: B.Basis) -> B.Basis:
+    """Strip Dual/Primal/WithInner wrappers down to the underlying core basis (any kind)."""
+    match basis:
+        case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
+            return _peel_to_core(inner)
+        case _:
+            return basis
+
+
 def _immersed_gram(
     ctx: _Ctx, space: S.Space, basis: B.Basis, *, note: str,
 ) -> pa.SymArray:
-    """The immersed Gram of an :class:`~grassmann.core.basis.ImageBasis` (`73 T2`, `50 §A`).
+    """The Gram ``colsᵀ · G · cols`` of a *non-orthonormal* basis (`73 T2`, `50 §A`).
 
-    ``G = colsᵀ · G_cod · cols`` where ``cols`` are the literal map-application columns
-    ``f(eᵢ)`` realized in the codomain's coords (the FFS realization seam) and ``G_cod`` is
-    the codomain metric.  For an injective image with a plain ``Base`` codomain this is the
-    source-coordinate Gram ``JᵀJ`` (= ``RᵀR`` from the QR).  A **dual** ``ImageBasis``
-    carries the (pseudo-)inverse — the cotangent metric ``(JᵀJ)⁻¹`` — sharpened to a plain
-    inverse when ``f`` is injective (full column rank).
+    Two cores (both via the realization seam, NOT the generic ``cob``):
+
+    * **``ImageBasis``** — ``cols`` are the literal map-application columns ``f(sᵢ)`` in the
+      codomain's coords and ``G = G_cod`` (the codomain metric); for an injective image with a
+      plain ``Base`` codomain this is ``JᵀJ`` (= ``RᵀR`` from the QR).
+    * **non-orthonormal ``ListBasis``/``CompleteBasis``** — ``cols`` are the frame realized in
+      ``space``'s standard coords and ``G`` is ``space``'s standard-basis metric (identity for a
+      ``Base``), so the Gram is ``CᵀC`` (or ``Cᵀ·g·C`` over a metric space).
+
+    A **dual** (cotangent) basis carries the (pseudo-)inverse Gram — a plain inverse for a
+    full-rank basis (a genuine ``ListBasis``/``CompleteBasis``, or an injective image), else the
+    Moore–Penrose pinv.
     """
     dual = _peel_dual(basis)
-    img = _unwrap_image_basis(basis)
-    f = img.f
-    dom, cod = map_domain_codomain(f)
-    n_dom, n_cod = _static_dim(dom), _static_dim(cod)
-    # cols : (cod, dom) — the map-application columns f(sᵢ) in codomain coords (sᵢ = source).
-    cols = _realize_image_basis(ctx, f, img.source)
-    # G_cod : the codomain metric in ITS orthonormal default basis (identity for a Base).
-    g_cod = _metric_matrix(ctx, cod, n_cod, note=note + ":G_cod")
-    # G = colsᵀ · G_cod · cols  (the immersed Gram, n_dom×n_dom).
+    core = _peel_to_core(basis)
+    if isinstance(core, B.ImageBasis):
+        f = core.f
+        dom, cod = map_domain_codomain(f)
+        n_gram, n_cod = _static_dim(dom), _static_dim(cod)
+        # cols : (cod, dom) — the map-application columns f(sᵢ) in codomain coords (sᵢ = source).
+        cols = _realize_image_basis(ctx, f, core.source)
+        g_amb = _metric_matrix(ctx, cod, n_cod, note=note + ":G_cod")
+        gram_note = note + ":colsᵀ·G_cod·cols"
+        props = map_props(f)
+        full_rank = props is not None and props.inj
+    else:
+        # A non-orthonormal ListBasis/CompleteBasis: its Gram in ``space``'s own inner product.
+        n_gram = _static_dim(space)
+        cols = realize_basis_cols(ctx, core)  # (n, n) frame in space's standard coords
+        g_amb = _metric_matrix(ctx, space, n_gram, note=note + ":G_std")  # identity for a Base
+        gram_note = note + ":colsᵀ·G·cols"
+        full_rank = True  # a genuine basis is full-rank ⇒ the cotangent Gram is a plain inverse
+    # G = colsᵀ · G_amb · cols.
     [gram] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("ca,cd,db->ab"), [cols, g_cod, cols],
-        [pa.OutSpec("immersed-gram", (n_dom, n_dom))],
-        note=note + ":colsᵀ·G_cod·cols",
+        pa.EinsumStmtOp("ca,cd,db->ab"), [cols, g_amb, cols],
+        [pa.OutSpec("immersed-gram", (n_gram, n_gram))], note=gram_note,
     )
     if not dual:
         return gram
-    # The dual (cotangent) basis carries the inverse Gram.  Sharpen to a plain inverse when
-    # f is injective (the Gram is then SPD/full-rank, RᵀR); else the Moore–Penrose pinv.
-    props = map_props(f)
-    if props is not None and props.inj:
-        [out] = ctx.prog.emit_stmt(
-            pa.InvOp(), [gram], [pa.OutSpec("immersed-gram-inv", (n_dom, n_dom))],
-            note=note + ":InvOp(JᵀJ)=cotangent",
-        )
-        return out
+    op, tag = (pa.InvOp(), ":InvOp=cotangent") if full_rank else (pa.PinvOp(), ":PinvOp=cotangent")
     [out] = ctx.prog.emit_stmt(
-        pa.PinvOp(), [gram], [pa.OutSpec("immersed-gram-pinv", (n_dom, n_dom))],
-        note=note + ":PinvOp(JᵀJ)=cotangent",
+        op, [gram], [pa.OutSpec("immersed-gram-inv", (n_gram, n_gram))], note=note + tag,
     )
     return out
 
@@ -4282,15 +4304,6 @@ def _peel_dual(basis: B.Basis) -> bool:
             return False
 
 
-def _unwrap_image_basis(basis: B.Basis) -> B.ImageBasis:
-    """Strip Dual/Primal/WithInner wrappers down to the underlying ``ImageBasis``."""
-    match basis:
-        case B.ImageBasis():
-            return basis
-        case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
-            return _unwrap_image_basis(inner)
-        case _:  # pragma: no cover - guarded by _is_immersed_metric_basis
-            raise RepresentError(f"_immersed_gram: not an ImageBasis: {basis!r}")
 
 
 def _is_numeric_metric(metric: object) -> bool:
