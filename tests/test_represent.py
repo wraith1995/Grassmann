@@ -440,7 +440,8 @@ def test_runtime_contraction_assert_trips_through_run() -> None:
 
 
 def test_list_basis_stacks_lowered_vectors_as_columns() -> None:
-    """``ListBasis(v0, v1)`` lowers to the matrix whose columns are ⟦v0⟧, ⟦v1⟧ (`73 T2`)."""
+    """``ListBasis(v0, v1)`` of ℝ³ lowers to a FULL ℝ³ basis whose LEADING columns are
+    ⟦v0⟧, ⟦v1⟧ — a short frame is completed to the ambient (`73 T2`)."""
     from grassmann.lower.represent import _Ctx, realize_basis_cols
 
     V = C.base("V", 3)
@@ -452,14 +453,19 @@ def test_list_basis_stacks_lowered_vectors_as_columns() -> None:
     prog.add_output("B", realize_basis_cols(ctx, lb))
     res = prog.run({_var_key(x): np.array([1.0, 2.0, 3.0]),
                     _var_key(y): np.array([4.0, 5.0, 6.0])})["B"]
-    assert res.shape == (3, 2)
-    np.testing.assert_allclose(res, np.array([[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]]))
+    # A short ℝ³ ListBasis now realizes to a full 3×3 ambient basis (the 2 explicit
+    # vectors plus a standard completion).
+    assert res.shape == (3, 3)
+    np.testing.assert_allclose(res[:, 0], np.array([1.0, 2.0, 3.0]))
+    np.testing.assert_allclose(res[:, 1], np.array([4.0, 5.0, 6.0]))
+    assert abs(np.linalg.det(res)) > 1e-9  # a genuine full basis
     # the column-stack provenance note is present.
     assert any("ListBasis=stack-columns" in n for n in _notes(prog))
 
 
 def test_list_basis_ravels_multi_axis_vectors() -> None:
-    """``ListBasis`` ravels a multi-axis (``V⊗ᵏ``) vector into one ambient column."""
+    """``ListBasis`` ravels a multi-axis (``V⊗ᵏ``) vector into one ambient column, then
+    completes to the full ambient (here ℝ⁴ = V⊗V)."""
     from grassmann.lower.represent import _Ctx, realize_basis_cols
 
     V = C.base("V", 2)
@@ -470,8 +476,10 @@ def test_list_basis_ravels_multi_axis_vectors() -> None:
     prog.add_output("B", realize_basis_cols(ctx, lb))
     xv = np.array([[1.0, 2.0], [3.0, 4.0]])
     res = prog.run({_var_key(x): xv})["B"]
-    assert res.shape == (4, 1)
-    np.testing.assert_allclose(res.reshape(-1), xv.reshape(-1))
+    # 1 explicit raveled column, completed to a full 4×4 ambient basis.
+    assert res.shape == (4, 4)
+    np.testing.assert_allclose(res[:, 0], xv.reshape(-1))
+    assert abs(np.linalg.det(res)) > 1e-9
 
 
 def test_list_basis_inconsistent_dim_raises() -> None:

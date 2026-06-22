@@ -828,14 +828,16 @@ def _register_pairs(bases, feeds, space_label: str) -> None:
 def _group_r3():
     Mv = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
     term, ft = _listb("v", Mv)
+    # A short ℝ³ term frame (one vector) completed to the full ambient from the standard basis —
+    # the new idiom: a `ListBasis`-with-backup (a `ListBasis` is always a full ambient basis).
     sub, fsub = _listb("u", np.array([[1.0], [0.0], [0.0]]))
-    complete = B.complete_basis(sub, _std(3), reduce=C.Reduce.RREF)
+    completed = B.list_basis(*sub.vectors, backup=_std(3), reduce=C.Reduce.RREF)
     bases = [
         ("BasisRep", "the standard basis `BasisRep(3, ScalarBasis)`", _std(3),
          "BasisRep(3, ScalarBasis())"),
         ("ListBasis", "a term basis `ListBasis(v₀,v₁,v₂)`", term, "ListBasis(v0, v1, v2)"),
-        ("CompleteBasis", "a sub-basis RREF-completed from the standard basis", complete,
-         "CompleteBasis(ListBasis(u0), std₃, reduce=RREF)"),
+        ("ListBasis", "a short term frame completed from the standard basis", completed,
+         "ListBasis(u0, backup=std₃, reduce=RREF)"),
     ]
     return bases, {**ft, **fsub}, "ℝ³"
 
@@ -851,10 +853,11 @@ def _group_img():
     g0 = C.var("g0", ImgJ)
     g1 = C.var("g1", ImgJ)
     term = B.list_basis(g0, g1)
-    # An FFS-typed completed image basis: [ sub | complement ] in the subspace's own coords.
+    # An FFS-typed completed image term frame: a short ListBasis of Img(J) completed from a
+    # backup (the new idiom — a `ListBasis` is always a full basis of its ambient, here Img(J)).
     sub = C.var("h0", ImgJ)
     mc = C.var("mc", ImgJ)
-    complete = B.complete_basis(B.list_basis(sub), B.list_basis(mc))
+    completed = B.list_basis(sub, backup=B.list_basis(mc), reduce=C.Reduce.RREF)
     feeds = {J: _JSTORED,
              g0: np.array([1.0, 0.0]), g1: np.array([1.0, 1.0]),
              sub: np.array([1.0, 0.0]), mc: np.array([0.0, 1.0])}
@@ -864,8 +867,8 @@ def _group_img():
          'ProjectedBasis(J, "image")'),
         ("ListBasis", "an FFS-typed term basis spanning the image `ListBasis(g₀,g₁)`", term,
          "ListBasis(g0, g1)"),
-        ("CompleteBasis", "an FFS-typed completed image basis `[ h₀ | mc ]`", complete,
-         "CompleteBasis(ListBasis(h0), comp)"),
+        ("ListBasis", "an FFS-typed completed image term frame `ListBasis(h₀, backup=[mc])`",
+         completed, "ListBasis(h0, backup=ListBasis(mc), reduce=RREF)"),
     ]
     return bases, feeds, "Img(J)"
 
@@ -895,12 +898,12 @@ def _group_oplus():
     term, ft, _ = _listb_sp(VW, "q", [Mv[:, i] for i in range(3)])
     sub, fs, _ = _listb_sp(VW, "p", [np.array([1.0, 0.0, 0.0])])
     vw_std = B.basis_sum(_std(2), _std(1))
-    complete = B.complete_basis(sub, vw_std, reduce=C.Reduce.RREF)
+    completed = B.list_basis(*sub.vectors, backup=vw_std, reduce=C.Reduce.RREF)
     bases = [
         ("BasisSum", "the ⊕ basis `BasisSum(std₂, std₁)`", vw_std, "BasisSum(std₂, std₁)"),
         ("ListBasis", "a term basis of V⊕W `ListBasis(q₀,q₁,q₂)`", term, "ListBasis(q0,q1,q2)"),
-        ("CompleteBasis", "a sub-basis RREF-completed from the ⊕ standard basis", complete,
-         "CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF)"),
+        ("ListBasis", "a short ⊕ term frame completed from the ⊕ standard basis", completed,
+         "ListBasis(p0, backup=BasisSum(std₂,std₁), reduce=RREF)"),
     ]
     return bases, {**ft, **fs}, "V⊕W"
 
@@ -914,12 +917,12 @@ def _group_oprod():
     term, ft, _ = _listb_sp(VW, "w", mats)
     sub, fs, _ = _listb_sp(VW, "r", [np.array([[1.0, 0.0], [0.0, 0.0]])])
     vw_std = B.basis_prod(_std(2), _std(2))
-    complete = B.complete_basis(sub, vw_std, reduce=C.Reduce.RREF)
+    completed = B.list_basis(*sub.vectors, backup=vw_std, reduce=C.Reduce.RREF)
     bases = [
         ("BasisProd", "the ⊗ basis `BasisProd(std₂, std₂)`", vw_std, "BasisProd(std₂, std₂)"),
         ("ListBasis", "a term basis of V⊗W `ListBasis(w₀..w₃)`", term, "ListBasis(w0..w3)"),
-        ("CompleteBasis", "a sub-basis RREF-completed from the ⊗ standard basis", complete,
-         "CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF)"),
+        ("ListBasis", "a short ⊗ term frame completed from the ⊗ standard basis", completed,
+         "ListBasis(r0, backup=BasisProd(std₂,std₂), reduce=RREF)"),
     ]
     return bases, {**ft, **fs}, "V⊗W"
 
@@ -932,14 +935,14 @@ def _group_withinner():
     Mv = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
     term, ft, _ = _listb_sp(V, "y", [Mv[:, i] for i in range(3)])
     sub, fs, _ = _listb_sp(V, "x", [np.array([1.0, 0.0, 0.0])])
-    completed = B.complete_basis(sub, _std(3), reduce=C.Reduce.RREF)
+    completed = B.list_basis(*sub.vectors, backup=_std(3), reduce=C.Reduce.RREF)
     bases = [
         ("WithInnerBasis", "the metric standard basis `WithInnerBasis(std₃, g)`",
          B.with_inner_basis(_std(3), g), "WithInnerBasis(std₃, g)"),
         ("WithInnerBasis", "a g-metric term basis `WithInnerBasis(ListBasis(y…), g)`",
          B.with_inner_basis(term, g), "WithInnerBasis(ListBasis(y0,y1,y2), g)"),
-        ("WithInnerBasis", "a g-metric completed basis `WithInnerBasis([x|std], g)`",
-         B.with_inner_basis(completed, g), "WithInnerBasis(CompleteBasis, g)"),
+        ("WithInnerBasis", "a g-metric completed term frame `WithInnerBasis(ListBasis(x,backup), g)`",
+         B.with_inner_basis(completed, g), "WithInnerBasis(ListBasis(x, backup=std₃, reduce=RREF), g)"),
     ]
     return bases, {**ft, **fs}, "WithInner(ℝ³,g)"
 
@@ -1112,6 +1115,27 @@ def _c_proj_target():
                 _show(m), to_node="ProjectedBasis",
                 code='cob(ProjectedBasis(J,"image",target=ListBasis(t…)), ProjectedBasis(J,"image"))',
                 inputs=_feed_rows(feeds))
+
+
+@_cv("CompleteBasis")
+def _c_complete_image_to_cod():
+    # CompleteBasis lifts a GENUINE-subspace basis to its ambient: here the orthonormal range
+    # ProjectedBasis(J,"image") of Img(J) (a proper 2-D subspace of the codomain ℝ³) is completed
+    # to a full ℝ³ codomain basis from the standard basis.  The sub's AMBIENT columns are its
+    # IMMERSION (U), so CompleteBasis hstacks U with the standard frame and RREF-completes.
+    J, _imgb, projb = _img()
+    Re = C.base("Re", 3)
+    cod_std = default_basis(Re)
+    complete = B.complete_basis(projb, cod_std, reduce=C.Reduce.RREF)
+    m = _cob(complete, cod_std, {J: _JSTORED})
+    back = _cob(cod_std, complete, {J: _JSTORED})
+    _ck(np.allclose(m @ back, np.eye(3)))
+    return Conv("the standard codomain basis (a full ℝ³ basis)",
+                "`CompleteBasis(ProjectedBasis(J,\"image\"), std₃, RREF)` lifts the immersed "
+                "image `U` to a full codomain basis; cob realizes both toward ℝ³",
+                _show(m), to_node="BasisRep",
+                code='cob(CompleteBasis(ProjectedBasis(J,"image"), std₃, reduce=RREF), std₃)',
+                inputs=_feed_rows({J: _JSTORED}))
 
 
 @_cv("DualBasis")

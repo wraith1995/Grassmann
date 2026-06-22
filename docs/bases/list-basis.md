@@ -57,14 +57,14 @@ Output — the `cob` matrix:
  [0., 0., 1.]]
 ```
 
-### → a sub-basis RREF-completed from the standard basis
+### → a short term frame completed from the standard basis
 
 **Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(ListBasis(v0, v1, v2), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
+cob(ListBasis(v0, v1, v2), ListBasis(u0, backup=std₃, reduce=RREF))
 ```
 
 Input `v0` =
@@ -406,12 +406,20 @@ Output — the `cob` matrix:
 
 > ``ListBasis(vectors…, backup?, reduce?)`` — a basis as an EXPLICIT LIST OF TERM VECTORS.
 > 
-> Each entry is a :class:`~grassmann.core.term.Term` vector (all of the same space); the basis
-> is their span in the listed order, stacked into the basis matrix at lowering.  The
-> *term-level* successor of the old ``BaseBasis`` frame:
+> A ``ListBasis`` is **ALWAYS a full basis of its ambient** (the vectors' space).  Each entry
+> is a :class:`~grassmann.core.term.Term` vector (all of the same space); the listed vectors
+> are stacked into the basis matrix at lowering, and a **short** frame (fewer vectors than the
+> ambient dim) is completed to the full ambient from the ``backup``.  The *term-level*
+> successor of the old ``BaseBasis`` frame:
 > 
 > * ``reduce`` (:class:`Reduce`) — how to combine the vectors: ``NONE`` (assume independent),
->   ``RREF`` (keep the linearly-independent columns), ``ORTHONORMALIZE`` (QR);
-> * ``backup`` — a fallback :class:`Basis` used to **complete** the (reduced) frame to a full
->   basis when it is rank-deficient/incomplete (default: the space's standard basis).
+>   ``RREF`` (keep the linearly-independent columns then complete), ``ORTHONORMALIZE`` (QR,
+>   then complete from the orthonormalized backup);
+> * ``backup`` — the :class:`Basis` that **completes** a short/rank-deficient frame to the full
+>   ambient basis (default, when ``None``: the ambient's *standard* basis).  So a short ℝⁿ
+>   ``ListBasis`` realizes to a full ``n×n`` ambient basis (the explicit vectors plus a
+>   standard completion), and a full-rank ``n``-vector frame is used unchanged.
+> 
+> To build a basis of a genuine *subspace* (not its ambient), use a subspace basis directly
+> (e.g. a :class:`ProjectedBasis`) and :class:`CompleteBasis` to lift it to the ambient.
 

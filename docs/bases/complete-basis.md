@@ -16,140 +16,14 @@ stacked.
 
 How this basis converts to other bases of the **same space**, and how `cob` handles each — with the literal `cob` call, its inputs, and the resulting matrix. Every entry is executed and asserted in `tests/test_doc_conversions.py`.
 
-### → the standard basis `BasisRep(3, ScalarBasis)`
+### → the standard codomain basis (a full ℝ³ basis)
 
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), BasisRep(3, ScalarBasis()))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
-```
-
-### → a term basis `ListBasis(v₀,v₁,v₂)`
-
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+**Mechanism (`cob`):** `CompleteBasis(ProjectedBasis(J,"image"), std₃, RREF)` lifts the immersed image `U` to a full codomain basis; cob realizes both toward ℝ³
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), ListBasis(v0, v1, v2))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[ 1.,  0., -1.],
- [ 0.,  1., -1.],
- [ 0.,  0.,  1.]]
-```
-
-### → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
-
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), PrimalBasis(DualBasis(<the term basis>)))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[ 1.,  0., -1.],
- [ 0.,  1., -1.],
- [ 0.,  0.,  1.]]
-```
-
-### → the literal `ImageBasis(J)`
-
-**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(h0), comp), ImageBasis(J))
+cob(CompleteBasis(ProjectedBasis(J,"image"), std₃, reduce=RREF), std₃)
 ```
 
 Input `J` =
@@ -159,179 +33,12 @@ Input `J` =
  [0., 3., 1.]]
 ```
 
-Input `g0` =
-
-```
-[1., 0.]
-```
-
-Input `g1` =
-
-```
-[1., 1.]
-```
-
-Input `h0` =
-
-```
-[1., 0.]
-```
-
-Input `mc` =
-
-```
-[0., 1.]
-```
-
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.246],
- [-0.   ,  0.369]]
-```
-
-### → the orthonormal `ProjectedBasis(J,"image")`
-
-**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(h0), comp), ProjectedBasis(J, "image"))
-```
-
-Input `J` =
-
-```
-[[2., 1., 1.],
- [0., 3., 1.]]
-```
-
-Input `g0` =
-
-```
-[1., 0.]
-```
-
-Input `g1` =
-
-```
-[1., 1.]
-```
-
-Input `h0` =
-
-```
-[1., 0.]
-```
-
-Input `mc` =
-
-```
-[0., 1.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[ 1., -0.],
- [-0.,  1.]]
-```
-
-### → the ⊕ basis `BasisSum(std₂, std₁)`
-
-**Mechanism (`cob`):** realize both bases toward the V⊕W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF), BasisSum(std₂, std₁))
-```
-
-Input `q0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `q1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `q2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `p0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
-```
-
-### → the ⊗ basis `BasisProd(std₂, std₂)`
-
-**Mechanism (`cob`):** realize both bases toward the V⊗W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF), BasisProd(std₂, std₂))
-```
-
-Input `w0` =
-
-```
-[[1., 0.],
- [0., 0.]]
-```
-
-Input `w1` =
-
-```
-[[1., 1.],
- [0., 0.]]
-```
-
-Input `w2` =
-
-```
-[[1., 1.],
- [1., 0.]]
-```
-
-Input `w3` =
-
-```
-[[1., 1.],
- [1., 1.]]
-```
-
-Input `r0` =
-
-```
-[[1., 0.],
- [0., 0.]]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0., 0.],
- [0., 1., 0., 0.],
- [0., 0., 1., 0.],
- [0., 0., 0., 1.]]
+[[ 0.816, -0.492,  1.   ],
+ [ 0.408,  0.862,  0.   ],
+ [ 0.408,  0.123,  0.   ]]
 ```
 
 ## Fields
@@ -355,4 +62,10 @@ Output — the `cob` matrix:
 > combined: ``RREF`` keeps the sub columns then greedily adds independent complement columns;
 > ``ORTHONORMALIZE`` orthonormalizes the stack; ``NONE`` stacks as-is.  embed = pad-zeros,
 > project = drop-complement (realized FROM this; no Embed/ProjectBasis).
+> 
+> ``sub_basis`` is intended to be a basis of a **genuine subspace** of the ambient (e.g. a
+> :class:`ProjectedBasis` of ``Img(f)``), realized via its AMBIENT immersion when completed.
+> To make a full ambient basis from an explicit short term frame, prefer a
+> :class:`ListBasis`-with-backup (``ListBasis(*vecs, backup=…, reduce=RREF)``) — a
+> ``ListBasis`` is always a full basis of its ambient — rather than wrapping the frame here.
 

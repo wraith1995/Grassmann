@@ -98,48 +98,6 @@ Output — the `cob` matrix:
  [0., 0., 1.]]
 ```
 
-### → a sub-basis RREF-completed from the standard basis
-
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(PrimalBasis(DualBasis(<the term basis>)), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 1.],
- [0., 1., 1.],
- [0., 0., 1.]]
-```
-
 ### → the literal `ImageBasis(J)`
 
 **Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`

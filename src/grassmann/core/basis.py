@@ -236,14 +236,22 @@ class ImageBasis:
 class ListBasis:
     """``ListBasis(vectors…, backup?, reduce?)`` — a basis as an EXPLICIT LIST OF TERM VECTORS.
 
-    Each entry is a :class:`~grassmann.core.term.Term` vector (all of the same space); the basis
-    is their span in the listed order, stacked into the basis matrix at lowering.  The
-    *term-level* successor of the old ``BaseBasis`` frame:
+    A ``ListBasis`` is **ALWAYS a full basis of its ambient** (the vectors' space).  Each entry
+    is a :class:`~grassmann.core.term.Term` vector (all of the same space); the listed vectors
+    are stacked into the basis matrix at lowering, and a **short** frame (fewer vectors than the
+    ambient dim) is completed to the full ambient from the ``backup``.  The *term-level*
+    successor of the old ``BaseBasis`` frame:
 
     * ``reduce`` (:class:`Reduce`) — how to combine the vectors: ``NONE`` (assume independent),
-      ``RREF`` (keep the linearly-independent columns), ``ORTHONORMALIZE`` (QR);
-    * ``backup`` — a fallback :class:`Basis` used to **complete** the (reduced) frame to a full
-      basis when it is rank-deficient/incomplete (default: the space's standard basis).
+      ``RREF`` (keep the linearly-independent columns then complete), ``ORTHONORMALIZE`` (QR,
+      then complete from the orthonormalized backup);
+    * ``backup`` — the :class:`Basis` that **completes** a short/rank-deficient frame to the full
+      ambient basis (default, when ``None``: the ambient's *standard* basis).  So a short ℝⁿ
+      ``ListBasis`` realizes to a full ``n×n`` ambient basis (the explicit vectors plus a
+      standard completion), and a full-rank ``n``-vector frame is used unchanged.
+
+    To build a basis of a genuine *subspace* (not its ambient), use a subspace basis directly
+    (e.g. a :class:`ProjectedBasis`) and :class:`CompleteBasis` to lift it to the ambient.
     """
 
     vectors: tuple[Term, ...]
@@ -315,13 +323,21 @@ class CompleteBasis:
     completing directions.  ``reduce`` (:class:`Reduce`) selects how ``[sub | complement]`` is
     combined: ``RREF`` keeps the sub columns then greedily adds independent complement columns;
     ``ORTHONORMALIZE`` orthonormalizes the stack; ``NONE`` stacks as-is.  embed = pad-zeros,
-    project = drop-complement (realized FROM this; no Embed/ProjectBasis)."""
+    project = drop-complement (realized FROM this; no Embed/ProjectBasis).
+
+    ``sub_basis`` is intended to be a basis of a **genuine subspace** of the ambient (e.g. a
+    :class:`ProjectedBasis` of ``Img(f)``), realized via its AMBIENT immersion when completed.
+    To make a full ambient basis from an explicit short term frame, prefer a
+    :class:`ListBasis`-with-backup (``ListBasis(*vecs, backup=…, reduce=RREF)``) — a
+    ``ListBasis`` is always a full basis of its ambient — rather than wrapping the frame here."""
 
     sub_basis: Basis
     complement: Basis
     reduce: Reduce = Reduce.NONE
 
     def __post_init__(self) -> None:
+        # NB: ``sub_basis`` should be a genuine-subspace basis (not a bare short ``ListBasis``,
+        # which is now always full-ambient); not hard-rejected to keep the node flexible.
         _require_basis(self.sub_basis, "CompleteBasis.sub_basis")
         _require_basis(self.complement, "CompleteBasis.complement")
         if not isinstance(self.reduce, Reduce):
