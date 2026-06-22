@@ -376,6 +376,40 @@ def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) ->
     return Rep(arr, target, rep.space, free_labels=rep.free_labels)
 
 
+# ---------------------------------------------------------------------------
+# The output-basis structure every ``_rep_X`` shares (`41 §3`).
+#
+# Each node builds its *natural* Rep, then routes it through the three target cases below.  Today
+# the STD/concrete branches just cob the finished Rep (the generic, always-correct realization);
+# the structure exists so a node can later realize **directly** in the requested basis at minimal
+# complexity (as ``_rep_var``/``_rep_sum``/``_rep_scale`` already do for their inputs/operands).
+# A node may instead special-case these branches inline — see ``_rep_var`` for the visible idiom.
+# ---------------------------------------------------------------------------
+
+
+def _std_result(ctx: _Ctx, rep: Rep) -> Rep:
+    """(1) STD — re-express ``rep`` in the standard orthonormal basis of its space (no-op if there)."""
+    try:
+        want = default_basis(rep.space)
+    except S.SpaceError:
+        return rep  # no static default (SVar/App) — keep the natural basis
+    if _basis_eq(rep.basis, want):
+        return rep
+    return _coerce_rep_to_target(ctx, rep, want, note="cob:target-std")
+
+
+def _match_result(ctx: _Ctx, rep: Rep, target: B.TargetBasis | B.Basis) -> Rep:
+    """(3) concrete — realize ``rep`` in a concrete ``target`` basis at minimal complexity.
+
+    Generic fallback: cob into ``target`` when it is a basis of ``rep``'s space (a no-op when
+    already there), else keep the natural basis.  Per-node minimal-complexity matches refine this.
+    """
+    want = _resolve_target(ctx, rep.space, target)
+    if want is None or _basis_eq(rep.basis, want):
+        return rep
+    return _coerce_rep_to_target(ctx, rep, want, note="cob:target-match")
+
+
 def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     """``⟦e⟧ ⇒ Rep`` — represent ``e``, given the desired output ``target`` basis (`41 §3`).
 
@@ -388,70 +422,71 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
         case T.Var():
             return _rep_var(e, ctx, target)
         case T.External():
-            return _rep_external(e, ctx)
+            return _rep_external(e, ctx, target)
         case T.Lit(v):
             return _rep_const(ctx, np.asarray(float(v)), S.Scalar(), B.scalar_basis(),
-                              note="lit:const")
+                              note="lit:const", target=target)
         case T.Zero(space):
             # B1: an omitted (None) space must be recovered by inference first.
-            return _rep_zeros(ctx, space if space is not None else _synth(e), note="zero:zeros")
+            return _rep_zeros(ctx, space if space is not None else _synth(e),
+                              note="zero:zeros", target=target)
         case T.Identity(space):
-            return _rep_identity(e, ctx)
+            return _rep_identity(e, ctx, target)
         case T.Scale(scalar, vector):
             return _rep_scale(e, scalar, vector, ctx, target)
         case T.Sum(vectors):
             return _rep_sum(e, vectors, ctx, target)
         case T.OPlusV(vectors):
-            return _rep_oplus(e, vectors, ctx)
+            return _rep_oplus(e, vectors, ctx, target)
         case T.OProdV(vectors):
-            return _rep_oprod(e, vectors, ctx)
+            return _rep_oprod(e, vectors, ctx, target)
         case T.Eval(f, positions, args):
-            return _rep_eval(e, f, positions, args, ctx)
+            return _rep_eval(e, f, positions, args, ctx, target)
         case T.NEval(f, positions, args):
-            return _rep_neval(e, f, positions, args, ctx)
+            return _rep_neval(e, f, positions, args, ctx, target)
         case T.Compose(f, positions, gs):
-            return _rep_compose(e, f, positions, gs, ctx)
+            return _rep_compose(e, f, positions, gs, ctx, target)
         case T.Trace(f, i, j):
-            return _rep_trace(e, f, i, j, ctx)
+            return _rep_trace(e, f, i, j, ctx, target)
         case T.Solve(f):
-            return _rep_solve(e, f, ctx)
+            return _rep_solve(e, f, ctx, target)
         case T.Pinv(f):
-            return _rep_pinv(e, f, ctx)
+            return _rep_pinv(e, f, ctx, target)
         case T.SolveApply(f, v):
-            return _rep_solve_apply(e, f, v, ctx)
+            return _rep_solve_apply(e, f, v, ctx, target)
         case T.PinvApply(f, v):
-            return _rep_pinv_apply(e, f, v, ctx)
+            return _rep_pinv_apply(e, f, v, ctx, target)
         case T.Dagger(f):
-            return _rep_dagger(e, f, ctx)
+            return _rep_dagger(e, f, ctx, target)
         case T.Inner(space):
-            return _rep_inner(e, space, ctx)
+            return _rep_inner(e, space, ctx, target)
         case T.Flat(space):
-            return _rep_flat(e, space, ctx)
+            return _rep_flat(e, space, ctx, target)
         case T.Sharp(space):
-            return _rep_sharp(e, space, ctx)
+            return _rep_sharp(e, space, ctx, target)
         case T.Project(vector, space):
             # B1: an omitted (None) target subspace is recovered by inference.
-            return _rep_project(e, vector, space if space is not None else _synth(e), ctx)
+            return _rep_project(e, vector, space if space is not None else _synth(e), ctx, target)
         case T.Embed(vector, space):
-            return _rep_embed(e, vector, space, ctx)
+            return _rep_embed(e, vector, space, ctx, target)
         case T.Assert(vector, space):
-            return _rep_assert(e, vector, space, ctx)
+            return _rep_assert(e, vector, space, ctx, target)
         case T.TupleEmbed(space, i):
-            return _rep_tuple_embed(e, space, i, ctx)
+            return _rep_tuple_embed(e, space, i, ctx, target)
         case T.TupleProject(space, i):
-            return _rep_tuple_project(e, space, i, ctx)
+            return _rep_tuple_project(e, space, i, ctx, target)
         case T.Remetric(vector, metric):
-            return _rep_remetric(e, vector, metric, ctx)
+            return _rep_remetric(e, vector, metric, ctx, target)
         case T.Permute():
-            return _rep_permute(e, ctx)
+            return _rep_permute(e, ctx, target)
         case T.Lift() | T.InvLift():
-            return _rep_lift(e, ctx)
+            return _rep_lift(e, ctx, target)
         case T.Kron(f, g):
-            return _rep_kron(e, f, g, ctx)
+            return _rep_kron(e, f, g, ctx, target)
         case T.LLam(vars_, body):
-            return _rep_llam(e, vars_, body, ctx)
+            return _rep_llam(e, vars_, body, ctx, target)
         case T.Lam():
-            return _rep_lam(e, ctx)
+            return _rep_lam(e, ctx, target)
         case _:
             raise RepresentError(f"represent: unsupported term {e!r}")
 
@@ -482,12 +517,20 @@ def _rep_var(e: T.Var, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> R
     if cached is not None:
         return cached
     space = _synth(e)
-    # An UNPINNED Var's input basis is the system's free choice, so we declare the input
-    # directly in the requested ``target`` (no cob needed — the simplest realization).  A
-    # ``basis_env`` pin always wins (the user fixed that input's basis); ``_rep``'s safety-net
-    # then cob's the pin → target if they differ.
-    want = None if e.uid in ctx.basis_env else _resolve_target(ctx, space, target)
-    basis = want if want is not None else _natural_basis(space, e, ctx)
+    # An UNPINNED Var's input basis is the system's free choice, so we declare the input directly
+    # in the requested ``target`` (no cob — the simplest realization).  A ``basis_env`` pin always
+    # wins (the user fixed that input's basis); ``_rep``'s safety-net then cob's pin → target.
+    # The three target cases (the shared ``_rep_X`` structure, realized here at the input):
+    if e.uid in ctx.basis_env:
+        basis = ctx.basis_env[e.uid]
+    else:
+        match target:
+            case B.TargetBasis.STD:                        # (1) declare the input in the standard basis
+                basis = _resolve_target(ctx, space, target) or _natural_basis(space, e, ctx)
+            case B.TargetBasis.AUTO:                        # (2) free choice — `41 §1b` min-sym
+                basis = _natural_basis(space, e, ctx)
+            case _:                                         # (3) a concrete basis — declare in it if it fits
+                basis = _resolve_target(ctx, space, target) or _natural_basis(space, e, ctx)
     shape = _shape_of_space_dyn(space, ctx)
     if _is_static(shape):
         arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
@@ -579,7 +622,9 @@ def _make_dynamic_ffs_input(
     return arr
 
 
-def _rep_external(e: T.External, ctx: _Ctx) -> Rep:
+def _rep_external(
+    e: T.External, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``External(s, data, args…)`` — a foreign elementwise numeric op (`41 §3`).
 
     The basic nonlinear scalar ops (``sqrt``/``abs``/``sign``/division/reciprocal — the
@@ -596,6 +641,7 @@ def _rep_external(e: T.External, ctx: _Ctx) -> Rep:
         # A bare External holding a numeric value/array (no foreign op): emit as a const.
         if not e.args:
             arr = _const(ctx, np.asarray(data, dtype=float), note="external:const")
+            # fast path; _rep's safety-net cob's to target
             return Rep(arr, default_basis(space), space)
         raise RepresentError(
             f"represent: External.data must be an ExternalOp to lower, got {data!r}"
@@ -623,27 +669,64 @@ def _rep_external(e: T.External, ctx: _Ctx) -> Rep:
         _ExternalOp(name=data.name, fn=data.fn), arrays,
         [pa.OutSpec("external", out_shape)], note=f"external:{data.name}",
     )
-    return Rep(out, out_basis, space)
+    rep = Rep(out, out_basis, space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _rep_const(
     ctx: _Ctx, data: np.ndarray, space: S.Space, basis: B.Basis, *, note: str,
+    target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     arr = _const(ctx, data, note=note)
-    return Rep(arr, basis, space)
+    rep = Rep(arr, basis, space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_zeros(ctx: _Ctx, space: S.Space, *, note: str) -> Rep:
+def _rep_zeros(
+    ctx: _Ctx, space: S.Space, *, note: str, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     shape = _shape_of_space(space)
     arr = _const(ctx, np.zeros(shape), note=note)
-    return Rep(arr, default_basis(space), space)
+    rep = Rep(arr, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_identity(e: T.Identity, ctx: _Ctx) -> Rep:
+def _rep_identity(
+    e: T.Identity, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     space = _synth(e)  # ~s * s
     n = _static_dim(e.space)
     arr = _const(ctx, np.eye(n), note="identity:eye")
-    return Rep(arr, default_basis(space), space)
+    rep = Rep(arr, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _rep_scale(
@@ -730,7 +813,10 @@ def _align_free_labels(
     return out
 
 
-def _rep_oplus(e: T.OPlusV, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
+def _rep_oplus(
+    e: T.OPlusV, vectors: tuple[T.Term, ...], ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     reps = [_rep(v, ctx) for v in vectors]
     space = _synth(e)
     basis = B.basis_sum(*(r.basis for r in reps))
@@ -738,10 +824,21 @@ def _rep_oplus(e: T.OPlusV, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
         _ConcatOp(), [r.array for r in reps],
         [pa.OutSpec("oplus", _shape_of_space(space))], note="oplus:concat",
     )
-    return Rep(out, basis, space)
+    rep = Rep(out, basis, space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_oprod(e: T.OProdV, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
+def _rep_oprod(
+    e: T.OProdV, vectors: tuple[T.Term, ...], ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``v1 * … * vn`` — the outer-product over the per-factor axes (`41 §3`).
 
     Each factor's *space* axes (a factor may itself be tensored, e.g. ``V⊗ᵏ``) get fresh
@@ -776,7 +873,15 @@ def _rep_oprod(e: T.OProdV, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
         pa.EinsumStmtOp(spec), [r.array for r in reps],
         [pa.OutSpec("oprod", out_shape)], note="oprod:outer-einsum",
     )
-    return Rep(out, basis, space, free_labels=free_labels)
+    rep = Rep(out, basis, space, free_labels=free_labels)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _dim_of_free(reps: list[Rep]) -> list[int]:
@@ -1746,6 +1851,7 @@ def _slot_basis_at(basis: B.Basis, pos: int) -> B.Basis | None:
 
 def _rep_eval(
     e: T.Eval, f: T.Term, positions: tuple[int, ...], args: tuple[T.Term, ...], ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Eval(f, pos, args)`` — contract ``f``'s dual slots ``pos`` with ``args`` (`41 §3`).
 
@@ -1829,7 +1935,15 @@ def _rep_eval(
         [pa.OutSpec("eval", out_shape)],
         note=f"eval:contract@{sorted(contracted)}",
     )
-    return Rep(out, basis, space, free_labels=out_free)
+    rep = Rep(out, basis, space, free_labels=out_free)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _fuse_arg_to_slot(
@@ -1870,6 +1984,7 @@ def _fuse_arg_to_slot(
 
 def _rep_compose(
     e: T.Compose, f: T.Term, positions: tuple[int, ...], gs: tuple[T.Term, ...], ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Compose(f, pos, gs)`` — chain each ``gₖ``'s codomain axis into ``f``'s slot.
 
@@ -1932,10 +2047,21 @@ def _rep_compose(
         [pa.OutSpec("compose", out_shape)],
         note=f"compose:contract@{sorted(replaced)}",
     )
-    return Rep(out, default_basis(space), space, free_labels=out_free)
+    rep = Rep(out, default_basis(space), space, free_labels=out_free)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_trace(e: T.Trace, f: T.Term, i: int, j: int, ctx: _Ctx) -> Rep:
+def _rep_trace(
+    e: T.Trace, f: T.Term, i: int, j: int, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Trace(f, i, j)`` — contract axes ``i`` and ``j`` (diagonal sum), `41 §3`."""
     f_rep = _rep(f, ctx)
     f_factors = _factors(f_rep.space)
@@ -1953,11 +2079,20 @@ def _rep_trace(e: T.Trace, f: T.Term, i: int, j: int, ctx: _Ctx) -> Rep:
         [pa.OutSpec("trace", _shape_of_space(space))],
         note=f"trace:contract@{i},{j}",
     )
-    return Rep(out, default_basis(space), space)
+    rep = Rep(out, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _rep_neval(
     e: T.NEval, f: T.Term, positions: tuple[int, ...], args: tuple[object, ...], ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``NEval(f, pos, args)`` — apply a ``Lam`` (`41 §3` "Lam → sub-Program").
 
@@ -1976,7 +2111,7 @@ def _rep_neval(
     term ``Var`` rather than a literal).  Both run to identical numbers.
     """
     if isinstance(f, T.Lam):
-        return _rep_neval_lam(e, f, positions, args, ctx)
+        return _rep_neval_lam(e, f, positions, args, ctx, target)
     # Non-literal callee (e.g. a Lam reached through a Var/other term): synth has already
     # resolved the result space; lower via the sub-Program seam if the callee reduces to a
     # Lam, else reject (no coordinate data for a bare Var-of-function).
@@ -1988,6 +2123,7 @@ def _rep_neval(
 
 def _rep_neval_lam(
     e: T.NEval, f: T.Lam, positions: tuple[int, ...], args: tuple[object, ...], ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """Lower ``NEval(Lam, pos, args)`` — sub-Program package + Stmt call (`41 §3`)."""
     if not T.is_term(f.body):
@@ -2029,7 +2165,15 @@ def _rep_neval_lam(
         [pa.OutSpec("neval", _shape_of_space(space))],
         note="neval:call-subprogram",
     )
-    return Rep(out, default_basis(space), space)
+    rep = Rep(out, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _build_lam_subprogram(
@@ -2079,7 +2223,9 @@ def _free_term_vars(node: object) -> list[T.Var]:
 # ---------------------------------------------------------------------------
 
 
-def _rep_solve(e: T.Solve, f: T.Term, ctx: _Ctx) -> Rep:
+def _rep_solve(
+    e: T.Solve, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     f_rep = _rep(f, ctx)
     _assert_square_full_rank(ctx, f_rep.array, note="assert:solve-bij")
     space = _synth(e)
@@ -2087,24 +2233,46 @@ def _rep_solve(e: T.Solve, f: T.Term, ctx: _Ctx) -> Rep:
         pa.InvOp(), [f_rep.array],
         [pa.OutSpec("inv", _shape_of_space(space))], note="solve:InvOp",
     )
-    return Rep(out, default_basis(space), space)
+    rep = Rep(out, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_pinv(e: T.Pinv, f: T.Term, ctx: _Ctx) -> Rep:
+def _rep_pinv(
+    e: T.Pinv, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     f_rep = _rep(f, ctx)
     space = _synth(e)
     metric = _map_metrics(f)
     if metric is not None:
         out = _gsvd_pinv_map(ctx, f_rep.array, *metric)
+        # fast path; _rep's safety-net cob's to target
         return Rep(out, default_basis(space), space)
     [out] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
         [pa.OutSpec("pinv", _shape_of_space(space))], note="pinv:PinvOp",
     )
-    return Rep(out, default_basis(space), space)
+    rep = Rep(out, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_solve_apply(e: T.SolveApply, f: T.Term, v: T.Term, ctx: _Ctx) -> Rep:
+def _rep_solve_apply(
+    e: T.SolveApply, f: T.Term, v: T.Term, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     f_rep = _rep(f, ctx)
     v_rep = _rep(v, ctx)
     _assert_square_full_rank(ctx, f_rep.array, note="assert:solveapply-bij")
@@ -2113,10 +2281,21 @@ def _rep_solve_apply(e: T.SolveApply, f: T.Term, v: T.Term, ctx: _Ctx) -> Rep:
         pa.SolveOp(), [f_rep.array, v_rep.array],
         [pa.OutSpec("solve", _shape_of_space(space))], note="solveapply:SolveOp",
     )
-    return Rep(out, default_basis(space), space)
+    rep = Rep(out, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_pinv_apply(e: T.PinvApply, f: T.Term, v: T.Term, ctx: _Ctx) -> Rep:
+def _rep_pinv_apply(
+    e: T.PinvApply, f: T.Term, v: T.Term, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     f_rep = _rep(f, ctx)
     v_rep = _rep(v, ctx)
     metric = _map_metrics(f)
@@ -2135,7 +2314,15 @@ def _rep_pinv_apply(e: T.PinvApply, f: T.Term, v: T.Term, ctx: _Ctx) -> Rep:
         pa.EinsumStmtOp("ab,a->b"), [fp, v_rep.array],
         [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
     )
-    return Rep(out, default_basis(space), space)
+    rep = Rep(out, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _map_metrics(f: T.Term) -> tuple[S.Space, S.Space] | None:
@@ -2189,7 +2376,9 @@ def _gsvd_pinv_map(
     return out
 
 
-def _rep_dagger(e: T.Dagger, f: T.Term, ctx: _Ctx) -> Rep:
+def _rep_dagger(
+    e: T.Dagger, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Dagger f`` — the metric adjoint ``f†`` (`41 §3`, `43 §2c`).
 
     The adjoint is defined by ``⟨f† y, x⟩_dom = ⟨y, f x⟩_cod``.  With ``f`` stored
@@ -2213,6 +2402,7 @@ def _rep_dagger(e: T.Dagger, f: T.Term, ctx: _Ctx) -> Rep:
             [pa.OutSpec("dagger", _transpose_shape(_shape_of(f_rep.array)))],
             note="dagger:transpose(identity-metric)",
         )
+        # fast path; _rep's safety-net cob's to target
         return Rep(out, default_basis(space), space)
     # Metric adjoint: f† = G_cod · fᵀ · G_dom⁻¹  (`43 §2c`).  The dom slot is the *dual*
     # (covariant) basis; peel one dual to the primal whose metric we materialize.
@@ -2234,7 +2424,15 @@ def _rep_dagger(e: T.Dagger, f: T.Term, ctx: _Ctx) -> Rep:
     )
     # Result f† : cod ⊸ dom — its slots are DualBasis(cod_primal) (covariant) and dom_primal.
     result_basis = B.basis_prod(B.dual_basis(cod_slot), dom_primal)
-    return Rep(out, result_basis, space)
+    rep = Rep(out, result_basis, space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _map_slot_bases(basis: B.Basis) -> tuple[B.Basis | None, B.Basis | None]:
@@ -2260,7 +2458,8 @@ def _peel_one_dual(basis: B.Basis | None) -> B.Basis | None:
 
 
 def _rep_inner(
-    e: T.Inner, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None,
+    e: T.Inner, space: S.Space, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO, *, basis: B.Basis | None = None,
 ) -> Rep:
     """``Inner(s)`` — the metric map ``s⊗s ⊸ R``; identity-metric default ⇒ ``G_s = I``.
 
@@ -2272,7 +2471,15 @@ def _rep_inner(
     n = _dyn_dim(space, ctx)  # int (static) or DimAtom δ_f (generic FFS rank)
     g = _metric_matrix(ctx, space, n, note="metric:Inner", basis=basis)
     map_space = _synth(e)
-    return Rep(g, _inner_map_basis(map_space, basis), map_space)
+    rep = Rep(g, _inner_map_basis(map_space, basis), map_space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _inner_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
@@ -2288,7 +2495,10 @@ def _inner_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
     return B.basis_prod(*(B.dual_basis(basis) for _ in map_space.spaces))
 
 
-def _rep_flat(e: T.Flat, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None) -> Rep:
+def _rep_flat(
+    e: T.Flat, space: S.Space, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO, *, basis: B.Basis | None = None,
+) -> Rep:
     """``Flat s`` — ``G_s`` (s ⊸ s*), identity-metric default ⇒ identity (`41 §3`).
 
     ``Flat`` and ``Inner`` are the SAME matrix ``G_s`` (a ``s*⊗s*`` form), so the result
@@ -2300,10 +2510,21 @@ def _rep_flat(e: T.Flat, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = N
     n = _dyn_dim(space, ctx)
     g = _metric_matrix(ctx, space, n, note="metric:Flat=G_s", basis=basis)
     map_space = _synth(e)
-    return Rep(g, _inner_map_basis(map_space, basis), map_space)
+    rep = Rep(g, _inner_map_basis(map_space, basis), map_space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_sharp(e: T.Sharp, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None = None) -> Rep:
+def _rep_sharp(
+    e: T.Sharp, space: S.Space, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO, *, basis: B.Basis | None = None,
+) -> Rep:
     """``Sharp s`` — ``InvOp(G_s)`` (s* ⊸ s), identity-metric default ⇒ identity.
 
     ``basis`` (from the ``Eval`` site) is the operand *covector*'s basis — the **dual** of
@@ -2321,7 +2542,15 @@ def _rep_sharp(e: T.Sharp, space: S.Space, ctx: _Ctx, *, basis: B.Basis | None =
         pa.InvOp(), [g], [pa.OutSpec("sharp", (n, n))], note="sharp:InvOp(G_s)",
     )
     map_space = _synth(e)
-    return Rep(out, _sharp_map_basis(map_space, basis), map_space)
+    rep = Rep(out, _sharp_map_basis(map_space, basis), map_space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _sharp_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
@@ -2342,7 +2571,10 @@ def _sharp_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
 # ---------------------------------------------------------------------------
 
 
-def _rep_project(e: T.Project, vector: T.Term, sub: S.Space, ctx: _Ctx) -> Rep:
+def _rep_project(
+    e: T.Project, vector: T.Term, sub: S.Space, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``project(v, s')`` — select the sub-block via the sub-space's basis (`41 §3`).
 
     Drop the complement coordinates: with the sub-basis ``P`` (columns = sub vectors in
@@ -2357,10 +2589,21 @@ def _rep_project(e: T.Project, vector: T.Term, sub: S.Space, ctx: _Ctx) -> Rep:
         [pa.OutSpec("project", (out_dim,))],
         note="project:drop-complement",
     )
-    return Rep(out, sub_basis, sub)
+    rep = Rep(out, sub_basis, sub)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_embed(e: T.Embed, vector: T.Term, big: S.Space, ctx: _Ctx) -> Rep:
+def _rep_embed(
+    e: T.Embed, vector: T.Term, big: S.Space, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``embed(v, s)`` — pad ``⟦v⟧`` into the ambient via the sub-basis (`41 §3`).
 
     The padded value is laid out over the ambient space's axes (``V⊗ᵏ`` ⇒ ``(n,…,n)``),
@@ -2381,14 +2624,26 @@ def _rep_embed(e: T.Embed, vector: T.Term, big: S.Space, ctx: _Ctx) -> Rep:
         [pa.OutSpec("embed", big_shape)],
         note="embed:pad-zeros",
     )
-    return Rep(out, default_basis(big), big)
+    rep = Rep(out, default_basis(big), big)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_assert(e: T.Assert, vector: T.Term, space: S.Space, ctx: _Ctx) -> Rep:
+def _rep_assert(
+    e: T.Assert, vector: T.Term, space: S.Space, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Assert(v, s')`` — pass ⟦v⟧ through (+ a shape assert if not statically equal)."""
     v_rep = _rep(vector, ctx)
     try:
         if dim_of(space) == dim_of(v_rep.space):
+            # fast path; _rep's safety-net cob's to target
             return Rep(v_rep.array, v_rep.basis, space)
     except DynamicDim:
         pass
@@ -2396,10 +2651,21 @@ def _rep_assert(e: T.Assert, vector: T.Term, space: S.Space, ctx: _Ctx) -> Rep:
         _IdentityArrOp(), [v_rep.array],
         [pa.OutSpec("assert", _shape_of(v_rep.array))], note="assert:space-equiv",
     )
-    return Rep(out, v_rep.basis, space)
+    rep = Rep(out, v_rep.basis, space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_tuple_embed(e: T.TupleEmbed, space: S.Space, i: int, ctx: _Ctx) -> Rep:
+def _rep_tuple_embed(
+    e: T.TupleEmbed, space: S.Space, i: int, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``TupleEmbed(s, i)`` — inject the i-th ⊕ block (pad), as a map block_i ⊸ s."""
     if not isinstance(space, S.OPlus):
         raise RepresentError(f"TupleEmbed: space must be ⊕, got {space!r}")
@@ -2411,10 +2677,21 @@ def _rep_tuple_embed(e: T.TupleEmbed, space: S.Space, i: int, ctx: _Ctx) -> Rep:
     M = np.zeros((bi, total))
     M[:, offsets[i]:offsets[i] + bi] = np.eye(bi)
     arr = _const(ctx, M, note=f"tuple-embed:inject@{i}")
-    return Rep(arr, default_basis(_synth(e)), _synth(e))
+    rep = Rep(arr, default_basis(_synth(e)), _synth(e))
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_tuple_project(e: T.TupleProject, space: S.Space, i: int, ctx: _Ctx) -> Rep:
+def _rep_tuple_project(
+    e: T.TupleProject, space: S.Space, i: int, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``TupleProject(s, i)`` — slice the i-th ⊕ block, as a map s ⊸ block_i."""
     if not isinstance(space, S.OPlus):
         raise RepresentError(f"TupleProject: space must be ⊕, got {space!r}")
@@ -2426,19 +2703,40 @@ def _rep_tuple_project(e: T.TupleProject, space: S.Space, i: int, ctx: _Ctx) -> 
     M = np.zeros((total, bi))
     M[offsets[i]:offsets[i] + bi, :] = np.eye(bi)
     arr = _const(ctx, M, note=f"tuple-project:slice@{i}")
-    return Rep(arr, default_basis(_synth(e)), _synth(e))
+    rep = Rep(arr, default_basis(_synth(e)), _synth(e))
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_remetric(e: T.Remetric, vector: T.Term, metric: object, ctx: _Ctx) -> Rep:
+def _rep_remetric(
+    e: T.Remetric, vector: T.Term, metric: object, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Remetric(v, g)`` — same coords, metric metadata swapped (+ SPD assert) (`41 §3`)."""
     v_rep = _rep(vector, ctx)
     space = _synth(e)  # WithInner(s, g)
     # No coordinate change; the metric is carried by the space. SPD is asserted when the
     # metric is later materialized (Inner/Flat/Sharp/dot); v1 keeps coords unchanged.
-    return Rep(v_rep.array, default_basis(space), space)
+    rep = Rep(v_rep.array, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_permute(e: T.Permute, ctx: _Ctx) -> Rep:
+def _rep_permute(
+    e: T.Permute, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Permute(v, perm)`` — reorder the space axes by ``perm`` (an einsum transpose).
 
     Free (basis-index / seed) labels trail the space axes and ride through untouched."""
@@ -2457,10 +2755,20 @@ def _rep_permute(e: T.Permute, ctx: _Ctx) -> Rep:
         pa.EinsumStmtOp(spec), [v_rep.array],
         [pa.OutSpec("permute", out_shape)], note=f"permute:{perm}",
     )
-    return Rep(out, default_basis(space), space, free_labels=free)
+    rep = Rep(out, default_basis(space), space, free_labels=free)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_lift(e: T.Lift | T.InvLift, ctx: _Ctx) -> Rep:
+def _rep_lift(
+    e: T.Lift | T.InvLift, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Lift``/``InvLift`` — fuse/unfuse the listed axes via reshape (`41 §3`)."""
     v_rep = _rep(e.vector, ctx)
     space = _synth(e)
@@ -2470,10 +2778,21 @@ def _rep_lift(e: T.Lift | T.InvLift, ctx: _Ctx) -> Rep:
         [pa.OutSpec("lift", out_shape)],
         note=("lift:reshape-fuse" if isinstance(e, T.Lift) else "invlift:reshape-unfuse"),
     )
-    return Rep(out, default_basis(space), space)
+    rep = Rep(out, default_basis(space), space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
-def _rep_kron(e: T.Kron, f: T.Term, g: T.Term, ctx: _Ctx) -> Rep:
+def _rep_kron(
+    e: T.Kron, f: T.Term, g: T.Term, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Kron(f, g)`` — the (a0⊗a1)→(b0⊗b1) block tensor via einsum (`41 §3`)."""
     f_rep = _rep(f, ctx)
     g_rep = _rep(g, ctx)
@@ -2488,7 +2807,15 @@ def _rep_kron(e: T.Kron, f: T.Term, g: T.Term, ctx: _Ctx) -> Rep:
         [f_rep.array, g_rep.array],
         [pa.OutSpec("kron", _shape_of_space(space) + free_dims)], note="kron:block-einsum",
     )
-    return Rep(out, default_basis(space), space, free_labels=out_free)
+    rep = Rep(out, default_basis(space), space, free_labels=out_free)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 # ---------------------------------------------------------------------------
@@ -2496,7 +2823,10 @@ def _rep_kron(e: T.Kron, f: T.Term, g: T.Term, ctx: _Ctx) -> Rep:
 # ---------------------------------------------------------------------------
 
 
-def _rep_llam(e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx) -> Rep:
+def _rep_llam(
+    e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``LLam([xᵢ:sᵢ]. e)`` — the map's coordinate tensor (`41 §3`/`§7`).
 
     Each linear var is bound to the standard basis of its space as a Program input; the
@@ -2532,7 +2862,15 @@ def _rep_llam(e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx) -> R
     for uid in bound:
         ctx.inputs.pop(uid, None)
     ctx._free_label_next = saved_next
-    return Rep(body_rep.array, default_basis(space), space, free_labels="")
+    rep = Rep(body_rep.array, default_basis(space), space, free_labels="")
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 # Free (basis-index) einsum labels live in a pool disjoint from the lowercase space labels
@@ -2557,7 +2895,9 @@ def _free_label(idx: int) -> str:
     return _FREE_LABEL_POOL[idx]
 
 
-def _rep_lam(e: T.Lam, ctx: _Ctx) -> Rep:
+def _rep_lam(
+    e: T.Lam, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``Lam([bᵢ:σᵢ]. e)`` — body-polymorphic binder.
 
     For the substrate (`41 §3`/`§7`) a ``Lam`` over value/space domains is lowered by
@@ -2574,7 +2914,17 @@ def _rep_lam(e: T.Lam, ctx: _Ctx) -> Rep:
     for v in e.term_vars:
         if v.uid not in ctx.inputs:
             ctx.inputs[v.uid] = _rep_var(v, ctx)
-    return _rep(body, ctx)
+    # Pure pass-through of a single same-space body: realize it directly in ``target``
+    # (the epilogue below is then a no-op, but kept for the visible structure).
+    rep = _rep(body, ctx, target)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 # ===========================================================================
