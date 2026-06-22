@@ -1912,7 +1912,32 @@ def _rep_eval(
     # We therefore lower the args FIRST, read their basis, and lower the metric ``f`` in it.
     # Scoped strictly to a metric ``f`` with a non-orthonormal operand basis — every other
     # ``Eval`` keeps the original f-first order and is byte-identical (`41 §3`).
-    f_rep, arg_reps = _rep_eval_operands(f, args, ctx)
+    space = _synth(e)
+    # (push-down) Steer f's slots so the Eval is born directly in ``want`` (no result cob):
+    # surviving slots ← ``want``'s components, contracted slots ← dual(arg basis) (natural pairing).
+    # Scoped to a NON-METRIC ``f`` (the metric path builds its Gram in the operand basis and tags
+    # its result ``default_basis`` — basis tags are honest only for non-metric ``f``).  Any complex
+    # shape (metric f / free labels / fused slot / non-structural want / non-plain f-space / a
+    # cob/component type error) returns ``None`` from ``_eval_operand_target`` ⇒ the natural realize
+    # + bail below (always correct — a missed steer is fine; a wrong steer is not).
+    steered = False
+    want = _resolve_target(ctx, space, target)
+    can_steer = want is not None and _metric_node_kind(f) is None and isinstance(_synth(f), S.OProd)
+    if can_steer:
+        arg_reps = [_rep(a, ctx) for a in args]
+        f_target = _eval_operand_target(ctx, want, _synth(f), positions, arg_reps)
+        if f_target is not None:
+            f_rep = _rep(f, ctx, f_target)
+            # f must realize honestly in f_target (so the surviving slots really are want's
+            # components) and carry no free labels (a differentiated map breaks the pairing).
+            if not f_rep.free_labels and _basis_eq(f_rep.basis, f_target):
+                steered = True
+        if not steered:
+            # Steering backed off after lowering the args — reuse them, lower f naturally
+            # (non-metric ⇒ args already emitted once; just lower f, no duplicate emission).
+            f_rep = _rep(f, ctx)
+    else:
+        f_rep, arg_reps = _rep_eval_operands(f, args, ctx)
     f_factors = _factors(f_rep.space)
     # A metric ``f`` is reconciled inside ``_rep_eval_operands`` (built in the operand basis);
     # a non-metric ``f`` contracts raw indices, so its slot must be the dual of the operand
@@ -1975,7 +2000,6 @@ def _rep_eval(
     out_labels = surviving_f + out_free
     spec = ",".join(["".join(f_labels) + f_free, *arg_label_lists]) + "->" + out_labels
 
-    space = _synth(e)
     basis = _result_basis_from_factors(f_rep.basis, contracted, space)
     out_shape = tuple(dim_of_label[lab] for lab in out_labels)
     [out] = ctx.prog.emit_stmt(
@@ -1984,6 +2008,8 @@ def _rep_eval(
         note=f"eval:contract@{sorted(contracted)}",
     )
     rep = Rep(out, basis, space, free_labels=out_free)
+    if steered:
+        return rep  # f was steered so the surviving slots are already `want` — no result cob
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2038,9 +2064,32 @@ def _rep_compose(
 
     Realized as one deferred einsum (chained contraction), `41 §3`.
     """
-    f_rep = _rep(f, ctx)
+    space = _synth(e)
+    # (push-down) Steer f's surviving slots + each g's domain into ``want``'s components and each
+    # g's codomain into the natural-pairing dual of f's contracted slot, so the Compose is born
+    # directly in ``want`` (no result cob).  ``None`` ⇒ keep the natural realize + bail.  Backs off
+    # for free labels (a differentiated f/g) — the basis tags would not be honest.
+    steered = False
+    want = _resolve_target(ctx, space, target)
+    tgts = (
+        _compose_operand_targets(ctx, want, _synth(f), positions, gs)
+        if want is not None and isinstance(_synth(f), S.OProd) else None
+    )
+    if tgts is not None:
+        f_target, g_targets = tgts
+        f_rep = _rep(f, ctx, f_target)
+        g_reps = [_rep(g, ctx, gt) for g, gt in zip(gs, g_targets, strict=True)]
+        # Steer only when every operand realized HONESTLY in its target with no free labels; else
+        # the operands keep their (honest) actual bases and the natural-tag + bail path runs.
+        steered = (
+            not f_rep.free_labels and _basis_eq(f_rep.basis, f_target)
+            and all(not g.free_labels and _basis_eq(g.basis, gt)
+                    for g, gt in zip(g_reps, g_targets, strict=True))
+        )
+    else:
+        f_rep = _rep(f, ctx)
+        g_reps = [_rep(g, ctx) for g in gs]
     f_factors = _factors(f_rep.space)
-    g_reps = [_rep(g, ctx) for g in gs]
 
     f_labels = [chr(ord("a") + k) for k in range(len(f_factors))]
     dim_of_label: dict[str, int] = {}
@@ -2090,7 +2139,6 @@ def _rep_compose(
     )
     spec = ",".join(["".join(f_labels) + f_free, *g_label_lists]) + "->" + out_labels + out_free
 
-    space = _synth(e)
     out_shape = _shape_of_space(space) + tuple(dim_of_label[lab] for lab in out_free)
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), operands,
@@ -2101,6 +2149,8 @@ def _rep_compose(
     # surviving slot basis, or — where ``g`` replaced it — that g's domain-slot (axis-0) basis.
     result_basis = _compose_result_basis(f_rep.basis, replaced_g, len(f_factors), space)
     rep = Rep(out, result_basis, space, free_labels=out_free)
+    if steered:
+        return rep  # operands steered so the result is born in `want` — no result cob
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -3207,6 +3257,86 @@ def _trace_result_basis(
     if not kept:  # fully traced ⇒ Scalar (basis-invariant; any cob is the identity)
         return default_basis(space)
     return _basis_from_factors(kept, space)
+
+
+def _compose_operand_targets(
+    ctx: _Ctx, want: B.Basis | None, f_space: S.Space,
+    positions: tuple[int, ...], gs: tuple[T.Term, ...],
+) -> tuple[B.Basis, list[B.Basis]] | None:
+    """The ``(f_target, [g_targets])`` so ``Compose(f, pos, gs)`` lands directly in ``want``.
+
+    Inverts ``_compose_result_basis``: output slot ``k`` is f's surviving slot, or — where ``gₖ``
+    replaced it — ``gₖ``'s domain (axis-0) slot.  Steer f's surviving slots ← ``want``'s comps; each
+    contracted f-slot ``pos`` ← ``default_basis`` of that factor (internal, never surfaces); each
+    ``gₖ`` ← ``BasisProd(want[pos], dual(default_basis(f-factor[pos])))`` so its domain lands in
+    ``want[pos]`` and its codomain is the natural-pairing dual of f's slot (``_reconcile_compose_g``
+    is then a no-op).  ``None`` (⇒ keep the natural realize + bail) when no clean structural steer
+    exists.  Conservative: every gₖ must be a 2-factor map; any mismatch / type error backs off.
+    """
+    if want is None:
+        return None
+    fac = _factors(f_space)
+    n = len(fac)
+    if any(p >= n for p in positions):
+        return None
+    comps = _basis_factors(want, n)
+    if comps is None:
+        return None
+    try:
+        f_slots: list[B.Basis] = list(comps)  # surviving slots = want's comps
+        g_targets: list[B.Basis] = []
+        for pos, g in zip(positions, gs, strict=True):
+            f_slot = default_basis(fac[pos])  # contracted (internal) — never surfaces
+            cod = _pairing_partner(f_slot)  # g's codomain = natural-pairing dual of f's slot
+            f_slots[pos] = f_slot
+            g_space = _synth(g)
+            if not isinstance(g_space, S.OProd) or len(_factors(g_space)) != 2:
+                return None
+            g_targets.append(B.basis_prod(comps[pos], cod))
+    except (S.SpaceError, TypeError):
+        return None
+    return _basis_from_factors(f_slots, f_space), g_targets
+
+
+def _eval_operand_target(
+    ctx: _Ctx, want: B.Basis | None, f_space: S.Space,
+    positions: tuple[int, ...], arg_reps: list[Rep],
+) -> B.Basis | None:
+    """The operand basis to realize ``f`` in so ``Eval(f, pos, args)`` lands directly in ``want``.
+
+    Inverts ``_result_basis_from_factors`` (result = f's surviving, non-contracted slots): place
+    ``want``'s components at the surviving slots (in order) and the **dual of each arg's basis** at
+    the contracted slots (so the natural pairing holds — ``_reconcile_pairing`` is a no-op).  Returns
+    ``None`` (⇒ keep the natural realize + bail) when no clean steer exists — see the BACK-OFF list
+    in :func:`_rep_eval`.  Conservative: any structural mismatch / fused slot / free label backs off.
+    """
+    if want is None:
+        return None
+    fac = _factors(f_space)
+    n = len(fac)
+    contracted = set(positions)
+    if any(p >= n for p in contracted):
+        return None
+    survivors = [k for k in range(n) if k not in contracted]
+    comps = _basis_factors(want, len(survivors))
+    if comps is None:
+        return None
+    # BACK OFF if any arg carries free labels, or presents its value over >1 space axis (a fused
+    # slot would fire — steering only the clean common shape) — these break the natural pairing.
+    for arg_rep in arg_reps:
+        if arg_rep.free_labels:
+            return None
+        if len(_shape_of(arg_rep.array)) - len(arg_rep.free_labels) > 1:
+            return None
+    slots: list[B.Basis] = [want] * n  # placeholder; every position overwritten below
+    for pos, b in zip(survivors, comps):
+        slots[pos] = b
+    try:
+        for pos, arg_rep in zip(positions, arg_reps, strict=True):
+            slots[pos] = B.dual_basis(arg_rep.basis)
+    except (S.SpaceError, TypeError):
+        return None
+    return _basis_from_factors(slots, f_space)
 
 
 def _trace_operand_target(
