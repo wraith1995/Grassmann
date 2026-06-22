@@ -333,3 +333,30 @@ def test_tuple_embed_project_auto_byte_identical():
         for node in (C.tuple_embed(sp, i), C.tuple_project(sp, i)):
             assert _nstmt(represent(node)) == _nstmt(represent(node, target=B.AUTO))
             assert _nstmt(represent(node, target=B.STD)) == _nstmt(represent(node, target=B.AUTO))
+
+
+def test_external_equivariant_pushes_target_into_operands():
+    """An EQUIVARIANT external (commutes with cob) pushes a concrete/STD target into its operands so
+    the elementwise result is born in `want` — no post-cob.  STANDARD kernels are unaffected."""
+    from grassmann.lower.represent import BasisReq, ExternalOp
+
+    V = C.base("V", 3)
+    neg = ExternalOp(name="neg", fn=np.negative, basis_req=BasisReq.EQUIVARIANT)
+    v = C.var("v", V)
+    t = C.external(V, neg, v)
+    vc = np.array([1.0, 2, 3])
+    a = [C.var(f"e{i}", V) for i in range(3)]
+    lb = B.list_basis(*a)
+    Am = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
+    frame = {f"e{i}_{a[i].uid}": Am[:, i] for i in range(3)}
+    # two-route: operand pinned to lb (fed lb-coords) + STD == operand std (fed vc) + STD == -vc
+    ref = _run(represent(t, basis_env={v.uid: default_basis(V)}, target=B.STD), {_vk(v): vc})
+    got = _run(represent(t, basis_env={v.uid: lb}, target=B.STD),
+               {**frame, _vk(v): np.linalg.solve(Am, vc)})
+    assert np.allclose(ref, -vc) and np.allclose(got, -vc)
+    # steered into a concrete target with a default (leaf) operand ⇒ no result cob
+    assert _no_target_cob(represent(t, basis_env={v.uid: default_basis(V)}, target=lb))
+    # AUTO byte-identical; a STANDARD kernel is unchanged
+    assert _nstmt(represent(t)) == _nstmt(represent(t, target=B.AUTO))
+    sq = ExternalOp(name="sqrt", fn=np.sqrt, basis_req=BasisReq.STANDARD)
+    assert np.allclose(_run(represent(C.external(V, sq, v), target=B.STD), {_vk(v): vc}), np.sqrt(vc))

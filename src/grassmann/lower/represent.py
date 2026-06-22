@@ -675,21 +675,32 @@ def _rep_external(
         raise RepresentError(
             f"represent: External.data must be an ExternalOp to lower, got {data!r}"
         )
-    arg_reps = [_rep(a, ctx) for a in e.args]
-    # The kernel's basis contract (`71 §2`): STANDARD forces the operands to standard
-    # coords (a numeric cob; identity for scalar/standard operands ⇒ byte-identical to
-    # before) and labels the result standard honestly; EQUIVARIANT applies in the
-    # arriving basis and carries that basis through.
+    # The kernel's basis contract (`71 §2`): STANDARD forces the operands to standard coords (a
+    # numeric cob; identity for scalar/standard operands ⇒ byte-identical to before) and labels the
+    # result standard honestly; EQUIVARIANT *commutes with cob*, so it applies in the arriving basis
+    # and carries that basis through — and a concrete/STD target can be PUSHED into the operands
+    # (build them in `want`, the elementwise result is born in `want`, no post-cob).
     req = getattr(data, "basis_req", BasisReq.STANDARD)
+    steered = False
     if req is BasisReq.STANDARD:
+        arg_reps = [_rep(a, ctx) for a in e.args]
         arrays = [
             _coerce_basis(ctx, r, default_basis(r.space), note=f"external:{data.name}:cob-std")
             for r in arg_reps
         ]
         out_basis = default_basis(space)
-    else:  # EQUIVARIANT
+    else:  # EQUIVARIANT — commutes with cob
+        want = _resolve_target(ctx, space, target)
+        # push-down only when `want` is a valid basis of EVERY operand's (elementwise) space
+        if want is not None and e.args and all(
+            _resolve_target(ctx, _synth(a), target) is not None for a in e.args
+        ):
+            arg_reps = [_rep(a, ctx, target) for a in e.args]
+            out_basis, steered = want, True
+        else:
+            arg_reps = [_rep(a, ctx) for a in e.args]
+            out_basis = arg_reps[0].basis if arg_reps else default_basis(space)
         arrays = [r.array for r in arg_reps]
-        out_basis = arg_reps[0].basis if arg_reps else default_basis(space)
     # Elementwise over matching-shaped operands (scalar args ⇒ scalar result).
     out_shape = _shape_of(arrays[0]) if arrays else _shape_of_space(space)
     for a in arrays[1:]:
@@ -699,6 +710,8 @@ def _rep_external(
         [pa.OutSpec("external", out_shape)], note=f"external:{data.name}",
     )
     rep = Rep(out, out_basis, space)
+    if steered:
+        return rep  # built directly in `want`
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
