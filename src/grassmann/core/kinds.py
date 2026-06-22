@@ -35,6 +35,10 @@ class Sort:
 
     name: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str):
+            raise KindError(f"Sort.name: expected a str, got {self.name!r}")
+
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return f"Sort({self.name!r})"
 

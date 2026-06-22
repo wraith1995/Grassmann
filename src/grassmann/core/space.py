@@ -75,6 +75,10 @@ class DimVar:
 
     name: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str):
+            raise SpaceError(f"DimVar.name: expected a str, got {self.name!r}")
+
     def __repr__(self) -> str:
         return f"DimVar({self.name!r})"
 
@@ -240,6 +244,10 @@ class SVar:
     """A space variable, bound by a ``Lam`` over the sort ``space`` (`20 §5`)."""
 
     name: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str):
+            raise SpaceError(f"SVar.name: expected a str, got {self.name!r}")
 
     def __repr__(self) -> str:
         return f"SVar({self.name!r})"
@@ -430,6 +438,12 @@ class SpaceMeta:
 
     uid: int = field(default_factory=lambda: next(_meta_counter))
     hint: str = "α"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.uid, int):
+            raise SpaceError(f"SpaceMeta.uid: expected an int, got {self.uid!r}")
+        if not isinstance(self.hint, str):
+            raise SpaceError(f"SpaceMeta.hint: expected a str, got {self.hint!r}")
 
     def __repr__(self) -> str:
         return f"?{self.hint}{self.uid}"

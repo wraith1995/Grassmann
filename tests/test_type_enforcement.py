@@ -30,7 +30,7 @@ from grassmann.core.basis import (
     ScalarBasis,
     WithInnerBasis,
 )
-from grassmann.core.kinds import NAT
+from grassmann.core.kinds import NAT, Sort
 from grassmann.core.space import (
     App,
     DimAtomRef,
@@ -40,10 +40,13 @@ from grassmann.core.space import (
     DimOf,
     DimProd,
     DimSum,
+    DimVar,
     Img,
     Ker,
     Scalar,
     SpaceError,
+    SpaceMeta,
+    SVar,
     WithInner,
 )
 from grassmann.core.term import (
@@ -231,3 +234,37 @@ class TestKindEnforcement:
         with pytest.raises(KindError):
             SpaceSort(object())
         assert hash(SpaceSort(S)) is not None  # a valid Space binder domain is hashable
+
+
+class TestPrimitiveNameEnforcement:
+    """Tier-3 primitive name/id fields — a raw array as a ``name``/``uid`` would also make the
+    node unhashable, so they are guarded too (closing the last residual of the audit)."""
+
+    def test_svar_name_must_be_str(self):
+        with pytest.raises(SpaceError):
+            SVar(ARR)
+        assert hash(SVar("a")) is not None
+
+    def test_dimvar_name_must_be_str(self):
+        with pytest.raises(SpaceError):
+            DimVar(ARR)
+        assert hash(DimVar("n")) is not None
+
+    def test_spacemeta_uid_and_hint_types(self):
+        with pytest.raises(SpaceError):
+            SpaceMeta(uid=ARR)
+        with pytest.raises(SpaceError):
+            SpaceMeta(uid=0, hint=ARR)
+        assert hash(SpaceMeta(uid=0, hint="α")) is not None
+
+    def test_bvar_name_must_be_str(self):
+        with pytest.raises(BasisError):
+            BVar(ARR)
+        assert hash(BVar("β")) is not None
+
+    def test_sort_name_must_be_str(self):
+        from grassmann.core.kinds import KindError
+
+        with pytest.raises(KindError):
+            Sort(ARR)
+        assert hash(Sort("space")) is not None
