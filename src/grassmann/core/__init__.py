@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from . import basis, kinds, props, space, term, types
 from .basis import (
+    AUTO,
+    STD,
     BApp,
     Basis,
     BasisError,
@@ -27,6 +29,7 @@ from .basis import (
     ProjectedBasis,
     Reduce,
     ScalarBasis,
+    TargetBasis,
     WithInnerBasis,
     bapp,
     basis_prod,

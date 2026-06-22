@@ -54,6 +54,30 @@ class Reduce(Enum):
     ORTHONORMALIZE = "orthonormalize"
 
 
+class TargetBasis(Enum):
+    """A *policy* for the basis ``represent``/``_rep`` lower a node into (not a basis node).
+
+    Used as the ``target`` of :func:`grassmann.lower.represent` (and ``_rep``) alongside a
+    concrete :class:`Basis`:
+
+    * ``AUTO`` — free choice by the underlying system: each space keeps its natural basis
+      (a ``basis_env`` pin, else the `41 §1b` ★ min-symbolic ``choose``).  The default.
+    * ``STD`` — the standard orthonormal basis of each space (``default_basis(space)``),
+      propagated through the whole recursion so every node is expressed in it.
+
+    A concrete :class:`Basis` target (not this enum) names the *result*'s basis directly.
+    """
+
+    AUTO = "auto"
+    STD = "std"
+
+
+#: Free choice by the system (natural / min-symbolic basis) — the ``represent`` default.
+AUTO = TargetBasis.AUTO
+#: Standard orthonormal basis of each space, propagated through the recursion.
+STD = TargetBasis.STD
+
+
 class BasisError(Exception):
     """Raised when a Basis is structurally malformed."""
 
