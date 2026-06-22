@@ -418,6 +418,27 @@ def _match_result(ctx: _Ctx, rep: Rep, target: B.TargetBasis | B.Basis) -> Rep:
     return _coerce_rep_to_target(ctx, rep, want, note="cob:target-match")
 
 
+def _split_target_components(want: B.Basis | None, n: int) -> list[B.Basis] | None:
+    """The ``n`` per-component sub-bases of a *structured* ``want`` (else ``None``) — the (B) arm
+    of the `41 §2.3` match decomposition (mirrors ``_cob_from_sum``/``_prod``/``_rep``'s arity logic).
+
+    ``BasisProd``/``BasisSum`` of arity ``n`` ⇒ their component bases; ``BasisRep(c, inner)`` whose
+    count statically folds to ``n`` ⇒ ``[inner]·n``.  A node that decomposes per component (``OProdV``
+    splits a ``BasisProd`` target, ``OPlusV`` a ``BasisSum``/``BasisRep``) builds each operand in its
+    sub-target directly, so the assembled result lands in ``want`` with NO conversion cob.
+    """
+    match want:
+        case B.BasisProd(bs) | B.BasisSum(bs) if len(bs) == n:
+            return list(bs)
+        case B.BasisRep(c, inner):
+            try:
+                if _count_int(c) == n:
+                    return [inner] * n
+            except DynamicDim:
+                return None
+    return None
+
+
 def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     """``⟦e⟧ ⇒ Rep`` — represent ``e``, given the desired output ``target`` basis (`41 §3`).
 
@@ -709,15 +730,9 @@ def _rep_zeros(
 ) -> Rep:
     shape = _shape_of_space(space)
     arr = _const(ctx, np.zeros(shape), note=note)
-    rep = Rep(arr, default_basis(space), space)
-    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
-    match target:
-        case B.TargetBasis.STD:
-            return _std_result(ctx, rep)
-        case B.TargetBasis.AUTO:
-            return rep
-        case _:
-            return _match_result(ctx, rep, target)
+    # (A) the zero vector is zero in EVERY basis — realize directly in the target, no cob.
+    want = _resolve_target(ctx, space, target)
+    return Rep(arr, want if want is not None else default_basis(space), space)
 
 
 def _rep_identity(
@@ -726,6 +741,16 @@ def _rep_identity(
     space = _synth(e)  # ~s * s
     n = _static_dim(e.space)
     arr = _const(ctx, np.eye(n), note="identity:eye")
+    # (A) the identity matrix is δ (eye) in ANY same-basis endo pair `BasisProd(Dual(b), b)`
+    # (the two cobs cancel) — realize directly in such a target, no similarity cob.
+    want = _resolve_target(ctx, space, target)
+    if (
+        isinstance(want, B.BasisProd)
+        and len(want.bases) == 2
+        and isinstance(want.bases[0], B.DualBasis)
+        and _basis_eq(want.bases[0].basis, want.bases[1])
+    ):
+        return Rep(arr, want, space)
     rep = Rep(arr, default_basis(space), space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
@@ -825,14 +850,21 @@ def _rep_oplus(
     e: T.OPlusV, vectors: tuple[T.Term, ...], ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    reps = [_rep(v, ctx) for v in vectors]
     space = _synth(e)
-    basis = B.basis_sum(*(r.basis for r in reps))
+    # (B) structural split: a BasisSum/BasisRep target of matching arity ⇒ build each summand in
+    # its component sub-target, so the concat lands directly in `want` (no conversion cob).
+    want = _resolve_target(ctx, space, target)
+    subs = _split_target_components(want, len(vectors))
+    reps = [_rep(v, ctx, subs[i]) for i, v in enumerate(vectors)] if subs is not None \
+        else [_rep(v, ctx) for v in vectors]
+    basis = want if subs is not None else B.basis_sum(*(r.basis for r in reps))
     [out] = ctx.prog.emit_stmt(
         _ConcatOp(), [r.array for r in reps],
         [pa.OutSpec("oplus", _shape_of_space(space))], note="oplus:concat",
     )
     rep = Rep(out, basis, space)
+    if subs is not None:
+        return rep  # already in `want`
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -854,9 +886,14 @@ def _rep_oprod(
     carries — the ``LLam``→coordinate-tensor binding (`41 §3`) — ride through verbatim to
     the output, so the outer product of LLam-bound matrix operands is the full map tensor.
     """
-    reps = [_rep(v, ctx) for v in vectors]
     space = _synth(e)
-    basis = B.basis_prod(*(r.basis for r in reps))
+    # (B) structural split: a BasisProd target of matching arity ⇒ build each factor in its
+    # component sub-target, so the outer product lands directly in `want` (no Kron conversion cob).
+    want = _resolve_target(ctx, space, target)
+    subs = _split_target_components(want, len(vectors))
+    reps = [_rep(v, ctx, subs[i]) for i, v in enumerate(vectors)] if subs is not None \
+        else [_rep(v, ctx) for v in vectors]
+    basis = want if subs is not None else B.basis_prod(*(r.basis for r in reps))
     # outer product over the per-factor axes (b = BasisProd(bᵢ)).
     next_label = ord("a")
     operand_specs: list[str] = []
@@ -882,6 +919,8 @@ def _rep_oprod(
         [pa.OutSpec("oprod", out_shape)], note="oprod:outer-einsum",
     )
     rep = Rep(out, basis, space, free_labels=free_labels)
+    if subs is not None:
+        return rep  # already in `want`
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2686,7 +2725,9 @@ def _rep_assert(
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Assert(v, s')`` — pass ⟦v⟧ through (+ a shape assert if not statically equal)."""
-    v_rep = _rep(vector, ctx)
+    # Assert is coordinate-identity, so push the target into the inner ⟦v⟧ (it lands directly in
+    # the target when v's space matches; otherwise this no-ops and `_rep`'s safety-net cob's).
+    v_rep = _rep(vector, ctx, target)
     try:
         if dim_of(space) == dim_of(v_rep.space):
             # fast path; _rep's safety-net cob's to target
@@ -2765,8 +2806,14 @@ def _rep_remetric(
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Remetric(v, g)`` — same coords, metric metadata swapped (+ SPD assert) (`41 §3`)."""
-    v_rep = _rep(vector, ctx)
     space = _synth(e)  # WithInner(s, g)
+    # (B) a `WithInnerBasis(b, g)` target ⇒ realize the operand in the underlying `b` (the metric
+    # is pure metadata, coords unchanged) and re-home onto the metricized space — directly in `want`.
+    want = _resolve_target(ctx, space, target)
+    if isinstance(want, B.WithInnerBasis):
+        v_rep = _rep(vector, ctx, want.basis)
+        return Rep(v_rep.array, want, space)
+    v_rep = _rep(vector, ctx)
     # No coordinate change; the metric is carried by the space. SPD is asserted when the
     # metric is later materialized (Inner/Flat/Sharp/dot); v1 keeps coords unchanged.
     # Honest tag: the operand's basis re-homed onto the metricized space (coords unchanged) —

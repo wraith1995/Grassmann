@@ -28,7 +28,25 @@ audit (correctness 2.1, free-case minimization 2.2, match decomposition 2.3) pro
   result (it previously returned a wrong number: a latent operand/sub-input basis mismatch the fix
   also closed).
 
-## 2.3 Match decomposition — the design (the fix vehicle)
+## 2.3 Match decomposition — IMPLEMENTED (core) + remaining arm-C
+
+**Implemented** (each gated on a concrete/STD target ⇒ AUTO byte-identical; each strictly an
+optimization over the correct bail; tests in `test_target_decomposition.py`):
+- **Structural split (B)** — `OProdV` splits a `BasisProd` target / `OPlusV` a `BasisSum`/`BasisRep`
+  target per component (shared `_split_target_components`), building each factor/summand directly in
+  its sub-target so the assembly lands in `want` with no Kron/block-diag cob.
+- **Direct realize (A)** — `Zero` (zero in every basis), `Identity` (eye in any same-basis endo pair
+  `BasisProd(Dual(b), b)`).
+- **Push-down (B)** — `Assert` / `Remetric` (a `WithInnerBasis(b, g)` target ⇒ realize the operand in
+  `b`) / `Lam`, plus the earlier `Var` (declare input in target), `Sum`/`Scale` (operands in target).
+
+**Remaining — operator arm-C** (the bail-out is already CORRECT — these only avoid a cob): `Dagger`
+into a slot-aligned `BasisProd(Dual(b_cod), b_dom)` (build `f` in the dual-swapped slots so `f†`
+lands in the target); `Pinv`/`Solve` into the map's own SVD/structure basis (where the inverse is
+already numeric). Deferred — delicate (metric-adjoint / GSVD basis detection), low-frequency, and
+warrants the adversarial-verify treatment before shipping.
+
+### The design (the fix vehicle)
 
 Replace today's single bail (`_match_result` = natural + one cob) with a per-node cascade:
 
