@@ -26,6 +26,7 @@ invertible matrix ``Lb`` (its own frame Vars).  Two operand shapes appear:
 """
 
 import numpy as np
+import polyarray as pa
 
 import grassmann.core as C
 from grassmann.core import basis as B
@@ -35,6 +36,16 @@ from grassmann.lower.represent import default_basis
 
 def _vk(v):
     return f"{v.name}_{v.uid}"
+
+
+def _nstmts(prog):
+    """Total statement count across the program and all its sub-programs."""
+    return sum(len(s.statements) for s in pa.forward.iter_programs(prog))
+
+
+def _notes(prog):
+    """All statement notes across the program and its sub-programs."""
+    return [st.note for s in pa.forward.iter_programs(prog) for st in s.statements]
 
 
 def _run(prog, feeds):
@@ -444,3 +455,74 @@ def test_concrete_basis_round_trip():
     out_lb = _run(represent(t, basis_env=env, target=lb_out), feeds)
     # ``out_lb`` are lb_out-coords; realizing the columns (``Lb @ coords``) recovers std == AUTO.
     assert np.allclose(_LB @ out_lb, out_auto), f"round-trip: {_LB @ out_lb} vs {out_auto}"
+
+
+# ---------------------------------------------------------------------------
+# Operator concrete-target PUSH-DOWN (roadmap-#1): _rep_eval / _rep_compose steer their
+# operand bases so the result is born directly in ``want`` (no result cob).  The two-route check
+# proves correctness; AUTO must stay byte-identical (stmt count); a steered case with default/leaf
+# operands must emit NO ``cob:target`` note (the steer realized natively).
+#
+# NOTE: ``_rep_neval_lam`` is NOT steered — backed off.  Threading ``target`` into the body
+# lowering requires it to enter the sub-Program memo key (``_build_lam_subprogram``, keyed on
+# ``(id(Lam), input uids)`` only), else two targets of the same Lam collide.  A ``Basis`` is not
+# guaranteed hashable in the seam (an embedded-array term basis is not — see
+# ``_operand_metric_basis``), so it cannot safely key the memo.  neval_lam keeps its bail.
+# ---------------------------------------------------------------------------
+
+
+def test_eval_pushdown():
+    """_rep_eval push-down: f·v with a SURVIVING slot — operands pinned, result steered to want."""
+    V = C.base("V", 3)
+    MS = C.linear_map_space(V, V)  # V*⊗V, stored (dom,cod); slot 1 (cod) survives
+    f = C.var("f", MS)
+    v = C.var("v", V)
+    lb, fr = _list_basis(V, "ep")
+    opb = B.basis_prod(B.dual_basis(lb), lb)
+    Mf = np.array([[2.0, 0, 1], [1, 1, 0], [0, 3, 1]])
+    vv = np.array([1.0, 0, 2])
+    t = C.eval_(f, (0,), v)  # contract slot 0 (dom) with v; slot 1 (cod, a V) survives
+    # target=STD: two-route correctness.
+    _two_route(t, {f: (opb, fr, Mf, _map_coords), v: (lb, fr, vv, _vec_coords)})
+    # target=concrete vector want: realize back to std == REF.
+    want, wfr = _list_basis(V, "ewt")
+    env_lb = {f.uid: opb, v.uid: lb}
+    env_std = {f.uid: default_basis(MS), v.uid: default_basis(V)}
+    feeds_tgt = {_vk(f): _map_coords(Mf), _vk(v): _vec_coords(vv), **fr, **wfr}
+    feeds_ref = {_vk(f): Mf, _vk(v): vv}
+    out_tgt = _run(represent(t, basis_env=env_lb, target=want), feeds_tgt)
+    out_ref = _run(represent(t, basis_env=env_std, target=B.AUTO), feeds_ref)
+    assert np.allclose(_LB @ out_tgt, out_ref), f"want route: {_LB @ out_tgt} vs {out_ref}"
+    # AUTO byte-identical (stmt count target=AUTO == no-target).
+    assert _nstmts(represent(t, basis_env=env_std, target=B.AUTO)) == \
+        _nstmts(represent(t, basis_env=env_std))
+    # A steered case with DEFAULT operands emits NO cob:target note (native realize).
+    notes = _notes(represent(t, basis_env=env_std, target=B.STD))
+    assert not any((n or "").startswith("cob:target") for n in notes), notes
+
+
+def test_compose_pushdown():
+    """_rep_compose push-down: g into f's slot — operands pinned, result steered to want."""
+    V = C.base("V", 3)
+    MS = C.linear_map_space(V, V)
+    f = C.var("f", MS)
+    g = C.var("g", MS)
+    lb, fr = _list_basis(V, "cp")
+    opb = B.basis_prod(B.dual_basis(lb), lb)
+    Mf = np.array([[2.0, 0, 1], [1, 1, 0], [0, 3, 1]])
+    Mg = np.array([[1.0, 2, 0], [0, 1, 1], [1, 0, 2]])
+    t = C.compose(f, (0,), g)
+    # target=STD: two-route correctness.
+    _two_route(t, {f: (opb, fr, Mf, _map_coords), g: (opb, fr, Mg, _map_coords)})
+    # target=concrete map want: realize back via the lowering's own cob == REF.
+    want, wfr = _endo_map_want()
+    _two_route_map_target(
+        t, {f: (opb, fr, Mf, _map_coords), g: (opb, fr, Mg, _map_coords)}, want, wfr, MS,
+    )
+    env_std = {f.uid: default_basis(MS), g.uid: default_basis(MS)}
+    # AUTO byte-identical (stmt count target=AUTO == no-target).
+    assert _nstmts(represent(t, basis_env=env_std, target=B.AUTO)) == \
+        _nstmts(represent(t, basis_env=env_std))
+    # A steered case with DEFAULT operands emits NO cob:target note (native realize).
+    notes = _notes(represent(t, basis_env=env_std, target=B.STD))
+    assert not any((n or "").startswith("cob:target") for n in notes), notes
