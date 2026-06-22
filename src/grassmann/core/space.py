@@ -346,8 +346,10 @@ class CoImg:
 class WithInner:
     """``WithInner(s, g)`` — ``s`` re-metricized by ``g : s*⊗s*`` (`20` point 9).
 
-    ``g`` is a metric Term (a forward ref to ``Term`` to avoid a runtime cycle);
-    the structural check is only that ``s`` is a space.
+    ``g`` is a metric **Term** (a forward ref to ``Term`` to avoid a runtime cycle): the metric
+    is part of the language, NOT a raw numeric array.  A concrete numeric metric is supplied as a
+    ``Var`` fed at run time (or any symbolic term), never embedded as an array — that keeps the
+    space hashable and the lowering uniform (a single ``_rep(metric)`` path).
     """
 
     space: Space
@@ -355,6 +357,7 @@ class WithInner:
 
     def __post_init__(self) -> None:
         _require_space(self.space, "WithInner")
+        _require_term(self.metric, "WithInner.metric (the metric must be a Term, not an array)")
 
     def __repr__(self) -> str:
         return f"WithInner({self.space!r}, {self.metric!r})"
@@ -436,6 +439,13 @@ def is_space(s: object) -> bool:
 def _require_space(s: object, ctx: str) -> None:
     if not is_space(s):
         raise SpaceError(f"{ctx}: expected a Space, got {s!r}")
+
+
+def _require_term(t: object, ctx: str) -> None:
+    # Lazy import: ``term`` imports ``space`` at runtime, so the dependency only flows one way.
+    from .term import is_term
+    if not is_term(t):
+        raise SpaceError(f"{ctx}: expected a Term, got {t!r}")
 
 
 def _check_ffs_endpoints(node: object) -> None:

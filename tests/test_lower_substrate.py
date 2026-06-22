@@ -111,8 +111,9 @@ def test_default_basis_oplusrep() -> None:
 
 
 def test_default_basis_with_inner_is_g_orthonormal() -> None:
-    g = object()
-    sp = C.with_inner(C.base("V", 2), g)
+    V = C.base("V", 2)
+    g = C.var("g", C.oprod(C.dual(V), C.dual(V)))  # the metric is a Term (a Var), not a sentinel
+    sp = C.with_inner(V, g)
     db, cands = space_basis(sp)
     # default is the g-orthonormal WithInnerBasis (metric becomes identity in coords).
     assert isinstance(db, C.WithInnerBasis)

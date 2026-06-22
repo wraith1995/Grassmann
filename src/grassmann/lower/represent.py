@@ -1002,11 +1002,12 @@ def _operand_metric_basis(arg_reps: list[Rep]) -> B.Basis | None:
     when ALL operands agree on it; ``None`` when the operands are orthonormal (the
     identity-metric default), so the existing fast path is taken and byte-identical.
     """
-    bases = {r.basis for r in arg_reps}
-    if len(bases) != 1:
-        return None
-    (b,) = bases
-    return b if _is_immersed_metric_basis(b) else None
+    # Compare bases STRUCTURALLY (``_basis_eq``), not via a hash-set: a basis is never required
+    # to be hashable anywhere else in the seam, and an embedded-array term metric would not be.
+    b0 = arg_reps[0].basis
+    if all(_basis_eq(b0, r.basis) for r in arg_reps[1:]):
+        return b0 if _is_immersed_metric_basis(b0) else None
+    return None
 
 
 def _reconcile_metric_operands(ctx: _Ctx, arg_reps: list[Rep]) -> list[Rep]:
@@ -4170,14 +4171,10 @@ def _metric_matrix(
     """
     if _is_immersed_metric_basis(basis):
         return _immersed_gram(ctx, space, basis, note=note + ":immersed")
-    if isinstance(space, S.WithInner) and _is_numeric_metric(space.metric):
-        g = _const(ctx, np.asarray(space.metric, dtype=float), note=note + ":explicit")
-        _assert_spd(ctx, g, note=note + ":spd")
-        return g
-    # A *term-valued* metric (e.g. an x-dependent metric field, a Program input) lowers by
-    # representing the metric term in the natural basis of its space — so Inner/Flat/Sharp of
-    # a symbolic ``WithInner(s, g)`` read the actual ``g`` rather than the identity default.
-    if isinstance(space, S.WithInner) and T.is_term(space.metric):
+    # A ``WithInner(s, g)`` metric is always a Term (enforced in ``space.WithInner``): lower it by
+    # representing ``g`` — a ``Var`` metric (a Program input fed at run time), an x-dependent
+    # metric field, etc. — so Inner/Flat/Sharp read the actual ``g`` rather than the identity.
+    if isinstance(space, S.WithInner):
         g = _rep(space.metric, ctx).array
         _assert_spd(ctx, g, note=note + ":spd")
         return g
@@ -4304,14 +4301,6 @@ def _peel_dual(basis: B.Basis) -> bool:
             return False
 
 
-
-
-def _is_numeric_metric(metric: object) -> bool:
-    try:
-        np.asarray(metric, dtype=float)
-        return not isinstance(metric, (str, bytes))
-    except (TypeError, ValueError):
-        return False
 
 
 # ===========================================================================

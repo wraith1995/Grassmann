@@ -187,8 +187,10 @@ def test_a5_gsvd_metric_least_squares_matches_reference() -> None:
     """A5: metric pinv via ``represent(C.pinv(f_metric))`` matches the whitened reference."""
     n_v, n_w = 4, 3
     m_v, m_w = _spd(n_v, 1), _spd(n_w, 2)
-    V = C.with_inner(C.base("V", n_v), m_v)
-    W = C.with_inner(C.base("W", n_w), m_w)
+    V0, W0 = C.base("V", n_v), C.base("W", n_w)
+    gV = C.var("gV", C.oprod(C.dual(V0), C.dual(V0)))  # the metric is a Term (a Program input)
+    gW = C.var("gW", C.oprod(C.dual(W0), C.dual(W0)))
+    V, W = C.with_inner(V0, gV), C.with_inner(W0, gW)
     f = C.var("f", C.linear_map_space(V, W))
 
     prog = represent(C.pinv(f))
@@ -199,7 +201,9 @@ def test_a5_gsvd_metric_least_squares_matches_reference() -> None:
     a = rng.standard_normal((n_w, n_v))  # map W ← V (cod, dom)
     fv = a.T  # stored (|V|,|W|) = transpose of the (cod,dom) matrix
 
-    out = prog.run({_var_key(f): fv})["result"]  # stored (|W|,|V|) = (|cod|,|dom|)
+    out = prog.run(  # stored (|W|,|V|) = (|cod|,|dom|); the SPD metrics are fed at run time
+        {_var_key(f): fv, _var_key(gV): m_v, _var_key(gW): m_w}
+    )["result"]
     fdag_ref = _metric_pinv_reference(a, m_v, m_w)  # math (|V|,|W|)
     np.testing.assert_allclose(out, fdag_ref.T, atol=1e-9)
 
@@ -208,8 +212,10 @@ def test_a5_gsvd_metric_pinv_apply_matches_reference() -> None:
     """A5: ``represent(C.pinv_apply(f_metric, v))`` solves the metric least-squares (`50 §A5`)."""
     n_v, n_w = 4, 3
     m_v, m_w = _spd(n_v, 3), _spd(n_w, 4)
-    V = C.with_inner(C.base("V", n_v), m_v)
-    W = C.with_inner(C.base("W", n_w), m_w)
+    V0, W0 = C.base("V", n_v), C.base("W", n_w)
+    gV = C.var("gV", C.oprod(C.dual(V0), C.dual(V0)))
+    gW = C.var("gW", C.oprod(C.dual(W0), C.dual(W0)))
+    V, W = C.with_inner(V0, gV), C.with_inner(W0, gW)
     f = C.var("f", C.linear_map_space(V, W))
     vw = C.var("v", W)
 
@@ -219,7 +225,9 @@ def test_a5_gsvd_metric_pinv_apply_matches_reference() -> None:
     rng = np.random.default_rng(1)
     a = rng.standard_normal((n_w, n_v))
     vv = rng.standard_normal(n_w)
-    out = prog.run({_var_key(f): a.T, _var_key(vw): vv})["result"]
+    out = prog.run(
+        {_var_key(f): a.T, _var_key(vw): vv, _var_key(gV): m_v, _var_key(gW): m_w}
+    )["result"]
     x_ref = _metric_pinv_reference(a, m_v, m_w) @ vv
     np.testing.assert_allclose(out, x_ref, atol=1e-9)
 
@@ -227,8 +235,10 @@ def test_a5_gsvd_metric_pinv_apply_matches_reference() -> None:
 def test_a5_gsvd_reduces_to_plain_pinv_at_identity_metric() -> None:
     """A5: at identity metrics, the metric pinv coincides with ``np.linalg.pinv`` (`50 §A5`)."""
     n_v, n_w = 4, 3
-    V = C.with_inner(C.base("V", n_v), np.eye(n_v))
-    W = C.with_inner(C.base("W", n_w), np.eye(n_w))
+    V0, W0 = C.base("V", n_v), C.base("W", n_w)
+    gV = C.var("gV", C.oprod(C.dual(V0), C.dual(V0)))
+    gW = C.var("gW", C.oprod(C.dual(W0), C.dual(W0)))
+    V, W = C.with_inner(V0, gV), C.with_inner(W0, gW)
     f = C.var("f", C.linear_map_space(V, W))
 
     prog = represent(C.pinv(f))
@@ -237,7 +247,9 @@ def test_a5_gsvd_reduces_to_plain_pinv_at_identity_metric() -> None:
 
     rng = np.random.default_rng(0)
     a = rng.standard_normal((n_w, n_v))  # math (cod,dom)
-    out = prog.run({_var_key(f): a.T})["result"]  # stored (|cod|,|dom|)
+    out = prog.run(  # identity metrics fed at run time ⇒ coincides with plain pinv
+        {_var_key(f): a.T, _var_key(gV): np.eye(n_v), _var_key(gW): np.eye(n_w)}
+    )["result"]  # stored (|cod|,|dom|)
     # the metric pinv map reduces to the plain Moore–Penrose pseudo-inverse (transposed).
     np.testing.assert_allclose(out, np.linalg.pinv(a).T, atol=1e-9)
 
