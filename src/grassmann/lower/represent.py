@@ -2290,9 +2290,13 @@ def _free_term_vars(node: object) -> list[T.Var]:
 def _rep_solve(
     e: T.Solve, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    f_rep = _rep(f, ctx)
-    _assert_square_full_rank(ctx, f_rep.array, note="assert:solve-bij")
     space = _synth(e)
+    # Arm-C operand steering: realize ``f`` in the slots whose dual-swap == ``want`` so the
+    # numeric inverse lands directly in ``want`` (no result cob).  ``None`` ⇒ existing bail.
+    want = _resolve_target(ctx, space, target)
+    f_target = _slot_swap_operand_target(want)
+    f_rep = _rep(f, ctx, f_target) if f_target is not None else _rep(f, ctx)
+    _assert_square_full_rank(ctx, f_rep.array, note="assert:solve-bij")
     [out] = ctx.prog.emit_stmt(
         pa.InvOp(), [f_rep.array],
         [pa.OutSpec("inv", _shape_of_space(space))], note="solve:InvOp",
@@ -2300,6 +2304,9 @@ def _rep_solve(
     # Honest tag: the inverse map ``f⁻¹`` (cod⊸dom) lives in the operand's dual-swapped slot
     # bases (the numeric inverse acts in whatever basis ``f`` arrived in), not ``default_basis``.
     rep = Rep(out, _dual_swap_map_basis(f_rep.basis, space), space)
+    if f_target is not None:
+        # Steered: _dual_swap_map_basis(f_target) == want by construction.
+        return Rep(out, want, space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2313,13 +2320,19 @@ def _rep_solve(
 def _rep_pinv(
     e: T.Pinv, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    f_rep = _rep(f, ctx)
     space = _synth(e)
     metric = _map_metrics(f)
     if metric is not None:
+        # GSVD branch — leave the bail (delicate metric/GSVD basis; no operand steering).
+        f_rep = _rep(f, ctx)
         out = _gsvd_pinv_map(ctx, f_rep.array, *metric)
         # fast path; _rep's safety-net cob's to target
         return Rep(out, default_basis(space), space)
+    # PinvOp branch — arm-C operand steering: realize ``f`` in the slots whose dual-swap ==
+    # ``want`` so the numeric pinv lands directly in ``want``.  ``None`` ⇒ existing bail.
+    want = _resolve_target(ctx, space, target)
+    f_target = _slot_swap_operand_target(want)
+    f_rep = _rep(f, ctx, f_target) if f_target is not None else _rep(f, ctx)
     [out] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
         [pa.OutSpec("pinv", _shape_of_space(space))], note="pinv:PinvOp",
@@ -2327,6 +2340,9 @@ def _rep_pinv(
     # Honest tag: the pseudo-inverse ``f⁺`` (cod⊸dom) lives in the operand's dual-swapped slot
     # bases — the numeric PinvOp acts in whatever basis ``f`` arrived in.
     rep = Rep(out, _dual_swap_map_basis(f_rep.basis, space), space)
+    if f_target is not None:
+        # Steered: _dual_swap_map_basis(f_target) == want by construction.
+        return Rep(out, want, space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2374,9 +2390,19 @@ def _rep_pinv_apply(
     e: T.PinvApply, f: T.Term, v: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    f_rep = _rep(f, ctx)
+    space = _synth(e)
     v_rep = _rep(v, ctx)
     metric = _map_metrics(f)
+    # Arm-C operand steering (PinvOp branch only): the result vector ``x = f⁺ v`` is honestly
+    # tagged in f's domain-slot primal.  Steer f's domain slot to ``DualBasis(want)`` (so that
+    # primal == want) while keeping its cod slot == v's basis (the einsum "ab,a->b" contracts
+    # fp's cod axis against v, so they must agree).  GSVD/metric branch keeps its bail.
+    want = _resolve_target(ctx, space, target)
+    steer = want is not None and metric is None
+    if steer:
+        f_rep = _rep(f, ctx, B.basis_prod(B.dual_basis(want), v_rep.basis))
+    else:
+        f_rep = _rep(f, ctx)
     if metric is not None:
         fp = _gsvd_pinv_map(ctx, f_rep.array, *metric)  # stored (|cod|,|dom|)
     else:
@@ -2385,7 +2411,6 @@ def _rep_pinv_apply(
             [pa.OutSpec("pinv", _transpose_shape(_shape_of(f_rep.array)))],
             note="pinvapply:PinvOp",
         )
-    space = _synth(e)
     # fp is the pinv map cod⊸dom stored (|cod|,|dom|); applying to v[cod] contracts the
     # input (cod) axis 0, mirroring the Eval contraction convention (`41 §3`).
     [out] = ctx.prog.emit_stmt(
@@ -2400,6 +2425,9 @@ def _rep_pinv_apply(
         else _inverse_apply_basis(f_rep.basis, space)
     )
     rep = Rep(out, out_basis, space)
+    if steer:
+        # Steered: f's dom slot == DualBasis(want) ⇒ _inverse_apply_basis primal == want.
+        return Rep(out, want, space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2479,6 +2507,12 @@ def _rep_dagger(
     """
     f_rep = _rep(f, ctx)
     space = _synth(e)
+    # NOTE (arm-C, NOT taken): operand-steering ``f`` into the dual-swapped slots is UNSOUND for
+    # the transpose fast path.  ``_is_immersed_metric_basis`` treats a ``list_basis`` as
+    # orthonormal (Gram skipped), so the fast path uses a plain transpose — but a non-orthonormal
+    # ``list_basis`` target has Gram ≠ I, where the adjoint is ``G·fᵀ·G⁻¹`` ≠ ``fᵀ`` (verified:
+    # ``transpose(map_coords(M)) ≠ map_coords(Mᵀ)``).  Unlike Solve/Pinv (inversion IS
+    # basis-covariant), transpose is not, so we KEEP the correct bail (natural + ``_match_result``).
     dom_slot, cod_slot = _map_slot_bases(f_rep.basis)
     # Fast path: orthonormal endpoints ⇒ metric = identity ⇒ plain transpose (byte-identical).
     if not _is_immersed_metric_basis(dom_slot) and not _is_immersed_metric_basis(cod_slot):
@@ -3210,6 +3244,29 @@ def _dual_swap_map_basis(basis: B.Basis, space: S.Space) -> B.Basis:
         return default_basis(space)
     dom_slot, cod_slot = factors
     return B.basis_prod(B.dual_basis(cod_slot), _peel_one_dual(dom_slot))
+
+
+def _slot_swap_operand_target(want: B.Basis | None) -> B.Basis | None:
+    """The operand map basis whose slot-dual-swap is ``want`` — arm-C operand steering.
+
+    ``_dual_swap_map_basis`` and ``_rep_dagger`` share one structural slot transform: a map
+    ``f`` stored ``BasisProd(dom_slot, cod_slot)`` produces a result tagged
+    ``BasisProd(DualBasis(cod_slot), _peel_one_dual(dom_slot))``.  To make that result land
+    natively in ``want = BasisProd(t0, t1)`` (with ``t0`` a covariant ``DualBasis``), steer the
+    operand to ``BasisProd(DualBasis(t1), t0.basis)``:
+
+        dom_slot = DualBasis(t1),  cod_slot = t0.basis
+        ⇒ swap = BasisProd(DualBasis(t0.basis), t1) = BasisProd(t0, t1) = want   (t0 a DualBasis)
+
+    Returns ``None`` when ``want`` is not a 2-factor product whose first slot is a ``DualBasis``
+    (no clean steering exists — the caller keeps its bail).
+    """
+    if not isinstance(want, B.BasisProd) or len(want.bases) != 2:
+        return None
+    t0, t1 = want.bases
+    if not isinstance(t0, B.DualBasis):
+        return None
+    return B.basis_prod(B.dual_basis(t1), t0.basis)
 
 
 def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.SymArray]:

@@ -317,6 +317,108 @@ def test_neval_lam():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Operator arm-C correctness: a STRUCTURE-MATCHING concrete map ``want`` (so steering fires)
+# must still give the correct numbers — route to ``want`` (operand pinned), realize back, == REF.
+# ---------------------------------------------------------------------------
+
+
+def _realize_map_via_lowering(map_space, want, coords, want_feeds):
+    """Realize a map ``want``-coords back to std using the LOWERING's own cob (convention-proof).
+
+    Feeds ``coords`` into a fresh ``Var`` pinned to ``want`` and lowers it with ``target=STD`` —
+    so the realize matches exactly what the lowering's ``cob:target`` would do, independent of any
+    hand-derived realize formula.
+    """
+    m = C.var("m_realize", map_space)
+    prog = represent(m, basis_env={m.uid: want}, target=B.STD)
+    return _run(prog, {_vk(m): coords, **want_feeds})
+
+
+def _two_route_map_target(term, op_specs, want, want_feeds, map_space):
+    """route_TGT (concrete map ``want``, operand pinned) realized back == route_REF (std AUTO)."""
+    env_lb, env_std = {}, {}
+    feeds_tgt, feeds_ref = {}, {}
+    for op, (lb, lb_feeds, value, coords_fn) in op_specs.items():
+        env_lb[op.uid] = lb
+        env_std[op.uid] = default_basis(op.space)
+        feeds_tgt[_vk(op)] = coords_fn(value)
+        feeds_ref[_vk(op)] = value
+        feeds_tgt.update(lb_feeds)
+    feeds_tgt.update(want_feeds)
+    out_tgt = _run(represent(term, basis_env=env_lb, target=want), feeds_tgt)
+    out_ref = _run(represent(term, basis_env=env_std, target=B.AUTO), feeds_ref)
+    realized = _realize_map_via_lowering(map_space, want, out_tgt, want_feeds)
+    assert np.allclose(realized, out_ref), (
+        f"map-target route mismatch:\nTGT(realized)={realized}\nREF={out_ref}"
+    )
+
+
+def _endo_map_want():
+    """A structure-matching map target ``BasisProd(dual(lb_out), lb_out)`` of an endo V*⊗V,
+    realized by ``_LB``, + its frame-var feeds (so ``_slot_swap_operand_target`` fires)."""
+    V = C.base("V", 3)
+    lb_out, fr = _list_basis(V, "wt")
+    return B.basis_prod(B.dual_basis(lb_out), lb_out), fr
+
+
+# NOTE: ``_rep_dagger`` is NOT arm-C steered.  Operand-steering is unsound for its transpose
+# fast path: ``_is_immersed_metric_basis`` treats a ``list_basis`` as orthonormal (Gram skipped),
+# but a non-orthonormal list basis has Gram ≠ I, where the adjoint is ``G·fᵀ·G⁻¹`` ≠ ``fᵀ``
+# (``transpose(map_coords(M)) ≠ map_coords(Mᵀ)``).  Unlike Solve/Pinv (inversion IS
+# basis-covariant), transpose is not.  A separate pre-existing gap (the fast path tags its result
+# ``default_basis`` even for a pinned NON-orthonormal operand, so a list-basis ``Dagger`` STD cob
+# is a no-op ⇒ wrong) is out of scope here; Dagger keeps its current bail unchanged.
+
+
+def test_solve_concrete_target():
+    """_rep_solve arm-C: a slot-aligned concrete map ``want`` is correct (STD covered above)."""
+    V = C.base("V", 3)
+    MS = C.linear_map_space(V, V)
+    f = C.var("f", MS, C.bij)
+    lb, fr = _list_basis(V, "sc")
+    opb = B.basis_prod(B.dual_basis(lb), lb)
+    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2]])
+    want, wfr = _endo_map_want()
+    _two_route_map_target(C.solve(f), {f: (opb, fr, Mf, _map_coords)}, want, wfr, MS)
+
+
+def test_pinv_concrete_target():
+    """_rep_pinv arm-C (PinvOp branch): a slot-aligned concrete map ``want`` is correct."""
+    V = C.base("V", 3)
+    MS = C.linear_map_space(V, V)
+    f = C.var("f", MS)
+    lb, fr = _list_basis(V, "pc")
+    opb = B.basis_prod(B.dual_basis(lb), lb)
+    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2]])
+    want, wfr = _endo_map_want()
+    _two_route_map_target(C.pinv(f), {f: (opb, fr, Mf, _map_coords)}, want, wfr, MS)
+
+
+def test_pinv_apply_concrete_target():
+    """_rep_pinv_apply arm-C (PinvOp branch): a concrete VECTOR ``want`` is correct.
+
+    The result vector is f's domain primal; steering f's dom slot to ``Dual(want)`` lands it
+    natively in ``want``.  Realize the want-coords back (``Lb_out @ coords``) == std AUTO.
+    """
+    V = C.base("V", 3)
+    MS = C.linear_map_space(V, V)
+    f = C.var("f", MS)
+    v = C.var("v", V)
+    lb, fr = _list_basis(V, "pac")
+    opb = B.basis_prod(B.dual_basis(lb), lb)
+    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2]])
+    vv = np.array([1.0, 0, 2])
+    want, wfr = _list_basis(V, "pawt")
+    env_lb = {f.uid: opb, v.uid: lb}
+    env_std = {f.uid: default_basis(MS), v.uid: default_basis(V)}
+    feeds_tgt = {_vk(f): _map_coords(Mf), _vk(v): _vec_coords(vv), **fr, **wfr}
+    feeds_ref = {_vk(f): Mf, _vk(v): vv}
+    out_tgt = _run(represent(C.pinv_apply(f, v), basis_env=env_lb, target=want), feeds_tgt)
+    out_ref = _run(represent(C.pinv_apply(f, v), basis_env=env_std, target=B.AUTO), feeds_ref)
+    assert np.allclose(_LB @ out_tgt, out_ref), f"{_LB @ out_tgt} vs {out_ref}"
+
+
 def test_concrete_basis_round_trip():
     """``represent(t, target=lb_out)`` then realize back to std == ``AUTO`` (a vector result).
 
