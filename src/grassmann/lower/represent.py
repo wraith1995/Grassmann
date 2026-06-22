@@ -358,6 +358,12 @@ def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) ->
     Handles a value (one space axis) and an operator/tensor (a ``BasisProd`` of per-axis
     bases) alike; the free (basis-index) axes ride along untouched.
     """
+    # A scalar rep (no space axes — ``Scalar`` space, possibly with only free axes) has
+    # basis-invariant coordinates: ℝ has a single basis, so any cob is the identity.  Guard it
+    # here so the per-axis cob machinery (which assumes ≥1 space axis) is never asked to cob a
+    # 0-space-axis array (e.g. a scalar-valued ``External`` carrying a non-default operand tag).
+    if len(_shape_of(rep.array)) == len(rep.free_labels):
+        return rep
     src = rep.basis
     if (
         isinstance(src, B.BasisProd)
@@ -3315,7 +3321,21 @@ def _realize_list_basis(
     eff_backup = backup if backup is not None else (default_basis(ambient) if auto_fill else None)
 
     if eff_backup is not None:
-        bcols = realize_basis_cols(ctx, eff_backup)
+        # Realize the backup in the SAME coordinate system as the frame ``cols`` (the ambient's
+        # canonical coords) so the hstack lines up.  A backup that is itself a basis OF the ambient
+        # realizes directly (``realize_basis_cols`` — in-space coords when the ambient is FFS); a
+        # backup that is a basis of a proper SUBSPACE of the ambient (an FFS ``ProjectedBasis``/
+        # ``ImageBasis``) must be IMMERSED into the ambient (``_ffs_immersion``), else its in-space
+        # k×k columns mis-shape against the n-row frame.
+        bk_space = _space_of_basis(ctx, eff_backup)
+        if (
+            bk_space is not None
+            and ambient is not None
+            and _norm_space(bk_space) == _norm_space(ambient)
+        ):
+            bcols = realize_basis_cols(ctx, eff_backup)
+        else:
+            bcols = _ffs_immersion(ctx, eff_backup)
         if reduce is B.Reduce.ORTHONORMALIZE:
             bcols = _orthonormalize_cols(ctx, bcols)
         n = _shape_of(bcols)[0]  # ambient dim ⇒ a full (square) completed basis
