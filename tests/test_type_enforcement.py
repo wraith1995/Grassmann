@@ -217,3 +217,17 @@ class TestTermEnforcement:
         with pytest.raises(TermError):
             Frame(V, ARR)
         assert hash(Frame(V, ScalarBasis())) is not None
+
+
+class TestKindEnforcement:
+    """``core/kinds.py`` — found by RE-AUDITING (SpaceSort carries a Space but is typed object,
+    so a non-Space binder domain slipped into Lam/BLam ⇒ unhashable IR)."""
+
+    def test_spacesort_space_must_be_a_space(self):
+        from grassmann.core.kinds import KindError, SpaceSort
+
+        with pytest.raises(KindError):
+            SpaceSort(ARR)  # a raw array as a binder domain → would make the binder unhashable
+        with pytest.raises(KindError):
+            SpaceSort(object())
+        assert hash(SpaceSort(S)) is not None  # a valid Space binder domain is hashable
