@@ -2643,10 +2643,19 @@ def _rep_inner(
     non-orthonormal ``ImageBasis`` ⇒ the immersed Gram ``JᵀJ``).  The result ``Rep`` is
     tagged with the per-slot basis so downstream bookkeeping stays consistent.
     """
-    n = _dyn_dim(space, ctx)  # int (static) or DimAtom δ_f (generic FFS rank)
-    g = _metric_matrix(ctx, space, n, note="metric:Inner", basis=basis)
     map_space = _synth(e)
-    rep = Rep(g, _inner_map_basis(map_space, basis), map_space)
+    # (#2) standalone metric (no Eval-site basis): build the Gram directly in a concrete target's
+    # underlying basis instead of building in default and cob'ing.
+    build_basis, steered = basis, False
+    if basis is None:
+        bt = _metric_target_basis(ctx, map_space, target, dual_slots=True)
+        if bt is not None:
+            build_basis, steered = bt, True
+    n = _dyn_dim(space, ctx)  # int (static) or DimAtom δ_f (generic FFS rank)
+    g = _metric_matrix(ctx, space, n, note="metric:Inner", basis=build_basis)
+    rep = Rep(g, _inner_map_basis(map_space, build_basis), map_space)
+    if steered:
+        return rep  # built directly in the target
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2682,10 +2691,17 @@ def _rep_flat(
     chain genuinely re-enters the immersed metric instead of silently falling to identity).
     Orthonormal default (``basis is None``) ⇒ ``default_basis`` — byte-identical.
     """
-    n = _dyn_dim(space, ctx)
-    g = _metric_matrix(ctx, space, n, note="metric:Flat=G_s", basis=basis)
     map_space = _synth(e)
-    rep = Rep(g, _inner_map_basis(map_space, basis), map_space)
+    build_basis, steered = basis, False
+    if basis is None:  # (#2) build G_s directly in a concrete target's basis (see _rep_inner)
+        bt = _metric_target_basis(ctx, map_space, target, dual_slots=True)
+        if bt is not None:
+            build_basis, steered = bt, True
+    n = _dyn_dim(space, ctx)
+    g = _metric_matrix(ctx, space, n, note="metric:Flat=G_s", basis=build_basis)
+    rep = Rep(g, _inner_map_basis(map_space, build_basis), map_space)
+    if steered:
+        return rep
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2710,6 +2726,10 @@ def _rep_sharp(
     ``s⊗s`` map is tagged with the primal per-slot basis so the produced vector re-enters the
     immersed metric correctly (`43 §2c`).  Orthonormal default ⇒ byte-identical.
     """
+    # NB: NOT steered like Inner/Flat. Sharp is the INVERSE metric (a (2,0) tensor); its components
+    # in a target basis are an inverse-transposed transform that the `basis=` hook (which builds the
+    # COVARIANT Gram `bᵀ·G·b`) cannot produce — `inv(bᵀGb) ≠` the (2,0) tensor in `b`. So Sharp keeps
+    # the standard build + epilogue bail (correct), which cob's the (2,0) tensor honestly.
     n = _dyn_dim(space, ctx)
     primal = _peel_one_dual(basis)
     g = _metric_matrix(ctx, space, n, note="metric:Sharp:G_s", basis=primal)
@@ -2739,6 +2759,39 @@ def _sharp_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
         return default_basis(map_space)
     primal = _peel_one_dual(basis)
     return B.basis_prod(*(primal for _ in map_space.spaces))
+
+
+def _metric_target_basis(
+    ctx: _Ctx, map_space: S.Space, target: B.TargetBasis | B.Basis, *, dual_slots: bool,
+) -> B.Basis | None:
+    """The active ``basis=`` to build the Gram in so a CONCRETE ``target`` is hit directly (#2).
+
+    The metric machinery already builds ``G_s`` in any supplied ``basis`` (the Eval-site hook), so a
+    standalone metric map (``Inner``/``Flat``/``Sharp``) can realize straight into a concrete target
+    instead of building in the default basis and cob'ing.  Returns the build-basis when ``target`` is
+    a metric-shaped ``BasisProd`` whose slots all share one underlying basis ``b``: for ``Inner``/
+    ``Flat`` (``dual_slots=True``) the slots are ``DualBasis(b)`` ⇒ build in ``b``; for ``Sharp``
+    (``dual_slots=False``) the slots are the primal ``b`` ⇒ build in ``DualBasis(b)`` (Sharp peels one
+    dual).  ``None`` ⇒ keep the default build + epilogue bail (STD/AUTO already no-op there).
+    """
+    if not isinstance(target, B.Basis):  # STD/AUTO already no-op via the epilogue
+        return None
+    want = _resolve_target(ctx, map_space, target)
+    if not isinstance(want, B.BasisProd) or not isinstance(map_space, S.OProd):
+        return None
+    slots = want.bases
+    if len(slots) != len(map_space.spaces):
+        return None
+    if dual_slots:
+        if not all(isinstance(sb, B.DualBasis) for sb in slots):
+            return None
+        inners = [sb.basis for sb in slots]
+    else:
+        inners = list(slots)
+    b0 = inners[0]
+    if not all(_basis_eq(b0, b) for b in inners[1:]):
+        return None
+    return b0 if dual_slots else B.dual_basis(b0)
 
 
 # ---------------------------------------------------------------------------
