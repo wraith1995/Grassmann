@@ -48,7 +48,7 @@ Snapshot after the STD/per-aspect follow-up (dagger + llam tag fixes, external/p
 | `_rep_sharp` | ✓ `InvOp(G_s)` in primal default = std (no-op) | ✓ `_sharp_map_basis` | `bail✓` Sharp is the (2,0) inverse-metric; `inv(bᵀGb) ≠` the (2,0) tensor in `b`, so the covariant `basis=` hook can't build it |
 | `_rep_solve_apply` | `bail✓` SolveOp contracts f's DOMAIN axis (not cod-paired) ⇒ no honest per-axis tag; forces both operands to std (tag honest) then no-ops | ✓ byte-identical | `bail✓` same SolveOp-domain reason |
 | `_rep_neval_lam` | `bail✓` body memoised once; the target can't key the sub-Program memo (a Basis may be unhashable) | ✓ honest body out-basis | `bail✓` same memo reason |
-| `_rep_pinv` / `_rep_pinv_apply` (GSVD/metric branch) | bail (delicate GSVD basis; `default_basis` tag honest via the safety net) | ✓ | ~ a WithInner-spaced pinv under a concrete target pays a result cob (no steer) |
+| `_rep_pinv` / `_rep_pinv_apply` (GSVD/metric branch) | ✓ default operand correct; **raises** on a non-default operand (the GSVD metric is built in default — formerly silent-wrong) | ✓ default | `raise` on a non-default operand (operand-basis GSVD metric is future work) |
 
 ### movement & binders
 
@@ -94,8 +94,10 @@ pure-realizable pairs); the `_cob_from_*` handlers run only when a side is non-s
   be honestly tagged; `_rep_llam` now RAISES (cod-basis guard + non-default-pin pre-check) rather than
   silently mislabel (it formerly returned the wrong matrix). Default-operand llams are correct. **Full
   fix = free-label-axis basis tracking (architectural, `41 §7`).**
-- **`_rep_pinv` / `_rep_pinv_apply` GSVD/metric branch (~):** a WithInner-spaced pinv under a concrete
-  target pays a result cob (no operand steer in the GSVD branch). Correct, marginally sub-optimal.
+- **`_rep_pinv` / `_rep_pinv_apply` GSVD/metric branch (raise):** `_gsvd_pinv_map` builds the metric in
+  the default basis, so a non-default operand was silent-wrong (inconsistent coords + mislabelled). Now
+  it RAISES on a non-default operand (default operands are correct). **Full fix = build the GSVD metric
+  in the operand basis (future work).** The non-metric `PinvOp` branch steers non-default operands fine.
 - **`_rep_project` / `_rep_embed` MATCH (bail):** correct and not improvable — `P·inv(W)ᵀ` just
   relocates the unavoidable `inv(W)`; steering is unsound for a non-orthonormal target.
 - **`_rep_dagger` / `_rep_sharp` / `_rep_solve_apply` / `_rep_neval_lam` (bail✓):** steering is provably
@@ -105,6 +107,6 @@ pure-realizable pairs); the `_cob_from_*` handlers run only when a side is non-s
   / there is no common block structure — no cheaper route.
 
 **Summary:** every arm is correct, and on every aspect either exploits the structure available, bails
-correctly (with the unsound-reason named), or refuses loudly. The only remaining `~` is the pinv
-GSVD-branch concrete-target cob; the only architectural gap is llam free-label-basis tracking (now
-guarded by a loud refusal, not silent-wrong).
+correctly (with the unsound-reason named), or refuses loudly. **No silent-wrong arms remain.** Two
+architectural gaps are guarded by a loud refusal rather than miscomputation: llam free-label-basis
+tracking, and the GSVD metric-pinv operand basis — both tracked as future work.
