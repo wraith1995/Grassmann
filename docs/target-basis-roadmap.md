@@ -10,7 +10,7 @@ audit (correctness 2.1, free-case minimization 2.2, match decomposition 2.3) pro
 - **FIXED** — `ListBasis` with an FFS-subspace backup crashed (`_realize_list_basis` realized the
   backup in-space, mis-shaping the ambient hstack); a scalar-valued rep crashed `_coerce_rep_to_target`
   (0 space axes). See the commit; both have probes.
-- **OPEN (the correctness item being fixed via the 2.3 redesign below)** — **basis-tag dishonesty.**
+- **FIXED (via the 2.3 honest-tag floor below; re-audited clean)** — **basis-tag dishonesty.**
   ~11 operator/movement/binder helpers (`_rep_permute`, `_rep_lift`, `_rep_kron`, `_rep_compose`,
   `_rep_trace`, `_rep_remetric`, `_rep_solve`, `_rep_solve_apply`, `_rep_pinv` PinvOp branch,
   `_rep_pinv_apply`, `_rep_neval_lam`) tag their rep `default_basis(space)` while the coordinates
@@ -18,9 +18,15 @@ audit (correctness 2.1, free-case minimization 2.2, match decomposition 2.3) pro
   cob'd); the `target` feature **activates** it → wrong STD/concrete results when an operand is in a
   non-default basis (confirmed: `_rep_permute` gives `0.0` vs `1.0`). The honest helpers (`eval`,
   `inner/flat/sharp`, `project`, `embed`, `assert`, `tuple_*`, `oprod/oplus/sum/scale/var`) are fine.
-  **Fix:** the 2.3 redesign — each node realizes honestly in (or bails to a cob FROM an honest
-  natural tag toward) the target. The bail path REQUIRES an honest natural tag, so honest result
-  bases (operand-derived) are the foundation.
+  **Fixed** by tagging each result with its honest operand-derived basis (`_reorder_basis`,
+  `_compose_result_basis`, `_trace_result_basis`, `_inverse_apply_basis`, `_rehome_metric_basis`,
+  `_dual_swap_map_basis`), with a force-default fallback (cob operands to default only when
+  `target != AUTO`) for the axis-FUSING / non-covariant ops (`lift`/`kron`/`solve_apply`). Gated by
+  `tests/test_target_correctness.py` (an implementation-independent two-route check). AUTO is
+  byte-identical **for default operands** (the whole suite); one corner — `_rep_neval_lam` with a
+  `basis_env`-pinned operand under AUTO — now emits an operand cob and returns the **correct**
+  result (it previously returned a wrong number: a latent operand/sub-input basis mismatch the fix
+  also closed).
 
 ## 2.3 Match decomposition — the design (the fix vehicle)
 
