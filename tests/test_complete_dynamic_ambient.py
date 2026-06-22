@@ -11,9 +11,9 @@ correctly.  Found by the round-6 cob re-audit (a pre-existing latent bug, not a 
 import importlib
 
 import numpy as np
+import polyarray as pa
 
 import grassmann.core as C
-import polyarray as pa
 from grassmann.core import basis as B
 
 _RM = importlib.import_module("grassmann.lower.represent")
