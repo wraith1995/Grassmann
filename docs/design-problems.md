@@ -306,6 +306,30 @@ no false positives, ImageBasis IR byte-identical) — correct/converged. Tests: 
 bases and a numeric-metric `WithInnerBasis` is unhashable (`numpy.ndarray`). Fails on the default
 path too; predates the seam work. Fix: make the operand-basis set hashable (term/tuple metric).
 
+## Cob/represent audit — round 7 (post roadmap-#1 re-audit / double-check)
+
+A double-check re-audit after the roadmap-#1 operator push-down (eval/compose/trace operand-steering)
+and the `_CompleteColsOp` dynamic-rank fix. Three agents (operator arms / value+movement arms / cob
+dispatch), each driving two-route ground truth + AUTO byte-identity (statement notes) + cob
+round-trips.
+
+**Roadmap-#1 work: CONVERGED — no regression.** The eval(non-metric)/compose/trace steering is
+correct across cod≠dom, multi-position, and dual-slot cases; the `_basis_eq(f_rep.basis, f_target)`
+self-check backs off any unsound steer (no wrong double-dual); all back-offs (metric f / free-labels
+/ fused slots / want-mismatch) bail correctly; AUTO is byte-identical; the cob dispatch round-trips
+on the new `BasisProd`-of-mixed-slot shapes; `_CompleteColsOp` correct for static and dynamic-rank
+ambients.
+
+**New finding (pre-existing, NOT a regression — confirmed at `adf7bae`) — FIXED:** `_rep_project`
+and `_rep_embed` had a basis-honesty bug of the metric-seam class. `project`'s `Pᵀ·⟦v⟧` and `embed`'s
+default-path `P·⟦v⟧` use a selection matrix `P` in the ambient/sub DEFAULT basis, but the operand was
+realized in its own (possibly pinned non-default) basis — so a non-default operand silently returned
+the wrong vector (`project(u,V)` with `u` in a non-orthonormal list basis returned the list coords
+mislabeled std). Fix: realize the operand in its space's default basis before the contraction
+(no-op for a default operand ⇒ AUTO byte-identical; cob's a non-default list / ORTHONORMALIZE /
+metric pin). `embed`'s immersed (ImageBasis / FFS) path is unchanged (it already uses the operand's
+own ambient columns). Regression: `tests/test_project_embed_basis.py` (two-route). Suite 1181.
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** *(Resolved for `ListBasis`.)* A `ListBasis`

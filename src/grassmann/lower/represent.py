@@ -2757,10 +2757,14 @@ def _rep_project(
     """
     v_rep = _rep(vector, ctx)
     sub_basis, P = _subspace_cols(ctx, sub, note="project:CompleteBasis-coords")
+    # ``P``'s columns are in the AMBIENT default basis, so ``Pᵀ·⟦v⟧`` is basis-consistent only with
+    # ``v`` in the SAME ambient default coords — realize it there (a non-default operand pin would
+    # otherwise contract std-``P`` against non-std-``v``).  No-op for a default operand.
+    v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space), note="project:operand-to-default")
     # projected dim = #columns of the sub-basis (may be a runtime δ_f DimAtom, `42 §B`).
     out_dim = _shape_of(P)[1]
     [out] = ctx.prog.emit_stmt(
-        _ProjectOp(), [P, v_rep.array],
+        _ProjectOp(), [P, v_arr],
         [pa.OutSpec("project", (out_dim,))],
         note="project:drop-complement",
     )
@@ -2790,12 +2794,16 @@ def _rep_embed(
     # ``P · ⟦v⟧`` reconstructs the ambient value.  A non-default (``ImageBasis``) pin realizes
     # its literal columns (`43 §2c`); the default path is byte-identical via ``_subspace_cols``.
     if _is_immersed_metric_basis(v_rep.basis):
-        P = _ffs_immersion(ctx, v_rep.basis)  # embed needs the AMBIENT columns, not in-space
+        P = _ffs_immersion(ctx, v_rep.basis)  # P = the operand's OWN basis cols in ambient …
+        v_arr = v_rep.array                    # … so v's coords are already consistent (no cob)
     else:
         _sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
+        # P = the sub's DEFAULT cols in ambient ⇒ realize v in that default basis so ``P·⟦v⟧`` is
+        # consistent (no-op for a default operand; cob's a non-default ORTHONORMALIZE/metric pin).
+        v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space), note="embed:operand-to-default")
     big_shape = _shape_of_space(big)  # ambient layout (static); P has rows = Σ|axes|.
     [out] = ctx.prog.emit_stmt(
-        _EmbedOp(tuple(big_shape)), [P, v_rep.array],
+        _EmbedOp(tuple(big_shape)), [P, v_arr],
         [pa.OutSpec("embed", big_shape)],
         note="embed:pad-zeros",
     )
