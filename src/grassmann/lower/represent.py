@@ -3629,9 +3629,9 @@ def _realize_list_basis(
             bcols = _ffs_immersion(ctx, eff_backup)
         if reduce is B.Reduce.ORTHONORMALIZE:
             bcols = _orthonormalize_cols(ctx, bcols)
-        n = _shape_of(bcols)[0]  # ambient dim ⇒ a full (square) completed basis
+        n = _shape_of(bcols)[0]  # ambient dim (may be a runtime DimAtom for a dynamic FFS ambient)
         [cols] = ctx.prog.emit_stmt(
-            _CompleteColsOp(n), [cols, bcols],
+            _CompleteColsOp(), [cols, bcols],
             [pa.OutSpec("listbasis:complete", (n, n))],
             note="listbasis:RREF-complete(frame|backup)",
         )
@@ -3746,7 +3746,7 @@ def _realize_complete_basis(
     n_rows = _shape_of(sub_cols)[0]
     if reduce is B.Reduce.RREF:
         [out] = ctx.prog.emit_stmt(
-            _CompleteColsOp(n_rows), [sub_cols, comp_cols],
+            _CompleteColsOp(), [sub_cols, comp_cols],
             [pa.OutSpec("complete:rref", (n_rows, n_rows))],
             note="complete:RREF(sub|complement)",
         )
@@ -3947,29 +3947,32 @@ class _ColStackOp:
 
 @dataclass(frozen=True)
 class _CompleteColsOp:
-    """Complete a (possibly rank-deficient) frame to an ``n``-column basis (`20 §7`).
+    """Complete a (possibly rank-deficient) frame to a full ``(ambient, ambient)`` basis (`20 §7`).
 
     Greedy RREF-style selection: keep the frame's linearly-independent columns first, then fill
     the remaining directions from the backup's columns — each accepted only if it raises the
-    rank.  Result is an ``(ambient, n)`` full-column-rank basis matrix.
-    """
+    rank.  Result is an ``(ambient, ambient)`` full-rank (square) basis matrix.
 
-    n: int
+    The target column count is the **ambient dimension** = the inputs' row count, read at run time
+    (``frame.shape[0]``) — NOT a static field — so a dynamic-rank FFS ambient (whose dimension is a
+    runtime ``DimAtom``, not a static int) completes correctly.
+    """
 
     def __call__(self, frame: np.ndarray, backup: np.ndarray) -> np.ndarray:
         frame = np.asarray(frame, dtype=float)
         backup = np.asarray(backup, dtype=float)
+        n = frame.shape[0]  # ambient dim ⇒ a full (square) completed basis
         kept = np.zeros((frame.shape[0], 0))
         tol = 1e-9
         for c in [*frame.T, *backup.T]:
-            if kept.shape[1] == self.n:
+            if kept.shape[1] == n:
                 break
             cand = np.column_stack([kept, c])
             if np.linalg.matrix_rank(cand, tol=tol) > kept.shape[1]:
                 kept = cand
-        if kept.shape[1] != self.n:
+        if kept.shape[1] != n:
             raise ValueError(
-                f"basis completion: frame ⊕ backup span {kept.shape[1]} < {self.n} dims"
+                f"basis completion: frame ⊕ backup span {kept.shape[1]} < {n} dims"
             )
         return kept
 
@@ -4278,10 +4281,13 @@ def _immersed_gram(
     )
     if not dual:
         return gram
-    op, tag = (pa.InvOp(), ":InvOp=cotangent") if full_rank else (pa.PinvOp(), ":PinvOp=cotangent")
-    [out] = ctx.prog.emit_stmt(
-        op, [gram], [pa.OutSpec("immersed-gram-inv", (n_gram, n_gram))], note=note + tag,
-    )
+    # The dual (cotangent) basis carries the (pseudo-)inverse Gram — a plain inverse for a
+    # full-rank basis, else the Moore–Penrose pinv.  Keep the inv-vs-pinv provenance labels distinct.
+    if full_rank:
+        op, label, tag = pa.InvOp(), "immersed-gram-inv", ":InvOp(Gram)=cotangent"
+    else:
+        op, label, tag = pa.PinvOp(), "immersed-gram-pinv", ":PinvOp(Gram)=cotangent"
+    [out] = ctx.prog.emit_stmt(op, [gram], [pa.OutSpec(label, (n_gram, n_gram))], note=note + tag)
     return out
 
 
