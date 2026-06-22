@@ -3199,6 +3199,21 @@ def _rep_kron(
 # ---------------------------------------------------------------------------
 
 
+def _llam_body_has_nondefault_pin(body: T.Term, bound_uids: set[int], ctx: _Ctx) -> bool:
+    """True if a non-bound free var of an LLam ``body`` is pinned to a NON-default basis — the
+    domain-only tag-honesty hazard (an eval can cob that var's free-label axis to the pin's basis
+    while the body codomain stays default, so the cod check alone would miss it)."""
+    for v in _free_term_vars(body):
+        if v.uid in bound_uids or v.uid not in ctx.basis_env:
+            continue
+        try:
+            if not _basis_eq(ctx.basis_env[v.uid], default_basis(_synth(v))):
+                return True
+        except S.SpaceError:
+            return True  # can't verify it's the default ⇒ treat as risky
+    return False
+
+
 def _rep_llam(
     e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
@@ -3250,9 +3265,14 @@ def _rep_llam(
         body_default: B.Basis | None = default_basis(body_rep.space)
     except S.SpaceError:
         body_default = None  # SVar/App body space — no static default to compare against
-    if body_default is not None and not _basis_eq(body_rep.basis, body_default):
+    cod_nondefault = body_default is not None and not _basis_eq(body_rep.basis, body_default)
+    # Also catch the domain-only case (cod stays default but a body eval cob'd a var axis to a
+    # pinned operand's basis): ANY non-bound free var of the body pinned to a non-default basis.
+    bound_uids = {v.uid for v in vars_}
+    pinned_nondefault = _llam_body_has_nondefault_pin(body, bound_uids, ctx)
+    if cod_nondefault or pinned_nondefault:
         raise RepresentError(
-            f"represent: LLam body lands in the non-default basis {body_rep.basis!r}; honest tagging "
+            f"represent: LLam body uses a non-default basis (cod={body_rep.basis!r}); honest tagging "
             f"of the map tensor's domain (free-label) axes is not yet supported, so the result would "
             f"be silently mislabelled. Realize the body's operand(s) in their default basis first "
             f"(LLam free-label-basis tracking is future work — `41 §7`)."

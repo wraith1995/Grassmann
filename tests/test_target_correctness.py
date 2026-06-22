@@ -578,3 +578,15 @@ def test_llam_nondefault_body_basis_fails_loudly():
         raise AssertionError("expected RepresentError for a non-default llam body basis")
     except RepresentError as ex:
         assert "non-default basis" in str(ex)
+    # domain-only case (cod stays default, a body eval cob's the var axis to a pinned covector):
+    # LLam([x]. ⟨a, x⟩) with `a` pinned non-default must also raise (caught by the pin pre-check).
+    a = C.var("a", C.dual(V))
+    d = [C.var(f"d{i}", C.dual(V)) for i in range(3)]
+    lbd = B.list_basis(*d)
+    dfr = {f"d{i}_{d[i].uid}": Am[:, i] for i in range(3)}
+    lin = C.llam(x, body=C.eval_(a, (0,), x))
+    try:
+        _run(represent(lin, basis_env={a.uid: lbd}, target=B.STD), {**dfr, _vk(a): np.array([1.0, 2, 3])})
+        raise AssertionError("expected RepresentError for a domain-only non-default llam pin")
+    except RepresentError as ex:
+        assert "non-default basis" in str(ex)
