@@ -34,16 +34,16 @@ Here each basis node is shown against a representative of its OWN space, so **�
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | [`ScalarBasis`](scalar-basis.md) | `I` | — | [✓](#conv-scalar-basis-primal-basis) | — | — | — | — | — | [✓](#conv-scalar-basis-list-basis) | — | — | — |
 | [`DualBasis`](dual-basis.md) | — | `I` | — | — | — | — | — | — | [✓](#conv-dual-basis-list-basis) | — | — | — |
-| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | — | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | — | — | [✓](#conv-primal-basis-complete-basis) |
-| [`BasisSum`](basis-sum.md) | — | — | [✓](#conv-basis-sum-primal-basis) | `I` | — | — | — | — | [✓](#conv-basis-sum-list-basis) | — | — | [✓](#conv-basis-sum-complete-basis) |
-| [`BasisProd`](basis-prod.md) | — | — | [✓](#conv-basis-prod-primal-basis) | — | `I` | — | — | — | [✓](#conv-basis-prod-list-basis) | — | — | [✓](#conv-basis-prod-complete-basis) |
-| [`BasisRep`](basis-rep.md) | — | — | [✓](#conv-basis-rep-primal-basis) | — | — | `I` | — | — | [✓](#conv-basis-rep-list-basis) | — | — | [✓](#conv-basis-rep-complete-basis) |
-| [`ProjectedBasis`](projected-basis.md) | — | — | [✓](#conv-projected-basis-primal-basis) | — | — | — | `I` | [✓](#conv-projected-basis-image-basis) | [✓](#conv-projected-basis-list-basis) | — | — | [✓](#conv-projected-basis-complete-basis) |
-| [`ImageBasis`](image-basis.md) | — | — | [✓](#conv-image-basis-primal-basis) | — | — | — | [✓](#conv-image-basis-projected-basis) | `I` | [✓](#conv-image-basis-list-basis) | — | — | [✓](#conv-image-basis-complete-basis) |
-| [`ListBasis`](list-basis.md) | [✓](#conv-list-basis-scalar-basis) | [✓](#conv-list-basis-dual-basis) | [✓](#conv-list-basis-primal-basis) | [✓](#conv-list-basis-basis-sum) | [✓](#conv-list-basis-basis-prod) | [✓](#conv-list-basis-basis-rep) | [✓](#conv-list-basis-projected-basis) | [✓](#conv-list-basis-image-basis) | `I` | — | — | [✓](#conv-list-basis-complete-basis) |
+| [`PrimalBasis`](primal-basis.md) | [✓](#conv-primal-basis-scalar-basis) | — | `I` | [✓](#conv-primal-basis-basis-sum) | [✓](#conv-primal-basis-basis-prod) | [✓](#conv-primal-basis-basis-rep) | [✓](#conv-primal-basis-projected-basis) | [✓](#conv-primal-basis-image-basis) | [✓](#conv-primal-basis-list-basis) | — | — | — |
+| [`BasisSum`](basis-sum.md) | — | — | [✓](#conv-basis-sum-primal-basis) | `I` | — | — | — | — | [✓](#conv-basis-sum-list-basis) | — | — | — |
+| [`BasisProd`](basis-prod.md) | — | — | [✓](#conv-basis-prod-primal-basis) | — | `I` | — | — | — | [✓](#conv-basis-prod-list-basis) | — | — | — |
+| [`BasisRep`](basis-rep.md) | — | — | [✓](#conv-basis-rep-primal-basis) | — | — | `I` | — | — | [✓](#conv-basis-rep-list-basis) | — | — | — |
+| [`ProjectedBasis`](projected-basis.md) | — | — | [✓](#conv-projected-basis-primal-basis) | — | — | — | `I` | [✓](#conv-projected-basis-image-basis) | [✓](#conv-projected-basis-list-basis) | — | — | — |
+| [`ImageBasis`](image-basis.md) | — | — | [✓](#conv-image-basis-primal-basis) | — | — | — | [✓](#conv-image-basis-projected-basis) | `I` | [✓](#conv-image-basis-list-basis) | — | — | — |
+| [`ListBasis`](list-basis.md) | [✓](#conv-list-basis-scalar-basis) | [✓](#conv-list-basis-dual-basis) | [✓](#conv-list-basis-primal-basis) | [✓](#conv-list-basis-basis-sum) | [✓](#conv-list-basis-basis-prod) | [✓](#conv-list-basis-basis-rep) | [✓](#conv-list-basis-projected-basis) | [✓](#conv-list-basis-image-basis) | `I` | — | — | — |
 | [`WithInnerBasis`](with-inner-basis.md) | — | — | — | — | — | — | — | — | — | `I` | — | — |
 | [`OrthonormalBasis`](orthonormal-basis.md) | — | — | — | — | — | — | — | — | — | [✓](#conv-orthonormal-basis-with-inner-basis) | `I` | — |
-| [`CompleteBasis`](complete-basis.md) | — | — | [✓](#conv-complete-basis-primal-basis) | [✓](#conv-complete-basis-basis-sum) | [✓](#conv-complete-basis-basis-prod) | [✓](#conv-complete-basis-basis-rep) | [✓](#conv-complete-basis-projected-basis) | [✓](#conv-complete-basis-image-basis) | [✓](#conv-complete-basis-list-basis) | — | — | `I` |
+| [`CompleteBasis`](complete-basis.md) | — | — | — | — | — | [✓](#conv-complete-basis-basis-rep) | — | — | — | — | — | `I` |
 
 **`I`** identity · **✓** a same-space conversion (links to its explanation + test below) · **—** a different space (not a cob) or not exercised here.
 
@@ -278,50 +278,6 @@ Output — the `cob` matrix:
 ```
 [[1., 0., 0.],
  [0., 1., 0.],
- [0., 0., 1.]]
-```
-
-<a id="conv-primal-basis-complete-basis"></a>
-
-### `PrimalBasis` → a sub-basis RREF-completed from the standard basis
-
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(PrimalBasis(DualBasis(<the term basis>)), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 1.],
- [0., 1., 1.],
  [0., 0., 1.]]
 ```
 
@@ -593,50 +549,6 @@ Output — the `cob` matrix:
  [ 0.,  0.,  1.]]
 ```
 
-<a id="conv-basis-sum-complete-basis"></a>
-
-### `BasisSum` → a sub-basis RREF-completed from the ⊕ standard basis
-
-**Mechanism (`cob`):** realize both bases toward the V⊕W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(BasisSum(std₂, std₁), CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF))
-```
-
-Input `q0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `q1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `q2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `p0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
-```
-
 <a id="conv-basis-sum-primal-basis"></a>
 
 ### `BasisSum` → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
@@ -775,62 +687,6 @@ Output — the `cob` matrix:
  [ 0.,  0.,  0.,  1.]]
 ```
 
-<a id="conv-basis-prod-complete-basis"></a>
-
-### `BasisProd` → a sub-basis RREF-completed from the ⊗ standard basis
-
-**Mechanism (`cob`):** realize both bases toward the V⊗W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(BasisProd(std₂, std₂), CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF))
-```
-
-Input `w0` =
-
-```
-[[1., 0.],
- [0., 0.]]
-```
-
-Input `w1` =
-
-```
-[[1., 1.],
- [0., 0.]]
-```
-
-Input `w2` =
-
-```
-[[1., 1.],
- [1., 0.]]
-```
-
-Input `w3` =
-
-```
-[[1., 1.],
- [1., 1.]]
-```
-
-Input `r0` =
-
-```
-[[1., 0.],
- [0., 0.]]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0., 0.],
- [0., 1., 0., 0.],
- [0., 0., 1., 0.],
- [0., 0., 0., 1.]]
-```
-
 <a id="conv-basis-prod-primal-basis"></a>
 
 ### `BasisProd` → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
@@ -957,50 +813,6 @@ Output — the `cob` matrix:
 [[ 1.,  0., -1.],
  [ 0.,  1., -1.],
  [ 0.,  0.,  1.]]
-```
-
-<a id="conv-basis-rep-complete-basis"></a>
-
-### `BasisRep` → a sub-basis RREF-completed from the standard basis
-
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(BasisRep(3, ScalarBasis()), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
 ```
 
 <a id="conv-basis-rep-primal-basis"></a>
@@ -1180,56 +992,6 @@ Output — the `cob` matrix:
 ```
 [[ 1., -1.],
  [ 0.,  1.]]
-```
-
-<a id="conv-projected-basis-complete-basis"></a>
-
-### `ProjectedBasis` → an FFS-typed completed image basis `[ h₀ | mc ]`
-
-**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(ProjectedBasis(J, "image"), CompleteBasis(ListBasis(h0), comp))
-```
-
-Input `J` =
-
-```
-[[2., 1., 1.],
- [0., 3., 1.]]
-```
-
-Input `g0` =
-
-```
-[1., 0.]
-```
-
-Input `g1` =
-
-```
-[1., 1.]
-```
-
-Input `h0` =
-
-```
-[1., 0.]
-```
-
-Input `mc` =
-
-```
-[0., 1.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0.],
- [0., 1.]]
 ```
 
 <a id="conv-projected-basis-primal-basis"></a>
@@ -1426,56 +1188,6 @@ Output — the `cob` matrix:
  [ 0.   ,  2.708]]
 ```
 
-<a id="conv-image-basis-complete-basis"></a>
-
-### `ImageBasis` → an FFS-typed completed image basis `[ h₀ | mc ]`
-
-**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(ImageBasis(J), CompleteBasis(ListBasis(h0), comp))
-```
-
-Input `J` =
-
-```
-[[2., 1., 1.],
- [0., 3., 1.]]
-```
-
-Input `g0` =
-
-```
-[1., 0.]
-```
-
-Input `g1` =
-
-```
-[1., 1.]
-```
-
-Input `h0` =
-
-```
-[1., 0.]
-```
-
-Input `mc` =
-
-```
-[0., 1.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[2.449, 1.633],
- [0.   , 2.708]]
-```
-
 <a id="conv-image-basis-primal-basis"></a>
 
 ### `ImageBasis` → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
@@ -1608,16 +1320,16 @@ Output — the `cob` matrix:
  [0., 0., 1.]]
 ```
 
-<a id="conv-list-basis-complete-basis"></a>
+<a id="conv-list-basis-list-basis"></a>
 
-### `ListBasis` → a sub-basis RREF-completed from the standard basis
+### `ListBasis` → a short term frame completed from the standard basis
 
 **Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(ListBasis(v0, v1, v2), CompleteBasis(ListBasis(u0), std₃, reduce=RREF))
+cob(ListBasis(v0, v1, v2), ListBasis(u0, backup=std₃, reduce=RREF))
 ```
 
 Input `v0` =
@@ -2050,146 +1762,14 @@ Output — the `cob` matrix:
 
 <a id="conv-complete-basis-basis-rep"></a>
 
-### `CompleteBasis` → the standard basis `BasisRep(3, ScalarBasis)`
+### `CompleteBasis` → the standard codomain basis (a full ℝ³ basis)
 
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), BasisRep(3, ScalarBasis()))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
-```
-
-<a id="conv-complete-basis-list-basis"></a>
-
-### `CompleteBasis` → a term basis `ListBasis(v₀,v₁,v₂)`
-
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
+**Mechanism (`cob`):** `CompleteBasis(ProjectedBasis(J,"image"), std₃, RREF)` lifts the immersed image `U` to a full codomain basis; cob realizes both toward ℝ³
 
 **Test** — run + asserted in `tests/test_doc_conversions.py`:
 
 ```python
-cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), ListBasis(v0, v1, v2))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[ 1.,  0., -1.],
- [ 0.,  1., -1.],
- [ 0.,  0.,  1.]]
-```
-
-<a id="conv-complete-basis-primal-basis"></a>
-
-### `CompleteBasis` → a `PrimalBasis(DualBasis(·))` wrapping (the universal primal basis)
-
-**Mechanism (`cob`):** realize both bases toward the ℝ³ ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(u0), std₃, reduce=RREF), PrimalBasis(DualBasis(<the term basis>)))
-```
-
-Input `v0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `v1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `v2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `u0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[ 1.,  0., -1.],
- [ 0.,  1., -1.],
- [ 0.,  0.,  1.]]
-```
-
-<a id="conv-complete-basis-image-basis"></a>
-
-### `CompleteBasis` → the literal `ImageBasis(J)`
-
-**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(h0), comp), ImageBasis(J))
+cob(CompleteBasis(ProjectedBasis(J,"image"), std₃, reduce=RREF), std₃)
 ```
 
 Input `J` =
@@ -2199,184 +1779,11 @@ Input `J` =
  [0., 3., 1.]]
 ```
 
-Input `g0` =
-
-```
-[1., 0.]
-```
-
-Input `g1` =
-
-```
-[1., 1.]
-```
-
-Input `h0` =
-
-```
-[1., 0.]
-```
-
-Input `mc` =
-
-```
-[0., 1.]
-```
-
 Output — the `cob` matrix:
 
 ```
-[[ 0.408, -0.246],
- [-0.   ,  0.369]]
-```
-
-<a id="conv-complete-basis-projected-basis"></a>
-
-### `CompleteBasis` → the orthonormal `ProjectedBasis(J,"image")`
-
-**Mechanism (`cob`):** realize both bases toward the Img(J) ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(h0), comp), ProjectedBasis(J, "image"))
-```
-
-Input `J` =
-
-```
-[[2., 1., 1.],
- [0., 3., 1.]]
-```
-
-Input `g0` =
-
-```
-[1., 0.]
-```
-
-Input `g1` =
-
-```
-[1., 1.]
-```
-
-Input `h0` =
-
-```
-[1., 0.]
-```
-
-Input `mc` =
-
-```
-[0., 1.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[ 1., -0.],
- [-0.,  1.]]
-```
-
-<a id="conv-complete-basis-basis-sum"></a>
-
-### `CompleteBasis` → the ⊕ basis `BasisSum(std₂, std₁)`
-
-**Mechanism (`cob`):** realize both bases toward the V⊕W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(p0), BasisSum(std₂,std₁), reduce=RREF), BasisSum(std₂, std₁))
-```
-
-Input `q0` =
-
-```
-[1., 0., 0.]
-```
-
-Input `q1` =
-
-```
-[0., 1., 0.]
-```
-
-Input `q2` =
-
-```
-[1., 1., 1.]
-```
-
-Input `p0` =
-
-```
-[1., 0., 0.]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0.],
- [0., 1., 0.],
- [0., 0., 1.]]
-```
-
-<a id="conv-complete-basis-basis-prod"></a>
-
-### `CompleteBasis` → the ⊗ basis `BasisProd(std₂, std₂)`
-
-**Mechanism (`cob`):** realize both bases toward the V⊗W ambient (the seam routes FFS/`ListBasis` through SVD/QR/GSVD), then `M = pinv(C_to)·C_from`
-
-**Test** — run + asserted in `tests/test_doc_conversions.py`:
-
-```python
-cob(CompleteBasis(ListBasis(r0), BasisProd(std₂,std₂), reduce=RREF), BasisProd(std₂, std₂))
-```
-
-Input `w0` =
-
-```
-[[1., 0.],
- [0., 0.]]
-```
-
-Input `w1` =
-
-```
-[[1., 1.],
- [0., 0.]]
-```
-
-Input `w2` =
-
-```
-[[1., 1.],
- [1., 0.]]
-```
-
-Input `w3` =
-
-```
-[[1., 1.],
- [1., 1.]]
-```
-
-Input `r0` =
-
-```
-[[1., 0.],
- [0., 0.]]
-```
-
-Output — the `cob` matrix:
-
-```
-[[1., 0., 0., 0.],
- [0., 1., 0., 0.],
- [0., 0., 1., 0.],
- [0., 0., 0., 1.]]
+[[ 0.816, -0.492,  1.   ],
+ [ 0.408,  0.862,  0.   ],
+ [ 0.408,  0.123,  0.   ]]
 ```
 

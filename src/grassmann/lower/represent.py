@@ -940,8 +940,9 @@ def _norm_space(s: S.Space) -> S.Space:
 
 def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
     """The space ``b`` is a basis **of** — used to guard a cob (it relates two bases of ONE
-    space).  ``None`` when undeterminable: an abstract ``BVar``/``BLam``/``BApp``, or a
-    ``ListBasis``/``CompleteBasis`` that spans a *subspace* (its exact identity is runtime)."""
+    space).  A ``ListBasis`` is ALWAYS a full basis of its *ambient* (its vectors' space), so it
+    returns that ambient.  ``None`` only when undeterminable: an abstract ``BVar``/``BLam``/
+    ``BApp``, or a ``ListBasis`` over genuinely abstract vectors (``synth_space`` fails)."""
     match b:
         case B.ScalarBasis():
             return S.Scalar()
@@ -987,14 +988,14 @@ def _ffs_space_of(ctor, f) -> S.Space | None:
 
 
 def _term_basis_space(vectors: tuple) -> S.Space | None:
-    """A ``ListBasis``'s space — its vectors' (ambient) space when it is a *full* basis; ``None``
-    when it spans a proper subspace (so the exact subspace, being runtime, can't be checked)."""
+    """A ``ListBasis``'s space — its vectors' **ambient** space (a ``ListBasis`` is ALWAYS a full
+    basis of its ambient; the backup completes a short frame).  ``None`` only when the ambient is
+    genuinely undeterminable (abstract vectors whose ``synth_space`` fails)."""
     from grassmann.infer.synth import synth_space
     if not vectors:
         return None
     try:
-        amb = synth_space(vectors[0])
-        return amb if dim_of(amb) == len(vectors) else None
+        return synth_space(vectors[0])
     except Exception:
         return None
 
@@ -2738,23 +2739,58 @@ def _realize_list_basis(
 ) -> pa.SymArray:
     """Realize a ``ListBasis(vectors, backup?, reduce?)`` (`41 §2`, `20 §7`).
 
-    Stack the lowered Term ``vectors`` as the frame columns, then:
-    ``reduce=ORTHONORMALIZE`` ⇒ QR the frame; a ``backup`` ⇒ greedy RREF-complete the (possibly
-    rank-deficient) frame to a full basis, filling missing directions from the backup's columns.
+    A ``ListBasis`` is ALWAYS a full basis of its ambient (the vectors' space).  Stack the
+    lowered Term ``vectors`` as the frame columns, then complete them to the full ambient
+    ``n×n`` from the **effective backup** — the explicit ``backup`` or, when none is given,
+    the ambient's standard basis (``default_basis(synth_space(vectors[0]))``):
+
+    * a full-rank ``n``-vector frame is unchanged (no fill);
+    * a SHORT frame (``len(vectors) < n``), or a rank-deficient frame under ``RREF``, is
+      greedily RREF-completed to ``n×n`` from the backup;
+    * ``ORTHONORMALIZE`` orthonormalizes the frame and, if still short, completes from the
+      (orthonormalized) backup.
+
+    A DYNAMIC-ambient (runtime-rank FFS) ``ListBasis`` is left as-is — ``dim_of`` raises so the
+    static-short check is skipped and its vectors are taken to be a full basis of the FFS space.
     """
     cols = _stack_term_cols(ctx, vectors)
     if reduce is B.Reduce.ORTHONORMALIZE:
         cols = _orthonormalize_cols(ctx, cols)
-    if backup is not None:
-        bcols = realize_basis_cols(ctx, backup)
+
+    # The effective backup that determines/completes the ambient: explicit, or the ambient's
+    # standard basis ("auto backup").  The ambient is the vectors' (synth_space) space.
+    ambient = _term_basis_space(vectors)
+    n_static: int | None = None
+    if ambient is not None:
+        try:
+            n_static = dim_of(ambient)
+        except DynamicDim:
+            n_static = None  # dynamic ambient (runtime-rank FFS) ⇒ leave the frame as-is
+
+    n_cols = len(vectors)
+    # The "auto backup" (ambient standard basis) completes a short/rank-deficient frame to the
+    # full ambient when there is no explicit backup and the ambient is statically sized.
+    auto_fill = (
+        backup is None
+        and ambient is not None
+        and n_static is not None
+        and (n_cols < n_static or reduce is B.Reduce.RREF)
+    )
+    eff_backup = backup if backup is not None else (default_basis(ambient) if auto_fill else None)
+
+    if eff_backup is not None:
+        bcols = realize_basis_cols(ctx, eff_backup)
+        if reduce is B.Reduce.ORTHONORMALIZE:
+            bcols = _orthonormalize_cols(ctx, bcols)
         n = _shape_of(bcols)[0]  # ambient dim ⇒ a full (square) completed basis
         [cols] = ctx.prog.emit_stmt(
-            _CompleteColsOp(n), [cols, bcols], [pa.OutSpec("listbasis:complete", (n, n))],
+            _CompleteColsOp(n), [cols, bcols],
+            [pa.OutSpec("listbasis:complete", (n, n))],
             note="listbasis:RREF-complete(frame|backup)",
         )
     elif reduce is B.Reduce.RREF:
-        # ``RREF`` with NO backup: keep the frame's linearly-independent columns — a genuine
-        # basis of the frame's SPAN (not the raw, possibly singular, frame).  Full rank ⇒ all
+        # ``RREF`` with NO determinable ambient (abstract vectors): keep the frame's
+        # linearly-independent columns — a genuine basis of the frame's SPAN.  Full rank ⇒ all
         # columns unchanged; rank-deficient ⇒ a ``(rows, rank)`` matrix whose column axis is a
         # runtime ``DimAtom`` (``rank`` is numeric).  (Audit Fix 2.)
         cols = _rref_select_cols(ctx, cols)
@@ -2820,9 +2856,15 @@ def _realize_complete_basis(
     ctx: _Ctx, sub: B.Basis, complement: B.Basis, reduce: B.Reduce,
 ) -> pa.SymArray:
     """Realize a ``CompleteBasis(sub, complement, reduce)`` — complete ``sub`` to the ambient
-    from ``complement``'s columns (`20 §7`)."""
-    sub_cols = realize_basis_cols(ctx, sub)
-    comp_cols = realize_basis_cols(ctx, complement)
+    from ``complement``'s columns (`20 §7`).
+
+    ``sub`` may be a **genuine-subspace** basis (e.g. a ``ProjectedBasis`` of ``Img(f)``), whose
+    AMBIENT columns are its IMMERSION (``U``/``J``), not its in-space (square) realize.  Realize
+    both ``sub`` and ``complement`` via :func:`_ffs_immersion` (ambient columns; falls back to
+    ``realize_basis_cols`` for non-FFS full-ambient bases) so the hstack lives in the ambient.
+    """
+    sub_cols = _ffs_immersion(ctx, sub)
+    comp_cols = _ffs_immersion(ctx, complement)
     n_rows = _shape_of(sub_cols)[0]
     if reduce is B.Reduce.RREF:
         [out] = ctx.prog.emit_stmt(

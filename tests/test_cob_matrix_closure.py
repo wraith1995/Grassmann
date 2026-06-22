@@ -44,7 +44,7 @@ def _listb(name, space, cols):
 def _reps_dim1():
     """Dimension-1 representative of each node — used for the pairs touching `ScalarBasis`."""
     S = C.scalar()
-    lv, v2 = C.var("lv", S), C.var("v2", S)
+    lv = C.var("lv", S)
     Rt = C.base("Rt", 1)
     f = C.var("f1", C.linear_map_space(Rt, Rt), props=C.props.inj)
     g = C.var("g1", C.oprod(C.dual(S), C.dual(S)))
@@ -59,8 +59,10 @@ def _reps_dim1():
         "ImageBasis": (B.image_basis(f), {_k(f): np.array([[2.0]])}),
         "ListBasis": (B.list_basis(lv), {_k(lv): np.array(3.0)}),
         "WithInnerBasis": (B.with_inner_basis(B.scalar_basis(), g), {}),
-        "CompleteBasis": (B.complete_basis(B.list_basis(v2), B.scalar_basis(),
-                                           reduce=B.Reduce.RREF), {_k(v2): np.array(1.0)}),
+        # CompleteBasis now lifts a GENUINE-subspace basis (a ProjectedBasis of Img(f)) to its
+        # ambient: here Img(f:ℝ↪ℝ) completed to Scalar from the unit basis (a Scalar basis).
+        "CompleteBasis": (B.complete_basis(B.projected_basis(f, "image"), B.scalar_basis(),
+                                           reduce=B.Reduce.RREF), {_k(f): np.array([[2.0]])}),
     }
 
 
@@ -73,7 +75,12 @@ def _reps_dim4():
     f = C.var("F", C.linear_map_space(R4, R4), props=C.props.inj)
     ff = {_k(f): M.T}
     g = C.var("g4", C.oprod(C.dual(R4), C.dual(R4)))
-    sub, fsub = _listb("s", R4, M[:, :2])
+    # CompleteBasis now lifts a GENUINE-subspace basis: an injective h: ℝ²↪ℝ⁴ whose Img(h) is a
+    # proper 2-D subspace of ℝ⁴, completed to a full ℝ⁴ codomain basis from the standard basis.
+    Rt2 = C.base("Rt2", 2)
+    h = C.var("H", C.linear_map_space(Rt2, R4), props=C.props.inj)
+    Hcols = M[:, :2]  # a full-column-rank 4×2 immersion
+    fh = {_k(h): Hcols.T}
     return {
         "DualBasis": (B.dual_basis(lb), flb),
         "PrimalBasis": (B.primal_basis(B.dual_basis(lb)), flb),
@@ -84,7 +91,8 @@ def _reps_dim4():
         "ImageBasis": (B.image_basis(f), ff),
         "ListBasis": (lb2, flb2),
         "WithInnerBasis": (B.with_inner_basis(lb, g), flb),
-        "CompleteBasis": (B.complete_basis(sub, default_basis(R4), reduce=B.Reduce.RREF), fsub),
+        "CompleteBasis": (B.complete_basis(B.projected_basis(h, "image"), default_basis(R4),
+                                           reduce=B.Reduce.RREF), fh),
     }
 
 

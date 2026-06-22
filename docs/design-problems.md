@@ -167,12 +167,16 @@ Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-
    raw — a singular "basis" → a silent `InvOp`/`PinvOp` of a rank-deficient matrix in cob. **Fix:**
    apply RREF column-selection in `_realize_list_basis` when `reduce is RREF` (keep the LI columns;
    a subspace basis when rank-deficient), or reject the `RREF, backup=None, rank-deficient` combo.
-3. **Cross-subspace pairs admitted via the `None`-space variance fallback.** Two
-   `OrthonormalBasis`/`ListBasis` over *different* k-planes of one ambient both have
-   `_space_of_basis == None` ⇒ `_same_space` degrades to variance parity ⇒ a wrong cob is produced
-   instead of a reject. Pre-existing (subspace identity is runtime; the doc already notes the
-   weakening). **Mitigation:** when a `backup`/`complement`/ambient is present (so the ambient *is*
-   determinable), compare that before the bare-variance fallback.
+3. **[FIXED for term bases] Cross-subspace pairs admitted via the `None`-space variance
+   fallback.** Two `OrthonormalBasis`/`ListBasis` over *different* k-planes of one ambient both
+   had `_space_of_basis == None` ⇒ `_same_space` degraded to variance parity ⇒ a wrong cob.
+   **Fix:** a `ListBasis` is now ALWAYS a full basis of its *ambient* (a short frame is completed
+   from its backup, default = the ambient's standard basis); `_space_of_basis`/`_term_basis_space`
+   return the ambient (`synth_space(vectors[0])`) — no more subspace `None` for a term basis. Two
+   short ListBases over different planes of ℝ³ are now two full ℝ³ bases that cob (and round-trip)
+   honestly. `CompleteBasis` stays ONLY for completing a genuine *subspace* basis (e.g. a
+   `ProjectedBasis` of `Img(f)`), realizing the sub via its ambient *immersion*. Remaining: a bare
+   subspace-spanning `OrthonormalBasis` (not a `ListBasis`/`CompleteBasis`) can still be `None`.
 4. **Wrong-side metric consumed in the GSVD per `which`.** `realize_ffs_basis` feeds both
    `metric_dom` and `metric_cod` regardless of `which`; the irrelevant side (e.g. a `source` on an
    `image`/cod-side basis) still rotates the frame — not mathematically wrong (intended-metric
@@ -203,12 +207,13 @@ Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-
 
 ## Open questions
 
-- **A subspace-spanning `ListBasis`/`CompleteBasis`.** A `ListBasis` of `k < n` ambient vectors is
-  a basis of *some* `k`-D subspace, but *which* subspace is runtime (numeric), so
-  `_space_of_basis` returns `None` and the guard falls back to variance parity for it. This means
-  two term bases that span *different* `k`-D subspaces of the same ambient are not currently
-  distinguished by the guard — the round-trip tests catch a genuine mismatch, but the guard alone
-  does not. A precise check would need the realized column span (runtime).
+- **A subspace-spanning `ListBasis`/`CompleteBasis`.** *(Resolved for `ListBasis`.)* A `ListBasis`
+  is now ALWAYS a full basis of its *ambient*: a short `k < n` frame is completed from its backup
+  (default = the ambient's standard basis), so `_space_of_basis` returns the ambient (never a
+  subspace `None`), and two term bases over different planes of one ambient are two full ambient
+  bases that the guard accepts and that round-trip honestly. To build a basis of a genuine
+  subspace, use a subspace basis (e.g. a `ProjectedBasis`) and `CompleteBasis` to lift it to the
+  ambient.
 - **Pure structured bases of equal dimension but different shape** (`ℝ²⊗ℝ²` vs `ℝ⁴`). These are
   isomorphic via flattening but are different spaces; we reject them. If a flatten/reshape
   conversion is wanted it should be an explicit term-level `Reshape`/`Kron`, not a `cob`.

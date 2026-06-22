@@ -83,14 +83,16 @@ def _cases():
         out.append((f"WithInnerBasis(ListBasis,g) ℝ^{n}",
                     B.with_inner_basis(lb, g), B.with_inner_basis(default_basis(Vn), g), f))
 
-    # --- CompleteBasis: vary ambient n and sub width k -------------------
+    # --- ListBasis-with-backup: a short term frame completed to the ambient (the new idiom for
+    #     completing a term frame; a `ListBasis` is always a full basis of its ambient) --------
     for n in (2, 3, 4):
         for k in range(1, n):
             Vn = C.base("V", n)
             M = _invertible(n)
             sub, f = _listb(Vn, f"sub{n}_{k}", M[:, :k])
-            out.append((f"CompleteBasis ℝ^{n} (sub {k}, RREF-completed)",
-                        B.complete_basis(sub, default_basis(Vn), reduce=B.Reduce.RREF),
+            out.append((f"ListBasis(backup) ℝ^{n} (sub {k}, RREF-completed)",
+                        B.list_basis(*sub.vectors, backup=default_basis(Vn),
+                                     reduce=B.Reduce.RREF),
                         default_basis(Vn), f))
 
     # --- BasisSum: arities + per-summand options -------------------------

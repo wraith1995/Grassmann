@@ -135,6 +135,19 @@ def _dim_int(d: S.Dim) -> int:
             raise DynamicDim(f"cannot statically evaluate dim {d!r}")
 
 
+def _list_basis_ambient(vectors: tuple) -> S.Space | None:
+    """The (ambient) space of a ``ListBasis`` — its vectors' ``synth_space``, or ``None`` when
+    undeterminable (abstract vectors).  A ``ListBasis`` is always a full basis of this space."""
+    if not vectors:
+        return None
+    try:
+        from grassmann.infer.synth import synth_space
+
+        return synth_space(vectors[0])
+    except Exception:
+        return None
+
+
 def basis_dim(b: B.Basis) -> int:
     """Return the static integer dimension of a basis or raise :class:`DynamicDim`."""
     match b:
@@ -153,12 +166,15 @@ def basis_dim(b: B.Basis) -> int:
         case B.BasisRep(count, inner):
             return _dim_int(count) * basis_dim(inner)
         case B.ListBasis(vectors, backup, reduce):
-            # a list of vectors is sized by its length, unless a backup completes it to the
-            # backup's (ambient) dimension.  An ``RREF`` reduce with NO backup keeps only the
-            # frame's independent columns — the **runtime rank** — so its dim is dynamic (the
-            # length is just an upper bound), routing the cob through the seam (audit Fix 2).
+            # A ``ListBasis`` is ALWAYS a full basis of its AMBIENT (the vectors' space): its
+            # dim is the ambient dim (static when the ambient is static).  An explicit backup
+            # also gives the ambient.  Only when the ambient is genuinely undeterminable
+            # (abstract vectors, no backup) do we fall back to a runtime/length size.
             if backup is not None:
                 return basis_dim(backup)
+            amb = _list_basis_ambient(vectors)
+            if amb is not None:
+                return dim_of(amb)
             if reduce is B.Reduce.RREF:
                 raise DynamicDim(
                     f"ListBasis(reduce=RREF, backup=None) {b!r} is sized by its runtime rank"

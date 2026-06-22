@@ -226,11 +226,13 @@ def test_cob_roundtrip_is_inverse() -> None:
     np.testing.assert_allclose(m @ mback, np.eye(2), atol=1e-9)
 
 
-def test_cob_completebasis_stacks_sub_and_complement() -> None:
-    # sub basis = e0; complement basis = e1; ambient = R^2.  cob to standard = [sub|comp] = I.
+def test_listbasis_with_backup_completes_to_ambient() -> None:
+    # A short ℝ² term frame (e0) completed from a backup (e1): the new idiom — a `ListBasis` is
+    # always a full basis of its ambient, so a short frame is completed from its backup.
+    # cob to standard = [e0|e1] = I.
     sub, fs = _listb("sub", np.array([[1.0], [0.0]]))
     comp, fc = _listb("ce", np.array([[0.0], [1.0]]))
-    cb = C.complete_basis(sub, comp)
+    cb = C.list_basis(*sub.vectors, backup=comp, reduce=C.Reduce.RREF)
     np.testing.assert_allclose(_cob_run(cb, _rb(2), {**fs, **fc}), np.eye(2), atol=1e-9)
 
 
