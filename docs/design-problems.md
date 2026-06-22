@@ -205,6 +205,47 @@ Cholesky `Lᵀ` / `Cᵀ·G` exactness, FFS in-space realize, `_basis_eq` option-
 - **[open, micro]** `_inv_transpose` still uses `InvOp` even when the inner cob is orthogonal
   (could transpose) — low value, deferred.
 
+## Cob audit (round 3) — findings
+
+A second per-rule audit after the round-2 fixes. Most fixes verified correct (metric-peel parity,
+ImageBasis maps-must-match + direct arm, ProjectedBasis which-aware identity + which-relevant
+metric, `_axes_square`, `_norm_space`, the ListBasis-always-full guard / audit-#3 closure). The
+audit found NEW bugs (two were regressions from the round-2 fixes); **all are now FIXED** — items
+1–5 + the sub-optimal/hygiene items, with regression tests (`tests/test_cob_audit_round3.py`).
+
+### Correctness (verified real — all FIXED)
+1. **[regression] Short `ListBasis(reduce=ORTHONORMALIZE, backup=None)` is not orthonormal but
+   claims to be → WRONG cob.** ListBasis-always-full now auto-completes a short ORTHO frame via
+   `_CompleteColsOp` (greedy selection, NOT re-orthonormalized), so the result isn't orthonormal —
+   but `_is_standard_orthonormal(ListBasis)` still returns True for `ORTHONORMALIZE & backup=None`,
+   so `_inverse_cols` takes the transpose branch and the cob is wrong (no round-trip). **Fix:** the
+   ORTHONORMALIZE realize must re-orthonormalize the *completed* result; then
+   `_is_standard_orthonormal(ListBasis) = reduce is ORTHONORMALIZE` is valid for any backup.
+2. **[regression] cob-dispatch structured arms call the PURE (non-Dim-aware) combinators →
+   TypeError on a dynamic-FFS component.** Fix-1 updated `realize_basis_cols`'s structured arms to
+   the Dim-aware `_block_diag_cols`/`_kron_cols`/`_block_repeat_cols`, but `_cob_from_sum`/`_prod`/
+   `_rep` (5 sites) still call the pure `_block_diag`/`_kron`/`_block_repeat`, which int-arithmetic
+   the shapes and crash on a `DimAtom` axis. Reachable via the metric/pairing reconcilers on an
+   ⊕/⊗ operand with an FFS summand. **Fix:** swap to the `*_cols` siblings.
+3. **`CompleteBasis(reduce=ORTHONORMALIZE)` crashes** (`_orthonormalize_cols` declares OutSpec =
+   input shape, but reduced QR of a wide `n×k>n` stack returns `n×n`). **Fix:** size the output
+   `(n_rows, min(n_rows, k))`.
+4. **`CompleteBasis(reduce=NONE)` with a genuine-subspace sub is an over-complete non-basis**
+   (hstacks `sub|complement` without reducing). Only `RREF` is usable for the documented use-case;
+   guard/doc that NONE assumes disjoint sub+complement spanning exactly the ambient.
+5. **Pre-step order:** the `_basis_eq` identity short-circuit fires before the abstract-basis
+   reject, so two identical abstract bases (`BVar`) give a confusing `CobError` instead of the
+   clear "abstract basis" `RepresentError`. **Fix:** reject abstract before the identity arm.
+
+### Sub-optimal / hygiene
+- `ffs_realizations` memo is over-keyed (`id(source), id(target)`), so two requests differing only
+  in the *irrelevant*-side basis miss the memo and re-emit the whole GSVD; key on the own-side
+  metric basis instead (matches the documented `(which, id(f))` intent).
+- `_basis_eq` has no explicit `ProjectedBasis` arm (falls to `==`; correct now, could diverge if a
+  source/target is a metric-bearing `WithInnerBasis`).
+- `_realize_ffs_in_space`/`_cob_from_image` docstrings overstate "square k×k" — rectangular for an
+  over-determined-source / non-injective `ImageBasis`.
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** *(Resolved for `ListBasis`.)* A `ListBasis`
