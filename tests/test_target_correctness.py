@@ -549,3 +549,32 @@ def test_dagger_orthonormal_nonstandard_operand_std():
     mf_q = _run(represent(f, basis_env=std_env, target=opb), {**frame, _vk(f): Mf})
     got = _run(represent(C.dagger(f), basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_q})
     assert np.allclose(got, ref)  # was WRONG before the fast-path tag fix (returned the Q-basis adjoint)
+
+
+def test_llam_nondefault_body_basis_fails_loudly():
+    """_rep_llam tag honesty: a body landing in a non-default basis (e.g. a pinned operand) can't be
+    honestly tagged yet (the map tensor's domain free-label axes aren't basis-tracked), so it must
+    RAISE rather than silently mislabel.  A default-operand body is correct (AUTO == STD == Mfᵀ)."""
+    from grassmann.lower.represent import RepresentError
+
+    V = C.base("V", 3)
+    MS = C.linear_map_space(V, V)
+    f = C.var("f", MS)
+    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])
+    x = C.var("x", V)
+    llam = C.llam(x, body=C.eval_(f, (0,), x))  # LLam([x]. f·x) — the matrix of f
+    std_env = {f.uid: default_basis(MS)}
+    assert np.allclose(_run(represent(llam, basis_env=std_env), {_vk(f): Mf}), Mf.T)
+    assert np.allclose(_run(represent(llam, basis_env=std_env, target=B.STD), {_vk(f): Mf}), Mf.T)
+    # f pinned to a non-default map basis ⇒ body lands in `lb` ⇒ must raise (was silent-wrong)
+    a = [C.var(f"e{i}", V) for i in range(3)]
+    lb = B.list_basis(*a)
+    Am = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
+    frame = {f"e{i}_{a[i].uid}": Am[:, i] for i in range(3)}
+    opb = B.basis_prod(B.dual_basis(lb), lb)
+    mf_lb = _run(represent(f, basis_env=std_env, target=opb), {**frame, _vk(f): Mf})
+    try:
+        _run(represent(llam, basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_lb})
+        raise AssertionError("expected RepresentError for a non-default llam body basis")
+    except RepresentError as ex:
+        assert "non-default basis" in str(ex)

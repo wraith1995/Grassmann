@@ -3238,6 +3238,25 @@ def _rep_llam(
     for uid in bound:
         ctx.inputs.pop(uid, None)
     ctx._free_label_next = saved_next
+    # Tag honesty: the map tensor's domain axes are the var free-label axes (whose POST-reconciliation
+    # bases are not tracked — the eval inside the body may cob a var axis to pair with a pinned
+    # operand) and the codomain axes carry ``body_rep.basis``.  We can only honestly tag the result
+    # ``default_basis(space)`` when the body landed in its DEFAULT basis (the common case: a body over
+    # default/leaf operands).  A non-default body basis (e.g. a pinned operand) makes the tensor's
+    # coords live in an untracked basis, so the default tag would be silent-wrong under a downstream
+    # or STD/MATCH cob — fail loudly instead of miscomputing.  (Full fix: track free-label-axis bases;
+    # a residual domain-only case with a default cod can still slip — see the audit log / `41 §7`.)
+    try:
+        body_default: B.Basis | None = default_basis(body_rep.space)
+    except S.SpaceError:
+        body_default = None  # SVar/App body space — no static default to compare against
+    if body_default is not None and not _basis_eq(body_rep.basis, body_default):
+        raise RepresentError(
+            f"represent: LLam body lands in the non-default basis {body_rep.basis!r}; honest tagging "
+            f"of the map tensor's domain (free-label) axes is not yet supported, so the result would "
+            f"be silently mislabelled. Realize the body's operand(s) in their default basis first "
+            f"(LLam free-label-basis tracking is future work — `41 §7`)."
+        )
     rep = Rep(body_rep.array, default_basis(space), space, free_labels="")
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
