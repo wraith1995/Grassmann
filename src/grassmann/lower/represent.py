@@ -42,7 +42,7 @@ from grassmann.core.kinds import SpaceSort as _SpaceSort
 from grassmann.infer import map_domain_codomain, synth_space
 from grassmann.infer.properties import map_props
 
-from ._dims import DynamicDim, basis_dim, dim_of
+from ._dims import DynamicDim, _dim_int, basis_dim, dim_of
 from .choose import choose
 from .provenance import LowerProv
 from .space_basis import (
@@ -917,8 +917,15 @@ def _norm_space(s: S.Space) -> S.Space:
     ``WithInner`` — those are *canonical isos*, and cob makes **no implicit conversions, even
     canonical ones** (``WithInner(V, g) ≠ V``; crossing it is an explicit ``remetric``)."""
     match s:
-        case S.OPlusRep(c, inner) if isinstance(c, S.DimLit):
-            return S.OPlus(tuple([_norm_space(inner)] * c.value))
+        case S.OPlusRep(c, inner):
+            # Expand `⊕ⁿ s` to `⊕(s,…,s)` (as `infer.unify` does) whenever the count statically
+            # folds to an int — not only a `DimLit` but any foldable count (`DimSum(1,1)`,
+            # `DimProd`, …); a genuinely symbolic/runtime count stays an `OPlusRep` (audit round-4).
+            try:
+                n = _dim_int(c)
+            except DynamicDim:
+                return S.OPlusRep(c, _norm_space(inner))
+            return S.OPlus(tuple([_norm_space(inner)] * n))
         case S.OPlus(sps):
             return S.OPlus(tuple(_norm_space(x) for x in sps))
         case S.OProd(sps):
@@ -1037,6 +1044,40 @@ def _basis_cob_matrix(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     return _basis_cob_rec(ctx, frm, to)
 
 
+def _contains_abstract(b: B.Basis) -> bool:
+    """Whether ``b`` is — or structurally CONTAINS — an abstract basis leaf (``BVar``/``BLam``/
+    ``BApp``), recursing every basis-valued child (audit round-4 #1).
+
+    An abstract leaf has no concrete cob until reduced; a TOP-node-only check (the old
+    ``isinstance``) lets a wrapped/structured pair (``BasisSum(BVar,BVar)``, ``DualBasis(BVar)``,
+    ``OrthonormalBasis(BVar)``, ``BasisRep(2, BasisSum(BVar))``, …) that is ``_basis_eq``-equal
+    slip past to the identity short-circuit, which then fails confusingly in ``realize_basis_cols``.
+    """
+    match b:
+        case B.BVar() | B.BLam() | B.BApp():
+            return True
+        case B.DualBasis(x) | B.PrimalBasis(x) | B.OrthonormalBasis(x):
+            return _contains_abstract(x)
+        case B.WithInnerBasis(x, _):
+            return _contains_abstract(x)
+        case B.BasisSum(bs) | B.BasisProd(bs):
+            return any(_contains_abstract(x) for x in bs)
+        case B.BasisRep(_n, x):
+            return _contains_abstract(x)
+        case B.CompleteBasis(sub, comp, _r):
+            return _contains_abstract(sub) or _contains_abstract(comp)
+        case B.ListBasis(_v, backup, _r):
+            return backup is not None and _contains_abstract(backup)
+        case B.ProjectedBasis(_f, _w, src, tgt):
+            return ((src is not None and _contains_abstract(src))
+                    or (tgt is not None and _contains_abstract(tgt)))
+        case B.ImageBasis(_f, src, tgt):
+            return ((src is not None and _contains_abstract(src))
+                    or (tgt is not None and _contains_abstract(tgt)))
+        case _:
+            return False
+
+
 def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     """Change-of-basis dispatch — **match on ``frm``, then dispatch to a per-from-basis handler**
     (``_cob_from_*``) which matches on ``to``.  Each handler has the specialized rule for its
@@ -1051,8 +1092,11 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
         pass
     # Reject abstract bases BEFORE the identity short-circuit: two identical abstract bases satisfy
     # `_basis_eq`, but `_identity_like` cannot size a concrete identity for them — give the clear
-    # "abstract basis" error rather than a confusing downstream realize failure.
-    if isinstance(frm, (B.BVar, B.BLam, B.BApp)) or isinstance(to, (B.BVar, B.BLam, B.BApp)):
+    # "abstract basis" error rather than a confusing downstream realize failure.  A NESTED abstract
+    # leaf (`BasisSum(BVar,BVar)`, `DualBasis(BVar)`, …) must be rejected too: a top-node-only check
+    # lets a `_basis_eq`-equal wrapped/structured pair slip to the identity short-circuit (audit
+    # round-4 #1), so recurse the whole tree.
+    if _contains_abstract(frm) or _contains_abstract(to):
         raise RepresentError(
             f"cob: abstract basis has no concrete cob until reduced: {frm!r} / {to!r}"
         )
@@ -1458,6 +1502,18 @@ def _is_standard_orthonormal(b: B.Basis) -> bool:
             return reduce is B.Reduce.ORTHONORMALIZE
         case B.CompleteBasis(_s, _c, reduce):
             return reduce is B.Reduce.ORTHONORMALIZE
+        case B.BasisProd(bs) | B.BasisSum(bs):
+            # A Kron / block-diag of orthogonal matrices is orthogonal (audit round-4 sub-opt).
+            return bool(bs) and all(_is_standard_orthonormal(x) for x in bs)
+        case B.BasisRep(_n, inner):
+            # A block-repeat (⊕ⁿ) of an orthogonal matrix is orthogonal.
+            return _is_standard_orthonormal(inner)
+        case B.DualBasis(inner) | B.PrimalBasis(inner):
+            # Orthogonality is variance-invariant: the inverse-transpose of an orthogonal matrix is
+            # orthogonal (so `default_basis(ℝⁿ)`, a BasisRep of ScalarBasis, is recognized).  NOTE:
+            # `WithInnerBasis` is deliberately NOT recursed — a g-orthonormal basis is NOT
+            # standard-orthonormal.
+            return _is_standard_orthonormal(inner)
         case _:
             return False
 
@@ -2947,9 +3003,36 @@ def _realize_complete_basis(
         _HStackOp(), [sub_cols, comp_cols],
         [pa.OutSpec("complete:hstack", (n_rows, k))], note="complete:[sub|comp]",
     )
+    if reduce is B.Reduce.NONE and not (isinstance(k, int) and isinstance(n_rows, int)):
+        # The static check above could not decide (a dynamic-column `ProjectedBasis` sub has a
+        # `DimAtom` column count) — emit a RUNTIME assert that the completed column count equals the
+        # ambient row count, so a silent over/under-complete rectangular non-basis raises clearly
+        # at run time instead of round-tripping only one-sided (audit round-4 #3).
+        _assert_complete_square(ctx, out)
     if reduce is B.Reduce.ORTHONORMALIZE:
         out = _orthonormalize_cols(ctx, out)
     return out
+
+
+def _assert_complete_square(ctx: _Ctx, hstack: pa.SymArray) -> None:
+    """Runtime guard that a ``CompleteBasis(reduce=NONE)`` hstack is square (col count == row
+    count) — the only shape under which a bare ``[sub|comp]`` is a basis (audit round-4 #3)."""
+    msg = (
+        "CompleteBasis(reduce=NONE): sub+complement column count != ambient dimension "
+        "(over/under-complete rectangular non-basis); use reduce=RREF or ORTHONORMALIZE"
+    )
+    [nrows] = ctx.prog.emit_stmt(
+        _AxisLenOp(axis=0), [hstack], [pa.OutSpec("complete:n_rows", ())],
+        note="complete:none-square:n_rows",
+    )
+    [ncols] = ctx.prog.emit_stmt(
+        _AxisLenOp(axis=1), [hstack], [pa.OutSpec("complete:n_cols", ())],
+        note="complete:none-square:n_cols",
+    )
+    ctx.prog.emit_stmt(
+        pa.AssertOp(kind="rank_eq", msg=msg), [hstack, nrows, ncols],
+        [pa.OutSpec("ok", _shape_of(hstack))], note="complete:none-square",
+    )
 
 
 def _peel_orthonormal_metric(inner: B.Basis) -> tuple[object | None, int]:
@@ -2967,6 +3050,13 @@ def _peel_orthonormal_metric(inner: B.Basis) -> tuple[object | None, int]:
         match b:
             case B.DualBasis(x) | B.PrimalBasis(x):
                 parity ^= 1
+                b = x
+            case B.OrthonormalBasis(x):
+                # Peel through an inner ``OrthonormalBasis`` to its carried metric (audit round-4
+                # #2): the SPACE of ``Orth(Orth(WithInner(b,g)))`` is still ``WithInner(V,g)``, so
+                # the outer ``Orth`` must orthonormalize against ``g`` — stopping here would
+                # orthonormalize in the STANDARD product instead.  An inner ``Orth`` does not change
+                # variance, so parity is untouched.
                 b = x
             case B.WithInnerBasis(_x, g):
                 return g, parity
@@ -4240,8 +4330,15 @@ def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
             return _basis_eq(x, y)
         case (B.BasisRep(nx, x), B.BasisRep(ny, y)):
             return nx == ny and _basis_eq(x, y)
-        case (B.WithInnerBasis(x, _), B.WithInnerBasis(y, _)):
-            return _basis_eq(x, y)
+        case (B.WithInnerBasis(x, gx), B.WithInnerBasis(y, gy)):
+            # Compare the metric too (audit round-4): `_same_space` keeps the metric, so dropping it
+            # here is a latent wrong-identity via the public `cob()`.  Terms compare by `==` (as the
+            # rest of `_basis_eq` does for term-valued fields).
+            try:
+                metrics_eq = bool(gx == gy)
+            except ValueError:
+                metrics_eq = False
+            return metrics_eq and _basis_eq(x, y)
         case _:
             try:
                 return bool(a == b)

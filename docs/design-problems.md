@@ -246,6 +246,35 @@ audit found NEW bugs (two were regressions from the round-2 fixes); **all are no
 - `_realize_ffs_in_space`/`_cob_from_image` docstrings overstate "square k×k" — rectangular for an
   over-determined-source / non-injective `ImageBasis`.
 
+## Cob audit (round 4) — findings
+
+Third per-rule audit (after round-3 fixes). Round-3 fixes verified correct. New issues (all FIXED),
+markedly fewer/subtler — convergence:
+
+### Correctness
+1. **Abstract-reject was top-node-only** — a structured/wrapped basis with a nested abstract leaf
+   (`BasisSum(BVar,BVar)`, `DualBasis(BVar)`, …) that is `_basis_eq`-equal bypassed the reject →
+   identity short-circuit → confusing `CobError` instead of the clear "abstract basis" error
+   (negated the round-3 fix for nested cases). **Fix:** recursive `_contains_abstract`.
+2. **`Orth(Orth(WithInner(b,g)))` dropped the metric** — the peel stopped at an inner
+   `OrthonormalBasis`, so the outer `Orth` orthonormalized in the STANDARD product, not `g`; two
+   `OrthonormalBasis` of the same space disagreed on the inner product (cob still round-trips, but
+   wrong "kind" + mis-classification). **Fix:** peel through an inner `OrthonormalBasis`.
+3. **`CompleteBasis(reduce=NONE)` over-complete guard was statically blind to a `ProjectedBasis`
+   sub** — its immersion has a dynamic (`DimAtom`) column count, so the `isinstance(k,int)` guard
+   was skipped → a silent rectangular non-basis (one-sided round-trip only). **Fix:** a runtime
+   column-count `AssertOp` when the static check can't decide.
+
+### Sub-optimal / hygiene (fixed)
+- `_is_standard_orthonormal` didn't recurse through `BasisSum`/`BasisProd`/`BasisRep`/`Dual`/`Primal`
+  of orthonormal components (e.g. `default_basis(ℝⁿ)=BasisRep` unrecognized) → missed transpose.
+- `_norm_space` only expanded `OPlusRep` for a `DimLit` count, so a foldable non-literal count
+  (`DimSum(1,1)`) wrongly failed the same-space guard (fails safe — rejects). **Fix:** static-fold.
+- `_basis_eq` ignored the `WithInnerBasis` metric while `_same_space` keeps it — a latent
+  wrong-identity via the public `cob()` (guarded pipeline path unaffected). **Fix:** compare metrics.
+- (Deferred, efficiency-only: FFS memo keyed by `id` not structure → duplicate GSVD for
+  structurally-equal own-side metrics; `_src_eq(None, default_basis)` not unified.)
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** *(Resolved for `ListBasis`.)* A `ListBasis`
