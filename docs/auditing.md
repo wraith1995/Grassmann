@@ -15,6 +15,50 @@ prioritize** → **verify each finding by probe before fixing** → **fix** → 
 
 ---
 
+# 0. The canonical arm structure (what the arm audits enforce)
+
+The cob dispatch (`_cob_from_*`) and the represent lowering (`_rep_X`) are both families of "arms,"
+and we hold every arm to ONE shape:
+
+> **Exploit structure where it exists, else bail out via the standard basis + a conversion.**
+
+The standard basis is the universal pivot; the specialized handling is a pure *optimization* layered
+over an always-correct bail. That is what makes the arm audits tractable — an arm that "does nothing
+special" is still correct, so the audit only asks: *does it exploit the structure it could, and is
+the bail right?*
+
+## cob arms — `_cob_from_<from>`
+
+`_basis_cob_rec` matches `frm` first → a per-from handler that matches `to`. Each `(from, to)` arm:
+
+1. **breaks out sub-cases by the bases' OPTIONS** (don't collapse them) — `ImageBasis` same/diff map
+   × source/target; `ProjectedBasis` `which` × own-side source/target; `ListBasis` `reduce` × backup;
+   dual/primal parity;
+2. **exploits structure maximally** per sub-case — identity / transpose / `Cᵀ·G` /
+   block-diag·Kron·block-repeat / exact `InvOp` / `(inner cob)⁻ᵀ`;
+3. **bails out via the standard route** — `_cob_via_standard → _inverse_cols` =
+   `(realize to)⁻¹ · realize from`.
+
+## represent arms — `_rep_X(e, ctx, target)`
+
+A visible 3-case structure in **every** arm:
+
+1. **STD** — realize directly in the standard orthonormal basis of the space.
+2. **AUTO** — the system's free / `41 §1b` min-symbolic choice (ideally querying sub-terms to
+   minimize output complexity).
+3. **concrete target (match)** — decompose into the candidate bases the *term's structure* makes
+   cheap (structural split / direct realize / push-down into sub-terms), else **bail out via
+   standard-basis realize + a conversion cob**.
+
+## The symmetry
+
+cob bails to `(realize to)⁻¹ · realize from`; represent bails to `natural rep + cob to target`. Same
+shape, standard basis the pivot. The **cob audit (§1)** checks each `_cob_from_*` sub-case maximally
+exploits structure *and* the bail is correct; the **target-basis 2.3 audit (§2)** checks each
+`_rep_X` decomposes the match into structural candidates *and* falls back correctly.
+
+---
+
 # 1. Iterative multi-agent dispatch audit (the cob audit)
 
 A repeatable procedure for finding **correctness** bugs and **missing/sub-optimal** cases in a
