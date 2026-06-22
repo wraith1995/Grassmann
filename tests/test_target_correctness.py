@@ -590,3 +590,32 @@ def test_llam_nondefault_body_basis_fails_loudly():
         raise AssertionError("expected RepresentError for a domain-only non-default llam pin")
     except RepresentError as ex:
         assert "non-default basis" in str(ex)
+
+
+def test_pinv_gsvd_nondefault_operand_fails_loudly():
+    """_rep_pinv / _rep_pinv_apply GSVD (metric) branch: the metric is built in the default basis, so
+    a non-default operand pin was silent-wrong (coords inconsistent with the metric + mislabelled).
+    Now it RAISES; default operands are correct (== inv(Mf) for a square invertible f)."""
+    from grassmann.lower.represent import RepresentError
+
+    V0 = C.base("V", 3)
+    g = C.var("gm", C.linear_map_space(V0, V0))
+    Vg = C.with_inner(V0, g)
+    MS = C.linear_map_space(Vg, Vg)
+    f = C.var("f", MS)
+    Gm = np.diag([2.0, 3.0, 1.0])
+    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])
+    # default operand ⇒ correct (square invertible ⇒ metric-pinv == inverse)
+    out = _run(represent(C.pinv(f), basis_env={f.uid: default_basis(MS)}, target=B.STD),
+               {_vk(f): Mf, _vk(g): Gm})
+    assert np.allclose(out, np.linalg.inv(Mf))
+    # non-default operand ⇒ raises (was silent-wrong)
+    av = [C.var(f"e{i}", Vg) for i in range(3)]
+    lb = B.list_basis(*av)
+    mb = B.basis_prod(B.dual_basis(lb), lb)
+    for term in (C.pinv(f), C.pinv_apply(f, C.var("v", Vg))):
+        try:
+            represent(term, basis_env={f.uid: mb}, target=B.STD)
+            raise AssertionError("expected RepresentError for a non-default GSVD operand")
+        except RepresentError as ex:
+            assert "does not yet support" in str(ex)

@@ -2416,11 +2416,21 @@ def _rep_pinv(
     space = _synth(e)
     metric = _map_metrics(f)
     if metric is not None:
-        # GSVD branch — leave the bail (delicate metric/GSVD basis; no operand steering).
+        # GSVD branch — `_gsvd_pinv_map` builds the metric in the DEFAULT basis, so it is only
+        # correct when ``f`` arrives in default too.  A non-default operand pin would feed coords
+        # inconsistent with the metric AND mislabel the result (formerly silent-wrong); we cannot
+        # yet build the GSVD metric in the operand basis, so FAIL LOUDLY rather than miscompute.
         f_rep = _rep(f, ctx)
+        _require_default_gsvd_operand(f_rep, "Pinv")
         out = _gsvd_pinv_map(ctx, f_rep.array, *metric)
-        # fast path; _rep's safety-net cob's to target
-        return Rep(out, default_basis(space), space)
+        rep = Rep(out, default_basis(space), space)
+        match target:
+            case B.TargetBasis.STD:
+                return _std_result(ctx, rep)
+            case B.TargetBasis.AUTO:
+                return rep
+            case _:
+                return _match_result(ctx, rep, target)
     # PinvOp branch — arm-C operand steering: realize ``f`` in the slots whose dual-swap ==
     # ``want`` so the numeric pinv lands directly in ``want``.  ``None`` ⇒ existing bail.
     want = _resolve_target(ctx, space, target)
@@ -2486,24 +2496,40 @@ def _rep_pinv_apply(
     space = _synth(e)
     v_rep = _rep(v, ctx)
     metric = _map_metrics(f)
-    # Arm-C operand steering (PinvOp branch only): the result vector ``x = f⁺ v`` is honestly
-    # tagged in f's domain-slot primal.  Steer f's domain slot to ``DualBasis(want)`` (so that
-    # primal == want) while keeping its cod slot == v's basis (the einsum "ab,a->b" contracts
-    # fp's cod axis against v, so they must agree).  GSVD/metric branch keeps its bail.
+    if metric is not None:
+        # GSVD/metric branch — the metric is built in DEFAULT, so both ``f`` and ``v`` must arrive in
+        # default for a consistent computation; a non-default pin was silent-wrong.  We cannot yet
+        # build the GSVD metric in the operand basis, so FAIL LOUDLY rather than miscompute.
+        f_rep = _rep(f, ctx)
+        _require_default_gsvd_operand(f_rep, "PinvApply")
+        _require_default_gsvd_operand(v_rep, "PinvApply")
+        fp = _gsvd_pinv_map(ctx, f_rep.array, *metric)  # stored (|cod|,|dom|)
+        [out] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("ab,a->b"), [fp, v_rep.array],
+            [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
+        )
+        rep = Rep(out, default_basis(space), space)
+        match target:
+            case B.TargetBasis.STD:
+                return _std_result(ctx, rep)
+            case B.TargetBasis.AUTO:
+                return rep
+            case _:
+                return _match_result(ctx, rep, target)
+    # PinvOp branch — arm-C operand steering: the result vector ``x = f⁺ v`` is honestly tagged in
+    # f's domain-slot primal.  Steer f's domain slot to ``DualBasis(want)`` (so primal == want) while
+    # keeping its cod slot == v's basis (the einsum "ab,a->b" contracts fp's cod axis against v).
     want = _resolve_target(ctx, space, target)
-    steer = want is not None and metric is None
+    steer = want is not None
     if steer:
         f_rep = _rep(f, ctx, B.basis_prod(B.dual_basis(want), v_rep.basis))
     else:
         f_rep = _rep(f, ctx)
-    if metric is not None:
-        fp = _gsvd_pinv_map(ctx, f_rep.array, *metric)  # stored (|cod|,|dom|)
-    else:
-        [fp] = ctx.prog.emit_stmt(
-            pa.PinvOp(), [f_rep.array],
-            [pa.OutSpec("pinv", _transpose_shape(_shape_of(f_rep.array)))],
-            note="pinvapply:PinvOp",
-        )
+    [fp] = ctx.prog.emit_stmt(
+        pa.PinvOp(), [f_rep.array],
+        [pa.OutSpec("pinv", _transpose_shape(_shape_of(f_rep.array)))],
+        note="pinvapply:PinvOp",
+    )
     # fp is the pinv map cod⊸dom stored (|cod|,|dom|); applying to v[cod] contracts the
     # input (cod) axis 0, mirroring the Eval contraction convention (`41 §3`).
     [out] = ctx.prog.emit_stmt(
@@ -2511,13 +2537,8 @@ def _rep_pinv_apply(
         [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
     )
     # Honest tag: ``x = f⁺ v`` lives in f's domain-slot primal basis (PinvOp acts in whatever
-    # basis ``f``/``v`` arrived in).  The metric (GSVD) branch produces standard coords and so
-    # keeps ``default_basis`` — its WithInner operands are reconciled by the metric seam.
-    out_basis = (
-        default_basis(space) if metric is not None
-        else _inverse_apply_basis(f_rep.basis, space)
-    )
-    rep = Rep(out, out_basis, space)
+    # basis ``f``/``v`` arrived in).
+    rep = Rep(out, _inverse_apply_basis(f_rep.basis, space), space)
     if steer:
         # Steered: f's dom slot == DualBasis(want) ⇒ _inverse_apply_basis primal == want.
         return Rep(out, want, space)
@@ -2529,6 +2550,23 @@ def _rep_pinv_apply(
             return rep
         case _:
             return _match_result(ctx, rep, target)
+
+
+def _require_default_gsvd_operand(rep: Rep, op: str) -> None:
+    """The GSVD metric-pinv path builds its metric in the DEFAULT basis, so it is only correct when
+    the operand arrives in default.  A non-default pin would feed inconsistent coords and mislabel the
+    result — fail loudly rather than miscompute (building the GSVD metric in the operand basis is
+    future work; the non-metric `PinvOp` branch already handles non-default operands)."""
+    try:
+        if not _basis_eq(rep.basis, default_basis(rep.space)):
+            raise RepresentError(
+                f"represent: {op} over a metric (WithInner) space does not yet support a non-default "
+                f"operand basis {rep.basis!r} (the GSVD metric is built in the default basis, so the "
+                f"result would be silently miscomputed). Realize the operand in its default basis "
+                f"first (operand-basis GSVD metric is future work)."
+            )
+    except S.SpaceError:
+        pass  # no static default (SVar/App) — nothing to compare against
 
 
 def _map_metrics(f: T.Term) -> tuple[S.Space, S.Space] | None:
