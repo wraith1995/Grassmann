@@ -49,11 +49,19 @@ STAR = Sort("*")  # the kind of types
 class SpaceSort:
     """A value-domain sort: a binder ranges over the values of a space ``s``.
 
-    ``space`` is a :class:`~grassmann.core.space.Space`; kept as ``object`` to
-    avoid an import cycle (space.py does not import kinds for its own nodes).
+    ``space`` is a :class:`~grassmann.core.space.Space`; the annotation is kept as ``object`` to
+    avoid an import cycle (space.py does not import kinds), but it is **enforced** at construction
+    via a lazy ``is_space`` check — so a raw array / non-Space cannot slip into a ``Lam``/``BLam``
+    binder domain (which would make the binder unhashable, the type-enforcement audit's bug class).
     """
 
     space: object
+
+    def __post_init__(self) -> None:
+        # Lazy import — cycle-safe: space.py never imports kinds.
+        from .space import is_space
+        if not is_space(self.space):
+            raise KindError(f"SpaceSort.space: expected a Space, got {self.space!r}")
 
     def __repr__(self) -> str:
         return f"SpaceSort({self.space!r})"
