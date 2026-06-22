@@ -215,3 +215,85 @@ def test_arm_c_auto_byte_identical():
     v = C.var("v", V)
     for t in (C.dagger(f), C.solve(f), C.pinv(fp), C.pinv_apply(fp, v)):
         assert _nstmt(represent(t)) == _nstmt(represent(t, target=B.AUTO))
+
+
+# ---------------------------------------------------------------------------
+# Structured movement (roadmap #3): TupleEmbed/TupleProject emit their CONSTANT eye-block
+# directly in a structure-matching per-block target — the matrix is byte-identical there
+# (verified: an ⊕ basis block-diagonal in [c₀…] with the lone block slot == cᵢ keeps the
+# off-block selected columns zero), so it lands in `want` with no conversion cob.
+# ---------------------------------------------------------------------------
+
+
+def _bail_route(node, want, feeds):
+    """The always-correct reference: build the natural (default eye-block) Rep, then cob it
+    into `want` with the generic per-axis machinery (exactly the epilogue bail) and run it."""
+    prog = pa.forward.Program()
+    ctx = represent.__globals__["_Ctx"](prog=prog, basis_env={}, inputs={})
+    rep = represent.__globals__["_rep"](node, ctx)
+    rep2 = represent.__globals__["_coerce_rep_to_target"](ctx, rep, want, note="ref")
+    prog.add_output("result", rep2.array)
+    return np.asarray(prog.run(feeds)["result"], float)
+
+
+def _oplus_block_frames():
+    """Two per-block list bases (V:3, W:2) of the ⊕ space, plus their frame-var feeds."""
+    V, W = C.base("V", 3), C.base("W", 2)
+    ev = [C.var(f"ev{i}", V) for i in range(3)]
+    ew = [C.var(f"ew{i}", W) for i in range(2)]
+    lbV, lbW = B.list_basis(*ev), B.list_basis(*ew)
+    Vm = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
+    Wm = np.array([[1.0, 1], [0, 1.0]])
+    feeds = {f"ev{i}_{ev[i].uid}": Vm[:, i] for i in range(3)}
+    feeds |= {f"ew{i}_{ew[i].uid}": Wm[:, i] for i in range(2)}
+    return C.oplus(V, W), lbV, lbW, feeds
+
+
+def test_tuple_embed_steers_into_a_structural_target_no_cob():
+    sp, lbV, lbW, feeds = _oplus_block_frames()
+    cod = B.basis_sum(lbV, lbW)  # the ⊕ codomain in per-block list bases
+    for i, block_lb in ((0, lbV), (1, lbW)):
+        te = C.tuple_embed(sp, i)
+        want = B.basis_prod(B.dual_basis(block_lb), cod)  # block_i ⊸ s: dual dom, primal cod
+        prog = represent(te, target=want)
+        assert _no_target_cob(prog)  # eye-block built straight in `want`
+        # two-route: the steered constant == the always-correct (default eye-block + cob) bail.
+        assert np.allclose(_run(prog, feeds), _bail_route(te, want, feeds))
+
+
+def test_tuple_project_steers_into_a_structural_target_no_cob():
+    sp, lbV, lbW, feeds = _oplus_block_frames()
+    dom = B.dual_basis(B.basis_sum(lbV, lbW))  # the ⊕ domain (dual) in per-block list bases
+    for i, block_lb in ((0, lbV), (1, lbW)):
+        tp = C.tuple_project(sp, i)
+        want = B.basis_prod(dom, block_lb)  # s ⊸ block_i: dual dom, primal cod
+        prog = represent(tp, target=want)
+        assert _no_target_cob(prog)
+        assert np.allclose(_run(prog, feeds), _bail_route(tp, want, feeds))
+
+
+def test_tuple_embed_project_bail_on_mismatch():
+    """A block slot that disagrees with the ⊕ split (or a non-structural ⊕ slot) BAILS to the
+    cob — the eye-block is no longer byte-identical there, so the result is cob'd (still correct)."""
+    sp, lbV, lbW, feeds = _oplus_block_frames()
+    other = B.list_basis(*[C.var(f"z{i}", C.base("V", 3)) for i in range(3)])
+    te = C.tuple_embed(sp, 0)
+    # block slot lbV but the ⊕ V-block split is `other` ⇒ mismatch ⇒ bail (cob present).
+    mism = B.basis_prod(B.dual_basis(lbV), B.basis_sum(other, lbW))
+    assert not _no_target_cob(represent(te, target=mism))
+    # a non-structural ⊕ slot (a flat list_basis of the whole ⊕) ⇒ no split ⇒ bail.
+    flat = B.list_basis(*[C.var(f"q{i}", sp) for i in range(5)])
+    nonstruct = B.basis_prod(B.dual_basis(lbV), flat)
+    assert not _no_target_cob(represent(te, target=nonstruct))
+
+
+def test_tuple_embed_project_auto_byte_identical():
+    """AUTO/STD unchanged — the #3 steer is gated on a CONCRETE structural Basis target.
+
+    (STD is byte-identical because the default eye-block IS already in the standard basis ⇒
+    the STD epilogue is a no-op, never a cob — same statement count as AUTO.)"""
+    sp, _lbV, _lbW, _feeds = _oplus_block_frames()
+    for i in range(2):
+        for node in (C.tuple_embed(sp, i), C.tuple_project(sp, i)):
+            assert _nstmt(represent(node)) == _nstmt(represent(node, target=B.AUTO))
+            assert _nstmt(represent(node, target=B.STD)) == _nstmt(represent(node, target=B.AUTO))
