@@ -731,6 +731,7 @@ def _write_mkdocs(nav_cats) -> None:
         "  - Definitions: definitions.md",
         "  - Bases guide: bases-guide.md",
         "  - Target basis roadmap: target-basis-roadmap.md",
+        "  - Arm conformance: arm-conformance.md",
         "  - Testing: testing.md",
         "  - Auditing: auditing.md",
         "  - Design problems: design-problems.md",
