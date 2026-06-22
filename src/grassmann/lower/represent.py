@@ -2587,42 +2587,47 @@ def _rep_dagger(
     """
     f_rep = _rep(f, ctx)
     space = _synth(e)
-    # NOTE (arm-C, NOT taken): operand-steering ``f`` into the dual-swapped slots is UNSOUND for
-    # the transpose fast path.  ``_is_immersed_metric_basis`` treats a ``list_basis`` as
-    # orthonormal (Gram skipped), so the fast path uses a plain transpose — but a non-orthonormal
-    # ``list_basis`` target has Gram ≠ I, where the adjoint is ``G·fᵀ·G⁻¹`` ≠ ``fᵀ`` (verified:
-    # ``transpose(map_coords(M)) ≠ map_coords(Mᵀ)``).  Unlike Solve/Pinv (inversion IS
-    # basis-covariant), transpose is not, so we KEEP the correct bail (natural + ``_match_result``).
+    # NOTE (arm-C, NOT taken): operand-steering ``f`` into the dual-swapped slots is UNSOUND.
+    # ``_is_immersed_metric_basis`` treats an orthonormal ``list_basis`` as Gram=I (fast transpose),
+    # but transpose is NOT basis-covariant (a non-orthonormal target has ``G·fᵀ·G⁻¹`` ≠ ``fᵀ``;
+    # immersed-metric operands route through the metric formula instead).  Unlike Solve/Pinv
+    # (inversion IS covariant) we cannot steer, so MATCH keeps the bail (natural + ``_match_result``).
     dom_slot, cod_slot = _map_slot_bases(f_rep.basis)
-    # Fast path: orthonormal endpoints ⇒ metric = identity ⇒ plain transpose (byte-identical).
+    # The HONEST f† basis (both paths): covariant dom slot ``dual(cod)`` + contravariant cod slot
+    # ``dom-primal``.  Tagging this (NOT ``default_basis``) is load-bearing: the fast-path transpose
+    # of an orthonormal-but-NON-STANDARD operand is numerically right in *that* basis, not in std, so
+    # the STD/MATCH epilogue must see the operand basis to cob it (byte-identical for a default
+    # operand, where this folds to ``default_basis(space)``).
+    if dom_slot is not None and cod_slot is not None:
+        result_basis = B.basis_prod(B.dual_basis(cod_slot), _peel_one_dual(dom_slot))
+    else:
+        result_basis = default_basis(space)
+    # Fast path: orthonormal endpoints ⇒ metric = identity ⇒ plain transpose.
     if not _is_immersed_metric_basis(dom_slot) and not _is_immersed_metric_basis(cod_slot):
         [out] = ctx.prog.emit_stmt(
             _TransposeOp(), [f_rep.array],
             [pa.OutSpec("dagger", _transpose_shape(_shape_of(f_rep.array)))],
             note="dagger:transpose(identity-metric)",
         )
-        # fast path; _rep's safety-net cob's to target
-        return Rep(out, default_basis(space), space)
-    # Metric adjoint: f† = G_cod · fᵀ · G_dom⁻¹  (`43 §2c`).  The dom slot is the *dual*
-    # (covariant) basis; peel one dual to the primal whose metric we materialize.
-    dom, cod = map_domain_codomain(f)
-    n_dom, n_cod = _static_dim(dom), _static_dim(cod)
-    dom_primal = _peel_one_dual(dom_slot)
-    g_dom = _metric_matrix(ctx, dom, n_dom, note="dagger:G_dom", basis=dom_primal)
-    g_cod = _metric_matrix(ctx, cod, n_cod, note="dagger:G_cod", basis=cod_slot)
-    [g_dom_inv] = ctx.prog.emit_stmt(
-        pa.InvOp(), [g_dom], [pa.OutSpec("dagger:G_dom-inv", (n_dom, n_dom))],
-        note="dagger:InvOp(G_dom)",
-    )
-    # f stored F[d,c]; f† stored (|cod|,|dom|): F†[i,l] = Σ G_cod[i,j]·F[l,j]·G_dom⁻¹[l',l]…
-    # ⇒ einsum "ij,kj,kl->il" over (G_cod, F, G_dom⁻¹).
-    [out] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("ij,kj,kl->il"), [g_cod, f_rep.array, g_dom_inv],
-        [pa.OutSpec("dagger", (n_cod, n_dom))],
-        note="dagger:G_cod·fᵀ·G_dom⁻¹",
-    )
-    # Result f† : cod ⊸ dom — its slots are DualBasis(cod_primal) (covariant) and dom_primal.
-    result_basis = B.basis_prod(B.dual_basis(cod_slot), dom_primal)
+    else:
+        # Metric adjoint: f† = G_cod · fᵀ · G_dom⁻¹  (`43 §2c`).  The dom slot is the *dual*
+        # (covariant) basis; peel one dual to the primal whose metric we materialize.
+        dom, cod = map_domain_codomain(f)
+        n_dom, n_cod = _static_dim(dom), _static_dim(cod)
+        dom_primal = _peel_one_dual(dom_slot)
+        g_dom = _metric_matrix(ctx, dom, n_dom, note="dagger:G_dom", basis=dom_primal)
+        g_cod = _metric_matrix(ctx, cod, n_cod, note="dagger:G_cod", basis=cod_slot)
+        [g_dom_inv] = ctx.prog.emit_stmt(
+            pa.InvOp(), [g_dom], [pa.OutSpec("dagger:G_dom-inv", (n_dom, n_dom))],
+            note="dagger:InvOp(G_dom)",
+        )
+        # f stored F[d,c]; f† stored (|cod|,|dom|): F†[i,l] = Σ G_cod[i,j]·F[l,j]·G_dom⁻¹[l',l]…
+        # ⇒ einsum "ij,kj,kl->il" over (G_cod, F, G_dom⁻¹).
+        [out] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("ij,kj,kl->il"), [g_cod, f_rep.array, g_dom_inv],
+            [pa.OutSpec("dagger", (n_cod, n_dom))],
+            note="dagger:G_cod·fᵀ·G_dom⁻¹",
+        )
     rep = Rep(out, result_basis, space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:

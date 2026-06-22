@@ -377,9 +377,10 @@ def _endo_map_want():
 # fast path: ``_is_immersed_metric_basis`` treats a ``list_basis`` as orthonormal (Gram skipped),
 # but a non-orthonormal list basis has Gram ≠ I, where the adjoint is ``G·fᵀ·G⁻¹`` ≠ ``fᵀ``
 # (``transpose(map_coords(M)) ≠ map_coords(Mᵀ)``).  Unlike Solve/Pinv (inversion IS
-# basis-covariant), transpose is not.  A separate pre-existing gap (the fast path tags its result
-# ``default_basis`` even for a pinned NON-orthonormal operand, so a list-basis ``Dagger`` STD cob
-# is a no-op ⇒ wrong) is out of scope here; Dagger keeps its current bail unchanged.
+# basis-covariant), transpose is not.  (A non-orthonormal ``list_basis`` is immersed-metric, so it
+# routes through the metric formula — honest tag.  The fast path now ALSO tags the honest operand
+# basis for an orthonormal-but-NON-STANDARD operand, fixing a former silent-wrong STD cob; see
+# ``test_dagger_orthonormal_nonstandard_operand_std``.)
 
 
 def test_solve_concrete_target():
@@ -526,3 +527,25 @@ def test_compose_pushdown():
     # A steered case with DEFAULT operands emits NO cob:target note (native realize).
     notes = _notes(represent(t, basis_env=env_std, target=B.STD))
     assert not any((n or "").startswith("cob:target") for n in notes), notes
+
+
+def test_dagger_orthonormal_nonstandard_operand_std():
+    """_rep_dagger fast-path tag honesty: an ORTHONORMALIZE (Gram=I) but non-standard operand fires
+    the transpose fast path; its result must be tagged in the operand basis (not default) so the STD
+    cob fires.  Two-route via machinery-derived operand coords (==-by-construction)."""
+    V = C.base("V", 3)
+    MS = C.linear_map_space(V, V)
+    f = C.var("f", MS)
+    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])  # std coords
+    qsrc = np.array([[1.0, 2, 0], [0, 1, 1], [1, 0, 2.0]])  # non-standard frame (ORTHONORMALIZE'd → Q)
+    qv = [C.var(f"q{i}", V) for i in range(3)]
+    qb = B.list_basis(*qv, reduce=C.Reduce.ORTHONORMALIZE)
+    frame = {f"q{i}_{qv[i].uid}": qsrc[:, i] for i in range(3)}
+    opb = B.basis_prod(B.dual_basis(qb), qb)
+    std_env = {f.uid: default_basis(MS)}
+    ref = _run(represent(C.dagger(f), basis_env=std_env, target=B.STD), {_vk(f): Mf})
+    assert np.allclose(ref, Mf.T)  # std adjoint is the transpose
+    # Mf expressed in the orthonormal-non-standard map basis, via the lowering's own cob
+    mf_q = _run(represent(f, basis_env=std_env, target=opb), {**frame, _vk(f): Mf})
+    got = _run(represent(C.dagger(f), basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_q})
+    assert np.allclose(got, ref)  # was WRONG before the fast-path tag fix (returned the Q-basis adjoint)
