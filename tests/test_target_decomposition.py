@@ -116,6 +116,30 @@ def test_auto_unchanged_by_the_decomposition_arms():
 
 
 # ---------------------------------------------------------------------------
+# Operator push-down (roadmap #1): Trace steers f so the surviving slots land in the target.
+# ---------------------------------------------------------------------------
+
+
+def test_trace_pushes_target_into_surviving_slot():
+    V, W = C.base("V", 3), C.base("W", 2)
+    a, b, c = C.var("a", V), C.var("b", C.dual(V)), C.var("c", W)
+    t = C.trace(C.oprod_v(a, b, c), 0, 1)  # contract V⊗V* ⇒ ⟨a,b⟩·c, surviving slot = W
+    ac, bc, cc = np.array([1.0, 2, 0]), np.array([0.0, 1, 3]), np.array([2.0, 1])
+    std_result = (ac @ bc) * cc
+    # operands pinned to std (input contract fixed); a non-default W target steers the surviving slot
+    env = {a.uid: default_basis(V), b.uid: default_basis(C.dual(V)), c.uid: default_basis(W)}
+    e = [C.var(f"e{i}", W) for i in range(2)]
+    lbW = B.list_basis(*e)
+    Wm = np.array([[1.0, 1], [0, 1.0]])
+    feeds = {_vk(a): ac, _vk(b): bc, _vk(c): cc, **{f"e{i}_{e[i].uid}": Wm[:, i] for i in range(2)}}
+    assert np.allclose(_run(represent(t, basis_env=env, target=lbW), feeds),
+                       np.linalg.solve(Wm, std_result))  # result re-expressed into lbW
+    assert np.allclose(_run(represent(t, basis_env=env, target=B.STD), feeds), std_result)
+    # with default operands + STD target the surviving slot is steered ⇒ no result-level cob
+    assert _no_target_cob(represent(t, target=B.STD))
+
+
+# ---------------------------------------------------------------------------
 # Operator arm-C — operand steering: the inverse/adjoint math is reused unchanged; only the
 # basis ``f`` is realized in changes, so the natural result lands directly in ``want`` (no cob).
 # ---------------------------------------------------------------------------
