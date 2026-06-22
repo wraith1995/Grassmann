@@ -1576,9 +1576,11 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     """from ``ProjectedBasis`` — the orthonormal FFS-subspace range basis.
 
-    ``ProjectedBasis → ImageBasis`` of one map is subsumed by the generic standard route (both
-    realize square in-space ⇒ plain ``InvOp``), so only the ``ProjectedBasis → ProjectedBasis``
-    same-/different-metric cases are special here.
+    The ``ProjectedBasis → ProjectedBasis`` same-/different-metric cases are special here, and so
+    is the canonical *metric-free image* ``ProjectedBasis → ImageBasis`` of the SAME map — the
+    exact mirror of the ``ImageBasis → metric-free ProjectedBasis`` arm in :func:`_cob_from_image`.
+    Every other ``ProjectedBasis → ImageBasis`` is subsumed by the generic standard route (it
+    realizes square in-space ⇒ plain ``InvOp``).
 
     The identity short-circuit compares only the **own-side** metric (cod/``target`` for
     image/coker, dom/``source`` for ker/coimg — `audit #4`): the irrelevant side is dropped by the
@@ -1593,6 +1595,20 @@ def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _identity_like(ctx, frm)
         case (B.ProjectedBasis(), B.ProjectedBasis()):
             return _cob_via_standard(ctx, frm, to)           # differing metric ⇒ reorthonormalize
+        case (B.ProjectedBasis(fpf, fpw, None, None), B.ImageBasis(tf, _tsrc, _ttgt)) if (
+            fpw in ("image", "img") and (fpf is tf or fpf == tf) and _map_is_injective(tf)
+        ):
+            # from = canonical metric-free image ProjectedBasis (in-space realize = U_dᵀ·U_d = I),
+            # to = ImageBasis of the SAME map ⇒ cob = (realize to)⁻¹·I = R⁻¹.  Exact mirror of the
+            # ``ImageBasis → metric-free ProjectedBasis`` arm (which returns R, skipping InvOp(I)).
+            # Only valid when ``f`` is INJECTIVE: then the in-space image realize ``R`` is square
+            # (k = δ) ⇒ ``_inverse_cols`` takes the exact square ``InvOp`` and round-trips with the
+            # forward ``R``.  A non-injective ``f`` (k > δ ⇒ rectangular ``R``) MUST keep the pinv
+            # bail.  The inverse still routes through ``_inverse_cols`` (cheapest exact factor for
+            # the image cols); only the wasted ``·I`` compose is dropped.
+            c_to = realize_basis_cols(ctx, to)               # R = U_dᵀ·J (square ⇐ injective)
+            n_amb, k_to = _shape_of(c_to)
+            return _inverse_cols(ctx, c_to, n_amb, k_to, to)
         case _:
             return _cob_via_standard(ctx, frm, to)
 
@@ -1607,6 +1623,14 @@ def _projected_own_metric_eq(
     if which in ("image", "img", "coker"):
         return _src_eq(ft, tt)        # cod-side (target) metric is the own side
     return _src_eq(fs, ts)            # ker/coimg ⇒ dom-side (source) metric is the own side
+
+
+def _map_is_injective(f: object) -> bool:
+    """Whether map ``f`` is ASSERTED injective (via its props) — so its in-space image realize
+    ``R = U_dᵀ·J`` is square (``k = δ``) and exactly invertible.  Conservative: only the asserted
+    flag (no static-rank inference); a non-injective / unasserted ``f`` keeps the pinv bail."""
+    p = map_props(f)
+    return p is not None and p.inj
 
 
 def _cob_from_list(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
@@ -2900,6 +2924,44 @@ def _rep_assert(
             return _match_result(ctx, rep, target)
 
 
+def _tuple_block_basis_match(
+    ctx: _Ctx, map_space: S.Space, target: B.TargetBasis | B.Basis,
+    n_blocks: int, i: int, *, dom_is_oplus: bool,
+) -> B.Basis | None:
+    """Steer-test for ``TupleEmbed``/``TupleProject`` (#3, the structured-movement arm).
+
+    The eye-block selection matrix these nodes emit is the SAME constant matrix in any
+    per-block bases as long as the ⊕ slot is block-diagonal in ``[c₀…c_{m-1}]`` and the lone
+    block slot equals ``cᵢ`` (the off-block columns it selects stay zero either way) — derived
+    and numerically verified: the map's matrix in those bases is byte-identical to the default
+    eye-block, so tagging the constant with ``want`` realizes back to the reference (no cob).
+
+    The map's two slots are a (dual) DOMAIN @ slot 0 and a (primal) CODOMAIN @ slot 1.
+    ``TupleProject`` (``s ⊸ block_i``) has the ⊕ as the dual domain and the block as the primal
+    codomain (``dom_is_oplus=True``); ``TupleEmbed`` (``block_i ⊸ s``) has the block as the dual
+    domain and the ⊕ as the primal codomain (``dom_is_oplus=False``).  Returns ``want`` when
+    ``target`` is a CONCRETE ``BasisProd(dom, cod)`` whose ⊕ slot — ``DualBasis(BasisSum/Rep)``
+    when it is the domain, else a bare ``BasisSum/Rep`` — splits into ``n_blocks`` per-block
+    bases, and whose block slot — ``DualBasis(cᵢ)`` when it is the domain, else a bare ``cᵢ`` —
+    equals the i-th split basis.  ``None`` ⇒ no clean structural match ⇒ epilogue bail.
+    """
+    if not isinstance(target, B.Basis):  # STD/AUTO no-op via the epilogue
+        return None
+    want = _resolve_target(ctx, map_space, target)
+    if not isinstance(want, B.BasisProd) or len(want.bases) != 2:
+        return None
+    # slot 0 is always the (dual) domain; slot 1 the (primal) codomain.
+    dom_slot, cod_slot = want.bases
+    if not isinstance(dom_slot, B.DualBasis):
+        return None  # the domain slot of a canonical map basis is always dual
+    oplus_inner = dom_slot.basis if dom_is_oplus else cod_slot
+    block_inner = cod_slot if dom_is_oplus else dom_slot.basis
+    splits = _split_target_components(oplus_inner, n_blocks)
+    if splits is None or not _basis_eq(block_inner, splits[i]):
+        return None
+    return want
+
+
 def _rep_tuple_embed(
     e: T.TupleEmbed, space: S.Space, i: int, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
@@ -2910,12 +2972,19 @@ def _rep_tuple_embed(
     offsets = _oplus_offsets(space)
     total = sum(_static_dim(s) for s in space.spaces)
     bi = _static_dim(space.spaces[i])
+    map_space = _synth(e)
+    # (#3) clean structural match ⇒ the eye-block IS byte-identical in the per-block target bases
+    # (block_i ⊸ s: block = dual dom @ slot 0, ⊕ = primal cod @ slot 1), so tag `want` — no cob.
+    steered = _tuple_block_basis_match(
+        ctx, map_space, target, len(space.spaces), i, dom_is_oplus=False)
     # block_i ⊸ s stored (|dom|,|cod|) = (bi, total): the canonical map layout Eval/Compose
     # read (axis 0 = dom = the block, axis 1 = cod = the padded ⊕). Pads the i-th block.
     M = np.zeros((bi, total))
     M[:, offsets[i]:offsets[i] + bi] = np.eye(bi)
     arr = _const(ctx, M, note=f"tuple-embed:inject@{i}")
-    rep = Rep(arr, default_basis(_synth(e)), _synth(e))
+    if steered is not None:
+        return Rep(arr, steered, map_space)
+    rep = Rep(arr, default_basis(map_space), map_space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2936,12 +3005,19 @@ def _rep_tuple_project(
     offsets = _oplus_offsets(space)
     total = sum(_static_dim(s) for s in space.spaces)
     bi = _static_dim(space.spaces[i])
+    map_space = _synth(e)
+    # (#3) clean structural match ⇒ the eye-block IS byte-identical in the per-block target bases
+    # (s ⊸ block_i: ⊕ = dual dom @ slot 0, block = primal cod @ slot 1), so tag `want` — no cob.
+    steered = _tuple_block_basis_match(
+        ctx, map_space, target, len(space.spaces), i, dom_is_oplus=True)
     # s ⊸ block_i stored (|dom|,|cod|) = (total, bi): the canonical map layout Eval/Compose
     # read (axis 0 = dom = the ⊕, axis 1 = cod = the block). Slices the i-th block.
     M = np.zeros((total, bi))
     M[offsets[i]:offsets[i] + bi, :] = np.eye(bi)
     arr = _const(ctx, M, note=f"tuple-project:slice@{i}")
-    rep = Rep(arr, default_basis(_synth(e)), _synth(e))
+    if steered is not None:
+        return Rep(arr, steered, map_space)
+    rep = Rep(arr, default_basis(map_space), map_space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
