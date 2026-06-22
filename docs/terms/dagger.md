@@ -66,20 +66,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_dagger`**:
-
-> ``Dagger f`` — the metric adjoint ``f†`` (`41 §3`, `43 §2c`).
-> 
-> The adjoint is defined by ``⟨f† y, x⟩_dom = ⟨y, f x⟩_cod``.  With ``f`` stored
-> ``(|dom|,|cod|)`` and per-slot metrics ``G_dom`` / ``G_cod`` in the *active* slot bases,
-> the stored adjoint ``(|cod|,|dom|)`` is
-> 
->     f† = G_cod · fᵀ · G_dom⁻¹ .
-> 
-> In the orthonormal default basis both metrics are the identity, so this collapses to a
-> plain transpose (the min-sym win, `41 §1`) — that fast path is kept **byte-identical**.
-> A non-orthonormal endpoint (an ``ImageBasis`` slot, whose Gram is ``JᵀJ`` ≠ I) routes
-> through the metric formula so the adjoint identity stays basis-invariant (`43 §2c`).
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

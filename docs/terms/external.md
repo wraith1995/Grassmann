@@ -53,17 +53,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_external`**:
-
-> ``External(s, data, args…)`` — a foreign elementwise numeric op (`41 §3`).
-> 
-> The basic nonlinear scalar ops (``sqrt``/``abs``/``sign``/division/reciprocal — the
-> old ``BaseNonLinear`` of the FEMOracle algebra) lower here.  ``data`` is expected to be
-> an :class:`ExternalOp` naming the op and carrying the numpy callable; its operands are
-> the lowered ``args`` and the op is applied elementwise.  A bare (arg-less) ``External``
-> with numeric ``data`` is emitted as a constant.
-> 
-> Provenance is ``external:<op>`` (see :data:`_NOTE_PREFIX_PROV`).
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

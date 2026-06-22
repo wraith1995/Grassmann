@@ -730,6 +730,7 @@ def _write_mkdocs(nav_cats) -> None:
         "  - Home: index.md",
         "  - Definitions: definitions.md",
         "  - Bases guide: bases-guide.md",
+        "  - Target basis roadmap: target-basis-roadmap.md",
         "  - Testing: testing.md",
         "  - Auditing: auditing.md",
         "  - Design problems: design-problems.md",

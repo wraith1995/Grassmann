@@ -70,23 +70,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_var`**:
-
-> ``Var x`` — the Program input for ``x``, in its natural basis (`41 §3`).
-> 
-> A Var whose space is FFS-dimensioned (``Img``/``Ker``/…) is sized via the SVD/QR
-> rank of the FFS's defining map (`41 §1`): an *injective* image realizes via ``QrOp``
-> with a **static** ``rank = |dom|`` (the recovered ``IsoSpace``), so the input is a
-> plain static array.
-> 
-> A **generic FFS rank is a runtime δ** — only known at run time.  Stage C (`42 §C`)
-> lowers such a bare FFS-typed Var to a **dynamic bulk Program input** whose δ axis is an
-> input-sourced :class:`~polyarray.DimAtom` (read from the supplied array's shape at run
-> time), removing the old ``project(ambient, Λᵏ)`` workaround.  Two runtime
-> ``AssertOp``s guard it (`42 §C4`): (i) **rank-consistency** — the bound input δ must
-> equal the FFS map's computed ``svd_rank`` (when that map is realized in the program);
-> (ii) **sibling agreement** — inputs sharing a δ (e.g. ``a, b : Λᵏ``) get a ``shape_eq``
-> assert against the first sibling.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

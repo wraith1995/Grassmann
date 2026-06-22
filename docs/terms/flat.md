@@ -60,15 +60,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_flat`**:
-
-> ``Flat s`` — ``G_s`` (s ⊸ s*), identity-metric default ⇒ identity (`41 §3`).
-> 
-> ``Flat`` and ``Inner`` are the SAME matrix ``G_s`` (a ``s*⊗s*`` form), so the result
-> carries the same dual per-slot basis: in an immersed operand ``basis`` the surviving slot
-> of a partial contraction stays ``DualBasis(basis)`` (`43 §2c`, so a ``sharp(flat(v))``
-> chain genuinely re-enters the immersed metric instead of silently falling to identity).
-> Orthonormal default (``basis is None``) ⇒ ``default_basis`` — byte-identical.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

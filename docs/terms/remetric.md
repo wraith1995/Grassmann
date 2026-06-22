@@ -62,9 +62,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_remetric`**:
-
-> ``Remetric(v, g)`` — same coords, metric metadata swapped (+ SPD assert) (`41 §3`).
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

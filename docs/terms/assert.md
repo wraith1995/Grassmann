@@ -61,9 +61,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_assert`**:
-
-> ``Assert(v, s')`` — pass ⟦v⟧ through (+ a shape assert if not statically equal).
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

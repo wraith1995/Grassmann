@@ -75,23 +75,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_neval`**:
-
-> ``NEval(f, pos, args)`` — apply a ``Lam`` (`41 §3` "Lam → sub-Program").
-> 
-> Lower the ``Lam`` body **once** into its own polyarray sub-``Program`` (its bound
-> term-vars + the free term-vars it references become that sub-Program's inputs, `41
-> §3`/`§7`), and lower this ``NEval`` as a ``Stmt`` whose ``fn`` is that sub-``Program``:
-> polyarray's ``_run_stmt`` recurses into a sub-``Program`` ``fn``, mapping the operands
-> onto its inputs by position (`PUBLIC_API`).  Reusing the same ``Lam`` (a reused
-> dependent function) reuses the same sub-``Program`` — the body is lowered once and
-> *called* twice, not duplicated.
-> 
-> A literal, fully-applied value-slot ``NEval`` (the common case) takes the inline-trace
-> fast path: the supplied term-args' ``Rep``s are bound to the bound vars and the body is
-> traced into the *current* program.  The sub-``Program`` path covers the cases the inline
-> path can't package cleanly (a reused ``Lam`` ⇒ one shared Callable; a ``Lam`` bound to a
-> term ``Var`` rather than a literal).  Both run to identical numbers.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

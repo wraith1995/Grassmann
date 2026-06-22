@@ -76,12 +76,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_project`**:
-
-> ``project(v, s')`` — select the sub-block via the sub-space's basis (`41 §3`).
-> 
-> Drop the complement coordinates: with the sub-basis ``P`` (columns = sub vectors in
-> ambient coords), the projected coords are ``Pᵀ · ⟦v⟧`` (orthonormal sub-basis).
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

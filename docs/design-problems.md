@@ -275,6 +275,21 @@ markedly fewer/subtler — convergence:
 - (Deferred, efficiency-only: FFS memo keyed by `id` not structure → duplicate GSVD for
   structurally-equal own-side metrics; `_src_eq(None, default_basis)` not unified.)
 
+## Cob audit (round 5) + target-basis audit
+
+**Round 5 (cob dispatch) — converged.** Six per-group agents: four clean. Two new (both verified):
+- `_dual_toggle`'s `Dual(Dual)↔` flip flagged as inconsistent with `_norm_space`/`unify`. **NOT a
+  bug** (verified): the flip is shared by `DualBasis`/`PrimalBasis` so the `PrimalBasis(DualBasis(x))
+  ≡ x` involution is same-space (the guard runs before the peel); `V≅V**` is the trivial identity
+  iso (`realize` cancels the two inverse-transposes), distinct from the forbidden `V≅V*`. Left as-is.
+- `ListBasis` with an FFS-subspace backup crashed — **FIXED** (immerse a subspace backup into the
+  ambient; ordinary backups unchanged).
+
+**Target-basis audit (2.1/2.2/2.3).** Correctness (2.1): the scalar-cob crash — **FIXED**; the
+operator/movement **basis-tag dishonesty** (wrong STD/concrete results, ~11 helpers) — being fixed
+via the 2.3 match redesign (see `docs/target-basis-roadmap.md`). Free-case minimization (2.2) and the
+full match decomposition (2.3) are captured as a roadmap there (optimizations, not bugs).
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** *(Resolved for `ListBasis`.)* A `ListBasis`
