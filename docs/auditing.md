@@ -1,4 +1,21 @@
-# Iterative multi-agent audit (the cob-audit procedure)
+# Audit procedures
+
+Repeatable multi-agent audit procedures used to harden this codebase. Three types so far:
+
+1. **Iterative dispatch audit** (the cob audit) — find correctness bugs + missing/sub-optimal cases
+   in a large rule table; one agent per rule group + a global pass, iterate to convergence.
+2. **Multi-dimensional audit** (the target-basis audit) — assess a feature along orthogonal
+   dimensions, one agent per dimension: *correctness* (2.1), *quality in the free case* (2.2), and
+   *behavior under the structured case* (2.3). See `target-basis-roadmap.md`.
+3. **Type-signature enforcement audit** — verify every IR node's declared field types are actually
+   enforced; one agent per node-definition file. See §"Type-signature enforcement audit" below.
+
+All three share the spine: **fan out** (one agent per group/dimension/file) → **synthesize +
+prioritize** → **verify each finding by probe before fixing** → **fix** → **re-audit**.
+
+---
+
+# 1. Iterative multi-agent dispatch audit (the cob audit)
 
 A repeatable procedure for finding **correctness** bugs and **missing/sub-optimal** cases in a
 large dispatch. Developed on the change-of-basis dispatch (`_basis_cob_rec` / `_cob_from_*`), but
@@ -51,3 +68,47 @@ it generalizes to any rule table with many cases × options.
 in **smaller sequential batches**, or — for a convergence check where the suspicious corners are
 already known — run the targeted probes directly instead of spawning agents. This is a
 **user-opted-in, token-heavy** procedure; reserve it for high-value correctness surfaces.
+
+---
+
+# 3. Type-signature enforcement audit
+
+A procedure for verifying that every IR node's **declared field types are actually enforced** at
+construction — catching the *typed-but-unenforced field* class, where a field annotated `Term` /
+`Space` / `Dim` / `Basis` / `Var` silently accepts a raw array or arbitrary object. The failure
+mode is uniform and nasty: **unhashable IR** (a numpy array embedded in a frozen dataclass breaks
+every set/dict-keyed dedup, memo, and cob/metric path) plus silent-wrong / late crashes. Born from
+the `WithInner.metric = np.array` bug, which turned out to be one instance of ~15 across the tower.
+
+## Shape
+
+1. **One agent per node-definition file** (`core/space.py`, `core/basis.py`, `core/term.py`). Each
+   builds a **per-node table**: every `@dataclass`'s fields → declared type → *is it enforced in
+   `__post_init__` (or a smart constructor)?* → gap + severity.
+2. **Flag the escape-hatch class**: a structured-kind field (Term/Space/Dim/Basis/Var/tuple-thereof)
+   not validated — probe it (construct with `np.eye(2)` / `object()`; does it raise or silently
+   accept? is the result hashable?). Severity by failure mode: **unhashable-IR / crash / silent-
+   wrong** vs benign.
+3. **Synthesize**: note **consistency gaps** — a whole layer missing a checker is the big tell
+   (`basis.py` had `_require_basis` but no `_require_term`, so *every* Term-typed basis field
+   leaked). Prioritize unhashable-IR first.
+4. **Fix uniformly** with the existing require-helper / coerce pattern (`_require_term`,
+   `_require_space`, `as_dim` coercion via `object.__setattr__` for frozen Dim fields, a lazy
+   `is_basis` import where a module-import cycle forbids a top-level one).
+5. **Re-verify**: full suite green + a per-node regression test (each fixed node rejects a wrong-type
+   field and a valid node is hashable).
+
+## Lessons
+
+- **One escape hatch implies a class** — when you find a typed-but-unenforced field, audit *all*
+  node files for the same shape; they cluster (structural-container fields get enforced, leaf
+  Term/Dim fields get forgotten).
+- **A missing checker in a whole module** is the highest-yield finding (one import + one helper
+  closes many gaps at once).
+- **Coerce vs reject per field semantics**: Dim fields *coerce* ints (`as_dim`) to match their
+  builders; Term/Basis fields *reject* non-nodes. Match the builder's contract so direct
+  construction and the smart constructor agree.
+- **Enforcement surfaces test sentinels** — `object()` placeholders and array literals in tests
+  start failing; migrate each to a real `Var`/term/`Dim` (that's a feature: the tests were lying).
+- **Leave intentionally-opaque fields alone** (`External.data` holds a foreign value by design) —
+  record them as deliberate, not gaps.
