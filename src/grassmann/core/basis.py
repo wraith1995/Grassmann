@@ -106,6 +106,10 @@ class BVar:
 
     name: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str):
+            raise BasisError(f"BVar.name: expected a str, got {self.name!r}")
+
     def __repr__(self) -> str:
         return f"BVar({self.name!r})"
 
