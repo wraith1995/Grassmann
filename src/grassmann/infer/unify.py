@@ -220,19 +220,12 @@ def _solve_meta(m: SpaceMeta, s: Space, store: MetaStore) -> None:
 
 
 def _metric_eq(a: object, b: object) -> bool:
-    """Structural equality of two ``WithInner`` metrics, array-safe.
+    """Structural equality of two ``WithInner`` metric **Terms**.
 
-    A metric may be a numpy array (a numeric ``G_s``), for which ``a != b`` is element-wise
-    and ambiguous in a boolean context; fall back to ``np.array_equal`` then.
+    The metric is always a Term (enforced in ``space.WithInner``), so plain ``==`` (the frozen
+    dataclass's structural equality) is well-defined — no numpy-array fallback needed.
     """
-    if a is b:
-        return True
-    try:
-        return bool(a == b)
-    except (ValueError, TypeError):
-        import numpy as np
-
-        return bool(np.array_equal(np.asarray(a), np.asarray(b)))
+    return a is b or bool(a == b)
 
 
 def _unify_seq(
