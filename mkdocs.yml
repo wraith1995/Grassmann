@@ -31,7 +31,9 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Definitions: definitions.md
+  - Bases guide: bases-guide.md
   - Testing: testing.md
+  - Auditing: auditing.md
   - Design problems: design-problems.md
   - Spaces:
     - Overview: spaces/index.md

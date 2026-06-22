@@ -729,7 +729,9 @@ def _write_mkdocs(nav_cats) -> None:
         "nav:",
         "  - Home: index.md",
         "  - Definitions: definitions.md",
+        "  - Bases guide: bases-guide.md",
         "  - Testing: testing.md",
+        "  - Auditing: auditing.md",
         "  - Design problems: design-problems.md",
     ]
     for cat, (title, _m, _e) in CATS.items():
