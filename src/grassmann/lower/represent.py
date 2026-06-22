@@ -2116,7 +2116,11 @@ def _rep_trace(
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Trace(f, i, j)`` — contract axes ``i`` and ``j`` (diagonal sum), `41 §3`."""
-    f_rep = _rep(f, ctx)
+    space = _synth(e)
+    # (push-down) realize f so the surviving slots land in the target ⇒ the trace is born in
+    # `want` with no result cob (the traced slots keep dual-paired defaults); else natural + bail.
+    f_target = _trace_operand_target(ctx, _resolve_target(ctx, space, target), _synth(f), i, j)
+    f_rep = _rep(f, ctx, f_target) if f_target is not None else _rep(f, ctx)
     f_factors = _factors(f_rep.space)
     n = len(f_factors)
     if i >= n or j >= n:
@@ -2126,7 +2130,6 @@ def _rep_trace(
     f_labels[j] = f_labels[i]  # same label ⇒ einsum contracts the diagonal
     out_labels = "".join(f_labels[k] for k in range(n) if k not in (i, j))
     spec = "".join(f_labels) + "->" + out_labels
-    space = _synth(e)
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), [f_rep.array],
         [pa.OutSpec("trace", _shape_of_space(space))],
@@ -2134,6 +2137,8 @@ def _rep_trace(
     )
     # Honest tag: the surviving (non-traced) f-slot bases, in order (coords unchanged on them).
     rep = Rep(out, _trace_result_basis(f_rep.basis, i, j, n, space), space)
+    if f_target is not None:
+        return rep  # f was steered so the surviving slots are already `want` — no result cob
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -3202,6 +3207,36 @@ def _trace_result_basis(
     if not kept:  # fully traced ⇒ Scalar (basis-invariant; any cob is the identity)
         return default_basis(space)
     return _basis_from_factors(kept, space)
+
+
+def _trace_operand_target(
+    ctx: _Ctx, want: B.Basis | None, f_space: S.Space, i: int, j: int,
+) -> B.Basis | None:
+    """The operand basis to realize ``f`` in so ``Trace(f, i, j)`` lands directly in ``want``.
+
+    Place ``want``'s components at the surviving (non-traced) slots and **dual-paired defaults**
+    at the traced slots ``i, j`` — the trace ``Σ M[a,a]`` is basis-correct only when ``i, j`` stay
+    mutually dual.  ``None`` (⇒ keep the natural realize + bail) when ``want`` is not a basis whose
+    components match the surviving-slot arity.
+    """
+    if want is None:
+        return None
+    fac = _factors(f_space)
+    n = len(fac)
+    if i >= n or j >= n:
+        return None
+    survivors = [k for k in range(n) if k not in (i, j)]
+    comps = _basis_factors(want, len(survivors))
+    if comps is None:
+        return None
+    slots: list[B.Basis] = [want] * n  # placeholder; every position overwritten below
+    for pos, b in zip(survivors, comps):
+        slots[pos] = b
+    try:
+        slots[i], slots[j] = default_basis(fac[i]), default_basis(fac[j])
+    except S.SpaceError:
+        return None
+    return _basis_from_factors(slots, f_space)
 
 
 def _inverse_apply_basis(f_basis: B.Basis, space: S.Space) -> B.Basis:
