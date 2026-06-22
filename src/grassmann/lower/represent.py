@@ -127,7 +127,12 @@ class Rep:
 # ===========================================================================
 
 
-def represent(term: T.Term, *, basis_env: dict[int, B.Basis] | None = None) -> pa.Program:
+def represent(
+    term: T.Term,
+    *,
+    basis_env: dict[int, B.Basis] | None = None,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> pa.Program:
     """Lower a typed core ``term`` to a :class:`polyarray.Program` (`41 §3`).
 
     ``basis_env`` (optional) pins the result basis for selected term ``Var``s (keyed by
@@ -135,13 +140,23 @@ def represent(term: T.Term, *, basis_env: dict[int, B.Basis] | None = None) -> p
     `41 §1b` ★ min-sym lever). The returned program has a single output ``"result"``;
     its free term variables (and any binder-bound variables) are the program inputs.
 
+    ``target`` selects the basis the ``result`` is expressed in (a per-call policy passed to
+    the top ``_rep``):
+
+    * :data:`~grassmann.core.basis.AUTO` (default) — free choice by the system: the result
+      keeps its natural basis (``basis_env`` pin, else `41 §1b` ``choose``).  Byte-identical
+      to the historical lowering.
+    * :data:`~grassmann.core.basis.STD` — the standard orthonormal basis of the result's space.
+    * a concrete :class:`~grassmann.core.basis.Basis` — pin the result to it (must be a basis
+      of the result's space).
+
     The program is built under polyarray's ``force_stmts`` budget (`42 §A4`) and the
     `41 §5` post-pass (``partial_eval``) is applied before returning.
     """
     prog = pa.Program("represent", budget=pa.SymbolicBudget.force_stmts())
     ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={})
 
-    rep = _rep(term, ctx)
+    rep = _rep(term, ctx, target=target)
     prog.add_output("result", rep.array)
 
     # 41 §5 — build-then-simplify: collapse heavy residual symbolic output cells.
@@ -294,7 +309,70 @@ class _Ctx:
 # ===========================================================================
 
 
-def _rep(e: T.Term, ctx: _Ctx) -> Rep:
+def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
+    """``⟦e⟧ ⇒ Rep`` — represent ``e``, then re-express it in the ``target`` basis (`41 §3`).
+
+    ``target`` (default :data:`~grassmann.core.basis.AUTO`) is a **per-call** policy — it is not
+    threaded through ``ctx``, so each ``_rep`` call chooses independently and a sub-call may
+    target a different basis than its parent (recursive calls default to ``AUTO``, so a targeted
+    call re-expresses only that node, not its operands):
+
+    * ``AUTO`` — keep the node's natural basis (a ``basis_env`` pin, else `41 §1b` ``choose``).
+      No cob is emitted, so this is byte-identical to the historical lowering.
+    * ``STD`` — re-express the node in ``default_basis(space)`` (the standard orthonormal basis).
+    * a concrete :class:`~grassmann.core.basis.Basis` — re-express into it when it is a basis of
+      this node's space (else keep natural); used to pin a chosen result.
+    """
+    rep = _rep_node(e, ctx)
+    want = _resolve_target(ctx, rep.space, target)
+    if want is not None and not _basis_eq(rep.basis, want):
+        rep = _coerce_rep_to_target(ctx, rep, want, note="cob:target")
+    return rep
+
+
+def _resolve_target(
+    ctx: _Ctx, space: S.Space, policy: B.TargetBasis | B.Basis,
+) -> B.Basis | None:
+    """The concrete basis ``policy`` asks for in ``space`` (``None`` ⇒ keep the natural basis)."""
+    if policy is B.AUTO:
+        return None
+    if policy is B.STD:
+        try:
+            return default_basis(space)
+        except S.SpaceError:
+            return None  # no static default (SVar/App) — keep the natural basis
+    # A concrete Basis: apply it only where it is genuinely a basis of THIS node's space.
+    target_space = _space_of_basis(ctx, policy)
+    if target_space is not None and _norm_space(target_space) == _norm_space(space):
+        return policy
+    return None
+
+
+def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> Rep:
+    """Re-express ``rep`` in ``target``, cob'ing each space axis (FFS-aware) (`41 §2`).
+
+    Handles a value (one space axis) and an operator/tensor (a ``BasisProd`` of per-axis
+    bases) alike; the free (basis-index) axes ride along untouched.
+    """
+    src = rep.basis
+    if (
+        isinstance(src, B.BasisProd)
+        and isinstance(target, B.BasisProd)
+        and len(src.bases) == len(target.bases)
+    ):
+        arr = rep.array
+        for axis, (sb, tb) in enumerate(zip(src.bases, target.bases)):
+            if _basis_eq(sb, tb):
+                continue
+            m = _basis_cob_matrix(ctx, sb, tb)
+            arr = _apply_cob_on_axis(ctx, m, arr, axis, rep.free_labels, note=note)
+        return Rep(arr, target, rep.space, free_labels=rep.free_labels)
+    m = _basis_cob_matrix(ctx, src, target)
+    arr = _apply_cob_on_axis(ctx, m, rep.array, 0, rep.free_labels, note=note)
+    return Rep(arr, target, rep.space, free_labels=rep.free_labels)
+
+
+def _rep_node(e: T.Term, ctx: _Ctx) -> Rep:
     """``⟦e⟧ ⇒ Rep`` — represent ``e`` in the natural basis of its space (`41 §3`)."""
     match e:
         case T.Var():
