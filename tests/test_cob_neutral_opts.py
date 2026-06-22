@@ -238,3 +238,28 @@ def test_item_e_static_ffs_identity_unchanged() -> None:
     pb = B.projected_basis(f, "image")
     got, _ = _cob(pb, pb, feeds)
     assert got == pytest.approx(np.eye(dom))
+
+
+# --- Item F: dual/primal cob of orthonormal inners skips the InvOp (orthogonal ⇒ ⁻ᵀ = itself) ----
+
+
+def test_item_f_orthonormal_dual_cob_skips_inv_transpose() -> None:
+    """`cob(Dual(o₁) → Dual(o₂))` with standard-orthonormal inners is orthogonal, so the
+    inverse-transpose IS the inner cob — no `InvTranspose` op is emitted; a non-orthonormal inner
+    still uses it.  Results unchanged (round-trips)."""
+    from grassmann.core import Reduce
+    V = C.base("V", 3)
+    av = [C.var(f"fa{i}", V) for i in range(3)]
+    bv = [C.var(f"fb{i}", V) for i in range(3)]
+    A = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [1.0, 0.0, 1.0]])
+    Bm = np.array([[2.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 1.0]])
+    feeds = {**{_k(av[i]): A[:, i] for i in range(3)}, **{_k(bv[i]): Bm[:, i] for i in range(3)}}
+    o1 = B.dual_basis(B.list_basis(*av, reduce=Reduce.ORTHONORMALIZE))
+    o2 = B.dual_basis(B.list_basis(*bv, reduce=Reduce.ORTHONORMALIZE))
+    m, prog = _cob(o1, o2, feeds)
+    assert not any("(cob)^-T" in (s.note or "") for s in prog.statements)  # InvOp skipped
+    back, _ = _cob(o2, o1, feeds)
+    assert m @ back == pytest.approx(np.eye(3))                            # results unchanged
+    # a non-orthonormal inner still takes the inverse-transpose
+    _, prog2 = _cob(B.dual_basis(B.list_basis(*av)), B.dual_basis(B.list_basis(*bv)), feeds)
+    assert any("(cob)^-T" in (s.note or "") for s in prog2.statements)

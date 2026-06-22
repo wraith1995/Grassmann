@@ -1111,11 +1111,21 @@ def _cob_from_dual(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     match to:
         case B.DualBasis(tb) | B.PrimalBasis(tb):
             # dual → dual ⇒ (the primal cob)⁻ᵀ (the inner bases' cob, inverse-transposed).
-            return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, frm.basis, tb))
+            return _dual_pair_cob(ctx, frm.basis, tb)
         case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric/metricized covector basis
         case _:
             return _cob_via_standard(ctx, frm, to)
+
+
+def _dual_pair_cob(ctx: _Ctx, inner_from: B.Basis, inner_to: B.Basis) -> pa.SymArray:
+    """cob between two dual/primal bases ⇒ ``(inner cob)⁻ᵀ``.  When BOTH inner bases are
+    standard-orthonormal the inner cob is orthogonal (``Q_toᵀ·Q_from``), so its inverse-transpose
+    IS itself — return it directly, skipping the ``InvOp``+transpose."""
+    m = _basis_cob_rec(ctx, inner_from, inner_to)
+    if _is_standard_orthonormal(inner_from) and _is_standard_orthonormal(inner_to):
+        return m
+    return _inv_transpose(ctx.prog, m)
 
 
 def _cob_from_primal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
@@ -1127,7 +1137,7 @@ def _cob_from_primal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     variance wrappers are interchangeable space-wise), so it takes the same exact rule."""
     match to:
         case B.PrimalBasis(tb) | B.DualBasis(tb):
-            return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, frm.basis, tb))
+            return _dual_pair_cob(ctx, frm.basis, tb)
         case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
             return _cob_via_standard(ctx, frm, to)
         case _:
