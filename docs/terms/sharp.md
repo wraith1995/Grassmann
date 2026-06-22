@@ -59,17 +59,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_sharp`**:
-
-> ``Sharp s`` — ``InvOp(G_s)`` (s* ⊸ s), identity-metric default ⇒ identity.
-> 
-> ``basis`` (from the ``Eval`` site) is the operand *covector*'s basis — the **dual** of
-> the primal ``s`` basis.  The metric ``G_s`` is therefore built in the *primal* basis
-> (peel one dual) and then inverted, so ``Sharp`` agrees with the immersed-Gram convention
-> (``_metric_matrix(dual)`` already returns ``(JᵀJ)⁻¹`` — building ``G_s`` in the primal and
-> inverting avoids a double inverse) and with the explicit-``WithInner`` metric.  The result
-> ``s⊗s`` map is tagged with the primal per-slot basis so the produced vector re-enters the
-> immersed metric correctly (`43 §2c`).  Orthonormal default ⇒ byte-identical.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

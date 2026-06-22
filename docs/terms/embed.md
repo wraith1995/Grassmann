@@ -70,13 +70,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_embed`**:
-
-> ``embed(v, s)`` — pad ``⟦v⟧`` into the ambient via the sub-basis (`41 §3`).
-> 
-> The padded value is laid out over the ambient space's axes (``V⊗ᵏ`` ⇒ ``(n,…,n)``),
-> so it mirrors :func:`_shape_of_space` of the ambient and downstream nodes see the
-> expected multi-axis tensor.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

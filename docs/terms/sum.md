@@ -65,14 +65,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_sum`**:
-
-> ``v1 + … + vn`` — coordinate-wise add (`41 §3`).
-> 
-> Summands may carry *free* (basis-index) labels in different axis orders (e.g. the
-> antisymmetrizer's ``x⊗y`` vs ``y⊗x``); each summand is aligned to the first's
-> free-label order with a transpose einsum before adding, so the sum is taken on
-> matching basis indices.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

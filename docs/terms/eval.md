@@ -75,12 +75,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_eval`**:
-
-> ``Eval(f, pos, args)`` — contract ``f``'s dual slots ``pos`` with ``args`` (`41 §3`).
-> 
-> ⟨min-sym⟩ a single deferred :class:`~polyarray.EinsumStmtOp`; symbolic degree does
-> not multiply out at build time.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

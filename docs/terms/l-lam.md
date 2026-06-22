@@ -82,13 +82,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_llam`**:
-
-> ``LLam([xᵢ:sᵢ]. e)`` — the map's coordinate tensor (`41 §3`/`§7`).
-> 
-> Each linear var is bound to the standard basis of its space as a Program input; the
-> body (linear in the vars) is lowered once, yielding the full matrix/tensor of shape
-> ``(|sᵢ|…, |space e|)``. (e linear ⇒ one pass gives the whole tensor.)
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

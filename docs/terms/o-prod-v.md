@@ -66,14 +66,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_oprod`**:
-
-> ``v1 * … * vn`` — the outer-product over the per-factor axes (`41 §3`).
-> 
-> Each factor's *space* axes (a factor may itself be tensored, e.g. ``V⊗ᵏ``) get fresh
-> einsum labels and stack into the output; any *free* (basis-index) labels a factor
-> carries — the ``LLam``→coordinate-tensor binding (`41 §3`) — ride through verbatim to
-> the output, so the outer product of LLam-bound matrix operands is the full map tensor.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

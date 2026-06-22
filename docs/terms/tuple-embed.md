@@ -53,9 +53,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_tuple_embed`**:
-
-> ``TupleEmbed(s, i)`` — inject the i-th ⊕ block (pad), as a map block_i ⊸ s.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 

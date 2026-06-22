@@ -65,14 +65,7 @@ _Executed and asserted in `tests/test_doc_examples.py`._
 
 ## Represented as (lowering)
 
-Lowered by **`represent._rep_inner`**:
-
-> ``Inner(s)`` — the metric map ``s⊗s ⊸ R``; identity-metric default ⇒ ``G_s = I``.
-> 
-> ``basis`` (when supplied by the ``Eval`` contraction site) is the *active basis* of the
-> operands: the metric is built in THAT basis so the contraction is basis-consistent (a
-> non-orthonormal ``ImageBasis`` ⇒ the immersed Gram ``JᵀJ``).  The result ``Rep`` is
-> tagged with the per-slot basis so downstream bookkeeping stays consistent.
+_No direct `_rep_*` (lowered structurally / via another node)._
 
 _Exercised in `tests/test_doc_represent.py`._
 
