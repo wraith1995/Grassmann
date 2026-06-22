@@ -1042,23 +1042,26 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     (``_cob_from_*``) which matches on ``to``.  Each handler has the specialized rule for its
     (from, to) cases and bottoms out on the standard-basis fallback (:func:`_cob_via_standard`).
 
-    Universal pre-steps first: the pure-matrix fast path (succeeds-or-raises), the identity
-    short-circuit, double-dual peeling on either side, and the abstract-basis rejection.
+    Universal pre-steps first: the pure-matrix fast path (succeeds-or-raises), the abstract-basis
+    rejection, the identity short-circuit, and double-dual peeling on either side.
     """
     try:
         return cob(ctx.prog, frm, to)                                  # pure-realizable ⇒ static cob
     except (CobError, DynamicDim):
         pass
+    # Reject abstract bases BEFORE the identity short-circuit: two identical abstract bases satisfy
+    # `_basis_eq`, but `_identity_like` cannot size a concrete identity for them — give the clear
+    # "abstract basis" error rather than a confusing downstream realize failure.
+    if isinstance(frm, (B.BVar, B.BLam, B.BApp)) or isinstance(to, (B.BVar, B.BLam, B.BApp)):
+        raise RepresentError(
+            f"cob: abstract basis has no concrete cob until reduced: {frm!r} / {to!r}"
+        )
     if _basis_eq(frm, to):                                             # A == A ⇒ identity
         return _identity_like(ctx, frm)
     if isinstance(frm, B.PrimalBasis) and isinstance(frm.basis, B.DualBasis):
         return _basis_cob_rec(ctx, frm.basis.basis, to)               # PrimalBasis(DualBasis(x)) ≡ x
     if isinstance(to, B.PrimalBasis) and isinstance(to.basis, B.DualBasis):
         return _basis_cob_rec(ctx, frm, to.basis.basis)
-    if isinstance(frm, (B.BVar, B.BLam, B.BApp)) or isinstance(to, (B.BVar, B.BLam, B.BApp)):
-        raise RepresentError(
-            f"cob: abstract basis has no concrete cob until reduced: {frm!r} / {to!r}"
-        )
     match frm:
         case B.ScalarBasis():
             return _cob_from_scalar(ctx, frm, to)
@@ -1150,12 +1153,13 @@ def _cob_from_sum(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     fs = frm.bases
     match to:
         case B.BasisSum(ts) if len(ts) == len(fs):
-            # ⊕ → ⊕ ⇒ block-diagonal of the per-summand cobs.
-            return _block_diag(ctx.prog,
-                               [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
+            # ⊕ → ⊕ ⇒ block-diagonal of the per-summand cobs (Dim-aware: a per-summand cob may
+            # carry a runtime ``DimAtom`` axis from a dynamic-rank FFS summand — audit round-3 B).
+            return _block_diag_cols(
+                ctx, [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
         case B.BasisRep(tn, tb) if _count_int(tn) == len(fs):
             # ⊕ → ⊕ⁿ (same space, repeat spelling) ⇒ block-diag of each summand → the repeated inner.
-            return _block_diag(ctx.prog, [_basis_cob_rec(ctx, f, tb) for f in fs])
+            return _block_diag_cols(ctx, [_basis_cob_rec(ctx, f, tb) for f in fs])
         case B.ListBasis() | B.CompleteBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
         case _:
@@ -1168,9 +1172,10 @@ def _cob_from_prod(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     fs = frm.bases
     match to:
         case B.BasisProd(ts) if len(ts) == len(fs):
-            # ⊗ → ⊗ ⇒ Kronecker product of the per-factor cobs.
-            return _kron(ctx.prog,
-                         [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
+            # ⊗ → ⊗ ⇒ Kronecker product of the per-factor cobs (Dim-aware for a dynamic-rank
+            # FFS factor — audit round-3 B).
+            return _kron_cols(
+                ctx, [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
         case B.ListBasis() | B.CompleteBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
         case _:
@@ -1183,11 +1188,13 @@ def _cob_from_rep(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     fn, fb = frm.count, frm.basis
     match to:
         case B.BasisRep(tn, tb) if fn == tn:
-            # ⊕ⁿ → ⊕ⁿ ⇒ block-repeat of the single inner cob.
-            return _block_repeat(ctx.prog, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
+            # ⊕ⁿ → ⊕ⁿ ⇒ block-repeat of the single inner cob (Dim-aware: a dynamic-rank FFS
+            # inner makes the per-copy axes runtime ``DimAtom``s — audit round-3 B).  The count
+            # is ``_count_int``-guarded static here, so the static-count arm applies.
+            return _block_repeat_cols(ctx, _basis_cob_rec(ctx, fb, tb), _count_int(fn))
         case B.BasisSum(ts) if len(ts) == _count_int(fn):
             # ⊕ⁿ → ⊕ (same space, sum spelling) ⇒ block-diag of the inner → each summand.
-            return _block_diag(ctx.prog, [_basis_cob_rec(ctx, fb, t) for t in ts])
+            return _block_diag_cols(ctx, [_basis_cob_rec(ctx, fb, t) for t in ts])
         case B.ListBasis() | B.CompleteBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
         case _:
@@ -1235,8 +1242,11 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     target is embed-only (the realized ambient frame), so it does not enter the cob.
 
     ``ImageBasis ↔ ProjectedBasis`` of one map (the ``R``/``R⁻¹`` factor of ``J = U_d·R``) is
-    otherwise subsumed by the generic standard route: with in-space realize both sides are
-    **square**, so :func:`_cob_via_standard` composes them with a plain ``InvOp`` — no
+    otherwise subsumed by the generic standard route: with in-space realize the
+    ``ProjectedBasis`` side is square (``k = δ``) and the ``ImageBasis`` side is square WHEN
+    ``f`` is injective / the source is not over-determined (``k = δ``) — only then does
+    :func:`_cob_via_standard` compose them with a plain ``InvOp`` (a non-injective /
+    over-determined-source ``ImageBasis`` is ``k > δ`` ⇒ rectangular ⇒ pseudo-inverse).  No
     realize-ambient + QR factor (the old ``_same_map_ffs_cob`` special case is gone).  But for the
     canonical *metric-free* ``ProjectedBasis(f,"image")`` ``to`` of the SAME map, the to-side
     in-space realize is exactly ``I`` (``U_dᵀ·U_d``), so the standard route wastes an ``InvOp(I)``
@@ -1441,8 +1451,11 @@ def _is_standard_orthonormal(b: B.Basis) -> bool:
             # a carried metric ⇒ g-orthonormal (or G⁻¹-orthonormal under a dual) (audit Fix 5).
             g, _parity = _peel_orthonormal_metric(inner)
             return g is None                                        # plain QR ⇒ QᵀQ = I
-        case B.ListBasis(_v, backup, reduce):
-            return reduce is B.Reduce.ORTHONORMALIZE and backup is None
+        case B.ListBasis(_v, _backup, reduce):
+            # The completed result is re-orthonormalized as the LAST realize step (audit
+            # round-3 A), so an ORTHONORMALIZE ListBasis is genuinely orthonormal regardless
+            # of whether a backup was supplied ⇒ `pinv = transpose` is always valid here.
+            return reduce is B.Reduce.ORTHONORMALIZE
         case B.CompleteBasis(_s, _c, reduce):
             return reduce is B.Reduce.ORTHONORMALIZE
         case _:
@@ -2525,11 +2538,15 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
 
     Every term/basis belongs to exactly one space, so realize is always in that space's
     coords — here the canonical *metric-free* ``ProjectedBasis`` ``U_d`` of ``(which, f)``.
-    The result is ``U_dᵀ·immersion(basis)``: a **square** ``k×k`` matrix (metric-free
+    The result is ``U_dᵀ·immersion(basis)``: an ``r×k`` matrix where ``r`` is the canonical δ
+    (the ``U_d`` column count) and ``k`` is the immersion's column count (metric-free
     ``ProjectedBasis`` ⇒ ``I``; metric ``ProjectedBasis`` ⇒ the reorthonormalization
-    ``U_dᵀ·U_g``; ``ImageBasis`` ⇒ the ``R`` factor where ``J = U_d·R``).  Square because
-    the canonical δ atom is keyed by ``(which, id(f))`` alone, so ``u_d`` and ``imm`` share
-    the column axis.
+    ``U_dᵀ·U_g``; ``ImageBasis`` ⇒ the ``R`` factor where ``J = U_d·R``).
+
+    It is **square** ``k×k`` exactly when the immersion's column count equals the canonical δ:
+    ALWAYS for a ``ProjectedBasis`` (it is built on the same δ atom), and for an ``ImageBasis``
+    only when ``f`` is INJECTIVE / the source is not over-determined (``k = δ``); a
+    non-injective / over-determined-source ``ImageBasis`` has ``k > δ`` ⇒ rectangular.
     """
     which, f = _ffs_which_and_map(basis)
     imm = _ffs_immersion_std(ctx, basis)
@@ -2798,6 +2815,13 @@ def _realize_list_basis(
             [pa.OutSpec("listbasis:complete", (n, n))],
             note="listbasis:RREF-complete(frame|backup)",
         )
+        if reduce is B.Reduce.ORTHONORMALIZE:
+            # `_CompleteColsOp` GREEDILY appends backup columns; it does NOT re-orthonormalize
+            # the frame against them, so the completed `(n,n)` stack is orthonormal ONLY if the
+            # frame already spanned the same directions.  Re-orthonormalize the FINAL completed
+            # result so an ORTHONORMALIZE ListBasis genuinely realizes an orthonormal basis —
+            # the semantics `_is_standard_orthonormal(ListBasis)` relies on (audit round-3 A).
+            cols = _orthonormalize_cols(ctx, cols)
     elif reduce is B.Reduce.RREF:
         # ``RREF`` with NO determinable ambient (abstract vectors): keep the frame's
         # linearly-independent columns — a genuine basis of the frame's SPAN.  Full rank ⇒ all
@@ -2854,9 +2878,22 @@ def _stack_term_cols(ctx: _Ctx, vectors: tuple[object, ...]) -> pa.SymArray:
 
 
 def _orthonormalize_cols(ctx: _Ctx, cols: pa.SymArray) -> pa.SymArray:
-    """Orthonormalize a column matrix (the ``Q`` of its QR) — standard inner product."""
+    """Orthonormalize a column matrix (the ``Q`` of its QR) — standard inner product.
+
+    A reduced QR of an ``(n, k)`` stack returns ``(n, min(n, k))`` columns: a WIDE
+    ``k > n`` stack (e.g. the over-complete ``[sub|complement]`` of a
+    ``CompleteBasis(reduce=ORTHONORMALIZE)``) yields exactly ``n`` orthonormal columns, so
+    the output column axis is ``min(n, k)``, NOT the input ``k`` (audit round-3 Fix C).
+    """
+    rows, k = _shape_of(cols)
+    if isinstance(rows, int) and isinstance(k, int):
+        out_cols = min(rows, k)
+    else:
+        # A dynamic axis can't be min'd statically; reduced QR never widens, so when the
+        # static side is the smaller bound use it, else keep the (dynamic) column count.
+        out_cols = rows if isinstance(rows, int) else k
     [out] = ctx.prog.emit_stmt(
-        _QrColsOp(), [cols], [pa.OutSpec("orthonormal:Q", _shape_of(cols))],
+        _QrColsOp(), [cols], [pa.OutSpec("orthonormal:Q", (rows, out_cols))],
         note="orthonormalize:QR-Q",
     )
     return out
@@ -2872,6 +2909,17 @@ def _realize_complete_basis(
     AMBIENT columns are its IMMERSION (``U``/``J``), not its in-space (square) realize.  Realize
     both ``sub`` and ``complement`` via :func:`_ffs_immersion` (ambient columns; falls back to
     ``realize_basis_cols`` for non-FFS full-ambient bases) so the hstack lives in the ambient.
+
+    The three ``reduce`` modes are NOT interchangeable for an over-complete pair (audit round-3 D):
+
+    * ``RREF`` is the general completion — greedily keep the independent columns of ``[sub|comp]``,
+      always an ``n×n`` basis.  Use this when ``sub`` and ``complement`` may overlap or overspan.
+    * ``ORTHONORMALIZE`` orthonormalizes the (possibly wide) hstack; reduced QR drops the
+      dependent columns, so it too yields an ``n×n`` orthonormal basis.
+    * ``NONE`` is the bare hstack with NO reduction: it is a basis ONLY when ``sub`` and
+      ``complement`` are DISJOINT and span EXACTLY the ambient (``dim sub + dim complement ==
+      n``).  An over-complete (or short) ``NONE`` is rectangular and never round-trips — the
+      static assert below rejects the statically-known over/under-complete case.
     """
     sub_cols = _ffs_immersion(ctx, sub)
     comp_cols = _ffs_immersion(ctx, complement)
@@ -2883,7 +2931,18 @@ def _realize_complete_basis(
             note="complete:RREF(sub|complement)",
         )
         return out
-    k = _shape_of(sub_cols)[1] + _shape_of(comp_cols)[1]
+    k = _combined_dim(
+        ctx, _axis_dims([sub_cols, comp_cols], 1), "sum",
+        [sub_cols, comp_cols], 1, label="complete-hstack-c",
+    )
+    if reduce is B.Reduce.NONE and isinstance(k, int) and isinstance(n_rows, int) and k != n_rows:
+        # `NONE` does not reduce, so an over/under-complete `[sub|comp]` is a rectangular
+        # non-basis that never round-trips.  Use RREF (general completion) instead (audit D).
+        raise RepresentError(
+            f"CompleteBasis(reduce=NONE): sub+complement span {k} columns but the ambient is "
+            f"{n_rows}-dimensional; NONE assumes a disjoint pair spanning exactly the ambient. "
+            f"Use reduce=RREF (or ORTHONORMALIZE) for a general/over-complete completion."
+        )
     [out] = ctx.prog.emit_stmt(
         _HStackOp(), [sub_cols, comp_cols],
         [pa.OutSpec("complete:hstack", (n_rows, k))], note="complete:[sub|comp]",
@@ -3505,7 +3564,11 @@ def _realize_ffs_by_which(
     cod_side = norm in ("img", "coker")
     metric_dom = _basis_metric(ctx, source) if (source is not None and not cod_side) else None
     metric_cod = _basis_metric(ctx, target) if (target is not None and cod_side) else None
-    key = (norm, id(f), id(source), id(target))
+    # Only the OWN-side metric basis enters the realization (the irrelevant side is ignored,
+    # `audit #4`), so key the memo on it ALONE: two requests with the same own-side metric but a
+    # different irrelevant-side basis share one GSVD (audit round-3 E).
+    own_metric_basis = target if cod_side else source
+    key = (norm, id(f), id(own_metric_basis))
     cached = ctx.ffs_realizations.get(key)
     if cached is not None:
         return cached
@@ -4166,6 +4229,10 @@ def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
             return (fa == fb and (sa is None) == (sb is None) and (ta is None) == (tb is None)
                     and (sa is None or _basis_eq(sa, sb))
                     and (ta is None or _basis_eq(ta, tb)))
+        case (B.ProjectedBasis(fa, wa, sa, ta), B.ProjectedBasis(fb, wb, sb, tb)):
+            # explicit arm (mirrors ImageBasis) so a metric-bearing source/target compares
+            # structurally rather than by `==` (audit round-3 F).
+            return (fa == fb and wa == wb and _src_eq(sa, sb) and _src_eq(ta, tb))
         case (B.BasisProd(fs), B.BasisProd(ts)) | (B.BasisSum(fs), B.BasisSum(ts)):
             return len(fs) == len(ts) and all(_basis_eq(x, y) for x, y in zip(fs, ts, strict=True))
         case (B.DualBasis(x), B.DualBasis(y)) | (B.PrimalBasis(x), B.PrimalBasis(y)) \
