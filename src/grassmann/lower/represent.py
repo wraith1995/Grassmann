@@ -278,7 +278,9 @@ class _Ctx:
     ffs_input_siblings: dict[tuple, pa.SymArray] = field(default_factory=dict)
     # `41 §3` Lam→sub-Program: a body lowered once into its own sub-Program, keyed by
     # (id(Lam), sub-input uids) so a *reused* dependent function is lowered once + called.
-    lam_subprograms: dict[tuple, pa.Program] = field(default_factory=dict)
+    lam_subprograms: dict[tuple, tuple[pa.Program, list[B.Basis], B.Basis]] = field(
+        default_factory=dict
+    )
     # D2 — per-Program-build memo of FFS factorizations (the SvdOp/QrOp/GSvdOp seam).
     # An FFS basis of a map ``f`` may be requested many times in one lowering (a Var's
     # dynamic-δ shape, the rank-consistency AssertOp, and every Project/Embed of that
@@ -2014,6 +2016,7 @@ def _rep_compose(
     operands = [f_rep.array]
     g_label_lists: list[str] = []
     replaced: dict[int, str] = {}
+    replaced_g: dict[int, Rep] = {}  # slot -> the g whose domain slot survives there
     out_free = f_free
     next_fresh = ord("p")
     for pos, g_rep in zip(positions, g_reps, strict=True):
@@ -2034,6 +2037,7 @@ def _rep_compose(
         operands.append(g_rep.array)
         g_label_lists.append(dom_label + cod_label + g_rep.free_labels)
         replaced[pos] = dom_label
+        replaced_g[pos] = g_rep
         gshape = _shape_of(g_rep.array)
         for off, lab in enumerate(g_rep.free_labels):
             ax = 2 + off
@@ -2053,7 +2057,10 @@ def _rep_compose(
         [pa.OutSpec("compose", out_shape)],
         note=f"compose:contract@{sorted(replaced)}",
     )
-    rep = Rep(out, default_basis(space), space, free_labels=out_free)
+    # Honest tag (analogue of ``_result_basis_from_factors``): output factor ``k`` is f's
+    # surviving slot basis, or — where ``g`` replaced it — that g's domain-slot (axis-0) basis.
+    result_basis = _compose_result_basis(f_rep.basis, replaced_g, len(f_factors), space)
+    rep = Rep(out, result_basis, space, free_labels=out_free)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2085,7 +2092,8 @@ def _rep_trace(
         [pa.OutSpec("trace", _shape_of_space(space))],
         note=f"trace:contract@{i},{j}",
     )
-    rep = Rep(out, default_basis(space), space)
+    # Honest tag: the surviving (non-traced) f-slot bases, in order (coords unchanged on them).
+    rep = Rep(out, _trace_result_basis(f_rep.basis, i, j, n, space), space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2149,21 +2157,26 @@ def _rep_neval_lam(
     # the free vars, in a fixed order = the sub-Program's input order.
     bound_vars = [slot_to_var[s] for s in value_slots if s in slot_to_var]
     sub_inputs = bound_vars + free_vars
-    subprog = _build_lam_subprogram(f, sub_inputs, ctx)
+    subprog, in_bases, out_basis = _build_lam_subprogram(f, sub_inputs, ctx)
 
     # Operands for the call, in sub_inputs order: each bound var ← its supplied arg's Rep
     # (lowered into the *parent* program); each free var ← the parent's own input array
-    # (so the parent and sub-Program share the same runtime value for that var).
+    # (so the parent and sub-Program share the same runtime value for that var).  Each operand
+    # is cob'd into the basis the sub-Program declared for that input (``in_bases``), so the call
+    # is basis-consistent — and the result is then honestly in the body's output basis.
     operands: list[pa.SymArray] = []
-    for v in bound_vars:
+    for k, v in enumerate(bound_vars):
         slot = next(s for s, vv in slot_to_var.items() if vv.uid == v.uid)
         if slot not in term_args:
             raise RepresentError(
                 f"NEval: value slot {slot} of the Lam has no supplied term argument"
             )
-        operands.append(_rep(term_args[slot], ctx).array)
-    for v in free_vars:
-        operands.append(_rep_var(v, ctx).array)
+        arg_rep = _rep(term_args[slot], ctx)
+        operands.append(_coerce_basis(ctx, arg_rep, in_bases[k], note="neval:operand-cob"))
+    for j, v in enumerate(free_vars):
+        free_rep = _rep_var(v, ctx)
+        operands.append(_coerce_basis(ctx, free_rep, in_bases[len(bound_vars) + j],
+                                      note="neval:free-cob"))
 
     space = _synth(e)
     [out] = ctx.prog.emit_stmt(
@@ -2171,7 +2184,9 @@ def _rep_neval_lam(
         [pa.OutSpec("neval", _shape_of_space(space))],
         note="neval:call-subprogram",
     )
-    rep = Rep(out, default_basis(space), space)
+    # Honest tag: the call result is exactly the body's output, so it lives in the body's
+    # (operand-derived) output basis — NOT ``default_basis`` (a lie for a non-default body basis).
+    rep = Rep(out, out_basis, space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2184,7 +2199,7 @@ def _rep_neval_lam(
 
 def _build_lam_subprogram(
     f: T.Lam, sub_inputs: list[T.Var], parent: _Ctx,
-) -> pa.Program:
+) -> tuple[pa.Program, list[B.Basis], B.Basis]:
     """Lower a ``Lam`` body ONCE into its own polyarray sub-``Program`` (`41 §3`).
 
     ``sub_inputs`` (the bound term-vars followed by the free term-vars) become the
@@ -2192,6 +2207,10 @@ def _build_lam_subprogram(
     sub-program, and its result is the single ``"result"`` output.  Memoized per ``Lam``
     identity (and input ordering) on the parent context so a *reused* dependent function is
     lowered once and called many times.
+
+    Returns the sub-``Program`` together with the basis each input was declared in
+    (``in_bases``, in ``sub_inputs`` order) and the body's output basis (``out_basis``), so the
+    caller can cob its operands into the input bases and tag the call result honestly (`41 §3`).
     """
     key = (id(f), tuple(v.uid for v in sub_inputs))
     cached = parent.lam_subprograms.get(key)
@@ -2201,12 +2220,12 @@ def _build_lam_subprogram(
     sub_ctx = _Ctx(prog=sub, basis_env=parent.basis_env, inputs={})
     # Force each sub-input to be allocated as a sub-Program input, in the declared order
     # (so the parent's operand list lines up positionally with sub.inputs).
-    for v in sub_inputs:
-        _rep_var(v, sub_ctx)
+    in_bases = [_rep_var(v, sub_ctx).basis for v in sub_inputs]
     body_rep = _rep(f.body, sub_ctx)
     sub.add_output("result", body_rep.array)
-    parent.lam_subprograms[key] = sub
-    return sub
+    result = (sub, in_bases, body_rep.basis)
+    parent.lam_subprograms[key] = result
+    return result
 
 
 def _free_term_vars(node: object) -> list[T.Var]:
@@ -2239,7 +2258,9 @@ def _rep_solve(
         pa.InvOp(), [f_rep.array],
         [pa.OutSpec("inv", _shape_of_space(space))], note="solve:InvOp",
     )
-    rep = Rep(out, default_basis(space), space)
+    # Honest tag: the inverse map ``f⁻¹`` (cod⊸dom) lives in the operand's dual-swapped slot
+    # bases (the numeric inverse acts in whatever basis ``f`` arrived in), not ``default_basis``.
+    rep = Rep(out, _dual_swap_map_basis(f_rep.basis, space), space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2264,7 +2285,9 @@ def _rep_pinv(
         pa.PinvOp(), [f_rep.array],
         [pa.OutSpec("pinv", _shape_of_space(space))], note="pinv:PinvOp",
     )
-    rep = Rep(out, default_basis(space), space)
+    # Honest tag: the pseudo-inverse ``f⁺`` (cod⊸dom) lives in the operand's dual-swapped slot
+    # bases — the numeric PinvOp acts in whatever basis ``f`` arrived in.
+    rep = Rep(out, _dual_swap_map_basis(f_rep.basis, space), space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2279,8 +2302,18 @@ def _rep_solve_apply(
     e: T.SolveApply, f: T.Term, v: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    f_rep = _rep(f, ctx)
-    v_rep = _rep(v, ctx)
+    # ``SolveOp`` is ``np.linalg.solve(f, v) = f⁻¹·v`` with ``f`` stored ``(dom,cod)`` — it
+    # contracts ``v`` against f's domain axis rather than the Eval-style cod pairing, so it is
+    # NOT cleanly basis-covariant (no single honest per-axis tag exists for a non-default operand
+    # basis).  Honest-tagging is intractable, so under a non-AUTO target we take the roadmap
+    # FALLBACK: build both operands in their default basis, making the ``default_basis`` result
+    # tag genuinely honest.  AUTO is byte-identical (no operand cob).
+    if target is not B.AUTO:
+        f_rep = _rep(f, ctx, target=B.STD)
+        v_rep = _rep(v, ctx, target=B.STD)
+    else:
+        f_rep = _rep(f, ctx)
+        v_rep = _rep(v, ctx)
     _assert_square_full_rank(ctx, f_rep.array, note="assert:solveapply-bij")
     space = _synth(e)
     [out] = ctx.prog.emit_stmt(
@@ -2320,7 +2353,14 @@ def _rep_pinv_apply(
         pa.EinsumStmtOp("ab,a->b"), [fp, v_rep.array],
         [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
     )
-    rep = Rep(out, default_basis(space), space)
+    # Honest tag: ``x = f⁺ v`` lives in f's domain-slot primal basis (PinvOp acts in whatever
+    # basis ``f``/``v`` arrived in).  The metric (GSVD) branch produces standard coords and so
+    # keeps ``default_basis`` — its WithInner operands are reconciled by the metric seam.
+    out_basis = (
+        default_basis(space) if metric is not None
+        else _inverse_apply_basis(f_rep.basis, space)
+    )
+    rep = Rep(out, out_basis, space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2729,7 +2769,12 @@ def _rep_remetric(
     space = _synth(e)  # WithInner(s, g)
     # No coordinate change; the metric is carried by the space. SPD is asserted when the
     # metric is later materialized (Inner/Flat/Sharp/dot); v1 keeps coords unchanged.
-    rep = Rep(v_rep.array, default_basis(space), space)
+    # Honest tag: the operand's basis re-homed onto the metricized space (coords unchanged) —
+    # NOT ``default_basis``, which would be a lie when the operand sits in a non-default basis.
+    # ``WithInner(s, g)``'s default basis is ``WithInnerBasis(default_basis(s), g)``, so the
+    # re-homed operand basis is likewise ``WithInnerBasis(operand_basis, g)`` (the metric is pure
+    # metadata; the coordinates and per-axis basis are unchanged).
+    rep = Rep(v_rep.array, _rehome_metric_basis(v_rep.basis, space), space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2761,7 +2806,9 @@ def _rep_permute(
         pa.EinsumStmtOp(spec), [v_rep.array],
         [pa.OutSpec("permute", out_shape)], note=f"permute:{perm}",
     )
-    rep = Rep(out, default_basis(space), space, free_labels=free)
+    # Honest tag: the permute only reorders axes, so output factor ``i`` carries the
+    # operand's factor ``perm[i]`` basis (coords unchanged on each axis).
+    rep = Rep(out, _reorder_basis(v_rep.basis, perm, space), space, free_labels=free)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -2776,7 +2823,15 @@ def _rep_lift(
     e: T.Lift | T.InvLift, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Lift``/``InvLift`` — fuse/unfuse the listed axes via reshape (`41 §3`)."""
-    v_rep = _rep(e.vector, ctx)
+    # The reshape FUSES/UNFUSES axes, so the operand's per-axis bases cannot be re-wrapped as
+    # a single honest tensor basis of the reshaped layout (a fused axis would need a genuine
+    # Kronecker-product basis object).  Honest-tagging is intractable, so we take the roadmap's
+    # FALLBACK: under a non-AUTO target, cob the operand to its default basis first, making the
+    # ``default_basis`` result tag genuinely honest.  Under AUTO this is skipped — byte-identical.
+    if target is not B.AUTO:
+        v_rep = _rep(e.vector, ctx, target=B.STD)
+    else:
+        v_rep = _rep(e.vector, ctx)
     space = _synth(e)
     out_shape = _shape_of_space(space)
     [out] = ctx.prog.emit_stmt(
@@ -2800,8 +2855,17 @@ def _rep_kron(
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Kron(f, g)`` — the (a0⊗a1)→(b0⊗b1) block tensor via einsum (`41 §3`)."""
-    f_rep = _rep(f, ctx)
-    g_rep = _rep(g, ctx)
+    # The Kron block FUSES the operands' slots (dom = a0⊗a1, cod = b0⊗b1), so the per-slot
+    # operand bases cannot be re-wrapped as honest factors of the 2-axis fused result (a fused
+    # axis would need a genuine Kronecker-product basis object).  Honest-tagging is intractable,
+    # so under a non-AUTO target we take the roadmap FALLBACK: build the operands in their default
+    # basis, making the ``default_basis`` result tag genuinely honest.  AUTO is byte-identical.
+    if target is not B.AUTO:
+        f_rep = _rep(f, ctx, target=B.STD)
+        g_rep = _rep(g, ctx, target=B.STD)
+    else:
+        f_rep = _rep(f, ctx)
+        g_rep = _rep(g, ctx)
     space = _synth(e)
     # f : (a0,b0), g : (a1,b1) ⇒ result[(a0 a1),(b0 b1)] = f[a0,b0] g[a1,b1] (Kron block).
     # A *differentiated* Kron'd map (e.g. Kron(I,…,Γ(h),…,I) for a per-slot connection) may
@@ -2977,6 +3041,128 @@ def _result_basis_from_factors(
         if kept:
             return B.basis_prod(*kept)
     return default_basis(space)
+
+
+# ---------------------------------------------------------------------------
+# Honest operand-derived result bases (`41 §3`, the 2.3 "bail-out via honest tag" floor).
+#
+# Several movement/operator/binder helpers reshuffle / re-wrap their operand's coordinates
+# WITHOUT changing the basis each axis lives in.  Their result must therefore be tagged with
+# the basis the coordinates are genuinely in (derived from the operand bases), so the target
+# epilogue (``_std_result``/``_match_result``) and ``_rep``'s safety-net cob convert correctly.
+# Under ``AUTO`` the tag is never read for a cob, so AUTO stays byte-identical.
+# ---------------------------------------------------------------------------
+
+
+def _basis_factors(basis: B.Basis, n: int) -> list[B.Basis] | None:
+    """Split a value/tensor ``basis`` into its ``n`` per-axis bases, else ``None``.
+
+    A multi-axis tensor is a :class:`~grassmann.core.basis.BasisProd` of ``n`` factors; a
+    single-axis value's basis IS its one factor.  Returns ``None`` when the basis structure
+    does not match the expected arity (so the caller falls back to the default basis).
+    """
+    if n == 1:
+        if isinstance(basis, B.BasisProd) and len(basis.bases) == 1:
+            return [basis.bases[0]]
+        return [basis]
+    if isinstance(basis, B.BasisProd) and len(basis.bases) == n:
+        return list(basis.bases)
+    return None
+
+
+def _basis_from_factors(factors: list[B.Basis], space: S.Space) -> B.Basis:
+    """Re-wrap per-axis ``factors`` into a value/tensor basis (single factor unwrapped)."""
+    if len(factors) == 1:
+        return factors[0]
+    return B.basis_prod(*factors)
+
+
+def _reorder_basis(basis: B.Basis, perm: tuple[int, ...], space: S.Space) -> B.Basis:
+    """The operand ``basis`` with its per-axis factors reordered by ``perm`` (``_rep_permute``)."""
+    factors = _basis_factors(basis, len(perm))
+    if factors is None:
+        return default_basis(space)
+    return _basis_from_factors([factors[perm[i]] for i in range(len(perm))], space)
+
+
+def _compose_result_basis(
+    f_basis: B.Basis, replaced_g: dict[int, Rep], n: int, space: S.Space,
+) -> B.Basis:
+    """The honest basis of a ``Compose`` result (`41 §3`).
+
+    Output factor ``k`` is f's surviving slot basis, or — where a ``g`` was composed into slot
+    ``k`` — that g's *domain* (axis-0) slot basis (g's codomain contracted f's slot).  Falls back
+    to the default basis when any needed slot basis is not recoverable from the operand tags.
+    """
+    f_factors = _basis_factors(f_basis, n)
+    if f_factors is None:
+        return default_basis(space)
+    out: list[B.Basis] = []
+    for k in range(n):
+        if k in replaced_g:
+            g_slots = _basis_factors(replaced_g[k].basis, 2)
+            if g_slots is None:
+                return default_basis(space)
+            out.append(g_slots[0])  # g's domain slot (covariant)
+        else:
+            out.append(f_factors[k])
+    return _basis_from_factors(out, space)
+
+
+def _trace_result_basis(
+    f_basis: B.Basis, i: int, j: int, n: int, space: S.Space,
+) -> B.Basis:
+    """The honest basis of a ``Trace`` result: the non-traced f-slot bases (`41 §3`)."""
+    f_factors = _basis_factors(f_basis, n)
+    if f_factors is None:
+        return default_basis(space)
+    kept = [b for k, b in enumerate(f_factors) if k not in (i, j)]
+    if not kept:  # fully traced ⇒ Scalar (basis-invariant; any cob is the identity)
+        return default_basis(space)
+    return _basis_from_factors(kept, space)
+
+
+def _inverse_apply_basis(f_basis: B.Basis, space: S.Space) -> B.Basis:
+    """The honest basis of ``f⁻¹ v`` / ``f⁺ v`` — f's domain-slot primal (`41 §3`).
+
+    ``Solve``/``Pinv`` applied to a vector lands in f's domain; the coordinates the numeric
+    solve produces are in f's domain-slot basis (covariant ``DualBasis``), whose *primal* is the
+    vector basis (peel one dual).  Falls back to the default basis when f's slot basis is not a
+    recoverable 2-factor map basis.
+    """
+    f_factors = _basis_factors(f_basis, 2)
+    if f_factors is None:
+        return default_basis(space)
+    primal = _peel_one_dual(f_factors[0])
+    return primal if primal is not None else default_basis(space)
+
+
+def _rehome_metric_basis(basis: B.Basis, space: S.Space) -> B.Basis:
+    """Re-home an operand ``basis`` onto a metricized ``WithInner(s, g)`` space (`41 §3`).
+
+    The coordinates and per-axis basis are unchanged — only the metric metadata is added — so
+    the honest tag mirrors ``default_basis(WithInner(s, g)) = WithInnerBasis(default_basis(s), g)``
+    with the operand's actual basis in place of the default.
+    """
+    if isinstance(space, S.WithInner):
+        return B.with_inner_basis(basis, space.metric)
+    return basis
+
+
+def _dual_swap_map_basis(basis: B.Basis, space: S.Space) -> B.Basis:
+    """The slot-dual-swapped basis of an inverse map (cod↔dom), `41 §3`.
+
+    A map stored ``(dom, cod)`` carries ``BasisProd(dom_slot, cod_slot)`` with the dom slot
+    covariant (a ``DualBasis``).  Its inverse ``f⁻¹`` / ``f⁺`` is stored ``(cod, dom)``: the
+    new dom slot is the old cod slot made covariant (``dual``), the new cod slot is the old
+    dom slot's primal (peel one dual) — so the coordinates the numeric inverse produces are
+    honestly tagged in the operand's own (possibly non-default) slot bases.
+    """
+    factors = _basis_factors(basis, 2)
+    if factors is None:
+        return default_basis(space)
+    dom_slot, cod_slot = factors
+    return B.basis_prod(B.dual_basis(cod_slot), _peel_one_dual(dom_slot))
 
 
 def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.SymArray]:
