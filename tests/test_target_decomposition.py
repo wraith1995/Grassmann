@@ -113,3 +113,59 @@ def test_auto_unchanged_by_the_decomposition_arms():
     x, y = C.var("x", W), C.var("y", V)
     for t in (C.oprod_v(u, w), C.oplus_v(x, y), C.zero(V), C.identity(V)):
         assert _nstmt(represent(t)) == _nstmt(represent(t, target=B.AUTO))
+
+
+# ---------------------------------------------------------------------------
+# Operator arm-C — operand steering: the inverse/adjoint math is reused unchanged; only the
+# basis ``f`` is realized in changes, so the natural result lands directly in ``want`` (no cob).
+# ---------------------------------------------------------------------------
+
+
+def _endo_map_target(V):
+    """A structure-matching map target ``BasisProd(Dual(lb), lb)`` of the endo space V*⊗V,
+    plus its frame-var feeds.  ``_slot_swap_operand_target`` returns a non-None ``f_target``
+    for it, so the steered arm fires."""
+    a = [C.var(f"e{i}", V) for i in range(3)]
+    lb = B.list_basis(*a)
+    Am = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
+    feeds = {f"e{i}_{a[i].uid}": Am[:, i] for i in range(3)}
+    return B.basis_prod(B.dual_basis(lb), lb), lb, feeds
+
+
+def test_solve_steers_into_a_slot_aligned_target_no_cob():
+    V = C.base("V", 3)
+    f = C.var("f", C.linear_map_space(V, V), C.bij)  # UNPINNED
+    want, _lb, _fr = _endo_map_target(V)
+    prog = represent(C.solve(f), target=want)
+    assert _no_target_cob(prog)
+
+
+def test_pinv_steers_into_a_slot_aligned_target_no_cob():
+    V = C.base("V", 3)
+    f = C.var("f", C.linear_map_space(V, V))  # identity metric ⇒ PinvOp branch; UNPINNED
+    want, _lb, _fr = _endo_map_target(V)
+    prog = represent(C.pinv(f), target=want)
+    assert _no_target_cob(prog)
+
+
+def test_pinv_apply_steers_into_a_vector_target_no_cob():
+    V = C.base("V", 3)
+    f = C.var("f", C.linear_map_space(V, V))  # PinvOp branch; both operands UNPINNED
+    v = C.var("v", V)
+    a = [C.var(f"pe{i}", V) for i in range(3)]
+    lb = B.list_basis(*a)  # a concrete vector basis of the result space V
+    prog = represent(C.pinv_apply(f, v), target=lb)
+    assert _no_target_cob(prog)
+
+
+def test_arm_c_auto_byte_identical():
+    """AUTO (and no-target) byte-identical — arm-C is gated on a concrete/STD target.
+
+    (``Dagger`` is included for completeness — it bailed, but AUTO must still be byte-identical.)
+    """
+    V = C.base("V", 3)
+    f = C.var("f", C.linear_map_space(V, V), C.bij)
+    fp = C.var("fp", C.linear_map_space(V, V))
+    v = C.var("v", V)
+    for t in (C.dagger(f), C.solve(f), C.pinv(fp), C.pinv_apply(fp, v)):
+        assert _nstmt(represent(t)) == _nstmt(represent(t, target=B.AUTO))
