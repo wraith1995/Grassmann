@@ -323,7 +323,11 @@ def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     * a concrete :class:`~grassmann.core.basis.Basis` — re-express into it when it is a basis of
       this node's space (else keep natural); used to pin a chosen result.
     """
-    rep = _rep_node(e, ctx)
+    # The node sees ``target`` and realizes directly in it where it cheaply can (a Var declares
+    # its input in that basis; a Sum/Scale builds its operands in it) — so no cob is needed.
+    rep = _rep_node(e, ctx, target)
+    # Safety net: any node that produced a different (natural) basis is cob'd here — a no-op when
+    # the node already honored ``target``.
     want = _resolve_target(ctx, rep.space, target)
     if want is not None and not _basis_eq(rep.basis, want):
         rep = _coerce_rep_to_target(ctx, rep, want, note="cob:target")
@@ -372,11 +376,17 @@ def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) ->
     return Rep(arr, target, rep.space, free_labels=rep.free_labels)
 
 
-def _rep_node(e: T.Term, ctx: _Ctx) -> Rep:
-    """``⟦e⟧ ⇒ Rep`` — represent ``e`` in the natural basis of its space (`41 §3`)."""
+def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
+    """``⟦e⟧ ⇒ Rep`` — represent ``e``, given the desired output ``target`` basis (`41 §3`).
+
+    ``target`` is threaded in so each node can realize *directly* in the requested basis the
+    simplest way (a Var declares its input there; a ``Sum``/``Scale`` builds its operands there)
+    instead of producing a natural basis that ``_rep`` then cobs.  Nodes that cannot cheaply
+    honor it produce their natural basis and rely on ``_rep``'s safety-net cob.
+    """
     match e:
         case T.Var():
-            return _rep_var(e, ctx)
+            return _rep_var(e, ctx, target)
         case T.External():
             return _rep_external(e, ctx)
         case T.Lit(v):
@@ -388,9 +398,9 @@ def _rep_node(e: T.Term, ctx: _Ctx) -> Rep:
         case T.Identity(space):
             return _rep_identity(e, ctx)
         case T.Scale(scalar, vector):
-            return _rep_scale(e, scalar, vector, ctx)
+            return _rep_scale(e, scalar, vector, ctx, target)
         case T.Sum(vectors):
-            return _rep_sum(e, vectors, ctx)
+            return _rep_sum(e, vectors, ctx, target)
         case T.OPlusV(vectors):
             return _rep_oplus(e, vectors, ctx)
         case T.OProdV(vectors):
@@ -451,7 +461,7 @@ def _rep_node(e: T.Term, ctx: _Ctx) -> Rep:
 # ---------------------------------------------------------------------------
 
 
-def _rep_var(e: T.Var, ctx: _Ctx) -> Rep:
+def _rep_var(e: T.Var, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     """``Var x`` — the Program input for ``x``, in its natural basis (`41 §3`).
 
     A Var whose space is FFS-dimensioned (``Img``/``Ker``/…) is sized via the SVD/QR
@@ -472,7 +482,12 @@ def _rep_var(e: T.Var, ctx: _Ctx) -> Rep:
     if cached is not None:
         return cached
     space = _synth(e)
-    basis = _natural_basis(space, e, ctx)
+    # An UNPINNED Var's input basis is the system's free choice, so we declare the input
+    # directly in the requested ``target`` (no cob needed — the simplest realization).  A
+    # ``basis_env`` pin always wins (the user fixed that input's basis); ``_rep``'s safety-net
+    # then cob's the pin → target if they differ.
+    want = None if e.uid in ctx.basis_env else _resolve_target(ctx, space, target)
+    basis = want if want is not None else _natural_basis(space, e, ctx)
     shape = _shape_of_space_dyn(space, ctx)
     if _is_static(shape):
         arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
@@ -631,8 +646,12 @@ def _rep_identity(e: T.Identity, ctx: _Ctx) -> Rep:
     return Rep(arr, default_basis(space), space)
 
 
-def _rep_scale(e: T.Scale, scalar: object, vector: T.Term, ctx: _Ctx) -> Rep:
-    inner = _rep(vector, ctx)
+def _rep_scale(
+    e: T.Scale, scalar: object, vector: T.Term, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    # Scale preserves the space, so building the vector in ``target`` lands the result there.
+    inner = _rep(vector, ctx, target)
     if isinstance(scalar, (int, float)):
         [out] = ctx.prog.emit_stmt(
             _ScaleOp(float(scalar)), [inner.array],
@@ -649,7 +668,10 @@ def _rep_scale(e: T.Scale, scalar: object, vector: T.Term, ctx: _Ctx) -> Rep:
     return Rep(out, inner.basis, inner.space, free_labels=inner.free_labels)
 
 
-def _rep_sum(e: T.Sum, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
+def _rep_sum(
+    e: T.Sum, vectors: tuple[T.Term, ...], ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
     """``v1 + … + vn`` — coordinate-wise add (`41 §3`).
 
     Summands may carry *free* (basis-index) labels in different axis orders (e.g. the
@@ -667,12 +689,15 @@ def _rep_sum(e: T.Sum, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
         sib_space = _synth(sib)
         vectors = tuple(T.Zero(sib_space) if _is_bare_zero(v) else v for v in vectors)
 
-    reps = [_rep(v, ctx) for v in vectors]
-    target = reps[0].basis
+    # All summands share the sum's space, so building each in ``target`` lands the sum there
+    # (each ``sum:cob`` below is then a no-op); under AUTO they keep their natural bases and the
+    # first summand's basis is the common one, exactly as before.
+    reps = [_rep(v, ctx, target) for v in vectors]
+    common = reps[0].basis
     free = reps[0].free_labels
     arrays = [reps[0].array]
     for r in reps[1:]:
-        a = _coerce_basis(ctx, r, target, note="sum:cob")
+        a = _coerce_basis(ctx, r, common, note="sum:cob")
         a = _align_free_labels(ctx, a, r, free)
         _assert_shape_eq(ctx, reps[0].array, a, note="assert:sum-shapes")
         arrays.append(a)
@@ -680,7 +705,7 @@ def _rep_sum(e: T.Sum, vectors: tuple[T.Term, ...], ctx: _Ctx) -> Rep:
         _AddOp(len(arrays)), arrays,
         [pa.OutSpec("sum", _shape_of(reps[0].array))], note="sum:add",
     )
-    return Rep(out, target, reps[0].space, free_labels=free)
+    return Rep(out, common, reps[0].space, free_labels=free)
 
 
 def _align_free_labels(

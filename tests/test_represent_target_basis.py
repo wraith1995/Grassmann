@@ -98,14 +98,28 @@ def test_std_on_an_operator_is_the_identity_matrix():
 # ---------------------------------------------------------------------------
 
 
-def test_explicit_basis_reexpresses_a_vector():
+def test_explicit_basis_reexpresses_a_pinned_vector():
     V = C.base("V", 3)
     u = C.var("u", V)
     lb, lb_feeds = _list_basis_of(V)
     uc = np.array([2.0, 3, 5])
     feeds = {_vk(u): uc, **lb_feeds}
-    # No pin ⇒ AUTO ⇒ std coords ``uc``; targeting ``lb`` re-expresses std → lb (= solve(Am, uc)).
-    assert np.allclose(_run(represent(u, target=lb), feeds), np.linalg.solve(_AM, uc))
+    # PINNED to the standard basis ⇒ input is std coords; targeting ``lb`` re-expresses std → lb
+    # (= solve(Am, uc)).  The pin wins over the target, so a genuine cob is emitted.
+    std = _RM.default_basis(V)
+    out = _run(represent(u, basis_env={u.uid: std}, target=lb), feeds)
+    assert np.allclose(out, np.linalg.solve(_AM, uc))
+
+
+def test_unpinned_var_declares_its_input_directly_in_the_target():
+    # The threading payoff: an UNPINNED Var targeted at a concrete basis declares its INPUT in
+    # that basis (the simplest realization — no cob), so the result equals the fed coordinates.
+    V = C.base("V", 3)
+    u = C.var("u", V)
+    lb, lb_feeds = _list_basis_of(V)
+    uc = np.array([2.0, 3, 5])
+    feeds = {_vk(u): uc, **lb_feeds}
+    assert np.allclose(_run(represent(u, target=lb), feeds), uc)
 
 
 def test_explicit_operator_basis_multi_axis():
@@ -130,6 +144,29 @@ def test_explicit_basis_of_a_different_space_is_ignored():
     feeds = {_vk(u): uc}
     # Default (AUTO ⇒ std) coords are ``uc``; the mismatched target is ignored, so still ``uc``.
     assert np.allclose(_run(represent(u, target=wrong), feeds), uc)
+
+
+# ---------------------------------------------------------------------------
+# Threading payoff: a node honoring the target emits no redundant cob.
+# ---------------------------------------------------------------------------
+
+
+def _nstmt(prog):
+    return sum(1 for sub in pa.forward.iter_programs(prog) for _ in sub.statements)
+
+
+def test_target_threading_emits_no_redundant_cob():
+    V = C.base("V", 3)
+    u, v = C.var("u", V), C.var("v", V)
+    # An unpinned Var built directly in STD costs the same as AUTO (no extra cob).
+    assert _nstmt(represent(u, target=B.STD)) == _nstmt(represent(u, target=B.AUTO))
+    # A Sum of unpinned vars: each summand is built in STD, so every ``sum:cob`` is a no-op.
+    s = C.sum_(u, v)
+    assert _nstmt(represent(s, target=B.STD)) == _nstmt(represent(s, target=B.AUTO))
+    # And no statement carries the safety-net target cob note.
+    notes = [st.note for sub in pa.forward.iter_programs(represent(s, target=B.STD))
+             for st in sub.statements]
+    assert not any(n.startswith("cob:target") for n in notes)
 
 
 # ---------------------------------------------------------------------------
