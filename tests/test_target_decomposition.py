@@ -140,6 +140,28 @@ def test_trace_pushes_target_into_surviving_slot():
 
 
 # ---------------------------------------------------------------------------
+# Metric-in-target (roadmap #2): Inner/Flat build the Gram directly in a concrete target basis.
+# ---------------------------------------------------------------------------
+
+
+def test_inner_flat_build_gram_in_a_concrete_target():
+    V = C.base("V", 3)
+    a = [C.var(f"e{i}", V) for i in range(3)]
+    lb = B.list_basis(*a)
+    Am = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
+    feeds = {f"e{i}_{a[i].uid}": Am[:, i] for i in range(3)}
+    gram = Am.T @ Am  # the Gram of lb under the standard metric (G = I)
+    want = B.basis_prod(B.dual_basis(lb), B.dual_basis(lb))  # the metric's two covariant slots in lb
+    for t in (C.inner(V), C.flat(V)):
+        prog = represent(t, target=want)
+        assert _no_target_cob(prog)  # built directly in `want` — no conversion cob
+        assert np.allclose(_run(prog, feeds), gram)  # G_s in lb = lbᵀ·G·lb
+    # AUTO and STD are unchanged (the steer fires only for a concrete Basis target)
+    assert _nstmt(represent(C.inner(V))) == _nstmt(represent(C.inner(V), target=B.AUTO))
+    assert _nstmt(represent(C.inner(V), target=B.STD)) == _nstmt(represent(C.inner(V)))
+
+
+# ---------------------------------------------------------------------------
 # Operator arm-C — operand steering: the inverse/adjoint math is reused unchanged; only the
 # basis ``f`` is realized in changes, so the natural result lands directly in ``want`` (no cob).
 # ---------------------------------------------------------------------------
