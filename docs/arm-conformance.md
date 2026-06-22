@@ -123,9 +123,9 @@ specializing would need an injectivity gate.
 | `_rep_pinv_apply` | `_std_result` | honest `_inverse_apply_basis` tag | **operand-steer** (PinvOp): steer f's dom slot; metric branch bail | `_match_result` | FULL |
 | `_rep_solve_apply` | `_std_result`; STD-forces operands under non-AUTO | AUTO byte-identical | force-default + `_match_result` | yes | FULL (correct bail — SolveOp not basis-covariant) |
 | `_rep_dagger` | `_std_result` | metric-adjoint honest tag; orthonormal fast path = transpose | deliberate bail (steering unsound: transpose ≠ adjoint for Gram≠I) | `_match_result` | FULL (correct bail) |
-| `_rep_inner` | `_std_result` | metric `G_s` built in active operand basis; per-slot tag | metric built in operand basis (Eval-driven); else generic `_match_result` | yes | PARTIAL |
-| `_rep_flat` | `_std_result` | `G_s` in operand basis; dual per-slot tag | as inner | yes | PARTIAL |
-| `_rep_sharp` | `_std_result` | `G_s` in operand primal, inverted | as inner | yes | PARTIAL |
+| `_rep_inner` | `_std_result` | `G_s` in active operand basis; per-slot tag | **build the Gram directly in a concrete target's basis** (`_metric_target_basis`, the `basis=` hook); Eval-driven path unchanged | yes | FULL |
+| `_rep_flat` | `_std_result` | `G_s` in operand basis; dual per-slot tag | as inner (build `G_s` directly in the target) | yes | FULL |
+| `_rep_sharp` | `_std_result` | `G_s` in operand primal, inverted | generic `_match_result` (deferred: the (2,0) inverse-metric variance can't use the covariant `bᵀGb` hook) | yes | FULL (deferred bail) |
 
 ### movement & binders
 
@@ -163,8 +163,10 @@ SolveOp aren't basis-covariant); `orthonormal → *` cob (re-coordinates); `Imag
    / fused cases bail). `_rep_neval_lam` is **deferred-by-design** (the target can't safely key the
    sub-Program memo — a `Basis` isn't guaranteed hashable). Pre-existing, out-of-scope: a `diff`/
    free-label eval has a basis-honesty gap in the diff/LLam lowering (steering correctly bails on it).
-2. **Metric-in-target** — `_rep_inner`/`_flat`/`_sharp`: when called standalone with a concrete target
-   (no operand `basis=`), build the Gram directly in the target basis.
+2. **Metric-in-target — DONE for `_rep_inner`/`_rep_flat`** (build the Gram directly in a concrete
+   target's basis via the `basis=` hook; STD/AUTO byte-identical). `_rep_sharp` is **deferred** — it
+   is the (2,0) inverse metric, whose components in a target basis are an inverse-transposed
+   transform the covariant `bᵀ·G·b` hook can't produce; it keeps the correct standard build + bail.
 3. **Structured movement targets** — `_rep_tuple_embed`/`_tuple_project` (build the constant map in
    per-block target bases via `_split_target_components`); `_rep_llam` (bind vars in the target's
    domain slots + push the codomain into the body); `_rep_project`/`_embed` (steer the realized
