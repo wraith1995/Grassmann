@@ -113,11 +113,11 @@ specializing would need an injectivity gate.
 
 | `_rep_X` | STD | AUTO (queries sub-terms?) | concrete-target match | bail? | conformance |
 |---|---|---|---|---|---|
-| `_rep_eval` | `_std_result` | metric built in operands' basis; `_reconcile_pairing` steers args; honest `_result_basis_from_factors` tag | generic `_match_result` | yes | PARTIAL |
+| `_rep_eval` | `_std_result` | metric in operands' basis; `_reconcile_pairing`; honest `_result_basis_from_factors` tag | **steer** (non-metric): surviving f-slots = want, contracted = dual(arg); `_basis_eq` self-check backs off; metric/free-label/fused bail | `_match_result` | FULL |
 | `_rep_neval` | delegates | delegates | delegates | delegates | FULL (delegator) |
-| `_rep_neval_lam` | `_std_result` | operands cob'd into sub-Program in-bases; honest body out-basis tag | generic `_match_result` | yes | PARTIAL |
-| `_rep_compose` | `_std_result` | `_compose_result_basis`; `_reconcile_compose_g` steers g | generic `_match_result` | yes | PARTIAL |
-| `_rep_trace` | `_std_result` | honest non-traced-slot tag | generic `_match_result` | yes | PARTIAL |
+| `_rep_neval_lam` | `_std_result` | operands cob'd into sub-Program in-bases; honest body out-basis tag | generic `_match_result` (deferred: target can't safely key the sub-Program memo) | yes | FULL (deferred bail) |
+| `_rep_compose` | `_std_result` | `_compose_result_basis`; `_reconcile_compose_g` | **steer**: f surviving slots = want; each gₖ domain = want comp, cod = `_pairing_partner` of f's slot; self-check backs off | `_match_result` | FULL |
+| `_rep_trace` | `_std_result` | honest non-traced-slot tag | **steer** f: surviving slots = want, traced slots dual-paired defaults | yes | FULL |
 | `_rep_solve` | `_std_result` | honest `_dual_swap_map_basis` tag | **operand-steer**: realize f in slot-swap(want) → InvOp lands in want | `_match_result` | FULL |
 | `_rep_pinv` | `_std_result` | honest dual-swap tag; GSVD branch → safety-net | **operand-steer** (PinvOp); GSVD branch deliberate bail | `_match_result` | FULL |
 | `_rep_pinv_apply` | `_std_result` | honest `_inverse_apply_basis` tag | **operand-steer** (PinvOp): steer f's dom slot; metric branch bail | `_match_result` | FULL |
@@ -157,9 +157,12 @@ SolveOp aren't basis-covariant); `orthonormal → *` cob (re-coordinates); `Imag
 (raises — different spaces).
 
 **Structure left on the table (optimization roadmap, by rough value):**
-1. **Operator concrete-target push-down** — `_rep_eval`/`_rep_compose`/`_rep_trace`/`_rep_neval_lam`:
-   thread a value/slot target into the surviving operand's realize (or the Lam body) so the result is
-   born in `want` instead of cob'd after.
+1. **Operator concrete-target push-down — DONE** (operand-steering, verified by two-route + adversarial
+   pass): `_rep_trace`, `_rep_eval` (non-metric), `_rep_compose` now realize their operands so the
+   result is born in `want` (a `_basis_eq` self-check backs off any unsound steer; metric / free-label
+   / fused cases bail). `_rep_neval_lam` is **deferred-by-design** (the target can't safely key the
+   sub-Program memo — a `Basis` isn't guaranteed hashable). Pre-existing, out-of-scope: a `diff`/
+   free-label eval has a basis-honesty gap in the diff/LLam lowering (steering correctly bails on it).
 2. **Metric-in-target** — `_rep_inner`/`_flat`/`_sharp`: when called standalone with a concrete target
    (no operand `basis=`), build the Gram directly in the target basis.
 3. **Structured movement targets** — `_rep_tuple_embed`/`_tuple_project` (build the constant map in
