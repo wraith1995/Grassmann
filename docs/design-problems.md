@@ -290,6 +290,22 @@ operator/movement **basis-tag dishonesty** (wrong STD/concrete results, ~11 help
 via the 2.3 match redesign (see `docs/target-basis-roadmap.md`). Free-case minimization (2.2) and the
 full match decomposition (2.3) are captured as a roadmap there (optimizations, not bugs).
 
+## Metric seam over non-orthonormal bases (FIXED) + a flagged residual
+
+The operator arm-C verification pass surfaced a pre-existing bug: `_is_immersed_metric_basis`
+flagged only `ImageBasis`, so a non-orthonormal `ListBasis`/`CompleteBasis` operand (`reduce` ≠
+`ORTHONORMALIZE`) took the identity-metric fast path — every metric consumer (Inner/dot, Flat,
+Sharp, Dagger) was wrong over such operands, even under AUTO (reachable via `basis_env`). **Fixed**:
+the predicate now flags non-orthonormal list/complete bases, and `_immersed_gram` is generalized to
+`colsᵀ·G·cols` for them (dual ⇒ inverse Gram). Adversarially re-audited (mixed-operand, dagger
+cod≠dom + dual slot, dual→G⁻¹ via InvOp, WithInner `Cᵀ·g·C`, CompleteBasis, Flat/Sharp round-trip,
+no false positives, ImageBasis IR byte-identical) — correct/converged. Tests: `test_metric_seam.py`.
+
+**Residual (pre-existing, NOT caused by the fix, out of scope):** a `WithInner(V, g)` space with a
+*numeric* metric cannot be a metric-Eval operand — `_operand_metric_basis` builds a `set` of operand
+bases and a numeric-metric `WithInnerBasis` is unhashable (`numpy.ndarray`). Fails on the default
+path too; predates the seam work. Fix: make the operand-basis set hashable (term/tuple metric).
+
 ## Open questions
 
 - **A subspace-spanning `ListBasis`/`CompleteBasis`.** *(Resolved for `ListBasis`.)* A `ListBasis`
