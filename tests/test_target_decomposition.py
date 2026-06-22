@@ -354,8 +354,8 @@ def test_external_equivariant_pushes_target_into_operands():
     got = _run(represent(t, basis_env={v.uid: lb}, target=B.STD),
                {**frame, _vk(v): np.linalg.solve(Am, vc)})
     assert np.allclose(ref, -vc) and np.allclose(got, -vc)
-    # steered into a concrete target with a default (leaf) operand ⇒ no result cob
-    assert _no_target_cob(represent(t, basis_env={v.uid: default_basis(V)}, target=lb))
+    # steered into a concrete target with an UNPINNED (leaf) operand ⇒ declared in `want`, no cob
+    assert _no_target_cob(represent(t, target=lb))
     # AUTO byte-identical; a STANDARD kernel is unchanged
     assert _nstmt(represent(t)) == _nstmt(represent(t, target=B.AUTO))
     sq = ExternalOp(name="sqrt", fn=np.sqrt, basis_req=BasisReq.STANDARD)
