@@ -162,6 +162,42 @@ def test_inner_flat_build_gram_in_a_concrete_target():
 
 
 # ---------------------------------------------------------------------------
+# Permute push-down: a structural target is pushed into the operand (operand axis j carries want's
+# axis inv[j]); the transpose then lands directly in `want` — no post-cob.
+# ---------------------------------------------------------------------------
+
+
+def test_permute_pushes_a_structural_target_into_the_operand():
+    V, W = C.base("V", 3), C.base("W", 2)
+    a = [C.var(f"e{i}", V) for i in range(3)]
+    b = [C.var(f"w{i}", W) for i in range(2)]
+    lbV, lbW = B.list_basis(*a), B.list_basis(*b)
+    Av = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
+    Aw = np.array([[1.0, 1], [0, 1.0]])
+    frame = {f"e{i}_{a[i].uid}": Av[:, i] for i in range(3)}
+    frame |= {f"w{i}_{b[i].uid}": Aw[:, i] for i in range(2)}
+    M = np.arange(6.0).reshape(3, 2)  # the std operand V⊗W
+    op = C.var("op", C.oprod(V, W))
+    t = C.permute(op, (1, 0))  # V⊗W ⇒ W⊗V (transpose)
+    dflt_in = default_basis(C.oprod(V, W))
+    # STD: two-route via machinery-derived operand coords (pin op to (lbV,lbW), feed M in that basis)
+    opc = _run(represent(op, basis_env={op.uid: dflt_in}, target=B.basis_prod(lbV, lbW)),
+               {**frame, "op_" + str(op.uid): M})
+    std = represent(t, basis_env={op.uid: B.basis_prod(lbV, lbW)}, target=B.STD)
+    assert not any(n.startswith("cob:target-std") for n in _notes(std))  # pushed down, no post-cob
+    assert np.allclose(_run(std, {**frame, "op_" + str(op.uid): opc}), M.T)
+    # concrete target (lbW,lbV): == M.T cob'd there, no post-cob
+    want = B.basis_prod(lbW, lbV)
+    permvar = C.var("pv", C.oprod(W, V))
+    expc = _run(represent(permvar, basis_env={permvar.uid: default_basis(C.oprod(W, V))}, target=want),
+                {**frame, "pv_" + str(permvar.uid): M.T})
+    got = represent(t, basis_env={op.uid: dflt_in}, target=want)
+    assert np.allclose(_run(got, {**frame, "op_" + str(op.uid): M}), expc)
+    # AUTO byte-identical
+    assert _nstmt(represent(t)) == _nstmt(represent(t, target=B.AUTO))
+
+
+# ---------------------------------------------------------------------------
 # Operator arm-C — operand steering: the inverse/adjoint math is reused unchanged; only the
 # basis ``f`` is realized in changes, so the natural result lands directly in ``want`` (no cob).
 # ---------------------------------------------------------------------------

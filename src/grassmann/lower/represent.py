@@ -3065,23 +3065,37 @@ def _rep_permute(
     """``Permute(v, perm)`` — reorder the space axes by ``perm`` (an einsum transpose).
 
     Free (basis-index / seed) labels trail the space axes and ride through untouched."""
-    v_rep = _rep(e.vector, ctx)
-    n = len(_factors(v_rep.space))
+    space = _synth(e)
+    n = len(_factors(space))
     perm = e.perm
-    space_labels = [chr(ord("a") + k) for k in range(n)]
+    # (push-down) a structural target ⇒ build the operand so the transpose lands directly in `want`:
+    # output axis i carries operand axis perm[i], so operand axis j must carry want's axis inv[j].
+    want = _resolve_target(ctx, space, target)
+    want_factors = _basis_factors(want, n) if want is not None else None
+    if want_factors is not None:
+        inv = [0] * n
+        for i in range(n):
+            inv[perm[i]] = i
+        op_target = _basis_from_factors([want_factors[inv[j]] for j in range(n)], _synth(e.vector))
+        v_rep = _rep(e.vector, ctx, op_target)
+    else:
+        v_rep = _rep(e.vector, ctx)
     free = v_rep.free_labels
+    space_labels = [chr(ord("a") + k) for k in range(n)]
     in_labels = "".join(space_labels) + free
     out_labels = "".join(space_labels[perm[i]] for i in range(n)) + free
     spec = in_labels + "->" + out_labels
-    space = _synth(e)
     in_shape = _shape_of(v_rep.array)
     out_shape = tuple(in_shape[perm[i]] for i in range(n)) + tuple(in_shape[n:])
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), [v_rep.array],
         [pa.OutSpec("permute", out_shape)], note=f"permute:{perm}",
     )
-    # Honest tag: the permute only reorders axes, so output factor ``i`` carries the
-    # operand's factor ``perm[i]`` basis (coords unchanged on each axis).
+    # Honest tag: the permute only reorders axes, so output factor ``i`` carries the operand's
+    # factor ``perm[i]`` basis (coords unchanged per axis).  A structural target was pushed into the
+    # operand ⇒ the result is already in `want` (no post-cob — mirrors `_rep_oplus`).
+    if want_factors is not None:
+        return Rep(out, want, space, free_labels=free)
     rep = Rep(out, _reorder_basis(v_rep.basis, perm, space), space, free_labels=free)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
