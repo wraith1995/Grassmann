@@ -114,6 +114,16 @@ pure-realizable pairs); the `_cob_from_*` handlers run only when a side is non-s
   / there is no common block structure — no cheaper route.
 
 **Summary:** every arm is correct, and on every aspect either exploits the structure available, bails
-correctly (with the unsound-reason named), or refuses loudly. **No silent-wrong arms remain.** Two
-architectural gaps are guarded by a loud refusal rather than miscomputation: llam free-label-basis
-tracking, and the GSVD metric-pinv operand basis — both tracked as future work.
+correctly (with the unsound-reason named), or refuses loudly. **No silent-wrong arms remain.** The
+GSVD metric-pinv operand-basis gap is now FIXED (built in the operand basis); the llam non-default
+body is handled by the `vmap` default (cod-non-default correct, domain-only guarded). Path A (a typed
+one-pass llam index) + the domain-only body-level eval reconciliation remain tracked future work.
+
+**Re-audit (post Gap 1/2, both llam modes) — converged.** A full per-aspect + two-route sweep over all
+represent and cob arms (3 basis flavors; cob round-trips verified to ~1e-14) found **NO silent-wrong
+arm**. The cob side is fully FULL (incl. the `#5` Projected→Image mirror, round-trip-verified). The
+sole finding was a robustness crash — `_rep_embed` ungracefully reshaped (not silent-wrong) on an
+FFS-subspace operand pinned to a non-orthonormal `list_basis`, because the literal-column branch was
+gated on `_is_immersed_metric_basis` (too broad) instead of `ImageBasis` — **now fixed** (gate on
+`ImageBasis`; route every other basis through the sub↪ambient `_subspace_cols` path; two-route
+verified).
