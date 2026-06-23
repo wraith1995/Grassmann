@@ -18,6 +18,8 @@ the leading ``Dual`` (input) axis, so a stored map matrix is the transpose of th
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import polyarray as pa
 
@@ -26,6 +28,11 @@ import grassmann.core.props as P
 from grassmann.core.kinds import SpaceSort
 from grassmann.lower import represent
 from grassmann.lower.provenance import PROV_KINDS
+
+
+def _llam_eye_mode() -> bool:
+    """True when the LLam lowering is the default fused-``eye`` einsum (not ``vmap``, `41 §7`)."""
+    return os.environ.get("GRASSMANN_LLAM_INDEX", "eye") != "vmap"
 
 
 def _var_key(v: C.Var) -> str:
@@ -119,8 +126,11 @@ def test_pullback_body_is_deferred_tbt_contraction() -> None:
 
     prog = represent(pullback_form)
 
-    # The body contraction is the single deferred TᵀBT einsum (`41 §7`).
-    assert "ab,ai,bj->ij" in _einsum_specs(prog)
+    # The body contraction is the single deferred TᵀBT einsum (`41 §7`) — an EYE-mode IR shape.
+    # Under the Path-B ``GRASSMANN_LLAM_INDEX=vmap`` lowering the body is a sub-Program + vmap call
+    # (no fused free-axis einsum), so this structural check applies only to the default eye mode.
+    if _llam_eye_mode():
+        assert "ab,ai,bj->ij" in _einsum_specs(prog)
 
     rng = np.random.default_rng(0)
     Tm = rng.standard_normal((3, 2))  # T stored (|V|,|W|)
@@ -272,8 +282,13 @@ def test_provenance_pullback_notes() -> None:
     prog = represent(C.llam(xv, yv, body=body))
     notes = _notes(prog)
     assert all(n for n in notes)
-    assert any(n.startswith("llam:basis") for n in notes)
-    assert any(n.startswith("eval:contract") for n in notes)
+    # ``llam:basis`` is the EYE-mode binding-const note; the vmap lowering tags its eye consts
+    # ``llam:vmap:eye`` instead.  Accept either so the test is mode-agnostic.
+    assert any(n.startswith("llam:basis") or n.startswith("llam:vmap") for n in notes)
+    # The body contraction is a TOP-level stmt only under eye; under vmap it lives in the body
+    # sub-Program (the top program just holds the eye consts + the vmap CallOp).
+    if _llam_eye_mode():
+        assert any(n.startswith("eval:contract") for n in notes)
 
 
 # ===========================================================================

@@ -552,10 +552,17 @@ def test_dagger_orthonormal_nonstandard_operand_std():
 
 
 def test_llam_nondefault_body_basis_fails_loudly():
-    """_rep_llam tag honesty: a body landing in a non-default basis (e.g. a pinned operand) can't be
-    honestly tagged yet (the map tensor's domain free-label axes aren't basis-tracked), so it must
-    RAISE rather than silently mislabel.  A default-operand body is correct (AUTO == STD == Mfᵀ)."""
+    """_rep_llam tag honesty under the DEFAULT (``eye``) lowering: a body landing in a non-default
+    basis (e.g. a pinned operand) can't be honestly tagged (the map tensor's domain free-label axes
+    aren't basis-tracked), so eye RAISES rather than silently mislabel.  A default-operand body is
+    correct (AUTO == STD == Mfᵀ).  Under ``GRASSMANN_LLAM_INDEX=vmap`` (Path B, `41 §7`) the body is
+    lowered per-basis-vector with honest tags, so the same non-default pins must NOT raise — they
+    must give the STD std-map value instead (the bug this fix addresses)."""
+    import os
+
     from grassmann.lower.represent import RepresentError
+
+    eye_mode = os.environ.get("GRASSMANN_LLAM_INDEX", "eye") != "vmap"
 
     V = C.base("V", 3)
     MS = C.linear_map_space(V, V)
@@ -566,30 +573,40 @@ def test_llam_nondefault_body_basis_fails_loudly():
     std_env = {f.uid: default_basis(MS)}
     assert np.allclose(_run(represent(llam, basis_env=std_env), {_vk(f): Mf}), Mf.T)
     assert np.allclose(_run(represent(llam, basis_env=std_env, target=B.STD), {_vk(f): Mf}), Mf.T)
-    # f pinned to a non-default map basis ⇒ body lands in `lb` ⇒ must raise (was silent-wrong)
+    # f pinned to a non-default map basis ⇒ body lands in `lb`.  EYE: raise.  VMAP: STD == Mfᵀ.
     a = [C.var(f"e{i}", V) for i in range(3)]
     lb = B.list_basis(*a)
     Am = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
     frame = {f"e{i}_{a[i].uid}": Am[:, i] for i in range(3)}
     opb = B.basis_prod(B.dual_basis(lb), lb)
     mf_lb = _run(represent(f, basis_env=std_env, target=opb), {**frame, _vk(f): Mf})
-    try:
-        _run(represent(llam, basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_lb})
-        raise AssertionError("expected RepresentError for a non-default llam body basis")
-    except RepresentError as ex:
-        assert "non-default basis" in str(ex)
-    # domain-only case (cod stays default, a body eval cob's the var axis to a pinned covector):
-    # LLam([x]. ⟨a, x⟩) with `a` pinned non-default must also raise (caught by the pin pre-check).
+    if eye_mode:
+        try:
+            _run(represent(llam, basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_lb})
+            raise AssertionError("expected RepresentError for a non-default llam body basis")
+        except RepresentError as ex:
+            assert "non-default basis" in str(ex)
+    else:
+        got = _run(represent(llam, basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_lb})
+        assert np.allclose(got, Mf.T)
+    # domain-only case: LLam([x]. ⟨a, x⟩) with `a` pinned non-default.  EYE raises (pin pre-check);
+    # VMAP gives the honest STD covector row == the std-coords of `a` (the value fed in `lbd`).
     a = C.var("a", C.dual(V))
     d = [C.var(f"d{i}", C.dual(V)) for i in range(3)]
     lbd = B.list_basis(*d)
     dfr = {f"d{i}_{d[i].uid}": Am[:, i] for i in range(3)}
     lin = C.llam(x, body=C.eval_(a, (0,), x))
+    a_lb = np.array([1.0, 2, 3])
+    # EYE raises (pin pre-check).  VMAP now ALSO raises: the domain-ONLY hazard — the body ``⟨a,x⟩``
+    # contracts the pinned covector ``a`` against the bound ``x`` basis-blindly, so the per-slice
+    # value is NOT a basis-honest ``lin(e_j)`` (it would be silent-wrong, ``[1,0,2]`` vs ``[1,2,3]``).
+    # Until body-level free-axis basis tracking lands (`41 §7`), vmap GUARDS this instead of
+    # silent-wronging — so both modes must RAISE here.
     try:
-        _run(represent(lin, basis_env={a.uid: lbd}, target=B.STD), {**dfr, _vk(a): np.array([1.0, 2, 3])})
+        _run(represent(lin, basis_env={a.uid: lbd}, target=B.STD), {**dfr, _vk(a): a_lb})
         raise AssertionError("expected RepresentError for a domain-only non-default llam pin")
     except RepresentError as ex:
-        assert "non-default basis" in str(ex)
+        assert ("non-default basis" in str(ex)) or ("domain-only basis pin" in str(ex))
 
 
 def test_pinv_gsvd_default_operand_correct():
@@ -657,3 +674,50 @@ def test_pinv_apply_gsvd_nondefault_operand_two_route():
     cob of ``v`` into f's cod slot makes the pin correct — STD (pinned) == AUTO (default)."""
     got, ref = _gsvd_two_route("pinvapply")
     assert np.allclose(got, ref), f"pinv_apply GSVD two-route:\nGOT={got}\nREF={ref}"
+
+
+# ---------------------------------------------------------------------------
+# LLam Path-B (`GRASSMANN_LLAM_INDEX=vmap`) — a NON-DEFAULT llam body, correct (`41 §7`).
+#
+# The default ``eye`` lowering binds each linear var to a materialized identity on an untyped FREE
+# axis and lowers the body once; for a non-default/non-orthonormal body this entangles a Gram onto
+# the free axis so the map tensor can't be honestly tagged — so eye RAISES.  Path B lowers the body
+# ONCE as a sub-Program with each bound var a rank-1 input, then ``vmap``s it over the binding basis
+# (feeding ``eye``, sliced into the j-th basis vector per iteration) — each slice is an honest
+# rank-1 eval, so a non-default body is tagged honestly and the std map is recovered.
+#
+# As with the GSVD two-route check, the two routes run in SEPARATE subprocesses (one with the env var
+# set to ``vmap``) to avoid the in-process free-label/einsum-symbol accumulation artifact.
+# ---------------------------------------------------------------------------
+
+
+def _llam_vmap_two_route(kind):
+    """Run the ``std`` (``GRASSMANN_LLAM_INDEX=vmap``, operand pinned, STD) and ``ref`` (default eye
+    lowering, default operand, AUTO == ``Mfᵀ``) routes in separate subprocesses; return ``(got, ref)``."""
+    import os
+    import subprocess
+    import sys
+    import tempfile
+
+    src = os.path.join(os.path.dirname(__file__), "_llam_vmap_two_route_helper.py")
+    out = {}
+    with tempfile.TemporaryDirectory() as d:
+        for route in ("std", "ref"):
+            p = os.path.join(d, f"{route}.npy")
+            env = dict(os.environ)
+            env["GRASSMANN_LLAM_INDEX"] = "vmap" if route == "std" else "eye"
+            subprocess.run(
+                [sys.executable, src, route, kind, p], check=True,
+                capture_output=True, text=True, env=env,
+            )
+            out[route] = np.load(p)
+    return out["std"], out["ref"]
+
+
+def test_llam_nondefault_body_vmap_two_route():
+    """LLam Path B: ``LLam([x]. eval_(f,(0,),x))`` (the matrix of ``f``) with ``f`` pinned to a
+    non-orthonormal ``BasisProd(dual(lb), lb)``, fed f's mb-coords, ``target=STD`` under
+    ``GRASSMANN_LLAM_INDEX=vmap`` MUST equal the default-operand ``target=AUTO`` reference (== Mfᵀ for
+    the std map).  This RAISES under the default eye lowering; under vmap it gives the right numbers."""
+    got, ref = _llam_vmap_two_route("matrix")
+    assert np.allclose(got, ref), f"LLam vmap two-route:\nGOT={got}\nREF={ref}"

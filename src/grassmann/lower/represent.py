@@ -29,6 +29,7 @@ a different basis (`41 §0` strategy).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -2375,6 +2376,35 @@ def _free_term_vars(node: object) -> list[T.Var]:
     return list(seen.values())
 
 
+def _basis_term_vars(basis: B.Basis) -> list[T.Var]:
+    """Term ``Var``s referenced anywhere inside ``basis`` (e.g. a ``ListBasis`` frame), in order.
+
+    A basis can embed Term vectors / maps (``ListBasis.vectors``, ``ProjectedBasis.f``, …); when
+    such a basis pins an LLam-vmap free var, those Terms' vars are genuine Program inputs that must
+    be realized in the parent.  Recurses dataclass fields generically, descending Terms via
+    :func:`_free_term_vars` and nested bases / tuples structurally.
+    """
+    import dataclasses
+
+    seen: dict[int, T.Var] = {}
+
+    def walk(n: object) -> None:
+        if T.is_term(n):
+            for v in _free_term_vars(n):
+                seen.setdefault(v.uid, v)
+            return
+        if isinstance(n, (tuple, list)):
+            for item in n:
+                walk(item)
+            return
+        if dataclasses.is_dataclass(n) and not isinstance(n, type):
+            for fld in dataclasses.fields(n):
+                walk(getattr(n, fld.name))
+
+    walk(basis)
+    return list(seen.values())
+
+
 # ---------------------------------------------------------------------------
 # Inverses & adjoint (`41 §3`). ⟨min-sym⟩ numeric Stmts — symbolics never enter them.
 # ---------------------------------------------------------------------------
@@ -3262,6 +3292,30 @@ def _rep_llam(
 ) -> Rep:
     """``LLam([xᵢ:sᵢ]. e)`` — the map's coordinate tensor (`41 §3`/`§7`).
 
+    Two lowering strategies, selected by ``GRASSMANN_LLAM_INDEX``:
+
+    * ``"eye"`` (default) — bind each linear var to a materialized ``eye`` on an untyped
+      FREE axis and lower the body ONCE (a single einsum).  For a non-default/non-orthonormal
+      body this entangles a Gram onto the free axis so the map tensor cannot be honestly
+      tagged; that case RAISES loudly.  Byte-identical to the historical lowering.
+    * ``"vmap"`` (Path B) — lower the body once as a sub-Program with each bound var a RANK-1
+      input (its basis-index a real input, NOT a free axis), then ``vmap`` the sub-Program over
+      the binding basis (feed ``eye``; each slice is the j-th basis vector ``eⱼ``).  Each slice
+      is an honest rank-1 ``eval`` (no free-axis, no entanglement), so a non-default body basis
+      is tagged honestly instead of raising (`41 §7`).
+    """
+    mode = os.environ.get("GRASSMANN_LLAM_INDEX", "eye")
+    if mode == "vmap":
+        return _rep_llam_vmap(e, vars_, body, ctx, target)
+    return _rep_llam_eye(e, vars_, body, ctx, target)
+
+
+def _rep_llam_eye(
+    e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``LLam`` via the materialized-``eye`` free-axis lowering (the default, see ``_rep_llam``).
+
     Each linear var is bound to the standard basis of its space as a Program input; the
     body (linear in the vars) is lowered once, yielding the full matrix/tensor of shape
     ``(|sᵢ|…, |space e|)``. (e linear ⇒ one pass gives the whole tensor.)
@@ -3328,6 +3382,211 @@ def _rep_llam(
             return rep
         case _:
             return _match_result(ctx, rep, target)
+
+
+def _nested_vmap(sub: pa.Program, n_vars: int, n_free: int, n_cod: int):
+    """A callable batching ``sub`` over ONE axis per bound var, APPENDED after the body cod axes.
+
+    Mirrors the historical ``eye`` einsum (`41 §7`, Path B): that lowering (``ab,ai->bi``) lands
+    the body's codomain axes FIRST and the var (basis-index) axes LAST, so the map tensor is laid
+    out ``(*cod, n_0, n_1, …)``.  ``pa.vmap`` stacks at ``out_axes``; for a single var we append
+    at ``n_cod``.  Since ``pa.vmap`` requires a *Program* body (it reads ``body.inputs``), it cannot
+    wrap another ``vmap`` *callable*; so for ``n_vars ≥ 2`` we hand-roll the nest: the OUTER loop
+    slices var 0's eye and recurses on the remaining vars, then ``moveaxis`` the new leading axis to
+    the end so each level appends one trailing axis (var 0 ends up just after the cod axes, var 1
+    after that, …).  The closure closes over ``sub`` so forward analysis (``_body_of``) descends in.
+    """
+    if n_vars == 1:
+        # in_axes: batch the one bound var (axis 0), share every free input as-is.
+        return pa.ir.vmap(sub, in_axes=(0,) + (None,) * n_free, out_axes=n_cod)
+
+    def fn(*args: np.ndarray):
+        # args = (eye_0, …, eye_{n_vars-1}, free_0, …): one identity per bound var, then the shared
+        # free inputs.  Loop the full cartesian product of basis indices, running the body per combo,
+        # and place each var's index as one axis AFTER the cod axes (order ``(*cod, var0, var1, …)``).
+        eyes = [np.asarray(a) for a in args[:n_vars]]
+        free = args[n_vars:]
+        sizes = [e.shape[0] for e in eyes]
+        out = np.empty(tuple(sizes), dtype=object)  # per-combo body result (filled below)
+        cod_shape = None
+        for combo in np.ndindex(*sizes):
+            slice_vals = {}
+            for spec, e, j in zip(sub.inputs[:n_vars], eyes, combo, strict=True):
+                slice_vals[spec.name] = e[j]
+            for spec, arr in zip(sub.inputs[n_vars:], free, strict=True):
+                slice_vals[spec.name] = np.asarray(arr)
+            res = np.asarray(sub.run(slice_vals)["result"])
+            cod_shape = res.shape
+            out[combo] = res
+        # Assemble: stack the object grid into one array of shape (*var_sizes, *cod), then move the
+        # var axes to AFTER the cod axes → (*cod, var0, var1, …).
+        full = np.empty(tuple(sizes) + (cod_shape or ()), dtype=float)
+        for combo in np.ndindex(*sizes):
+            full[combo] = out[combo]
+        return np.moveaxis(full, range(n_vars), range(-n_vars, 0))
+
+    fn.__qualname__ = fn.__name__ = f"vmap_nest({sub.name})"
+    return fn
+
+
+def _rep_llam_vmap(
+    e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
+    target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``LLam`` via the "compile-for-each-j" sub-Program + ``vmap`` lowering (`41 §7`, Path B).
+
+    The body is lowered ONCE as a sub-Program whose bound vars are RANK-1 inputs (the basis-index
+    is a genuine input, not a free axis).  ``vmap`` then feeds ``eye`` and slices the j-th basis
+    vector ``eⱼ`` per iteration: each slice is an honest rank-1 ``eval`` (no entanglement), and the
+    slices stack into the map tensor.  The result is tagged HONESTLY from the body's actual basis,
+    so a non-default/non-orthonormal body no longer raises.
+    """
+    space = _synth(e)
+    bound_uids = {v.uid for v in vars_}
+    free_vars = [v for v in _free_term_vars(body) if v.uid not in bound_uids]
+
+    # 1. Build the body sub-Program (mirror ``_build_lam_subprogram``'s structure).
+    sub = pa.Program("llam_body", budget=pa.SymbolicBudget.force_stmts())
+    sub_ctx = _Ctx(prog=sub, basis_env=ctx.basis_env, inputs={})
+    # 2. Inputs IN ORDER: the bound vars FIRST (each a rank-1 input in its binding basis), then the
+    #    body's free vars.  Lowering the body may ALSO pull in extra inputs (e.g. the abstract
+    #    vectors of a pinned ``ListBasis`` frame), which appear AFTER in ``sub.inputs`` order.
+    binding_bases: list[B.Basis] = [_rep_var(v, sub_ctx).basis for v in vars_]
+    for v in free_vars:
+        _rep_var(v, sub_ctx)
+    body_rep = _rep(body, sub_ctx)
+
+    # Guard the DOMAIN-ONLY hazard (`41 §7`).  The clean sound distinction:
+    #   * cod-non-default (e.g. ``f·x`` with ``f`` pinned): the pin surfaces in the COD, so
+    #     ``body_rep.basis != default_basis(body_rep.space)`` ⇒ vmap tags it honestly ⇒ CORRECT.
+    #   * domain-only (e.g. ``⟨a,x⟩`` with ``a`` pinned): the cod is unaffected (scalar/default)
+    #     but a pinned non-bound free var cob'd the DOMAIN basis-blind ⇒ the per-slice eval
+    #     contracts the pinned operand against the bound var in the WRONG basis ⇒ SILENT-WRONG.
+    # We must not silent-wrong (a regression from the eye path's loud raise): when the body cod
+    # is default AND a non-bound free var is pinned non-default, RAISE.  Mirror the eye path's
+    # SpaceError handling (an SVar/App body space has no static default to compare against).
+    try:
+        body_default = default_basis(body_rep.space)
+        cod_is_default = _basis_eq(body_rep.basis, body_default)
+    except S.SpaceError:
+        cod_is_default = True  # no static cod to verify a non-default cod ⇒ treat as default-cod
+    if cod_is_default and _llam_body_has_nondefault_pin(body, bound_uids, ctx):
+        raise RepresentError(
+            "represent: LLam body has a domain-only basis pin (a non-bound free var pinned to a "
+            "non-default basis) with a default codomain — e.g. ⟨a,x⟩ with ``a`` pinned.  Under "
+            "vmap the per-slice eval contracts the pinned operand against the bound var "
+            "basis-blind, so the result would be silently wrong.  This domain-only LLam basis "
+            "hazard is not yet handled in vmap mode (future work: body-level eval reconciliation "
+            "of a pinned operand against the bound var — `41 §7`).  Realize the body's pinned "
+            "operand(s) in their default basis first."
+        )
+
+    sub.add_output("result", body_rep.array)
+
+    # 3. Parent: realize the free vars (this materializes any frame/basis inputs in the parent under
+    #    the SAME input names), feed every NON-bound sub-input (free vars + frame vectors) from the
+    #    parent's matching input array (cob'd into the sub's declared basis, ``in_axes=None``), and
+    #    feed each bound var the identity ``eye`` batch.  ONE vmap statement runs the per-j body.
+    n_vars = len(vars_)
+    for v in free_vars:
+        _rep(v, ctx)
+    # Realize, in the PARENT, any frame/basis term-vars embedded in the pinned bases of the bound or
+    # free vars (e.g. a ``ListBasis`` frame).  These are genuine Program inputs that the body's
+    # internal cobs materialize inside the sub-Program; they must exist in the parent too so the
+    # vmap call can feed them (and so the parent's own output cob reuses them, no duplicate inputs).
+    for v in (*vars_, *free_vars):
+        pin = ctx.basis_env.get(v.uid)
+        if pin is not None:
+            for fv in _basis_term_vars(pin):
+                if fv.uid not in ctx.inputs:
+                    _rep(fv, ctx)
+    # uid -> the basis each input was declared in inside the sub-Program (from ``sub_ctx.inputs``).
+    sub_basis_by_uid = {uid: rep.basis for uid, rep in sub_ctx.inputs.items()}
+    bound_names = {_var_name(v) for v in vars_}
+    eyes: list[pa.SymArray] = []
+    for v in vars_:
+        n_i = _static_dim(_synth(v))
+        eyes.append(_const(ctx, np.eye(n_i), note=f"llam:vmap:eye({v.name})"))
+    # Non-bound sub-inputs, in sub-input declaration order (so operands line up positionally).
+    shared_arrays: list[pa.SymArray] = []
+    for spec in sub.inputs:
+        if spec.name in bound_names:
+            continue
+        uid = _uid_of_var_name(spec.name)
+        want_b = sub_basis_by_uid.get(uid)
+        cur = ctx.inputs.get(uid)
+        if cur is not None:
+            # A free var already realized in the parent — cob it into the sub's declared basis.
+            if want_b is not None and not _basis_eq(cur.basis, want_b):
+                shared_arrays.append(_coerce_basis(ctx, cur, want_b, note="llam:vmap:shared-cob"))
+            else:
+                shared_arrays.append(cur.array)
+            continue
+        # A sub-only input not realized in the parent above (a frame vector reached only through a
+        # body-internal basis realization) — fall back to the parent's matching input array by name.
+        parent_arr = ctx.prog.input_arrays.get(spec.name)
+        if parent_arr is None:
+            raise RepresentError(
+                f"represent: LLam vmap body needs sub-input {spec.name!r}, but the parent has no "
+                f"matching input — frame/free realization mismatch (`41 §7`)."
+            )
+        shared_arrays.append(parent_arr)
+    n_shared = len(shared_arrays)
+
+    # Physical layout mirrors the historical ``eye`` einsum (``ab,ai->bi``): body codomain axes
+    # FIRST, then one var (basis-index) axis per bound var.  This is the TRANSPOSE of the space's
+    # ``(dom…, cod…)`` factor order — but it is exactly what the eye path emits, so the value is
+    # byte-identical for a default body (and the honest tag below describes THIS physical order).
+    cod_shape = _shape_of_space(body_rep.space)
+    n_cod_axes = len(cod_shape)          # ARRAY axes of the body (0 for a scalar body)
+    n_cod = len(_factors(body_rep.space))  # codomain BASIS factors (1 for a scalar body)
+    fn = _nested_vmap(sub, n_vars, n_shared, n_cod_axes)
+    dom_shape = tuple(_static_dim(_synth(v)) for v in vars_)
+    out_shape = cod_shape + dom_shape
+    [out] = ctx.prog.emit_stmt(
+        pa.CallOp(fn), [*eyes, *shared_arrays],
+        [pa.OutSpec("llam:vmap", out_shape)],
+        note="llam:vmap:call",
+    )
+
+    # 4. Honest result basis, in the PHYSICAL axis order (cod axes first, then one domain axis per
+    #    var).  Codomain slots carry the body's ACTUAL basis; domain slots are ``dual(binding_i)``
+    #    (covariant).  A SCALAR body contributes no codomain axis (only the var/domain axes appear).
+    #    For a default body this collapses to ``default_basis``'s factors transposed — matching the
+    #    array — so AUTO is byte-identical to eye and STD/MATCH cob honestly.
+    body_cod_factors = _basis_factors(body_rep.basis, n_cod) if n_cod_axes else []
+    if body_cod_factors is None:
+        # Cod basis structure does not split into the expected arity — fall back to default tag.
+        out_basis: B.Basis = default_basis(space)
+    else:
+        dom_factors = [B.dual_basis(vb) for vb in binding_bases]
+        factors = body_cod_factors + dom_factors
+        out_basis = factors[0] if len(factors) == 1 else B.basis_prod(*factors)
+    rep = Rep(out, out_basis, space, free_labels="")
+    # target — the output basis.  The array/tag are in PHYSICAL order ``(cod…, dom…)`` — the
+    # TRANSPOSE of the space's ``(dom…, cod…)`` factor order (the historical eye convention).  The
+    # standard per-space epilogue cobs each array axis against ``default_basis(space).bases[axis]``
+    # positionally, which would mis-pair the transposed axes; so we cob against a PHYSICAL-order
+    # target (cod factors first) and hand the result back tagged ``default_basis(space)`` — i.e. the
+    # exact eye convention (transposed array, default tag), so AUTO is byte-identical to eye and an
+    # outer consumer sees the same thing it would from the eye path.
+    if target is B.TargetBasis.AUTO:
+        return rep
+    # STD (the supported targeted case): build the PHYSICAL-order standard basis (cod axes first,
+    # then one ``dual`` domain axis per var) so the per-axis cob lines up with the transposed array.
+    # A concrete MATCH target on a transposed map tensor is rare; fall back to the standard epilogue
+    # (it may then mis-pair axes for a non-default body — but that path is not exercised by callers).
+    if target is not B.TargetBasis.STD:
+        return _match_result(ctx, rep, target)
+    cod_factors = _basis_factors(default_basis(body_rep.space), n_cod) if n_cod_axes else []
+    dom_factors = [B.dual_basis(default_basis(_synth(v))) for v in vars_]
+    phys = (cod_factors or []) + dom_factors
+    want = phys[0] if len(phys) == 1 else B.basis_prod(*phys)
+    cob_rep = rep if _basis_eq(out_basis, want) else _coerce_rep_to_target(
+        ctx, rep, want, note="llam:vmap:target-std"
+    )
+    # Hand back in the eye convention: transposed array, ``default_basis(space)`` tag.
+    return Rep(cob_rep.array, default_basis(space), space, free_labels="")
 
 
 # Free (basis-index) einsum labels live in a pool disjoint from the lowercase space labels
@@ -4948,6 +5207,14 @@ def _is_static(shape: tuple[object, ...]) -> bool:
 
 def _var_name(v: T.Var) -> str:
     return f"{v.name}_{v.uid}"
+
+
+def _uid_of_var_name(name: str) -> int | None:
+    """Recover a ``Var.uid`` from a ``_var_name`` string (``"{name}_{uid}"``); ``None`` if not one."""
+    head, _sep, tail = name.rpartition("_")
+    if head and tail.isdigit():
+        return int(tail)
+    return None
 
 
 def _make_input(
