@@ -721,3 +721,26 @@ def test_llam_nondefault_body_vmap_two_route():
     the std map).  This RAISES under the default eye lowering; under vmap it gives the right numbers."""
     got, ref = _llam_vmap_two_route("matrix")
     assert np.allclose(got, ref), f"LLam vmap two-route:\nGOT={got}\nREF={ref}"
+
+
+def test_embed_subspace_list_basis_no_crash():
+    """_rep_embed: an FFS-subspace operand pinned to a non-orthonormal list basis must route through
+    the sub↪ambient `_subspace_cols` path (NOT the ImageBasis literal-column branch, whose
+    `_ffs_immersion` would give sub-INTERNAL columns ⇒ a run-time reshape crash).  Two-route: the
+    embedded ambient value is basis-independent of how the subspace operand is pinned."""
+    R2, R3 = C.base("Rt", 2), C.base("Re", 3)
+    Jm = C.var("J", C.linear_map_space(R2, R3), C.props.inj)
+    imgJ = C.img(Jm)
+    a = C.var("a", imgJ)
+    emb = C.embed(a, R3)
+    Jfeed = np.array([[2.0, 0], [1, 3], [1, 1]]).T  # J stored (dom,cod)=(2,3), injective
+    q = [C.var(f"q{i}", imgJ) for i in range(2)]
+    lb = B.list_basis(*q)
+    Lq = np.array([[1.0, 1], [0, 1.0]])  # non-orthonormal list frame in img(J) coords
+    qfeed = {f"q{i}_{q[i].uid}": Lq[:, i] for i in range(2)}
+    ad = np.array([1.0, 2])  # a in default(img(J)) coords
+    ref = _run(represent(emb, basis_env={a.uid: default_basis(imgJ)}), {_vk(a): ad, _vk(Jm): Jfeed})
+    alb = _run(represent(a, basis_env={a.uid: default_basis(imgJ)}, target=lb),
+               {_vk(a): ad, _vk(Jm): Jfeed, **qfeed})
+    got = _run(represent(emb, basis_env={a.uid: lb}), {_vk(a): alb, _vk(Jm): Jfeed, **qfeed})
+    assert ref.shape == (3,) and np.allclose(got, ref)  # was a ValueError reshape crash

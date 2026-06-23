@@ -2957,16 +2957,21 @@ def _rep_embed(
     expected multi-axis tensor.
     """
     v_rep = _rep(vector, ctx)
-    # The embedding columns must be the operand's *active* basis vectors in ambient coords —
-    # ``P · ⟦v⟧`` reconstructs the ambient value.  A non-default (``ImageBasis``) pin realizes
-    # its literal columns (`43 §2c`); the default path is byte-identical via ``_subspace_cols``.
-    if _is_immersed_metric_basis(v_rep.basis):
-        P = _ffs_immersion(ctx, v_rep.basis)  # P = the operand's OWN basis cols in ambient …
-        v_arr = v_rep.array                    # … so v's coords are already consistent (no cob)
+    # The embedding columns must be the operand's *active* basis vectors in AMBIENT coords —
+    # ``P · ⟦v⟧`` reconstructs the ambient value.  Only an ``ImageBasis`` realizes its literal
+    # columns directly in the ambient (the f-application cols in cod, `43 §2c`); a plain
+    # ``ListBasis`` realizes columns in its OWN space's coords, which are the ambient ONLY when that
+    # space IS the ambient — over a strict subspace they're sub-internal (wrong shape → a run-time
+    # reshape crash).  So gate the literal-column branch on ``ImageBasis`` and route every other
+    # basis (List/Complete/Projected/default) through ``_subspace_cols`` (the sub↪ambient immersion)
+    # + a cob of the operand to its default basis — correct for sub==ambient and sub⊊ambient alike.
+    if isinstance(_peel_to_core(v_rep.basis), B.ImageBasis):
+        P = _ffs_immersion(ctx, v_rep.basis)  # P = the ImageBasis f-cols in ambient …
+        v_arr = v_rep.array                    # … so v's in-space coords are already consistent
     else:
         _sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
-        # P = the sub's DEFAULT cols in ambient ⇒ realize v in that default basis so ``P·⟦v⟧`` is
-        # consistent (no-op for a default operand; cob's a non-default ORTHONORMALIZE/metric pin).
+        # P = the sub↪ambient default cols ⇒ realize v in that default basis so ``P·⟦v⟧`` is
+        # consistent (no-op for a default operand; cob's a non-default ORTHONORMALIZE/metric/list pin).
         v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space), note="embed:operand-to-default")
     big_shape = _shape_of_space(big)  # ambient layout (static); P has rows = Σ|axes|.
     [out] = ctx.prog.emit_stmt(
