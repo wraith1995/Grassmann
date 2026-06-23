@@ -31,6 +31,8 @@ matrix and the pullback result is ``Tm @ Bm @ Tm.T`` in these coords.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import polyarray as pa
 
@@ -178,9 +180,12 @@ def test_pullback_is_tt_b_t() -> None:
     pullback = C.llam(xv, yv, body=body)              # the n×n form matrix on V
 
     prog = represent(pullback)
-    # the body is the single deferred TᵀBT contraction (`41 §7`).
-    specs = [s.fn.spec for s in prog.statements if isinstance(s.fn, pa.EinsumStmtOp)]
-    assert "ab,ai,bj->ij" in specs
+    # the body is the single deferred TᵀBT contraction (`41 §7`) — an EYE-mode IR shape only.
+    # Under ``GRASSMANN_LLAM_INDEX=vmap`` the body is a sub-Program + vmap call (no fused einsum);
+    # the NUMERIC result below is unchanged, so guard this structural check on the eye mode.
+    if os.environ.get("GRASSMANN_LLAM_INDEX", "eye") != "vmap":
+        specs = [s.fn.spec for s in prog.statements if isinstance(s.fn, pa.EinsumStmtOp)]
+        assert "ab,ai,bj->ij" in specs
 
     rng = np.random.default_rng(0)
     tm = rng.standard_normal((2, 2))  # T stored (|V|, |W|)
