@@ -592,30 +592,68 @@ def test_llam_nondefault_body_basis_fails_loudly():
         assert "non-default basis" in str(ex)
 
 
-def test_pinv_gsvd_nondefault_operand_fails_loudly():
-    """_rep_pinv / _rep_pinv_apply GSVD (metric) branch: the metric is built in the default basis, so
-    a non-default operand pin was silent-wrong (coords inconsistent with the metric + mislabelled).
-    Now it RAISES; default operands are correct (== inv(Mf) for a square invertible f)."""
-    from grassmann.lower.represent import RepresentError
-
+def test_pinv_gsvd_default_operand_correct():
+    """_rep_pinv / _rep_pinv_apply GSVD (metric) branch, DEFAULT operand: square invertible ``f`` ⇒
+    the metric-pinv collapses to the inverse, so the result == ``inv(Mf)`` — an independent ground
+    truth.  Also guards byte-identity (STD == AUTO stmt count: a default-operand result is already in
+    default, so the STD epilogue cob is a no-op)."""
     V0 = C.base("V", 3)
     g = C.var("gm", C.linear_map_space(V0, V0))
     Vg = C.with_inner(V0, g)
     MS = C.linear_map_space(Vg, Vg)
     f = C.var("f", MS)
     Gm = np.diag([2.0, 3.0, 1.0])
-    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])
-    # default operand ⇒ correct (square invertible ⇒ metric-pinv == inverse)
+    Mf = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])  # square invertible
     out = _run(represent(C.pinv(f), basis_env={f.uid: default_basis(MS)}, target=B.STD),
                {_vk(f): Mf, _vk(g): Gm})
     assert np.allclose(out, np.linalg.inv(Mf))
-    # non-default operand ⇒ raises (was silent-wrong)
-    av = [C.var(f"e{i}", Vg) for i in range(3)]
-    lb = B.list_basis(*av)
-    mb = B.basis_prod(B.dual_basis(lb), lb)
-    for term in (C.pinv(f), C.pinv_apply(f, C.var("v", Vg))):
-        try:
-            represent(term, basis_env={f.uid: mb}, target=B.STD)
-            raise AssertionError("expected RepresentError for a non-default GSVD operand")
-        except RepresentError as ex:
-            assert "does not yet support" in str(ex)
+    # default operand: STD epilogue is a no-op ⇒ byte-identical stmt count to AUTO.
+    p_std = represent(C.pinv(f), basis_env={f.uid: default_basis(MS)}, target=B.STD)
+    p_auto = represent(C.pinv(f), basis_env={f.uid: default_basis(MS)}, target=B.AUTO)
+    assert _nstmts(p_std) == _nstmts(p_auto)
+
+
+# The GSVD metric-pinv TWO-ROUTE correctness check (non-default operand): the metric is now built in
+# the OPERAND's per-slot bases, so a non-default pin is correct.  An in-process two-route check
+# accumulates free einsum labels across the many ``represent()`` calls and trips a SPURIOUS numpy
+# "does not contain the correct number of indices" ValueError (a probe artifact, NOT a real bug), so
+# each route is built+run in a fresh subprocess sharing data via a temp ``.npy`` (`see _gsvd_two_route`).
+
+
+def _gsvd_two_route(kind):
+    """Run the two GSVD-pinv routes (``std`` vs ``ref``) for ``kind`` in SEPARATE subprocesses and
+    return ``(got, ref)``.  Each subprocess builds exactly ONE ``represent()`` so the in-process
+    einsum-symbol accumulation artifact never bites.  Operand ``f`` (square invertible) is pinned to a
+    non-default ``BasisProd(dual(lb), lb)`` over a ``WithInner`` space (and ``v`` to ``lb`` for apply);
+    ``target=STD`` (operand pinned) must equal ``target=AUTO`` (default operand) — same value, two
+    expressions."""
+    import os
+    import subprocess
+    import sys
+    import tempfile
+
+    src = os.path.join(os.path.dirname(__file__), "_gsvd_two_route_helper.py")
+    out = {}
+    with tempfile.TemporaryDirectory() as d:
+        for route in ("std", "ref"):
+            p = os.path.join(d, f"{route}.npy")
+            subprocess.run(
+                [sys.executable, src, route, kind, p], check=True,
+                capture_output=True, text=True,
+            )
+            out[route] = np.load(p)
+    return out["std"], out["ref"]
+
+
+def test_pinv_gsvd_nondefault_operand_two_route():
+    """_rep_pinv GSVD branch, NON-DEFAULT operand: the metric built in the operand basis makes the pin
+    correct — ``target=STD`` (operand pinned to ``lb``) == ``target=AUTO`` (default operand)."""
+    got, ref = _gsvd_two_route("pinv")
+    assert np.allclose(got, ref), f"pinv GSVD two-route:\nGOT={got}\nREF={ref}"
+
+
+def test_pinv_apply_gsvd_nondefault_operand_two_route():
+    """_rep_pinv_apply GSVD branch, NON-DEFAULT operand: the metric built in f's per-slot bases plus a
+    cob of ``v`` into f's cod slot makes the pin correct — STD (pinned) == AUTO (default)."""
+    got, ref = _gsvd_two_route("pinvapply")
+    assert np.allclose(got, ref), f"pinv_apply GSVD two-route:\nGOT={got}\nREF={ref}"
