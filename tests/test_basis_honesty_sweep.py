@@ -254,16 +254,57 @@ def _c_llam_covector():
     return C.llam(x, body=C.eval_(a, (0,), x)), {a: (DV, np.array([1.0, 2, 3]))}
 
 
+def _c_dot():  # metric full contraction — exercises _reconcile_metric_operands (UNSTEERED, scalar)
+    a, b = _vec("a"), _vec("b")
+    return C.eval_(C.inner(V), (0, 1), a, b), {a: (V, np.array([1.0, 2, 3])), b: (V, np.array([2.0, 0, 1]))}
+
+
+def _c_flat_apply():
+    v = _vec("v")
+    return C.eval_(C.flat(V), (0,), v), {v: (V, np.array([1.0, 2, 3]))}
+
+
+def _c_sharp_apply():
+    co = C.var("co", DV)
+    return C.eval_(C.sharp(V), (0,), co), {co: (DV, np.array([1.0, 2, 3]))}
+
+
+def _c_project():
+    v = _vec("v")
+    return C.project(v, V), {v: (V, np.array([1.0, 2, 3]))}
+
+
+def _c_embed():
+    v = _vec("v")
+    return C.embed(v, V), {v: (V, np.array([1.0, 2, 3]))}
+
+
+_METRIC_EVAL_TAG_GAP = (
+    "KNOWN GAP: the metric-`Eval` path (`_rep_eval`) builds the Gram in the operand basis but tags the "
+    "surviving slot `default_basis` — silent-wrong for an orthonormal-NON-STANDARD operand (it's honest "
+    "only for a non-metric f).  Caught by this sweep; fix = tag the operand-derived result basis "
+    "(`43 §2c`/`41 §7`).  strict xfail: when fixed this XPASSes and flags removal."
+)
+
+
+def _case(name, builder, xfail=None):
+    marks = [pytest.mark.xfail(reason=xfail, strict=True)] if xfail else []
+    return pytest.param(name, builder, marks=marks, id=name)
+
+
 CASES = [
-    ("scale", _c_scale), ("sum", _c_sum), ("oplus", _c_oplus), ("oprod", _c_oprod),
-    ("eval_covector", _c_eval_covector), ("eval_map", _c_eval_map), ("compose", _c_compose),
-    ("trace", _c_trace), ("dagger", _c_dagger), ("solve", _c_solve), ("pinv", _c_pinv),
-    ("pinv_apply", _c_pinv_apply), ("permute", _c_permute), ("kron", _c_kron), ("lift", _c_lift),
-    ("llam_map", _c_llam_map), ("llam_covector", _c_llam_covector),
+    _case("scale", _c_scale), _case("sum", _c_sum), _case("oplus", _c_oplus), _case("oprod", _c_oprod),
+    _case("eval_covector", _c_eval_covector), _case("eval_map", _c_eval_map), _case("compose", _c_compose),
+    _case("trace", _c_trace), _case("dagger", _c_dagger), _case("solve", _c_solve), _case("pinv", _c_pinv),
+    _case("pinv_apply", _c_pinv_apply), _case("permute", _c_permute), _case("kron", _c_kron),
+    _case("lift", _c_lift), _case("llam_map", _c_llam_map), _case("llam_covector", _c_llam_covector),
+    _case("dot", _c_dot), _case("project", _c_project), _case("embed", _c_embed),
+    _case("flat_apply", _c_flat_apply, xfail=_METRIC_EVAL_TAG_GAP),
+    _case("sharp_apply", _c_sharp_apply, xfail=_METRIC_EVAL_TAG_GAP),
 ]
 
 
-@pytest.mark.parametrize("name,builder", CASES, ids=[c[0] for c in CASES])
+@pytest.mark.parametrize("name,builder", CASES)
 def test_basis_honesty_sweep(name, builder):
     """No arm is silent-wrong: a non-default operand basis either matches the std reference or raises."""
     term, var_specs = builder()
