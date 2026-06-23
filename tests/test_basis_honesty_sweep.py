@@ -279,11 +279,12 @@ def _c_embed():
     return C.embed(v, V), {v: (V, np.array([1.0, 2, 3]))}
 
 
-_METRIC_EVAL_TAG_GAP = (
-    "KNOWN GAP: the metric-`Eval` path (`_rep_eval`) builds the Gram in the operand basis but tags the "
-    "surviving slot `default_basis` — silent-wrong for an orthonormal-NON-STANDARD operand (it's honest "
-    "only for a non-metric f).  Caught by this sweep; fix = tag the operand-derived result basis "
-    "(`43 §2c`/`41 §7`).  strict xfail: when fixed this XPASSes and flags removal."
+_SHARP_VARIANCE_GAP = (
+    "KNOWN GAP (sharp only): `Sharp` is the (2,0) inverse metric taking a COVECTOR operand; building it "
+    "in a non-DualBasis covector basis hits a result-slot variance gap (`_rep_sharp` peels a dual that "
+    "isn't there), so it's kept on the build-in-default path ⇒ silent-wrong for an orthonormal-NON-"
+    "STANDARD covector.  inner/flat/dot are FIXED (built + tagged in the operand basis).  Fix sharp's "
+    "covector-operand variance (`41 §7`); strict xfail XPASSes + flags removal when done."
 )
 
 
@@ -299,8 +300,8 @@ CASES = [
     _case("pinv_apply", _c_pinv_apply), _case("permute", _c_permute), _case("kron", _c_kron),
     _case("lift", _c_lift), _case("llam_map", _c_llam_map), _case("llam_covector", _c_llam_covector),
     _case("dot", _c_dot), _case("project", _c_project), _case("embed", _c_embed),
-    _case("flat_apply", _c_flat_apply, xfail=_METRIC_EVAL_TAG_GAP),
-    _case("sharp_apply", _c_sharp_apply, xfail=_METRIC_EVAL_TAG_GAP),
+    _case("flat_apply", _c_flat_apply),  # FIXED: metric Eval now builds + tags in the operand basis
+    _case("sharp_apply", _c_sharp_apply, xfail=_SHARP_VARIANCE_GAP),
 ]
 
 
