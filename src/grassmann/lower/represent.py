@@ -977,10 +977,15 @@ def _rep_eval_operands(
         # so the metric is built once in a genuinely shared basis.
         arg_reps = _reconcile_metric_operands(ctx, arg_reps)
         op_basis = _operand_metric_basis(arg_reps)
+        # Sharp is the (2,0) inverse metric taking a COVECTOR operand; building it in a non-DualBasis
+        # covector basis hits a result-slot variance gap (``_rep_sharp`` peels a dual that isn't
+        # there) — keep sharp on the immersed-only path until that variance is handled (`41 §7`).
+        if metric_kind == "sharp" and op_basis is not None and not _is_immersed_metric_basis(op_basis):
+            op_basis = None
         if op_basis is not None:
             f_rep = _rep_metric(f, metric_kind, ctx, basis=op_basis)
             return f_rep, arg_reps
-        # orthonormal operands ⇒ identity-metric default: lower f exactly as before.
+        # default (or scoped-out sharp) operand ⇒ identity-metric default: lower f exactly as before.
         return _rep(f, ctx), arg_reps
     f_rep = _rep(f, ctx)
     arg_reps = [_rep(a, ctx) for a in args]
@@ -1010,18 +1015,25 @@ def _rep_metric(f: T.Term, kind: str, ctx: _Ctx, *, basis: B.Basis) -> Rep:
 
 
 def _operand_metric_basis(arg_reps: list[Rep]) -> B.Basis | None:
-    """The non-orthonormal operand basis to build a metric in, or ``None`` (orthonormal).
+    """The non-default operand basis to build a metric in, or ``None`` (the operand IS default).
 
-    Returns a non-orthonormal ``ImageBasis`` (the only basis whose metric is not identity)
-    when ALL operands agree on it; ``None`` when the operands are orthonormal (the
-    identity-metric default), so the existing fast path is taken and byte-identical.
+    Returns the shared operand basis whenever ALL operands agree on it and it is NOT the default
+    basis — so the metric is built (and the result honestly TAGGED) in that basis.  This covers a
+    non-orthonormal ``ImageBasis`` (immersed Gram ≠ I) AND an orthonormal-but-NON-STANDARD basis
+    (Gram = I, yet ≠ ``default`` — building in default while the operand stays in that basis tagged
+    the result ``default`` while its coords lived in the operand basis: silent-wrong).  Returns
+    ``None`` only when the operand is genuinely the default basis (build in default, byte-identical).
     """
     # Compare bases STRUCTURALLY (``_basis_eq``), not via a hash-set: a basis is never required
     # to be hashable anywhere else in the seam, and an embedded-array term metric would not be.
     b0 = arg_reps[0].basis
-    if all(_basis_eq(b0, r.basis) for r in arg_reps[1:]):
-        return b0 if _is_immersed_metric_basis(b0) else None
-    return None
+    if not all(_basis_eq(b0, r.basis) for r in arg_reps[1:]):
+        return None
+    try:
+        is_default = _basis_eq(b0, default_basis(arg_reps[0].space))
+    except S.SpaceError:
+        is_default = not _is_immersed_metric_basis(b0)  # no static default ⇒ old immersed test
+    return None if is_default else b0
 
 
 def _reconcile_metric_operands(ctx: _Ctx, arg_reps: list[Rep]) -> list[Rep]:
