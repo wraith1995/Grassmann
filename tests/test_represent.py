@@ -32,7 +32,7 @@ from grassmann.lower.provenance import PROV_KINDS
 
 def _llam_eye_mode() -> bool:
     """True when the LLam lowering is the default fused-``eye`` einsum (not ``vmap``, `41 §7`)."""
-    return os.environ.get("GRASSMANN_LLAM_INDEX", "eye") != "vmap"
+    return os.environ.get("GRASSMANN_LLAM_INDEX", "vmap") != "vmap"
 
 
 def _var_key(v: C.Var) -> str:

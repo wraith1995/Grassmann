@@ -562,7 +562,7 @@ def test_llam_nondefault_body_basis_fails_loudly():
 
     from grassmann.lower.represent import RepresentError
 
-    eye_mode = os.environ.get("GRASSMANN_LLAM_INDEX", "eye") != "vmap"
+    eye_mode = os.environ.get("GRASSMANN_LLAM_INDEX", "vmap") != "vmap"
 
     V = C.base("V", 3)
     MS = C.linear_map_space(V, V)

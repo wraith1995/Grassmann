@@ -183,7 +183,7 @@ def test_pullback_is_tt_b_t() -> None:
     # the body is the single deferred TᵀBT contraction (`41 §7`) — an EYE-mode IR shape only.
     # Under ``GRASSMANN_LLAM_INDEX=vmap`` the body is a sub-Program + vmap call (no fused einsum);
     # the NUMERIC result below is unchanged, so guard this structural check on the eye mode.
-    if os.environ.get("GRASSMANN_LLAM_INDEX", "eye") != "vmap":
+    if os.environ.get("GRASSMANN_LLAM_INDEX", "vmap") != "vmap":
         specs = [s.fn.spec for s in prog.statements if isinstance(s.fn, pa.EinsumStmtOp)]
         assert "ab,ai,bj->ij" in specs
 

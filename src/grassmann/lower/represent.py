@@ -3294,17 +3294,20 @@ def _rep_llam(
 
     Two lowering strategies, selected by ``GRASSMANN_LLAM_INDEX``:
 
-    * ``"eye"`` (default) — bind each linear var to a materialized ``eye`` on an untyped
-      FREE axis and lower the body ONCE (a single einsum).  For a non-default/non-orthonormal
-      body this entangles a Gram onto the free axis so the map tensor cannot be honestly
-      tagged; that case RAISES loudly.  Byte-identical to the historical lowering.
-    * ``"vmap"`` (Path B) — lower the body once as a sub-Program with each bound var a RANK-1
-      input (its basis-index a real input, NOT a free axis), then ``vmap`` the sub-Program over
-      the binding basis (feed ``eye``; each slice is the j-th basis vector ``eⱼ``).  Each slice
-      is an honest rank-1 ``eval`` (no free-axis, no entanglement), so a non-default body basis
-      is tagged honestly instead of raising (`41 §7`).
+    * ``"vmap"`` (Path B, DEFAULT) — lower the body once as a sub-Program with each bound var a
+      RANK-1 input (its basis-index a real input, NOT a free axis), then ``vmap`` the sub-Program
+      over the binding basis (feed ``eye``; each slice is the j-th basis vector ``eⱼ``).  Each
+      slice is an honest rank-1 ``eval`` (no free-axis, no entanglement), so a non-default body
+      basis is tagged honestly instead of raising (`41 §7`).  The correct path — default for now.
+    * ``"eye"`` — bind each linear var to a materialized ``eye`` on an untyped FREE axis and lower
+      the body ONCE (a single einsum); faster, and byte-identical to the historical lowering, but a
+      non-default/non-orthonormal body entangles a Gram onto the free axis so it RAISES loudly.
+
+    TODO(`41 §7`): Path A — a typed/one-pass index that flows its basis through ``eval``'s
+    reconciliation — would be both fast (one einsum) AND correct, superseding both modes as the
+    default.  Until then ``vmap`` is the correct default (a runtime vmap loop, slower than ``eye``).
     """
-    mode = os.environ.get("GRASSMANN_LLAM_INDEX", "eye")
+    mode = os.environ.get("GRASSMANN_LLAM_INDEX", "vmap")
     if mode == "vmap":
         return _rep_llam_vmap(e, vars_, body, ctx, target)
     return _rep_llam_eye(e, vars_, body, ctx, target)
