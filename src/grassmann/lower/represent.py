@@ -1929,10 +1929,16 @@ def _apply_cob_on_axis(
 
 
 def _slot_basis_at(basis: B.Basis, pos: int) -> B.Basis | None:
-    """The basis of factor ``pos`` of a map/tensor ``BasisProd`` (else ``None``)."""
-    if isinstance(basis, B.BasisProd) and 0 <= pos < len(basis.bases):
-        return basis.bases[pos]
-    return None
+    """The basis of factor ``pos`` of a map/tensor operand.
+
+    A ``BasisProd`` returns its ``pos``-th factor.  A RANK-1 (non-product) operand — e.g. a
+    covector being ``Eval``'d, ``⟨a,x⟩`` — is its OWN single slot, so ``pos==0`` returns the whole
+    basis (without this, its contracted slot never reached ``_reconcile_pairing``, so a pinned
+    covector contracted a default vector basis-blind — a silent-wrong pairing).
+    """
+    if isinstance(basis, B.BasisProd):
+        return basis.bases[pos] if 0 <= pos < len(basis.bases) else None
+    return basis if pos == 0 else None
 
 
 def _rep_eval(
@@ -3276,21 +3282,6 @@ def _rep_kron(
 # ---------------------------------------------------------------------------
 
 
-def _llam_body_has_nondefault_pin(body: T.Term, bound_uids: set[int], ctx: _Ctx) -> bool:
-    """True if a non-bound free var of an LLam ``body`` is pinned to a NON-default basis — the
-    domain-only tag-honesty hazard (an eval can cob that var's free-label axis to the pin's basis
-    while the body codomain stays default, so the cod check alone would miss it)."""
-    for v in _free_term_vars(body):
-        if v.uid in bound_uids or v.uid not in ctx.basis_env:
-            continue
-        try:
-            if not _basis_eq(ctx.basis_env[v.uid], default_basis(_synth(v))):
-                return True
-        except S.SpaceError:
-            return True  # can't verify it's the default ⇒ treat as risky
-    return False
-
-
 def _rep_llam(
     e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
@@ -3370,15 +3361,16 @@ def _rep_llam_eye(
     except S.SpaceError:
         body_default = None  # SVar/App body space — no static default to compare against
     cod_nondefault = body_default is not None and not _basis_eq(body_rep.basis, body_default)
-    # Also catch the domain-only case (cod stays default but a body eval cob'd a var axis to a
-    # pinned operand's basis): ANY non-bound free var of the body pinned to a non-default basis.
-    bound_uids = {v.uid for v in vars_}
-    pinned_nondefault = _llam_body_has_nondefault_pin(body, bound_uids, ctx)
-    if cod_nondefault or pinned_nondefault:
+    # The DOMAIN-only case (cod default, a pinned covector contracting the bound var, e.g. ⟨a,x⟩) is
+    # now honest even in eye mode — ``eval``'s ``_reconcile_pairing`` reconciles the pinned rank-1
+    # operand against the bound var's eye (the free axis rides, so the domain stays the binding
+    # basis).  Only the COD-non-default entanglement (e.g. ``f·x`` with ``f`` pinned — the free-axis
+    # Gram the one-einsum eye path can't track) remains unrepresentable here, so raise just for that.
+    if cod_nondefault:
         raise RepresentError(
-            f"represent: LLam body uses a non-default basis (cod={body_rep.basis!r}); honest tagging "
-            f"of the map tensor's domain (free-label) axes is not yet supported, so the result would "
-            f"be silently mislabelled. Realize the body's operand(s) in their default basis first "
+            f"represent: LLam body lands in a non-default codomain basis (cod={body_rep.basis!r}); "
+            f"the one-einsum eye lowering cannot honestly tag the free-axis Gram. Use the default "
+            f"vmap mode (unset GRASSMANN_LLAM_INDEX) or realize the body's operand(s) in default "
             f"(LLam free-label-basis tracking is future work — `41 §7`)."
         )
     rep = Rep(body_rep.array, default_basis(space), space, free_labels="")
@@ -3463,32 +3455,10 @@ def _rep_llam_vmap(
     for v in free_vars:
         _rep_var(v, sub_ctx)
     body_rep = _rep(body, sub_ctx)
-
-    # Guard the DOMAIN-ONLY hazard (`41 §7`).  The clean sound distinction:
-    #   * cod-non-default (e.g. ``f·x`` with ``f`` pinned): the pin surfaces in the COD, so
-    #     ``body_rep.basis != default_basis(body_rep.space)`` ⇒ vmap tags it honestly ⇒ CORRECT.
-    #   * domain-only (e.g. ``⟨a,x⟩`` with ``a`` pinned): the cod is unaffected (scalar/default)
-    #     but a pinned non-bound free var cob'd the DOMAIN basis-blind ⇒ the per-slice eval
-    #     contracts the pinned operand against the bound var in the WRONG basis ⇒ SILENT-WRONG.
-    # We must not silent-wrong (a regression from the eye path's loud raise): when the body cod
-    # is default AND a non-bound free var is pinned non-default, RAISE.  Mirror the eye path's
-    # SpaceError handling (an SVar/App body space has no static default to compare against).
-    try:
-        body_default = default_basis(body_rep.space)
-        cod_is_default = _basis_eq(body_rep.basis, body_default)
-    except S.SpaceError:
-        cod_is_default = True  # no static cod to verify a non-default cod ⇒ treat as default-cod
-    if cod_is_default and _llam_body_has_nondefault_pin(body, bound_uids, ctx):
-        raise RepresentError(
-            "represent: LLam body has a domain-only basis pin (a non-bound free var pinned to a "
-            "non-default basis) with a default codomain — e.g. ⟨a,x⟩ with ``a`` pinned.  Under "
-            "vmap the per-slice eval contracts the pinned operand against the bound var "
-            "basis-blind, so the result would be silently wrong.  This domain-only LLam basis "
-            "hazard is not yet handled in vmap mode (future work: body-level eval reconciliation "
-            "of a pinned operand against the bound var — `41 §7`).  Realize the body's pinned "
-            "operand(s) in their default basis first."
-        )
-
+    # (The former domain-only guard — ``⟨a,x⟩`` with a pinned covector — is no longer needed: each
+    # per-slice body lowers with the bound var bound to a concrete rank-1 ``eⱼ``, and ``eval``'s
+    # ``_reconcile_pairing`` now reconciles a pinned rank-1 operand against it (``_slot_basis_at``
+    # treats a rank-1 operand as its own slot), so the body is honest even with a domain-only pin.)
     sub.add_output("result", body_rep.array)
 
     # 3. Parent: realize the free vars (this materializes any frame/basis inputs in the parent under

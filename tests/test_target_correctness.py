@@ -552,12 +552,12 @@ def test_dagger_orthonormal_nonstandard_operand_std():
 
 
 def test_llam_nondefault_body_basis_fails_loudly():
-    """_rep_llam tag honesty under the DEFAULT (``eye``) lowering: a body landing in a non-default
-    basis (e.g. a pinned operand) can't be honestly tagged (the map tensor's domain free-label axes
-    aren't basis-tracked), so eye RAISES rather than silently mislabel.  A default-operand body is
-    correct (AUTO == STD == Mfᵀ).  Under ``GRASSMANN_LLAM_INDEX=vmap`` (Path B, `41 §7`) the body is
-    lowered per-basis-vector with honest tags, so the same non-default pins must NOT raise — they
-    must give the STD std-map value instead (the bug this fix addresses)."""
+    """_rep_llam basis honesty across both modes.  A default-operand body is correct (AUTO==STD==Mfᵀ).
+    A COD-non-default body (``f·x`` with ``f`` pinned) RAISES under ``eye`` (the one-einsum lowering
+    can't tag the free-axis Gram) but is CORRECT under the ``vmap`` default (per-basis-vector, honest).
+    A DOMAIN-only body (``⟨a,x⟩`` with a pinned covector) is now CORRECT in BOTH modes — eval's
+    ``_reconcile_pairing`` reconciles the pinned rank-1 operand against the bound var (the
+    ``_slot_basis_at`` rank-1 fix); it was formerly silent-wrong, then guarded by a raise."""
     import os
 
     from grassmann.lower.represent import RepresentError
@@ -583,9 +583,9 @@ def test_llam_nondefault_body_basis_fails_loudly():
     if eye_mode:
         try:
             _run(represent(llam, basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_lb})
-            raise AssertionError("expected RepresentError for a non-default llam body basis")
+            raise AssertionError("expected RepresentError for a non-default llam cod body basis")
         except RepresentError as ex:
-            assert "non-default basis" in str(ex)
+            assert "non-default" in str(ex)
     else:
         got = _run(represent(llam, basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_lb})
         assert np.allclose(got, Mf.T)
@@ -595,18 +595,17 @@ def test_llam_nondefault_body_basis_fails_loudly():
     d = [C.var(f"d{i}", C.dual(V)) for i in range(3)]
     lbd = B.list_basis(*d)
     dfr = {f"d{i}_{d[i].uid}": Am[:, i] for i in range(3)}
-    lin = C.llam(x, body=C.eval_(a, (0,), x))
-    a_lb = np.array([1.0, 2, 3])
-    # EYE raises (pin pre-check).  VMAP now ALSO raises: the domain-ONLY hazard — the body ``⟨a,x⟩``
-    # contracts the pinned covector ``a`` against the bound ``x`` basis-blindly, so the per-slice
-    # value is NOT a basis-honest ``lin(e_j)`` (it would be silent-wrong, ``[1,0,2]`` vs ``[1,2,3]``).
-    # Until body-level free-axis basis tracking lands (`41 §7`), vmap GUARDS this instead of
-    # silent-wronging — so both modes must RAISE here.
-    try:
-        _run(represent(lin, basis_env={a.uid: lbd}, target=B.STD), {**dfr, _vk(a): a_lb})
-        raise AssertionError("expected RepresentError for a domain-only non-default llam pin")
-    except RepresentError as ex:
-        assert ("non-default basis" in str(ex)) or ("domain-only basis pin" in str(ex))
+    lin = C.llam(x, body=C.eval_(a, (0,), x))  # LLam([x]. ⟨a,x⟩) = the covector a
+    # Domain-only case — now HONEST in BOTH modes (was silent-wrong, then a guard-raise): eval's
+    # `_reconcile_pairing` reconciles the pinned rank-1 covector `a` against the bound var (the
+    # `_slot_basis_at` rank-1 fix), so ⟨a, eⱼ⟩ is the honest pairing.  Two-route: `a` pinned to lbd
+    # fed its lbd-coords, target=STD == `a` in the std dual basis (the value it represents).
+    av = np.array([1.0, 2, 3])
+    dom_env = {a.uid: default_basis(C.dual(V))}
+    ref = _run(represent(lin, basis_env=dom_env, target=B.STD), {_vk(a): av})
+    a_lb = _run(represent(a, basis_env=dom_env, target=lbd), {**dfr, _vk(a): av})
+    got = _run(represent(lin, basis_env={a.uid: lbd}, target=B.STD), {**dfr, _vk(a): a_lb})
+    assert np.allclose(got, ref)
 
 
 def test_pinv_gsvd_default_operand_correct():
@@ -744,3 +743,25 @@ def test_embed_subspace_list_basis_no_crash():
                {_vk(a): ad, _vk(Jm): Jfeed, **qfeed})
     got = _run(represent(emb, basis_env={a.uid: lb}), {_vk(a): alb, _vk(Jm): Jfeed, **qfeed})
     assert ref.shape == (3,) and np.allclose(got, ref)  # was a ValueError reshape crash
+
+
+def test_eval_pinned_covector_against_default_vector():
+    """The root fix for the domain-only LLam hazard: `eval(a,(0,),v)` (= ⟨a,v⟩) with a RANK-1
+    covector `a` pinned to a non-default basis and `v` in default must reconcile (a rank-1 operand is
+    its own slot in `_slot_basis_at`, so `_reconcile_pairing` fires) — it formerly contracted
+    basis-blind (`4.0` instead of the true `5.0`)."""
+    V = C.base("V", 3)
+    a = C.var("a", C.dual(V))
+    v = C.var("v", V)
+    av, vv = np.array([1.0, 2, 3]), np.array([2.0, 0, 1])  # ⟨a,v⟩ = 5 in std
+    t = C.eval_(a, (0,), v)
+    d = [C.var(f"d{i}", C.dual(V)) for i in range(3)]
+    lbd = B.list_basis(*d)
+    Am = np.array([[1.0, 1, 0], [0, 1, 1], [1, 0, 1.0]])
+    dfr = {f"d{i}_{d[i].uid}": Am[:, i] for i in range(3)}
+    ddual = default_basis(C.dual(V))
+    ref = _run(represent(t, basis_env={a.uid: ddual, v.uid: default_basis(V)}), {_vk(a): av, _vk(v): vv})
+    ac = _run(represent(a, basis_env={a.uid: ddual}, target=lbd), {_vk(a): av, **dfr})
+    got = _run(represent(t, basis_env={a.uid: lbd, v.uid: default_basis(V)}, target=B.STD),
+               {_vk(a): ac, _vk(v): vv, **dfr})
+    assert np.allclose(ref, 5.0) and np.allclose(got, ref)
