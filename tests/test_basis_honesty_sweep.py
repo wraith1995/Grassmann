@@ -279,15 +279,6 @@ def _c_embed():
     return C.embed(v, V), {v: (V, np.array([1.0, 2, 3]))}
 
 
-_SHARP_VARIANCE_GAP = (
-    "KNOWN GAP (sharp only): `Sharp` is the (2,0) inverse metric taking a COVECTOR operand; building it "
-    "in a non-DualBasis covector basis hits a result-slot variance gap (`_rep_sharp` peels a dual that "
-    "isn't there), so it's kept on the build-in-default path ⇒ silent-wrong for an orthonormal-NON-"
-    "STANDARD covector.  inner/flat/dot are FIXED (built + tagged in the operand basis).  Fix sharp's "
-    "covector-operand variance (`41 §7`); strict xfail XPASSes + flags removal when done."
-)
-
-
 def _case(name, builder, xfail=None):
     marks = [pytest.mark.xfail(reason=xfail, strict=True)] if xfail else []
     return pytest.param(name, builder, marks=marks, id=name)
@@ -300,8 +291,8 @@ CASES = [
     _case("pinv_apply", _c_pinv_apply), _case("permute", _c_permute), _case("kron", _c_kron),
     _case("lift", _c_lift), _case("llam_map", _c_llam_map), _case("llam_covector", _c_llam_covector),
     _case("dot", _c_dot), _case("project", _c_project), _case("embed", _c_embed),
-    _case("flat_apply", _c_flat_apply),  # FIXED: metric Eval now builds + tags in the operand basis
-    _case("sharp_apply", _c_sharp_apply, xfail=_SHARP_VARIANCE_GAP),
+    _case("flat_apply", _c_flat_apply),  # metric Eval builds + tags in the operand basis
+    _case("sharp_apply", _c_sharp_apply),  # + covector-operand variance (_covector_primal)
 ]
 
 

@@ -977,15 +977,10 @@ def _rep_eval_operands(
         # so the metric is built once in a genuinely shared basis.
         arg_reps = _reconcile_metric_operands(ctx, arg_reps)
         op_basis = _operand_metric_basis(arg_reps)
-        # Sharp is the (2,0) inverse metric taking a COVECTOR operand; building it in a non-DualBasis
-        # covector basis hits a result-slot variance gap (``_rep_sharp`` peels a dual that isn't
-        # there) — keep sharp on the immersed-only path until that variance is handled (`41 §7`).
-        if metric_kind == "sharp" and op_basis is not None and not _is_immersed_metric_basis(op_basis):
-            op_basis = None
         if op_basis is not None:
             f_rep = _rep_metric(f, metric_kind, ctx, basis=op_basis)
             return f_rep, arg_reps
-        # default (or scoped-out sharp) operand ⇒ identity-metric default: lower f exactly as before.
+        # default operand ⇒ identity-metric default: lower f exactly as before.
         return _rep(f, ctx), arg_reps
     f_rep = _rep(f, ctx)
     arg_reps = [_rep(a, ctx) for a in args]
@@ -2764,6 +2759,20 @@ def _peel_one_dual(basis: B.Basis | None) -> B.Basis | None:
             return basis
 
 
+def _covector_primal(basis: B.Basis | None) -> B.Basis | None:
+    """The PRIMAL basis a covector operand's basis lives over.  A ``DualBasis(p)`` peels to ``p``; a
+    LITERAL covector basis (e.g. a ``ListBasis`` over ``dual`` vars, not ``DualBasis``-wrapped) is its
+    own covector basis, so its primal is its dual (``dual_basis``).  Unlike ``_peel_one_dual`` this is
+    correct for a non-``DualBasis`` covector operand (Sharp's (2,0) inverse-metric build/tag)."""
+    match basis:
+        case None:
+            return None
+        case B.DualBasis(inner):
+            return inner
+        case _:
+            return B.dual_basis(basis)
+
+
 def _rep_inner(
     e: T.Inner, space: S.Space, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO, *, basis: B.Basis | None = None,
@@ -2863,7 +2872,7 @@ def _rep_sharp(
     # COVARIANT Gram `bᵀ·G·b`) cannot produce — `inv(bᵀGb) ≠` the (2,0) tensor in `b`. So Sharp keeps
     # the standard build + epilogue bail (correct), which cob's the (2,0) tensor honestly.
     n = _dyn_dim(space, ctx)
-    primal = _peel_one_dual(basis)
+    primal = _covector_primal(basis)
     g = _metric_matrix(ctx, space, n, note="metric:Sharp:G_s", basis=primal)
     [out] = ctx.prog.emit_stmt(
         pa.InvOp(), [g], [pa.OutSpec("sharp", (n, n))], note="sharp:InvOp(G_s)",
@@ -2889,7 +2898,7 @@ def _sharp_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
     """
     if basis is None or not isinstance(map_space, S.OProd):
         return default_basis(map_space)
-    primal = _peel_one_dual(basis)
+    primal = _covector_primal(basis)
     return B.basis_prod(*(primal for _ in map_space.spaces))
 
 
