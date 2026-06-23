@@ -1080,17 +1080,19 @@ def _reconcile_pairing(
 ) -> Rep:
     """Auto-reconcile a natural-pairing operand to ``slot_basis``'s dual partner (`43 §2c`).
 
-    For a non-metric ``Eval``/``Compose`` contraction whose slot and operand are pinned to
-    inconsistent FFS bases (one ``ImageBasis``, one orthonormal), change the operand into the
-    slot's dual-partner basis (through the FFS realization seam) so the raw index contraction
-    is the correct natural pairing.  Only fires when an immersed basis is involved and the two
-    are not already mutually dual — the orthonormal path is byte-identical.
+    A non-metric ``Eval``/``Compose`` sums raw indices with no metric, so it is correct ONLY when the
+    contracted slot and operand are mutually dual.  When they are NOT (an ``ImageBasis`` vs an
+    orthonormal, OR an orthonormal-but-NON-STANDARD basis whose Gram=I yet whose dual ≠ ``default``),
+    change the operand into the slot's dual-partner basis so the raw contraction is the right pairing.
+    Fires whenever the two are not pairing-consistent — a default/already-dual pair is consistent, so
+    that path stays byte-identical; a non-standard pair (immersed OR rotated-orthonormal) reconciles.
     """
-    if slot_basis is None:
-        return op_rep
-    if not (_is_immersed_metric_basis(slot_basis) or _is_immersed_metric_basis(op_rep.basis)):
-        return op_rep
-    if _basis_pairing_consistent(slot_basis, op_rep.basis):
+    # Only a RANK-1 operand (a vector/covector) is reconciled here: ``_coerce_rep_to_basis`` cobs the
+    # operand's axis 0 using its whole basis, which is the contracted slot only for a rank-1 operand.
+    # A multi-axis (``BasisProd``) operand has surviving slots, so a blind axis-0 cob is invalid —
+    # leave it (the OLD immersed-only gate happened to exclude these; they need per-axis handling).
+    if (slot_basis is None or isinstance(op_rep.basis, B.BasisProd)
+            or _basis_pairing_consistent(slot_basis, op_rep.basis)):
         return op_rep
     return _coerce_rep_to_basis(ctx, op_rep, _pairing_partner(slot_basis), note=note)
 
@@ -1098,18 +1100,16 @@ def _reconcile_pairing(
 def _reconcile_compose_g(ctx: _Ctx, slot_basis: B.Basis | None, g_rep: Rep) -> Rep:
     """Auto-reconcile a ``Compose`` ``g``'s codomain (axis 1) into f's slot partner (`43 §2c`).
 
-    ``g``'s codomain feeds f's slot ``pos``; the two must be mutually dual for the raw
-    contraction to be the correct natural pairing.  When they are pinned to inconsistent FFS
-    bases, change ``g``'s codomain axis into f's slot dual-partner basis (FFS seam).
+    ``g``'s codomain feeds f's slot ``pos``; the two must be mutually dual for the raw contraction to
+    be the correct natural pairing.  When they are NOT (inconsistent FFS bases OR an orthonormal-but-
+    NON-STANDARD codomain whose Gram=I yet dual ≠ ``default``), cob ``g``'s codomain axis into f's slot
+    dual-partner basis.  Fires whenever they are not pairing-consistent (a default/already-dual pair is
+    consistent ⇒ byte-identical); the cob targets axis 1 specifically, so a multi-axis ``g`` is fine.
     """
     if slot_basis is None:
         return g_rep
     gcod = _slot_basis_at(g_rep.basis, 1)
-    if gcod is None:
-        return g_rep
-    if not (_is_immersed_metric_basis(slot_basis) or _is_immersed_metric_basis(gcod)):
-        return g_rep
-    if _basis_pairing_consistent(slot_basis, gcod):
+    if gcod is None or _basis_pairing_consistent(slot_basis, gcod):
         return g_rep
     target = _pairing_partner(slot_basis)
     m = _basis_cob_matrix(ctx, gcod, target)
