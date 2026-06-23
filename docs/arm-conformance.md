@@ -60,7 +60,7 @@ Snapshot after the STD/per-aspect follow-up (dagger + llam tag fixes, external/p
 | `_rep_permute` | ✓ **pushes the target into the operand** (axis j ← want's axis inv_perm[j]); transpose lands in `want`, no post-cob | ✓ honest `_reorder_basis` tag | ✓ same push-down for any structural target |
 | `_rep_project` / `_rep_embed` | ✓ operand realized in default before the contraction (correctness fix); std no-op | ✓ n/a (output forced to the std sub/ambient basis) | `bail` no net win — pushing the target into the columns `P` is `P·inv(W)ᵀ`, which only relocates the unavoidable `inv(W)` (= the post-cob); steering is also unsound for a non-orthonormal want |
 | `_rep_lift` / `_rep_kron` | `by-design` fused axes have no honest per-axis basis (need a Kronecker-product basis object) ⇒ operand forced to std; tag honest | ✓ natural | `by-design` generic `_match_result` after the std pre-cob |
-| `_rep_llam` | ✓ default-operand body (the common case: body in default); **raises** on a non-default body (see note) | ✓ default-operand body | `raise` a non-default body basis can't be honestly tagged yet — see note |
+| `_rep_llam` | ✓ default body; **eye mode** (default) raises on a non-default body; **vmap mode** (`GRASSMANN_LLAM_INDEX=vmap`) handles a non-default *cod* body honestly, raises the domain-only hazard — see note | ✓ default body | eye: raise; vmap: honest for cod-non-default, raise for domain-only |
 
 ---
 
@@ -88,12 +88,19 @@ pure-realizable pairs); the `_cob_from_*` handlers run only when a side is non-s
 
 ## Notes (the `~` / `bail✓` / `raise` cells)
 
-- **`_rep_llam` (raise):** the map tensor's DOMAIN axes are the bound vars' free-label axes, whose
-  post-reconciliation bases are NOT tracked (an eval in the body can cob a var axis to a pinned
-  operand's basis), and the natural coords don't form a clean product basis. So a non-default body can't
-  be honestly tagged; `_rep_llam` now RAISES (cod-basis guard + non-default-pin pre-check) rather than
-  silently mislabel (it formerly returned the wrong matrix). Default-operand llams are correct. **Full
-  fix = free-label-axis basis tracking (architectural, `41 §7`).**
+- **`_rep_llam` — two modes via `GRASSMANN_LLAM_INDEX` (Gap 1):**
+  - **`eye`** (default, fast): one einsum over the materialized `eye`; the index rides an untyped free
+    axis. Correct + byte-identical for default bodies; **raises** on a non-default body (the free-axis
+    Gram entanglement can't be honestly tagged — formerly returned the wrong matrix).
+  - **`vmap`** (Path B): lowers the body once as a sub-Program with each bound var a rank-1 input, then
+    `pa.vmap`s over the binding basis (slice the `eye` into each `e_j`). Each slice is an honest rank-1
+    `eval` (no entanglement), stacked + tagged honestly (domain `dual(binding)`, cod the body's actual
+    basis). Handles a **cod-non-default** body correctly (verified `LLam([x].f·x)`, f pinned ⇒ `Mfᵀ`);
+    **raises** the **domain-only** hazard (`⟨a,x⟩`, a pinned covector ⇒ the per-slice eval contracts
+    basis-blind) rather than silent-wrong. Slower (a runtime vmap loop) so it's opt-in.
+  - **Future (Path A):** a typed/one-pass index that flows its basis through `eval`'s reconciliation —
+    fast *and* correct — would supersede both; the domain-only body-level eval reconciliation (`41 §7`)
+    is the remaining piece for full correctness in either mode.
 - **`_rep_pinv` / `_rep_pinv_apply` GSVD/metric branch (raise):** `_gsvd_pinv_map` builds the metric in
   the default basis, so a non-default operand was silent-wrong (inconsistent coords + mislabelled). Now
   it RAISES on a non-default operand (default operands are correct). **Full fix = build the GSVD metric
