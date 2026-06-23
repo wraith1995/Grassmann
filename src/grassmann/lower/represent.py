@@ -2416,14 +2416,19 @@ def _rep_pinv(
     space = _synth(e)
     metric = _map_metrics(f)
     if metric is not None:
-        # GSVD branch — `_gsvd_pinv_map` builds the metric in the DEFAULT basis, so it is only
-        # correct when ``f`` arrives in default too.  A non-default operand pin would feed coords
-        # inconsistent with the metric AND mislabel the result (formerly silent-wrong); we cannot
-        # yet build the GSVD metric in the operand basis, so FAIL LOUDLY rather than miscompute.
+        # GSVD branch — build the metric in the OPERAND's per-slot bases (mirroring ``_rep_dagger``),
+        # so ``M_V``/``M_W`` stay consistent with the coordinates ``f`` arrives in for a non-default
+        # operand pin.  The dom slot is covariant (a ``DualBasis``) ⇒ build its metric in the primal
+        # (``_peel_one_dual``); the cod slot is used as-is.  ``None`` slots ⇒ default (byte-identical).
         f_rep = _rep(f, ctx)
-        _require_default_gsvd_operand(f_rep, "Pinv")
-        out = _gsvd_pinv_map(ctx, f_rep.array, *metric)
-        rep = Rep(out, default_basis(space), space)
+        dom_slot, cod_slot = _map_slot_bases(f_rep.basis)
+        out = _gsvd_pinv_map(
+            ctx, f_rep.array, *metric,
+            dom_basis=_peel_one_dual(dom_slot), cod_basis=cod_slot,
+        )
+        # Honest tag: ``f⁺`` (cod⊸dom) lives in the operand's dual-swapped slot bases — the metric
+        # GSVD acts in whatever basis ``f`` arrived in (folds to ``default_basis`` for a default op).
+        rep = Rep(out, _dual_swap_map_basis(f_rep.basis, space), space)
         match target:
             case B.TargetBasis.STD:
                 return _std_result(ctx, rep)
@@ -2497,18 +2502,28 @@ def _rep_pinv_apply(
     v_rep = _rep(v, ctx)
     metric = _map_metrics(f)
     if metric is not None:
-        # GSVD/metric branch — the metric is built in DEFAULT, so both ``f`` and ``v`` must arrive in
-        # default for a consistent computation; a non-default pin was silent-wrong.  We cannot yet
-        # build the GSVD metric in the operand basis, so FAIL LOUDLY rather than miscompute.
+        # GSVD/metric branch — build ``fp = f⁺`` with its metric in f's per-slot bases (consistent
+        # with f's coords for a non-default operand pin), then make the einsum contraction
+        # basis-consistent: "ab,a->b" contracts fp's cod axis (axis 0 = f's cod slot) against ``v``,
+        # so ``v`` must be expressed in f's cod-slot basis.  We cob ``v`` to that slot (mirroring the
+        # non-metric branch, which instead steers f's cod slot to ``v_rep.basis``), then tag the
+        # result in f's domain-slot primal (folds to ``default_basis`` for default operands).
         f_rep = _rep(f, ctx)
-        _require_default_gsvd_operand(f_rep, "PinvApply")
-        _require_default_gsvd_operand(v_rep, "PinvApply")
-        fp = _gsvd_pinv_map(ctx, f_rep.array, *metric)  # stored (|cod|,|dom|)
+        dom_slot, cod_slot = _map_slot_bases(f_rep.basis)
+        fp = _gsvd_pinv_map(
+            ctx, f_rep.array, *metric,
+            dom_basis=_peel_one_dual(dom_slot), cod_basis=cod_slot,
+        )  # stored (|cod|,|dom|)
+        v_arr = v_rep.array
+        if cod_slot is not None and not _basis_eq(v_rep.basis, cod_slot):
+            v_arr = _coerce_rep_to_target(
+                ctx, v_rep, cod_slot, note="pinvapply:cob-v→cod-slot",
+            ).array
         [out] = ctx.prog.emit_stmt(
-            pa.EinsumStmtOp("ab,a->b"), [fp, v_rep.array],
+            pa.EinsumStmtOp("ab,a->b"), [fp, v_arr],
             [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
         )
-        rep = Rep(out, default_basis(space), space)
+        rep = Rep(out, _inverse_apply_basis(f_rep.basis, space), space)
         match target:
             case B.TargetBasis.STD:
                 return _std_result(ctx, rep)
@@ -2552,23 +2567,6 @@ def _rep_pinv_apply(
             return _match_result(ctx, rep, target)
 
 
-def _require_default_gsvd_operand(rep: Rep, op: str) -> None:
-    """The GSVD metric-pinv path builds its metric in the DEFAULT basis, so it is only correct when
-    the operand arrives in default.  A non-default pin would feed inconsistent coords and mislabel the
-    result — fail loudly rather than miscompute (building the GSVD metric in the operand basis is
-    future work; the non-metric `PinvOp` branch already handles non-default operands)."""
-    try:
-        if not _basis_eq(rep.basis, default_basis(rep.space)):
-            raise RepresentError(
-                f"represent: {op} over a metric (WithInner) space does not yet support a non-default "
-                f"operand basis {rep.basis!r} (the GSVD metric is built in the default basis, so the "
-                f"result would be silently miscomputed). Realize the operand in its default basis "
-                f"first (operand-basis GSVD metric is future work)."
-            )
-    except S.SpaceError:
-        pass  # no static default (SVar/App) — nothing to compare against
-
-
 def _map_metrics(f: T.Term) -> tuple[S.Space, S.Space] | None:
     """The ``(dom, cod)`` of ``f`` iff either is a metric (``WithInner``) space (`50 §A5`).
 
@@ -2584,6 +2582,7 @@ def _map_metrics(f: T.Term) -> tuple[S.Space, S.Space] | None:
 
 def _gsvd_pinv_map(
     ctx: _Ctx, f_arr: pa.SymArray, dom: S.Space, cod: S.Space,
+    dom_basis: B.Basis | None = None, cod_basis: B.Basis | None = None,
 ) -> pa.SymArray:
     """Assemble the metric pseudo-inverse map through ``GSvdOp`` (`50 §A5`).
 
@@ -2592,10 +2591,15 @@ def _gsvd_pinv_map(
     ``(cod,dom)`` orientation), and the result is stored ``(|cod|,|dom|)`` to match the plain
     ``PinvOp`` convention (the stored map is the transpose of the math ``(cod,dom)`` matrix).
     Identity metrics make ``GSvdOp`` coincide numerically with plain pinv.
+
+    ``dom_basis``/``cod_basis`` are the operand's active per-slot bases (the dom slot's *primal*
+    and the cod slot): the metrics ``M_V``/``M_W`` are built in THOSE bases so they stay
+    consistent with the coordinates ``f_arr`` arrives in (a non-default operand pin), exactly as
+    ``_rep_dagger``'s metric path does.  ``None`` ⇒ the default basis (byte-identical to before).
     """
     n_dom, n_cod = _static_dim(dom), _static_dim(cod)
-    m_v = _metric_matrix(ctx, dom, n_dom, note="pinv:metric(dom)")
-    m_w = _metric_matrix(ctx, cod, n_cod, note="pinv:metric(cod)")
+    m_v = _metric_matrix(ctx, dom, n_dom, note="pinv:metric(dom)", basis=dom_basis)
+    m_w = _metric_matrix(ctx, cod, n_cod, note="pinv:metric(cod)", basis=cod_basis)
     # A : the map in math (cod,dom) orientation = transpose of the stored (dom,cod).
     [a_cd] = ctx.prog.emit_stmt(
         _TransposeOp(), [f_arr],
