@@ -60,7 +60,7 @@ Snapshot after the STD/per-aspect follow-up (dagger + llam tag fixes, external/p
 | `_rep_permute` | ✓ **pushes the target into the operand** (axis j ← want's axis inv_perm[j]); transpose lands in `want`, no post-cob | ✓ honest `_reorder_basis` tag | ✓ same push-down for any structural target |
 | `_rep_project` / `_rep_embed` | ✓ operand realized in default before the contraction (correctness fix); std no-op | ✓ n/a (output forced to the std sub/ambient basis) | `bail` no net win — pushing the target into the columns `P` is `P·inv(W)ᵀ`, which only relocates the unavoidable `inv(W)` (= the post-cob); steering is also unsound for a non-orthonormal want |
 | `_rep_lift` / `_rep_kron` | `by-design` fused axes have no honest per-axis basis (need a Kronecker-product basis object) ⇒ operand forced to std; tag honest | ✓ natural | `by-design` generic `_match_result` after the std pre-cob |
-| `_rep_llam` | ✓ default body; **eye mode** (default) raises on a non-default body; **vmap mode** (`GRASSMANN_LLAM_INDEX=vmap`) handles a non-default *cod* body honestly, raises the domain-only hazard — see note | ✓ default body | eye: raise; vmap: honest for cod-non-default, raise for domain-only |
+| `_rep_llam` | ✓ default + domain-only bodies (both modes); **vmap** (default) also handles cod-non-default; **eye** raises only cod-non-default | ✓ default body | vmap: honest (cod + domain-only); eye: honest except cod-non-default (raises) |
 
 ---
 
@@ -89,18 +89,22 @@ pure-realizable pairs); the `_cob_from_*` handlers run only when a side is non-s
 ## Notes (the `~` / `bail✓` / `raise` cells)
 
 - **`_rep_llam` — two modes via `GRASSMANN_LLAM_INDEX` (Gap 1):**
-  - **`eye`** (default, fast): one einsum over the materialized `eye`; the index rides an untyped free
-    axis. Correct + byte-identical for default bodies; **raises** on a non-default body (the free-axis
-    Gram entanglement can't be honestly tagged — formerly returned the wrong matrix).
-  - **`vmap`** (Path B): lowers the body once as a sub-Program with each bound var a rank-1 input, then
-    `pa.vmap`s over the binding basis (slice the `eye` into each `e_j`). Each slice is an honest rank-1
-    `eval` (no entanglement), stacked + tagged honestly (domain `dual(binding)`, cod the body's actual
-    basis). Handles a **cod-non-default** body correctly (verified `LLam([x].f·x)`, f pinned ⇒ `Mfᵀ`);
-    **raises** the **domain-only** hazard (`⟨a,x⟩`, a pinned covector ⇒ the per-slice eval contracts
-    basis-blind) rather than silent-wrong. Slower (a runtime vmap loop) so it's opt-in.
-  - **Future (Path A):** a typed/one-pass index that flows its basis through `eval`'s reconciliation —
-    fast *and* correct — would supersede both; the domain-only body-level eval reconciliation (`41 §7`)
-    is the remaining piece for full correctness in either mode.
+  - **`vmap`** (Path B, DEFAULT): lowers the body once as a sub-Program with each bound var a rank-1
+    input, then `pa.vmap`s over the binding basis (slice the `eye` into each `e_j`). Each slice is an
+    honest rank-1 `eval`, stacked + tagged honestly (domain `dual(binding)`, cod the body's actual
+    basis). Handles **both** a cod-non-default body (`LLam([x].f·x)`, f pinned ⇒ `Mfᵀ`) and a
+    **domain-only** body (`⟨a,x⟩`, a pinned covector ⇒ `eval`'s reconciliation now fires) correctly.
+    Slower (a runtime vmap loop), so `eye` stays available.
+  - **`eye`** (opt-in, fast): one einsum over the materialized `eye`; correct + byte-identical for
+    default bodies and now also for **domain-only** bodies (the eval fix). Still **raises** on a
+    cod-non-default body (`f·x`, f pinned) — the free-axis Gram the one-einsum path can't tag.
+  - **Gap 2 fixed at the source:** the domain-only hazard was an `eval` bug — `_slot_basis_at` returned
+    `None` for a rank-1 operand, so a pinned covector contracted the bound var basis-blind. Fixed
+    (rank-1 operand is its own slot ⇒ `_reconcile_pairing` fires); both modes now honest, the guards
+    removed.
+  - **Future (Path A, performance only):** a typed/one-pass index that flows its basis through `eval`
+    — fast *and* correct for cod-non-default too — would let `vmap` retire its runtime loop and make
+    `eye` correct everywhere. Not a correctness gap (the default `vmap` is correct); purely speed.
 - **`_rep_pinv` / `_rep_pinv_apply` GSVD/metric branch (raise):** `_gsvd_pinv_map` builds the metric in
   the default basis, so a non-default operand was silent-wrong (inconsistent coords + mislabelled). Now
   it RAISES on a non-default operand (default operands are correct). **Full fix = build the GSVD metric
@@ -116,8 +120,9 @@ pure-realizable pairs); the `_cob_from_*` handlers run only when a side is non-s
 **Summary:** every arm is correct, and on every aspect either exploits the structure available, bails
 correctly (with the unsound-reason named), or refuses loudly. **No silent-wrong arms remain.** The
 GSVD metric-pinv operand-basis gap is now FIXED (built in the operand basis); the llam non-default
-body is handled by the `vmap` default (cod-non-default correct, domain-only guarded). Path A (a typed
-one-pass llam index) + the domain-only body-level eval reconciliation remain tracked future work.
+body is handled correctly by the `vmap` default (cod-non-default AND domain-only — the latter fixed at
+the `eval` source). The only remaining llam item is Path A (a typed one-pass index) — a PERFORMANCE
+improvement (retire vmap's runtime loop), not a correctness gap.
 
 **Re-audit (post Gap 1/2, both llam modes) — converged.** A full per-aspect + two-route sweep over all
 represent and cob arms (3 basis flavors; cob round-trips verified to ~1e-14) found **NO silent-wrong
