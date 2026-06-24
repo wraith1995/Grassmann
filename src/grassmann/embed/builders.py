@@ -303,6 +303,37 @@ def diff(e: object, x: object, deps: dict | None = None) -> Expr:
     return wrap(_diff(_term(e), xv, dd))
 
 
+def beta(e: object) -> Expr:
+    """``G.beta(e)`` — β-reduce applied binders (``Eval(LLam …)`` / ``NEval(Lam …)``) to a
+    fixpoint. See :func:`grassmann.transform.rewrite.beta`."""
+    from grassmann.transform.rewrite import beta as _beta
+
+    return wrap(_beta(_term(e)))
+
+
+def simplify(e: object) -> Expr:
+    """``G.simplify(e)`` — β + the always-valid algebraic cleanups (scalar/zero/identity
+    laws, sum flattening, involutions). See :func:`grassmann.transform.rewrite.simplify`."""
+    from grassmann.transform.rewrite import simplify as _simplify
+
+    return wrap(_simplify(_term(e)))
+
+
+def normal_form(e: object, config: object = None) -> Expr:
+    """``G.normal_form(e, config=None)`` — rewrite to sum-of-products normal form (β,
+    distribution, contraction-push, collection, canonical ordering). Pass a
+    :class:`~grassmann.transform.rewrite.SoPConfig` to select aggressiveness. See
+    :func:`grassmann.transform.rewrite.sum_of_products`."""
+    from grassmann.transform.rewrite import DEFAULT_SOP
+    from grassmann.transform.rewrite import sum_of_products as _sop
+
+    return wrap(_sop(_term(e), config if config is not None else DEFAULT_SOP))
+
+
+# ``G.sum_of_products`` is an alias matching the core function name.
+sum_of_products = normal_form
+
+
 # ===========================================================================
 # Binders (HOAS, 25 §F2).
 # ===========================================================================
