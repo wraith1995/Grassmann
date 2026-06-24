@@ -763,11 +763,12 @@ def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None])
         if in_space and isinstance(node, Var) and is_xdep(node):
             raise DiffError(
                 "diff: an x-dependent term flows into a space position (e.g. Img(J) with J "
-                "x-dependent / Img(x)); the space's realization then varies with x and the "
-                "value-level rules would miss the ∂(space) contribution (silent-wrong). "
-                "Differentiating through a term-dependent space is unsupported — keep the "
-                "space-defining term (the chart/immersion) constant w.r.t. x, or use the "
-                "frame/chart connection for the tangent case."
+                "x-dependent / Img(x)). The orthonormal ImageBasis of Img(J) is NOT frame-free "
+                "differentiable (its derivative carries a Cholesky/triangular gauge term with no "
+                "coordinate-free term form). Represent the tangent vector in the PARAMETER frame "
+                "instead — immerse via Eval(J, w) for w in dom(J) — which differentiates term→term "
+                "by the ordinary product rule (covariant part = embed∘project = the frame "
+                "connection Pinv(J)∘∂J; normal part = the second fundamental form)."
             )
         for child in _children(node):
             walk(child, in_space or is_space(child))
