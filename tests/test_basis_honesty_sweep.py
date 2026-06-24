@@ -31,6 +31,7 @@ import pytest
 
 import grassmann.core as C
 from grassmann.core import basis as B
+from grassmann.core.kinds import SpaceSort
 from grassmann.lower import represent
 from grassmann.lower.represent import RepresentError, default_basis
 
@@ -108,6 +109,13 @@ def _machine_coords(v, space, basis, frame_feeds, std_value):
 # ---------------------------------------------------------------------------
 
 
+def _norm_spec(spec):
+    """A var_specs value is ``(space, std_value)`` (pinnable) or ``(space, std_value, False)``
+    (FEED-ONLY: always fed at default, never flavor-pinned — for an operand whose basis the arm can't
+    thread, e.g. a free var realized by frame vars inside a NEval sub-program)."""
+    return (spec[0], spec[1], spec[2] if len(spec) > 2 else True)
+
+
 def _sweep_one(make_term, var_specs, flavor_choice):
     """``flavor_choice``: var -> ``(basis, feeds)`` to pin, or ``None`` to leave it DEFAULT (subset
     pinning — a mix of pinned + default operands is a distinct, often more sensitive, trigger than
@@ -115,15 +123,16 @@ def _sweep_one(make_term, var_specs, flavor_choice):
     two-route match OR a loud RepresentError; FAIL only on a silent mismatch."""
     term = make_term()
     # route_REF: every operand default, AUTO.
-    ref_env = {v.uid: default_basis(sp) for v, (sp, _val) in var_specs.items()}
-    ref_feeds = {_vk(v): val for v, (sp, val) in var_specs.items()}
+    ref_env = {v.uid: default_basis(_norm_spec(s)[0]) for v, s in var_specs.items()}
+    ref_feeds = {_vk(v): _norm_spec(s)[1] for v, s in var_specs.items()}
     try:
         ref = _run(represent(term, basis_env=ref_env, target=B.AUTO), ref_feeds)
     except RepresentError:
         return  # the default case itself bailed — nothing to compare (rare; tolerate)
     # route_STD: chosen operands pinned (machine-derived coords); the rest stay default.
     std_env, std_feeds = {}, {}
-    for v, (sp, val) in var_specs.items():
+    for v, s in var_specs.items():
+        sp, val, _ = _norm_spec(s)
         choice = flavor_choice[v]
         if choice is None:
             std_env[v.uid] = default_basis(sp)
@@ -145,10 +154,14 @@ def _sweep_one(make_term, var_specs, flavor_choice):
 def _sweep(make_term, var_specs):
     """Sweep every (per-operand: default OR one of its non-default flavors) combination — the product
     of ``[None, *flavors]`` over operands, which covers BOTH all-pinned and every pinned/default subset.
-    Skips the trivial all-default combo."""
+    Skips the trivial all-default combo.  Feed-only operands contribute only ``[None]`` (never pinned)."""
     import itertools
     per_var = {}
-    for v, (sp, _val) in var_specs.items():
+    for v, s in var_specs.items():
+        sp, _val, pinnable = _norm_spec(s)
+        if not pinnable:
+            per_var[v] = [None]
+            continue
         flavs = _flavors(sp, f"{_vk(v)}_")
         if not flavs:
             pytest.skip("a flavor could not be built for some operand space (e.g. FFS) — covered elsewhere")
@@ -401,6 +414,28 @@ def _c_eval_map_rect_scalar():  # ⟨w′, f·v⟩, f: V→W (unsteered)
             {wp: (DW, np.array([1.0, 1])), f: (MVW, _MR), v: (V, np.array([1.0, 2, 3]))})
 
 
+def _c_neval_lam():  # NEval of λx. f·x applied to op (op is the pinned arg; f is feed-only — pinning a
+    # free var realized by frame vars into the sub-program isn't threaded ⇒ a loud missing-input crash,
+    # not silent-wrong; the dedicated test_neval_lam pins op too)
+    f, x, op = C.var("f", MS), C.var("x", V), C.var("op", V)
+    lam = C.lam(((x.name, SpaceSort(V)),), C.eval_(f, (0,), x), (x,))
+    return C.neval(lam, (0,), op), {f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]]), False),
+                                    op: (V, np.array([2.0, 3, 5]))}
+
+
+def _c_multi_llam():  # LLam([x,y]. b(Tx, Ty)) — the pullback form (two bound vars, free T + b)
+    T, b, xv, yv = C.var("T", MS), C.var("b", C.oprod(DV, DV)), C.var("xv", V), C.var("yv", V)
+    body = C.eval_(b, (0, 1), C.eval_(T, (0,), xv), C.eval_(T, (0,), yv))
+    return C.llam(xv, yv, body=body), {T: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+                                       b: (C.oprod(DV, DV), np.array([[1.0, 0, 0], [0, 2, 0], [0, 0, 1.0]]))}
+
+
+def _c_remetric():  # remetric(v, g) — re-home v onto WithInner(V, g)
+    v, g = C.var("v", V), C.var("g", MS)
+    return C.remetric(v, g), {v: (V, np.array([1.0, 2, 3])),
+                              g: (MS, np.array([[2.0, 0, 0], [0, 3, 0], [0, 0, 1.0]]))}
+
+
 def _c_var():
     u = _vec("u")
     return u, {u: (V, np.array([1.0, 2, 3]))}
@@ -464,6 +499,8 @@ CASES = [
     # vary the consumer (sum / oprod / compose)
     _case("sum_of_applies", _c_sum_of_applies), _case("oprod_of_applies", _c_oprod_of_applies),
     _case("compose_dagger_scalar", _c_compose_dagger_scalar),
+    # remaining coverage: neval_lam, multi-var llam (pullback), remetric
+    _case("neval_lam", _c_neval_lam), _case("multi_llam", _c_multi_llam), _case("remetric", _c_remetric),
 ]
 
 
