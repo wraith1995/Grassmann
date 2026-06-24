@@ -30,15 +30,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 
 from grassmann.core.kinds import NAT, SPACE, SpaceSort
-from grassmann.core.space import OProd, Scalar, Space, is_dim, is_space, oplus
+from grassmann.core.space import OProd, Scalar, Space, dual, is_dim, is_space, oplus
 from grassmann.core.term import (
     Assert,
     Compose,
     Dagger,
     Embed,
     Eval,
+    Flat,
     Frame,
     Identity,
+    Inner,
     InvLift,
     Kron,
     Lam,
@@ -49,9 +51,11 @@ from grassmann.core.term import (
     OPlusV,
     OProdV,
     Permute,
+    Pinv,
     Project,
     Remetric,
     Scale,
+    Sharp,
     Solve,
     Sum,
     Term,
@@ -622,6 +626,25 @@ def rule_dagger_push(node: Term) -> Term | None:
     return None
 
 
+def rule_musical(node: Term) -> Term | None:
+    """Canonicalize the musical isomorphisms to a single metric primitive ``g = Inner(s)``:
+    ``♭ = Flat(s) → Inner(s)`` (same space ``s*⊗s*`` and same data), ``♯ = Sharp(s) →
+    Pinv(Inner(s))`` (the inverse metric), and cancel an inverse-metric pair in a composition
+    — ``g⁻¹∘g → Id(s)``, ``g∘g⁻¹ → Id(s*)`` (a metric is non-degenerate, so ``Pinv(Inner)`` is
+    a true inverse). Direction: collapse musical maps toward ``Inner``/``Identity`` (value-exact)."""
+    if isinstance(node, Flat):
+        return Inner(node.space)
+    if isinstance(node, Sharp):
+        return Pinv(Inner(node.space))
+    if isinstance(node, Compose) and node.positions == (0,) and len(node.gs) == 1:
+        f, g = node.f, node.gs[0]
+        if isinstance(f, Pinv) and isinstance(f.f, Inner) and isinstance(g, Inner) and f.f.space == g.space:
+            return Identity(g.space)
+        if isinstance(f, Inner) and isinstance(g, Pinv) and isinstance(g.f, Inner) and f.space == g.f.space:
+            return Identity(dual(f.space))
+    return None
+
+
 def rule_permute(node: Term) -> Term | None:
     """Collapse reshape ``Permute`` corrections: an identity permutation vanishes, and two
     nested permutations compose. Value-exact (a permutation of tensor axes). Keeps the
@@ -890,6 +913,7 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_compose,
     rule_involution,
     rule_dagger_push,
+    rule_musical,
     rule_permute,
     rule_scale,
     rule_sum,

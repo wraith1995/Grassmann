@@ -735,6 +735,27 @@ def test_scalar_product_folds_numeric_factors() -> None:
     assert sum_of_products(q1, cfg) == q1  # idempotent
 
 
+# ===========================================================================
+# Task #9 — musical canonicalization (g = Inner is the sole metric primitive).
+# ===========================================================================
+
+
+def test_musical_canonicalization() -> None:
+    V = S.base("V", 2)
+    assert simplify(T.Flat(V)) == T.Inner(V)
+    assert simplify(T.Sharp(V)) == T.Pinv(T.Inner(V))
+    # ♯∘♭ → Id and ♭∘♯ → Id (the inverse-metric pair cancels).
+    assert simplify(T.Compose(T.Sharp(V), (0,), (T.Flat(V),))) == T.Identity(V)
+    assert simplify(T.Compose(T.Flat(V), (0,), (T.Sharp(V),))) == T.Identity(S.dual(V))
+
+
+def test_musical_value_preserved() -> None:
+    V = S.base("V", 2)
+    term = T.Compose(T.Sharp(V), (0,), (T.Flat(V),))  # ♯∘♭
+    np.testing.assert_allclose(_run(simplify(term), {}), _run(term, {}))
+    assert is_normalized_sop(sum_of_products(term))
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
