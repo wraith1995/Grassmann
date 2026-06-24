@@ -19,7 +19,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 
 ## What's done (this session)
 
-**Nine silent-wrong bugs fixed**, all of the class above:
+**Ten silent-wrong bugs fixed**, all of the class above:
 
 | arm | the lie | fix | commit |
 |---|---|---|---|
@@ -32,6 +32,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 | `inner`/`flat`/`dot` metric Eval | Gram built/tagged `default` for a non-immersed operand | build + tag in any **non-default** operand basis | `529b5d1` |
 | `sharp` metric Eval (covector operand) | `_peel_one_dual` gives the wrong primal for a literal covector basis | `_covector_primal` (DualBasis peels; literal covector → `dual_basis`) | `daa4434` |
 | `pinv_apply` unsteered | `v` left unreconciled vs f's cod-slot when not steered (`⟨w,f⁺v⟩`) | cob `v` to f's cod-slot before the matvec (no-op when steered) | `2a0cb5d` |
+| `trace` unsteered | traced slots summed basis-blind when a contracted slot is pinned + f unsteered | cob axis `j` to `dual(slot i)` before the diagonal (no-op when steered) | `f56ba9d` |
 
 The `vmap` LLam lowering is the **default** (`GRASSMANN_LLAM_INDEX=eye` = the old fast path, which
 raises on a cod-non-default body).
@@ -58,8 +59,9 @@ contraction/reconcile path and *masks* a reconcile bug. To exercise the unsteere
 a **scalar** contraction `⟨w, …⟩` (a scalar result can't be steered) — that's how `pinv_apply`'s
 v-reconcile bug surfaced (`_c_eval_map_scalar`/`_c_compose_scalar`/`_c_pinv_apply_scalar`).
 
-The sweep currently has **29 cases, 0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
-with `GRASSMANN_LLAM_INDEX=eye`).
+The sweep currently has **31 cases, 0 xfail** (incl. unsteered `⟨w,…⟩` wrappers for eval-map/compose/
+pinv_apply/solve/trace). Run: `pytest tests/test_basis_honesty_sweep.py` (and once with
+`GRASSMANN_LLAM_INDEX=eye`).
 
 ## Remaining work (prioritized — resume here)
 
@@ -69,11 +71,11 @@ v-reconcile bug `2a0cb5d`. What remains:)*
 
 1. **Finish sweep coverage.** Still not in `CASES`: `neval_lam` (needs the `lam(binders, body,
    term_vars)` form — fiddly; has a dedicated test), `remetric` (the metric is a rank-2 var the auto-
-   flavor mis-wraps), a **multi-var `llam`**, and the **unsteered variants for `solve`/`trace`** (only
-   `eval-map`/`compose`/`pinv_apply` got the `⟨w,…⟩` wrapper). `const`/`zeros`/`identity`/`tuple_embed`/
-   `tuple_project` have no pinnable operand (not sweep-able; covered by structural tests). Adding the
-   `solve`/`trace` unsteered wrappers is the highest-value remaining check (they steer, so a reconcile
-   bug there is currently masked — same shape as the `pinv_apply` bug just found).
+   flavor mis-wraps), and a **multi-var `llam`**. `const`/`zeros`/`identity`/`tuple_embed`/`tuple_project`
+   have no pinnable operand (not sweep-able; covered by structural tests). The unsteered `⟨w,…⟩` wrappers
+   now cover eval-map/compose/pinv_apply/solve/trace; any other arm with a surviving slot that steers
+   (e.g. `kron`, `lift`, `permute` as sub-terms) could get a wrapper too — lower-yield, but the
+   `pinv_apply`/`trace` finds show the pattern is worth completing.
 
 2. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
    debug mode where `_rep`, per arm, two-route-checks the realized-basis claim on the actual feeds and
@@ -118,4 +120,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1225 passed, 0 xfailed** in both modes; ruff clean (sweep: 29/29).
+Current: **1227 passed, 0 xfailed** in both modes; ruff clean (sweep: 31/31).
