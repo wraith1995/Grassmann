@@ -2401,17 +2401,27 @@ def _build_lam_subprogram(
 
 
 def _free_term_vars(node: object) -> list[T.Var]:
-    """The term ``Var``s occurring (free) in ``node``, de-duplicated by uid, in order."""
+    """The term ``Var``s occurring **free** in ``node``, de-duplicated by uid, in order.
+
+    Vars bound by a binder on the path — a ``Lam`` (``term_vars``) or an ``LLam`` (``vars``) — are
+    NOT free in that binder's body and are excluded.  This matters for nested binders: e.g. a
+    ``NEval(Lam([y], …))`` sitting inside another ``Lam``'s body must not report ``y`` as a free var
+    of the outer body (else the outer sub-Program would declare ``y`` as an un-fed input)."""
     seen: dict[int, T.Var] = {}
 
-    def walk(n: object) -> None:
+    def walk(n: object, bound: frozenset[int]) -> None:
         if isinstance(n, T.Var):
-            seen.setdefault(n.uid, n)
+            if n.uid not in bound:
+                seen.setdefault(n.uid, n)
             return
+        if isinstance(n, T.Lam):
+            bound = bound | {v.uid for v in n.term_vars}
+        elif isinstance(n, T.LLam):
+            bound = bound | {v.uid for v in n.vars}
         for child in T._children(n):
-            walk(child)
+            walk(child, bound)
 
-    walk(node)
+    walk(node, frozenset())
     return list(seen.values())
 
 

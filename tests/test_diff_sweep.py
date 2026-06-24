@@ -176,6 +176,69 @@ def _check_default(c: FDCase, rng: np.random.Generator) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Higher-order: the second derivative via diff(diff(·)) and a SECOND central difference.
+# ---------------------------------------------------------------------------
+
+_EPS2 = 1e-4  # second differences divide by ε² — a larger step keeps roundoff in check
+_ATOL2 = 5e-3
+
+
+def _second_seeds(H: T.Term):
+    """``H = diff(diff(e,x),x) = LLam((h₂,), LLam((h,), d²body))`` — return ``(h₂, h, d²body)``, or
+    ``None`` when either order is the zero map (a term linear in ``x`` ⇒ zero second derivative)."""
+    if isinstance(H, T.Zero) or not isinstance(H, T.LLam):
+        return None
+    inner = H.body
+    if not isinstance(inner, T.LLam):
+        return None  # inner order collapsed to Zero ⇒ linear ⇒ no second derivative
+    return (H.vars[0], inner.vars[0], inner.body)
+
+
+def _fd_second_reference(c: FDCase, dval: np.ndarray, eps: float) -> np.ndarray:
+    """Central **second** difference of the total derivative along ``d``: perturb x (and every
+    marked var along its own ``Du·d``) by ``±εd`` and form ``(F₊ − 2F₀ + F₋)/ε²``."""
+    hdir = T.var("hdir2", c.x.space)
+    base = _base_feeds(c)
+    duh = {m.u: _directional_derivative(m.Du, m.Du_val, hdir, dval, base) for m in c.marked}
+
+    def evF(sign: float) -> np.ndarray:
+        feed = {_vk(v): val for v, val in c.consts.items()}
+        feed[_vk(c.x)] = c.x0 + sign * eps * dval
+        for m in c.marked:
+            feed[_vk(m.u)] = m.u0 + sign * eps * duh[m.u]
+        return _run(c.term, feed)
+
+    f0 = _run(c.term, base)
+    return (evF(+1.0) - 2.0 * f0 + evF(-1.0)) / (eps * eps)
+
+
+def _check_second_order(c: FDCase, rng: np.random.Generator) -> None:
+    """``∂²F`` along a random direction ``d`` (seed BOTH nested LLam bodies with ``d``) equals the
+    central second difference.  A loud bail (DiffError / RepresentError, e.g. an eye-mode bulk-op
+    seed) is acceptable; only a silent numeric mismatch fails."""
+    try:
+        H = diff(diff(c.term, c.x, c.deps), c.x, c.deps)
+    except (DiffError, RepresentError):
+        return
+    dval = rng.standard_normal(c.x0.shape)
+    fd2 = _fd_second_reference(c, dval, _EPS2)
+    sd = _second_seeds(H)
+    if sd is None:  # linear in x ⇒ zero second derivative
+        assert np.allclose(fd2.ravel(), 0.0, atol=_ATOL2), (
+            f"diff² gave the zero map but second FD = {fd2.ravel()}"
+        )
+        return
+    h2v, hv, body = sd
+    try:
+        got = _run(body, {**_base_feeds(c), _vk(h2v): dval, _vk(hv): dval})
+    except RepresentError:
+        return
+    assert np.allclose(got.ravel(), fd2.ravel(), rtol=2e-2, atol=_ATOL2), (
+        f"SILENT-WRONG second derivative: ∂²F[d,d] = {got.ravel()} but second FD = {fd2.ravel()}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Basis-pinning axis (reuses the basis-honesty flavor machinery).
 # ---------------------------------------------------------------------------
 
@@ -459,6 +522,29 @@ def _b_neval_lam_bilin():
     return FDCase(term=e, x=x, x0=np.array([1.0, -1, 2]), consts={Bm: Bv})
 
 
+def _b_neval_lam_nested():
+    # f(g(x)): g(y)=⟨y,y⟩ (V→scalar), f(s)=√s (scalar→scalar).  f(g(x)) = √|x|² — nested value-Lams,
+    # an inner NEval(Lam) sitting inside the outer Lam's body after the chain rule.
+    x = T.var("x", V)
+    y, sc = T.var("y", V), T.var("s", S.Scalar())
+    glam = T.Lam(((y.name, SpaceSort(V)),), T.Eval(T.inner(V), (0, 1), (y, y)), (y,))
+    flam = T.Lam(((sc.name, SpaceSort(S.Scalar())),), L.sqrt(G.wrap(sc)).node, (sc,))
+    e = T.NEval(flam, (0,), (T.NEval(glam, (0,), (x,)),))
+    return FDCase(term=e, x=x, x0=np.array([1.3, -0.7, 2.0]))
+
+
+def _b_neval_lam_compose_map():
+    # f(g(x)): g(y)=A·y (V→V), f(u)=⟨u,u⟩ (V→scalar).  f(g(x)) = ⟨Ax, Ax⟩ — composed nonlinear Lams
+    # over a vector intermediate.
+    x = T.var("x", V)
+    y, u, A = T.var("y", V), T.var("u", V), T.var("A", MS)
+    glam = T.Lam(((y.name, SpaceSort(V)),), T.Eval(A, (0,), (y,)), (y,))
+    flam = T.Lam(((u.name, SpaceSort(V)),), T.Eval(T.inner(V), (0, 1), (u, u)), (u,))
+    e = T.NEval(flam, (0,), (T.NEval(glam, (0,), (x,)),))
+    Av = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])
+    return FDCase(term=e, x=x, x0=np.array([1.0, -1, 2]), consts={A: Av})
+
+
 def _b_nested_sqrt_recip():
     x = T.var("x", V)
     inner = G.wrap(T.Eval(T.inner(V), (0, 1), (x, x)))
@@ -605,9 +691,10 @@ DIRECT_CASES = [
     ("project", _b_project), ("embed", _b_embed), ("dagger_apply", _b_dagger_apply),
     ("nested_sqrt_recip", _b_nested_sqrt_recip), ("dim2_inner", _b_dim2_inner),
     ("dim4_map", _b_dim4_map),
-    # value-Lam chain rule (task 14)
+    # value-Lam chain rule (task 14) + nested / composed nonlinear Lams (f(g(x)))
     ("neval_lam_norm", _b_neval_lam_norm), ("neval_lam_sqrt", _b_neval_lam_sqrt),
     ("neval_lam_bilin", _b_neval_lam_bilin),
+    ("neval_lam_nested", _b_neval_lam_nested), ("neval_lam_compose_map", _b_neval_lam_compose_map),
 ]
 
 MARKED_CASES = [
@@ -640,6 +727,15 @@ def test_fd_default(name, builder, needs_rng, llam_mode):
     """``J·h == central FD`` at the default basis, for both LLam lowering modes."""
     case, rng = _build(builder, needs_rng, _SEED)
     _check_default(case, rng)
+
+
+@pytest.mark.parametrize("name,builder,needs_rng", ALL_CASES, ids=[c[0] for c in ALL_CASES])
+def test_fd_second_order(name, builder, needs_rng, llam_mode):
+    """``∂²F[d,d] == central second difference`` (diff(diff(·))), for both LLam modes.  Linear terms
+    give the zero second derivative; nonlinear ones (norms, quotients, quadratics, nested Lams) carry
+    real curvature."""
+    case, rng = _build(builder, needs_rng, _SEED)
+    _check_second_order(case, rng)
 
 
 @pytest.mark.parametrize("name,builder,needs_rng", ALL_CASES, ids=[c[0] for c in ALL_CASES])

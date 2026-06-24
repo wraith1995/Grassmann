@@ -324,6 +324,24 @@ def test_neval_lowers_via_subprogram_and_runs() -> None:
     np.testing.assert_allclose(res, fv.T @ av)
 
 
+def test_nested_neval_lam_inside_lam_body_runs() -> None:
+    # A nested NEval(Lam([y], …)) sitting INSIDE another Lam's body: the inner binder ``y`` must not
+    # leak as a free var (and thus an un-fed input) of the outer sub-Program.  Regression for the
+    # _free_term_vars binder-scoping fix (surfaced by differentiating f(g(x)) through value-Lams).
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    y = C.var("y", V)
+    s = C.var("s", C.Scalar())
+    inner = C.neval(C.lam(((y.name, SpaceSort(V)),), C.eval_(C.inner(V), (0, 1), y, y), (y,)), (0,), x)
+    c = C.var("c", C.Scalar())
+    outer = C.neval(
+        C.lam(((s.name, SpaceSort(C.Scalar())),), C.sum_(s, inner), (s,)), (0,), c
+    )  # NEval(λs. s + NEval(λy.⟨y,y⟩, x), c) = c + |x|²
+    xv, cv = np.array([1.0, 2, 3]), np.array(5.0)
+    res = represent(outer).run({_var_key(x): xv, _var_key(c): cv})["result"]
+    np.testing.assert_allclose(res, cv + xv @ xv)
+
+
 def test_reused_dependent_function_shares_one_subprogram() -> None:
     # A reused Lam (the "reused dependent function" case the inline path can't package
     # cleanly) is lowered ONCE into a shared sub-Program and *called* twice.
