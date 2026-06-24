@@ -236,6 +236,63 @@ def test_bare_pinv_map_derivative(ambient) -> None:
     _fd_marked_map(e, x, J, DJ, base, Jv, rng.standard_normal((2, 2, ambient)), rng.standard_normal(2))
 
 
+def test_gauss_decomposition_of_embed() -> None:
+    # embed IS di (the pushforward of the embedding i).  Differentiating it term→term gives the
+    # second covariant derivative ∇di, which obeys the Gauss formula
+    #     ∇di(X,Y) = di(∇̄_X Y − ∇^M_X Y) + II(X,Y),   ḡ = i*h = di*h,
+    # the SAME object as our covariant connection (tangential) + second fundamental form (normal).
+    # Here ∇^M = 0 (flat parameter), h = I (standard ambient).  Every piece is checked against FD /
+    # geometry, all from J and Pinv(J) — no orthonormal basis is ever differentiated.
+    rng = np.random.default_rng(3)
+    Rt, Re = S.base("Rt", 2), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    x = T.var("x", Rt)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    Y = T.var("Y", Rt)
+    DY = T.var("DY", S.oprod(S.dual(Rt), Rt))
+    Jp = T.Pinv(J)
+    di_Y = T.Eval(J, (0,), (Y,))  # di(Y) = embed(Y) = J·Y, linear in J (iso/ImageBasis frame)
+    Jv = rng.standard_normal((2, 3))
+    D = rng.standard_normal((2, 2, 3))
+    DJv = 0.5 * (D + D.transpose(1, 0, 2))  # ∂J symmetric in dir↔tangent ⇒ a true Hessian ∂²i
+    Yv, DYv, hv = rng.standard_normal(2), rng.standard_normal((2, 2)), rng.standard_normal(2)
+    feed = {f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"Y_{Y.uid}": Yv, f"DY_{DY.uid}": DYv}
+
+    # (1) the AD second derivative ∇di(h, Y) == central FD (J and Y both moving)
+    Jd = diff(di_Y, x, deps={J.uid: DJ, Y.uid: DY})
+    seed = Jd.vars[0]
+    nabla = _run(Jd.body, {**feed, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    dYh = _run(T.Eval(DY, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    fp = _run(di_Y, {**feed, f"J_{J.uid}": Jv + 1e-6 * dJh, f"Y_{Y.uid}": Yv + 1e-6 * dYh})
+    fm = _run(di_Y, {**feed, f"J_{J.uid}": Jv - 1e-6 * dJh, f"Y_{Y.uid}": Yv - 1e-6 * dYh})
+    np.testing.assert_allclose(nabla, (fp - fm) / 2e-6, atol=1e-4)
+
+    # P = di∘di⁺ = embed∘project, the orthogonal projector onto the tangent space Img(J)
+    zc = T.var("zc", Re)
+    p_term = T.Eval(J, (0,), (T.Eval(Jp, (0,), (zc,)),))
+
+    def P_of(zval):
+        return _run(p_term, {**feed, f"zc_{zc.uid}": zval})
+
+    # (2) tangential part == di(∇̄_h Y), the induced connection: ∇̄_h Y = DY·h + Pinv(J)·((∂_h J)·Y)
+    gamma_Y = T.Eval(Jp, (0,), (T.Eval(T.Eval(DJ, (0,), (x,)), (0,), (Y,)),))  # Γ(h)·Y
+    barnabla = T.Sum((T.Eval(DY, (0,), (x,)), gamma_Y))                        # ∇̄_h Y
+    di_barnabla = _run(T.Eval(J, (0,), (barnabla,)), {**feed, f"x_{x.uid}": hv})
+    np.testing.assert_allclose(P_of(nabla), di_barnabla, atol=1e-5)
+
+    # (3) normal part == II : purely normal, and symmetric (the second fundamental form)
+    np.testing.assert_allclose(P_of(nabla - di_barnabla), 0.0, atol=1e-6)  # P·II = 0
+
+    def II_of(direction, vec):  # (∂_direction J)·vec, normal part — II(direction, vec)
+        jd = diff(T.Eval(J, (0,), (Y,)), x, deps={J.uid: DJ})  # only J marked ⇒ pure (∂J)·Y
+        s = jd.vars[0]
+        nb = _run(jd.body, {**feed, f"Y_{Y.uid}": vec, f"{s.name}_{s.uid}": direction})
+        return nb - P_of(nb)
+
+    np.testing.assert_allclose(II_of(hv, Yv), II_of(Yv, hv), atol=1e-6)  # II symmetric (∂²i is a Hessian)
+
+
 def test_moving_subspace_ad_term_to_term() -> None:
     # Term→term AD through a moving subspace, "everywhere it appears", all built from the defining
     # map J and Pinv(J) (no orthonormal basis differentiated): the FEM tangent (immersion), the
