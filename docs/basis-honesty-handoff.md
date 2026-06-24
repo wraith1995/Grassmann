@@ -59,9 +59,9 @@ contraction/reconcile path and *masks* a reconcile bug. To exercise the unsteere
 a **scalar** contraction `⟨w, …⟩` (a scalar result can't be steered) — that's how `pinv_apply`'s
 v-reconcile bug surfaced (`_c_eval_map_scalar`/`_c_compose_scalar`/`_c_pinv_apply_scalar`).
 
-The sweep currently has **31 cases, 0 xfail** (incl. unsteered `⟨w,…⟩` wrappers for eval-map/compose/
-pinv_apply/solve/trace). Run: `pytest tests/test_basis_honesty_sweep.py` (and once with
-`GRASSMANN_LLAM_INDEX=eye`).
+The sweep currently has **36 cases, 1 strict-xfail** (`lift_scalar`, see remaining work). Unsteered
+`⟨…⟩` wrappers cover eval-map/compose/pinv_apply/solve/trace/dagger/kron/permute/oprod/lift. Run:
+`pytest tests/test_basis_honesty_sweep.py` (and once with `GRASSMANN_LLAM_INDEX=eye`).
 
 ## Remaining work (prioritized — resume here)
 
@@ -69,20 +69,27 @@ pinv_apply/solve/trace). Run: `pytest tests/test_basis_honesty_sweep.py` (and on
 external/solve_apply/assert added; **#3 unsteered variants** — added, found + fixed the `pinv_apply`
 v-reconcile bug `2a0cb5d`. What remains:)*
 
-1. **Finish sweep coverage.** Still not in `CASES`: `neval_lam` (needs the `lam(binders, body,
+1. **The multi-axis / fused-slot reconcile gap** *(the live `lift_scalar` strict-xfail).* An `Eval`
+   contracting a SINGLE multi-axis (fused) operand against a fused slot in a non-default basis is not
+   reconciled: `_reconcile_pairing` is **rank-1-gated** (the gate added in `5f8410c` to avoid the
+   pullback multi-axis crash), and a fused `dual(V⊗V)` slot vs a 2-axis `x⊗y` operand also has an
+   axis-count mismatch for the axis-0 cob. So `⟨lift(m), x⊗y⟩` contracts basis-blind when `x`/`y` are
+   pinned (`25.5` vs `102`). Fix = **per-axis reconcile against a fused slot** (this also subsumes the
+   pullback case the rank-1 gate sidestepped). This is the deepest remaining item and the highest-value:
+   it's a *general* eval gap, not lift-specific.
+
+2. **Finish sweep coverage.** Still not in `CASES`: `neval_lam` (needs the `lam(binders, body,
    term_vars)` form — fiddly; has a dedicated test), `remetric` (the metric is a rank-2 var the auto-
    flavor mis-wraps), and a **multi-var `llam`**. `const`/`zeros`/`identity`/`tuple_embed`/`tuple_project`
-   have no pinnable operand (not sweep-able; covered by structural tests). The unsteered `⟨w,…⟩` wrappers
-   now cover eval-map/compose/pinv_apply/solve/trace; any other arm with a surviving slot that steers
-   (e.g. `kron`, `lift`, `permute` as sub-terms) could get a wrapper too — lower-yield, but the
-   `pinv_apply`/`trace` finds show the pattern is worth completing.
+   have no pinnable operand (not sweep-able; covered by structural tests). All steering arms now have an
+   unsteered `⟨…⟩` wrapper.
 
-2. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
+3. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
    debug mode where `_rep`, per arm, two-route-checks the realized-basis claim on the actual feeds and
    asserts. Heavy (doubles work), but it catches a dishonest tag in *any* program a user runs, not just
    tests. Optional.
 
-3. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
+4. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
    lowering is correct but slower (a runtime vmap loop; suite ~20s vs ~6s for `eye`). Path A would make
    the index a typed axis whose basis flows through `eval`'s reconciliation, so the single-einsum `eye`
    path stays correct — fast *and* correct, letting both modes collapse and the env var retire. The
@@ -120,4 +127,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1227 passed, 0 xfailed** in both modes; ruff clean (sweep: 31/31).
+Current: **1231 passed, 1 xfailed** (the documented `lift_scalar` multi-axis gap) in both modes; ruff clean (sweep: 35 pass + 1 xfail).
