@@ -665,15 +665,16 @@ def test_higher_order_is_rejected() -> None:
         diff(T.NEval(T.var("f", V), (0,), (x,)), x)
 
 
-def test_diff_into_space_position_raises() -> None:
-    # Differentiating w.r.t. the very map that DEFINES a space (here Img(f)): the projected coords
-    # depend on f through the space, which the value-level rules can't see — was a SILENT Zero,
-    # now a loud DiffError (audit bug A).  The guard must descend into space-valued fields.
+def test_project_through_moving_img_differentiates() -> None:
+    # project IS di⁺.  Differentiating project(z, Img(f)) w.r.t. the chart f (which defines the
+    # space) now COMPUTES the realization derivative ∂(f⁺)·z (the un-gated pseudoinverse derivative)
+    # instead of silently dropping it / bailing — no longer a Zero or a raise.
     W, V = S.base("W", 2), S.base("V", 4)
     f = T.var("f", S.oprod(S.dual(W), V), props=G.inj)
     z = T.var("z", V)
-    with pytest.raises(DiffError):
-        diff(T.Project(z, S.img(f)), f)
+    J = diff(T.Project(z, S.img(f)), f)  # d/df of the projection w.r.t. its defining map
+    assert not isinstance(J, T.Zero)  # the ∂f contribution is no longer silently dropped
+    assert isinstance(J, T.LLam)      # a genuine Jacobian map
 
 
 def test_section_in_img_space_differentiates_with_constant_chart() -> None:
@@ -703,10 +704,14 @@ def test_section_in_img_space_differentiates_with_constant_chart() -> None:
     np.testing.assert_allclose(np.asarray(jh).ravel(), ((fdp - fdm) / 2e-6).ravel(), atol=1e-4)
 
 
-def test_xdep_chart_in_img_space_raises() -> None:
-    # The curved-element case: the chart J ITSELF is x-dependent (marked), so the term-dependent
-    # space Img(J) — and the embedding it defines — varies with x.  The value-level Embed rule
-    # differentiates only v and misses the ∂J contribution ⇒ was SILENT-WRONG; now a loud bail.
+def test_embed_through_moving_img_differentiates() -> None:
+    # The curved-element case: embed IS di, so embed(v, Img(J)) with a MARKED (moving) chart J now
+    # differentiates term→term — d(embed) = embed(dv) + ∂(di)·v — instead of silently dropping the
+    # ∂J part.  Verified vs FD in a CONSISTENT ImageBasis (embed and Pinv use the same immersion;
+    # "bases just need to be consistent").
+    from grassmann.core import basis as B
+    from grassmann.lower.represent import default_basis, represent
+    rng = np.random.default_rng(7)
     Rt, Re = S.base("Rt", 2), S.base("Re", 3)
     J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
     imgJ = S.img(J)
@@ -716,8 +721,24 @@ def test_xdep_chart_in_img_space_raises() -> None:
     DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
     w = T.var("w", S.dual(Re))
     e = T.Eval(w, (0,), (T.embed(v, Re),))
-    with pytest.raises(DiffError):
-        diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+    Jv, vv = rng.standard_normal((2, 3)), rng.standard_normal(2)
+    Dvv, DJv = rng.standard_normal((2, 2)), rng.standard_normal((2, 2, 3))
+    wv, hv = rng.standard_normal(3), rng.standard_normal(2)
+    feed = {f"J_{J.uid}": Jv, f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"DJ_{DJ.uid}": DJv, f"w_{w.uid}": wv}
+    ib = B.ImageBasis(J)  # the immersion (iso) basis — consistent with Pinv(J)
+    env = {v.uid: ib, Dv.uid: B.basis_prod(B.dual_basis(default_basis(Rt)), ib)}
+
+    def runp(t, ff):
+        return np.asarray(represent(t, basis_env=env).run(ff)["result"], float)
+
+    jd = diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+    seed = jd.vars[0]
+    jh = runp(jd.body, {**feed, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    dvh = runp(T.Eval(Dv, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    fp = runp(e, {**feed, f"J_{J.uid}": Jv + 1e-6 * dJh, f"v_{v.uid}": vv + 1e-6 * dvh})
+    fm = runp(e, {**feed, f"J_{J.uid}": Jv - 1e-6 * dJh, f"v_{v.uid}": vv - 1e-6 * dvh})
+    np.testing.assert_allclose(jh, (fp - fm) / 2e-6, atol=1e-4)
 
 
 def test_inner_with_xdep_metric_raises_else_zero() -> None:
