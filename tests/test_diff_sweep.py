@@ -38,6 +38,7 @@ import grassmann.stdlib as L
 from grassmann.core import basis as B
 from grassmann.core import space as S
 from grassmann.core import term as T
+from grassmann.core.kinds import SpaceSort
 from grassmann.lower import represent
 from grassmann.lower.represent import RepresentError, default_basis
 from grassmann.transform.diff import DiffError, diff
@@ -425,6 +426,39 @@ def _b_dagger_apply():
     return FDCase(term=e, x=x, x0=np.array([1.0, 2, 3]), consts={A: Av})
 
 
+def _b_neval_lam_norm():
+    # NEval(λy. ⟨y,y⟩, A·x) — value-Lam chain rule through a quadratic body.
+    x = T.var("x", V)
+    A = T.var("A", MS)
+    y = T.var("y", V)
+    lam = T.Lam(((y.name, SpaceSort(V)),), T.Eval(T.inner(V), (0, 1), (y, y)), (y,))
+    e = T.NEval(lam, (0,), (T.Eval(A, (0,), (x,)),))
+    Av = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])
+    return FDCase(term=e, x=x, x0=np.array([1.0, -1, 2]), consts={A: Av})
+
+
+def _b_neval_lam_sqrt():
+    # NEval(λy. √⟨y,y⟩, x) — nonlinear body through the Lam.
+    x = T.var("x", V)
+    y = T.var("y", V)
+    body = L.sqrt(G.wrap(T.Eval(T.inner(V), (0, 1), (y, y)))).node
+    lam = T.Lam(((y.name, SpaceSort(V)),), body, (y,))
+    e = T.NEval(lam, (0,), (x,))
+    return FDCase(term=e, x=x, x0=np.array([1.3, -0.7, 2.0]))
+
+
+def _b_neval_lam_bilin():
+    # NEval(λ(u,v). ⟨u,v⟩, (x, B·x)) — two bound vars, one bound to a map-apply of x.
+    x = T.var("x", V)
+    Bm = T.var("Bm", MS)
+    u, v = T.var("u", V), T.var("v", V)
+    body = T.Eval(T.inner(V), (0, 1), (u, v))
+    lam = T.Lam(((u.name, SpaceSort(V)), (v.name, SpaceSort(V))), body, (u, v))
+    e = T.NEval(lam, (0, 1), (x, T.Eval(Bm, (0,), (x,))))
+    Bv = np.array([[1.0, 2, 0], [0, 1, 1], [1, 0, 2.0]])
+    return FDCase(term=e, x=x, x0=np.array([1.0, -1, 2]), consts={Bm: Bv})
+
+
 def _b_nested_sqrt_recip():
     x = T.var("x", V)
     inner = G.wrap(T.Eval(T.inner(V), (0, 1), (x, x)))
@@ -530,6 +564,22 @@ def _mk_oprod_marked(rng):
                   marked=[Marked(u, u0, Du, Duv), Marked(v, v0, Dv, Dvv)])
 
 
+def _mk_neval_lam_marked(rng):
+    # NEval(λy. ⟨y, c⟩, u) with u marked — chain rule through a Lam over a marked arg.
+    x = T.var("x", V)
+    u = T.var("u", V)
+    Du = T.var("Du", MS)
+    c = T.var("c", DV)
+    y = T.var("y", V)
+    lam = T.Lam(((y.name, SpaceSort(V)),), T.Eval(c, (0,), (y,)), (y,))
+    e = T.NEval(lam, (0,), (u,))
+    u0 = rng.standard_normal((3,))
+    Duv = rng.standard_normal((3, 3))
+    cv = rng.standard_normal((3,))
+    return FDCase(term=e, x=x, x0=np.array([0.0, 0, 0]), consts={c: cv},
+                  marked=[Marked(u, u0, Du, Duv)])
+
+
 def _mk_solve_apply_marked_v(rng):
     # d(A⁻¹ v)/dx with v marked (seed through the vector), A constant.
     x = T.var("x", V)
@@ -555,6 +605,9 @@ DIRECT_CASES = [
     ("project", _b_project), ("embed", _b_embed), ("dagger_apply", _b_dagger_apply),
     ("nested_sqrt_recip", _b_nested_sqrt_recip), ("dim2_inner", _b_dim2_inner),
     ("dim4_map", _b_dim4_map),
+    # value-Lam chain rule (task 14)
+    ("neval_lam_norm", _b_neval_lam_norm), ("neval_lam_sqrt", _b_neval_lam_sqrt),
+    ("neval_lam_bilin", _b_neval_lam_bilin),
 ]
 
 MARKED_CASES = [
@@ -562,6 +615,7 @@ MARKED_CASES = [
     ("compose_marked", _mk_compose_marked), ("kron_marked", _mk_kron_marked),
     ("remetric_flat", _mk_remetric_flat), ("oprod_marked", _mk_oprod_marked),
     ("solve_apply_marked_v", _mk_solve_apply_marked_v),
+    ("neval_lam_marked", _mk_neval_lam_marked),
 ]
 
 ALL_CASES = (
