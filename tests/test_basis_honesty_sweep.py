@@ -201,6 +201,9 @@ DW = C.dual(W)
 MS = C.linear_map_space(V, V)
 MVW = C.linear_map_space(V, W)  # rectangular 3→2 (stored (dom=V, cod=W) ⇒ shape (3,2))
 _MR = np.array([[2.0, 0], [1, 3], [0, 1.0]])  # a 3×2 rectangular map
+V4 = C.base("V4", 4)  # an edge dim ≠ 2/3 (generic frame)
+M4 = C.linear_map_space(V4, V4)
+_M4 = np.eye(4) + np.tril(np.ones((4, 4)), -1)
 
 
 def _vec(name, sp=V):
@@ -456,6 +459,71 @@ def _c_remetric():  # remetric(v, g) — re-home v onto WithInner(V, g)
                               g: (MS, np.array([[2.0, 0, 0], [0, 3, 0], [0, 0, 1.0]]))}
 
 
+# Same-var aliasing (a var in multiple slots) + multi-arg contraction + an edge dim (4).
+def _c_quad():  # B(x, x) — x pinned in BOTH contracted slots
+    x, Bv = _vec("x"), C.var("B", C.oprod(DV, DV))
+    return C.eval_(Bv, (0, 1), x, x), {x: (V, np.array([1.0, 2, 3])),
+                                       Bv: (C.oprod(DV, DV), np.array([[1.0, 0, 0], [0, 2, 0], [0, 0, 1.0]]))}
+
+
+def _c_self_oprod():  # x ⊗ x — x pinned in both axes
+    x = _vec("x")
+    return C.oprod_v(x, x), {x: (V, np.array([1.0, 2, 3]))}
+
+
+def _c_trilinear():  # T(a, b, c) — a 3-arg contraction (T feed-only: rank-3 has no flavor)
+    T3, a, b, c = C.var("T3", C.oprod(DV, DV, DV)), _vec("a"), _vec("b"), _vec("c")
+    return (C.eval_(T3, (0, 1, 2), a, b, c),
+            {T3: (C.oprod(DV, DV, DV), np.arange(27.0).reshape(3, 3, 3), False),
+             a: (V, np.array([1.0, 2, 0])), b: (V, np.array([0.0, 1, 3])), c: (V, np.array([2.0, 0, 1]))})
+
+
+def _c_eval_dim4():
+    f, v = C.var("f", M4), C.var("v", V4)
+    return C.eval_(f, (0,), v), {f: (M4, _M4), v: (V4, np.array([1.0, 2, 3, 4]))}
+
+
+def _c_dagger_dim4():
+    f = C.var("f", M4)
+    return C.dagger(f), {f: (M4, _M4)}
+
+
+def _c_pinv_dim4():
+    f = C.var("f", M4)
+    return C.pinv(f), {f: (M4, _M4)}
+
+
+# Nested "hard" arms — an inner reconcile/steering arm's AUTO result feeds an outer one.
+_M1 = np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])
+_M2 = np.array([[1.0, 2, 0], [0, 1, 1], [1, 0, 2.0]])
+
+
+def _c_dagger_pinv():
+    f = C.var("f", MS)
+    return C.dagger(C.pinv(f)), {f: (MS, _M1)}
+
+
+def _c_pinv_compose():
+    f, g = C.var("f", MS), C.var("g", MS)
+    return C.pinv(C.compose(f, (0,), g)), {f: (MS, _M1), g: (MS, _M2)}
+
+
+def _c_compose_pinv():
+    f, g = C.var("f", MS), C.var("g", MS)
+    return C.compose(f, (0,), C.pinv(g)), {f: (MS, _M1), g: (MS, _M2)}
+
+
+def _c_dagger_compose():
+    f, g = C.var("f", MS), C.var("g", MS)
+    return C.dagger(C.compose(f, (0,), g)), {f: (MS, _M1), g: (MS, _M2)}
+
+
+def _c_dagger_pinv_scalar():
+    w, f, v = C.var("w", DV), C.var("f", MS), _vec("v")
+    return (C.eval_(w, (0,), C.eval_(C.dagger(C.pinv(f)), (0,), v)),
+            {w: (DV, np.array([1.0, 2, 3])), f: (MS, _M1), v: (V, np.array([1.0, 0, 2]))})
+
+
 def _c_var():
     u = _vec("u")
     return u, {u: (V, np.array([1.0, 2, 3]))}
@@ -522,6 +590,13 @@ CASES = [
     _case("compose_dagger_scalar", _c_compose_dagger_scalar),
     # remaining coverage: neval_lam, multi-var llam (pullback), remetric
     _case("neval_lam", _c_neval_lam), _case("multi_llam", _c_multi_llam), _case("remetric", _c_remetric),
+    # nested hard arms (inner reconcile/steering arm feeds an outer one)
+    _case("dagger_pinv", _c_dagger_pinv), _case("pinv_compose", _c_pinv_compose),
+    _case("compose_pinv", _c_compose_pinv), _case("dagger_compose", _c_dagger_compose),
+    _case("dagger_pinv_scalar", _c_dagger_pinv_scalar),
+    # aliasing / multi-arg / edge dim
+    _case("quad", _c_quad), _case("self_oprod", _c_self_oprod), _case("trilinear", _c_trilinear),
+    _case("eval_dim4", _c_eval_dim4), _case("dagger_dim4", _c_dagger_dim4), _case("pinv_dim4", _c_pinv_dim4),
 ]
 
 
