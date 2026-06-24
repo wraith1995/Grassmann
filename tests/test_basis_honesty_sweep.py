@@ -590,3 +590,50 @@ def test_concrete_target_honesty(name, builder):
         )
     if not tested:
         pytest.skip("no sound result flavor (fused/direct-sum/large-dim result) — covered elsewhere")
+
+
+@pytest.mark.parametrize("name,builder", CASES)
+def test_pinned_operands_and_concrete_target(name, builder):
+    """The hardest corner: operands PINNED to non-default bases AND a non-default concrete RESULT basis
+    G at once.  Pin every pinnable operand to its first (non-orthonormal) flavor, represent at G, then
+    cob G→std == the default-operand std reference.  Exercises operand-honesty × the ``_match_result``
+    cob together (the operand sweep uses target=STD; the concrete-target test uses default operands)."""
+    term, var_specs = builder()
+    space = represent.__globals__["_synth"](term)
+    result_flavors = _flavors(space, "ct_")
+    if not result_flavors:
+        pytest.skip("scalar / no result flavor")
+    ref_env = {v.uid: default_basis(_norm_spec(s)[0]) for v, s in var_specs.items()}
+    ref_feeds = {_vk(v): _norm_spec(s)[1] for v, s in var_specs.items()}
+    try:
+        ref = _run(represent(term, basis_env=ref_env, target=B.STD), ref_feeds)
+    except RepresentError:
+        pytest.skip("term bailed at STD with default operands")
+    # pin every pinnable operand to its first flavor (machine-derived coords)
+    std_env, op_feeds = {}, {}
+    for v, s in var_specs.items():
+        sp, val, pinnable = _norm_spec(s)
+        flavs = _flavors(sp, f"{_vk(v)}p_") if pinnable else []
+        if not flavs:
+            std_env[v.uid] = default_basis(sp)
+            op_feeds[_vk(v)] = val
+            continue
+        basis, feeds = flavs[0]
+        std_env[v.uid] = basis
+        op_feeds[_vk(v)] = _machine_coords(v, sp, basis, feeds, val)
+        op_feeds.update(feeds)
+    tested = False
+    for G, g_feeds in result_flavors:
+        if not _basis_round_trips(space, G, g_feeds):
+            continue
+        tested = True
+        try:
+            got_G = _run(represent(term, basis_env=std_env, target=G), {**op_feeds, **g_feeds})
+        except RepresentError:
+            continue  # a loud bail is acceptable
+        std_from_G = _cob_to_std(space, G, g_feeds, got_G)
+        assert np.allclose(std_from_G, ref), (
+            f"SILENT-WRONG (pinned operands + concrete target): cob G→std gave {std_from_G}, ref {ref}"
+        )
+    if not tested:
+        pytest.skip("no sound result flavor")

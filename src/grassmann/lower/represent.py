@@ -2479,21 +2479,21 @@ def _rep_solve(
             return _match_result(ctx, rep, target)
 
 
-def _pinv_steer_ok(map_space: S.Space, want: B.Basis | None) -> bool:
-    """May a plain ``PinvOp`` be steered into ``want`` (tagged directly, no cob)?  Yes when ``want`` is
-    ORTHONORMAL (pinv is covariant under orthonormal changes), OR when the map is SQUARE — then pinv is
-    the inverse, which is covariant under ANY change.  A RECTANGULAR pinv at a non-orthonormal target is
-    NOT covariant (Moore-Penrose minimises the target-coord L2 norm, not the metric norm) ⇒ don't steer;
-    fall through to the default build + ``_match_result`` cob (correct for any ``want``)."""
-    if want is None:
-        return False
-    if _is_standard_orthonormal(want):
-        return True
+def _map_is_square(map_space: S.Space) -> bool:
+    """A rank-2 map with equal dom/cod static dims — its pinv is the INVERSE (covariant under ANY basis
+    change), unlike a rectangular Moore-Penrose pinv (covariant only under orthonormal changes)."""
     facs = _factors(map_space)
     try:
         return len(facs) == 2 and _static_dim(facs[0]) == _static_dim(facs[1])
     except Exception:
         return False
+
+
+def _pinv_steer_ok(map_space: S.Space, want: B.Basis | None) -> bool:
+    """May a plain ``PinvOp`` be steered into ``want`` (tagged directly, no cob)?  Yes when ``want`` is
+    ORTHONORMAL (pinv covariant under orthonormal changes) OR the map is SQUARE (pinv = covariant
+    inverse).  A RECTANGULAR pinv at a non-orthonormal target is NOT covariant ⇒ don't steer."""
+    return want is not None and (_is_standard_orthonormal(want) or _map_is_square(map_space))
 
 
 def _rep_pinv(
@@ -2529,7 +2529,12 @@ def _rep_pinv(
     # default build + ``_match_result`` cob (correct for any ``want``) — else silent-wrong.
     want = _resolve_target(ctx, space, target)
     f_target = _slot_swap_operand_target(want) if _pinv_steer_ok(_synth(f), want) else None
-    f_rep = _rep(f, ctx, f_target) if f_target is not None else _rep(f, ctx)
+    if f_target is not None:
+        f_rep = _rep(f, ctx, f_target)
+    elif _map_is_square(_synth(f)):
+        f_rep = _rep(f, ctx)  # inverse is covariant — operand basis OK (honest operand-derived tag)
+    else:
+        f_rep = _rep(f, ctx, target=B.STD)  # rectangular ⇒ PinvOp only honest in an orthonormal basis
     [out] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
         [pa.OutSpec("pinv", _shape_of_space(space))], note="pinv:PinvOp",
@@ -2630,8 +2635,10 @@ def _rep_pinv_apply(
     steer = _pinv_steer_ok(_synth(f), want)
     if steer:
         f_rep = _rep(f, ctx, B.basis_prod(B.dual_basis(want), v_rep.basis))
+    elif _map_is_square(_synth(f)):
+        f_rep = _rep(f, ctx)  # inverse is covariant — operand basis OK
     else:
-        f_rep = _rep(f, ctx)
+        f_rep = _rep(f, ctx, target=B.STD)  # rectangular ⇒ PinvOp only honest in an orthonormal basis
     # The "ab,a->b" einsum contracts fp's cod axis (= f's cod slot) against ``v``, so ``v`` MUST be in
     # f's cod-slot basis.  The steered path aligns f's cod slot to ``v_rep.basis`` (the cob below is a
     # no-op); when UNSTEERED ``f`` arrives in its own basis, so cob ``v`` into it (mirrors the GSVD
