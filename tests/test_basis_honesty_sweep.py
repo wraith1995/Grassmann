@@ -424,6 +424,11 @@ def _c_pinv_apply_rect():
     return C.pinv_apply(f, w), {f: (MVW, _MR), w: (W, np.array([1.0, 2]))}
 
 
+def _c_pinv_rect():  # the rectangular pinv MAP f⁺ : W→V (concrete-target honesty for _rep_pinv)
+    f = C.var("f", MVW)
+    return C.pinv(f), {f: (MVW, _MR)}
+
+
 def _c_eval_map_rect_scalar():  # ⟨w′, f·v⟩, f: V→W (unsteered)
     wp, f, v = C.var("wp", DW), C.var("f", MVW), _vec("v")
     return (C.eval_(wp, (0,), C.eval_(f, (0,), v)),
@@ -510,7 +515,8 @@ CASES = [
     _case("oprod_scalar", _c_oprod_scalar),
     # rectangular maps (V→W)
     _case("eval_map_rect", _c_eval_map_rect), _case("dagger_rect", _c_dagger_rect),
-    _case("pinv_apply_rect", _c_pinv_apply_rect), _case("eval_map_rect_scalar", _c_eval_map_rect_scalar),
+    _case("pinv_apply_rect", _c_pinv_apply_rect), _case("pinv_rect", _c_pinv_rect),
+    _case("eval_map_rect_scalar", _c_eval_map_rect_scalar),
     # vary the consumer (sum / oprod / compose)
     _case("sum_of_applies", _c_sum_of_applies), _case("oprod_of_applies", _c_oprod_of_applies),
     _case("compose_dagger_scalar", _c_compose_dagger_scalar),
@@ -552,23 +558,12 @@ def _basis_round_trips(space, basis, frame_feeds):
         return False
 
 
-_CONCRETE_TARGET_GAPS = {
-    # KNOWN real gap: a RECTANGULAR Moore-Penrose pinv at a NON-orthonormal concrete result target is
-    # silent-wrong — pinv is basis-covariant only for ORTHONORMAL changes, so a non-ortho target needs
-    # the metric (GSVD-at-target, the analogue of the operand-basis GSVD fix ac8e28a).  Square pinv/
-    # solve are the inverse ⇒ covariant ⇒ fine.  Fix: build the pinv metric in the target basis.
-    "pinv_apply_rect": "rectangular pinv at a non-orthonormal concrete target ignores the metric (GSVD-at-target)",
-}
-
-
 @pytest.mark.parametrize("name,builder", CASES)
 def test_concrete_target_honesty(name, builder):
     """The CONCRETE-target path (``_match_result``) is honest: representing a term at a non-default
     RESULT basis G and then cob'ing G→std (via the machinery) recovers the std reference.  This
     exercises ``_match_result`` (every arm's case-3 epilogue), which ``target=STD`` (``_std_result``)
     never reaches."""
-    if name in _CONCRETE_TARGET_GAPS:
-        pytest.xfail(_CONCRETE_TARGET_GAPS[name])
     term, var_specs = builder()
     space = represent.__globals__["_synth"](term)
     result_flavors = _flavors(space, "rt_")
