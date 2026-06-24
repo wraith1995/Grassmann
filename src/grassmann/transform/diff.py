@@ -193,6 +193,8 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             return _dd_kron(e, ctx)
         case LLam(vars_, body):
             return _dd_llam(e, vars_, body, ctx)
+        case NEval(fn, pos, args) if isinstance(fn, Lam):
+            return _dd_neval_lam(e, fn, pos, args, ctx)
         case NEval() | Lam() | Frame():
             raise DiffError(
                 f"diff: cannot differentiate a higher-order construct ({type(e).__name__}); "
@@ -390,6 +392,52 @@ def _dd_inverse_apply(e: Term, f: Term, v: Term, apply_inv, ctx: _DCtx) -> Term:
             f"applied vector may depend on x here"
         )
     return _sum(parts, e, ctx)
+
+
+def _dd_neval_lam(e: NEval, lam: Lam, positions: tuple[int, ...], args: tuple, ctx: _DCtx) -> Term:
+    """Value-``Lam`` chain rule (task 14). ``NEval(Lam([yₖ], body), pos, args)`` is
+    ``body[yₖ := args]``; its directional derivative differentiates the *body* with each bound var
+    ``yₖ`` carrying the directional derivative of its argument, then re-binds the args:
+
+        d(NEval(Lam([yₖ], body), pos, args)) = NEval(Lam([yₖ], d_body), pos, args)
+
+    where ``d_body = _dd(body)`` in a context that sets ``∂yₖ/∂x · h = _dd(arg_k)`` (so a bound-var
+    occurrence in the body contributes its argument's derivative — the chain rule).  The original
+    ``yₖ`` occurrences that survive ``_dd``'s product rule are re-bound to ``args`` by the wrapping
+    ``NEval``; the substituted derivatives reference only outer vars (``args`` cannot mention the
+    binder), so the re-binding leaves them untouched.
+
+    Only a **value**-producing ``Lam`` is differentiable: a Space/Type body (a SpaceFunction) or a
+    space/nat binder/argument is genuinely higher-order and stays a :class:`DiffError`."""
+    from grassmann.core.kinds import SpaceSort
+
+    if not is_term(lam.body):
+        raise DiffError("diff: cannot differentiate a Lam with a non-value (Space/Type/Nat) body")
+    if any(not isinstance(sort, SpaceSort) for _n, sort in lam.binders):
+        raise DiffError("diff: cannot differentiate a Lam with a Space/Nat binder (higher-order)")
+    if any(not is_term(a) for a in args):
+        raise DiffError("diff: cannot differentiate an NEval that applies a Space/Nat argument")
+    value_slots = [k for k, (_n, sort) in enumerate(lam.binders) if isinstance(sort, SpaceSort)]
+    slot_to_var = dict(zip(value_slots, lam.term_vars, strict=False))
+    arg_at_slot = dict(zip(positions, args, strict=True))
+    if any(v.uid == ctx.x.uid for v in slot_to_var.values()):
+        raise DiffError("diff: the differentiation variable is bound by a Lam in the term")
+    # Directional derivative of each argument (in the OUTER context — args are outer terms).
+    darg: dict[int, Term] = {}
+    for slot, yk in slot_to_var.items():
+        if slot not in arg_at_slot:
+            raise DiffError(f"diff: NEval value slot {slot} of the Lam has no supplied argument")
+        darg[yk.uid] = _dd(arg_at_slot[slot], ctx)
+    new_deps = dict(ctx.deps)
+    new_ddval = dict(ctx._ddval)  # after computing darg ⇒ shares any outer None-dep allocations
+    for yk in slot_to_var.values():
+        new_deps[yk.uid] = None  # marked dependent; its value is supplied via _ddval (below)
+        new_ddval[yk.uid] = darg[yk.uid]
+    inner = _DCtx(x=ctx.x, h=ctx.h, deps=new_deps, _ddval=new_ddval)
+    dbody = _dd(lam.body, inner)
+    if isinstance(dbody, Zero):
+        return _zero(e, ctx)
+    return NEval(Lam(lam.binders, dbody, lam.term_vars), positions, args)
 
 
 def _dd_llam(e: LLam, vars_: tuple[Var, ...], body: Term, ctx: _DCtx) -> Term:
