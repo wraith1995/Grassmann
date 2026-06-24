@@ -6,13 +6,16 @@
 
 ## Meaning
 
-**Applied exact solve** `SolveApply(f, v)` — `f⁻¹ · v`, solving `f·x = v` for a square full-rank
-`f` without materializing `f⁻¹`. Lowers to a `SolveOp` (a linear solve), which is cheaper and
-better-conditioned than forming the inverse then multiplying.
+**Applied exact solve** `SolveApply(f, v)` — apply the inverse map in `Eval`'s canonical
+contraction-view (a map's input is its `Dual` slot): `SolveApply(f, v) ≡ Eval(Solve(f), (0,), v)
+= solve(fᵀ, v)` for a square full-rank `f`, without materializing `f⁻¹`. This satisfies the
+application invariant `XApply(f, v) ≡ Eval(X(f), v)` shared with `PinvApply` (see
+`plans/91-application-conventions.md`). Lowers structurally to `Solve(f)` (an inverse map) applied
+by an `Eval` contraction — honest per-axis bases, unlike a bare `SolveOp`.
 
 ## Worked example
 
-Solve `f·x = v` for `x`.
+Apply the inverse map (contraction-view): `Eval(Solve(f), v) = solve(fᵀ·x = v)`.
 
 ```python
 solve(f)(v)
@@ -36,7 +39,7 @@ solve(f)(v)
 **Output**
 
 ```
-[-0.831,  1.552, -1.979]
+[-17.708,  -0.773,   5.197]
 ```
 
 ??? note "Test (literal source — input · run · expected assertion)"
@@ -48,7 +51,9 @@ solve(f)(v)
     A = np.round(np.random.default_rng(7).standard_normal((3, 3)), 2)
     vv = [1.0, 2.0, 3.0]
     got = _run(C.solve_apply(f, v), {f: A, v: vv})
-    _ck(np.allclose(A @ got, vv))
+    # Convention (plans/91): SolveApply(f,v) ≡ Eval(Solve(f),(0,),v) = solve(fᵀ, v) — apply the
+    # inverse MAP in Eval's canonical contraction-view (input = the Dual slot).
+    _ck(np.allclose(A.T @ got, vv))
     ```
 
 _Executed and asserted in `tests/test_doc_examples.py`._

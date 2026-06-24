@@ -2561,33 +2561,13 @@ def _rep_solve_apply(
     e: T.SolveApply, f: T.Term, v: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    # ``SolveOp`` is ``np.linalg.solve(f, v) = f⁻¹·v`` with ``f`` stored ``(dom,cod)`` — it
-    # contracts ``v`` against f's domain axis rather than the Eval-style cod pairing, so it is
-    # NOT cleanly basis-covariant (no single honest per-axis tag exists for a non-default operand
-    # basis).  Honest-tagging is intractable, so under a non-AUTO target we take the roadmap
-    # FALLBACK: build both operands in their default basis, making the ``default_basis`` result
-    # tag genuinely honest.  AUTO is byte-identical (no operand cob).
-    if target is not B.AUTO:
-        f_rep = _rep(f, ctx, target=B.STD)
-        v_rep = _rep(v, ctx, target=B.STD)
-    else:
-        f_rep = _rep(f, ctx)
-        v_rep = _rep(v, ctx)
-    _assert_square_full_rank(ctx, f_rep.array, note="assert:solveapply-bij")
-    space = _synth(e)
-    [out] = ctx.prog.emit_stmt(
-        pa.SolveOp(), [f_rep.array, v_rep.array],
-        [pa.OutSpec("solve", _shape_of_space(space))], note="solveapply:SolveOp",
-    )
-    rep = Rep(out, default_basis(space), space)
-    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
-    match target:
-        case B.TargetBasis.STD:
-            return _std_result(ctx, rep)
-        case B.TargetBasis.AUTO:
-            return rep
-        case _:
-            return _match_result(ctx, rep, target)
+    # CONVENTION (plans/91): SolveApply obeys the application invariant
+    #   ``XApply(f, v) ≡ Eval(X(f), (0,), (v,))`` — apply the inverse MAP via Eval (the canonical
+    # contraction-view), i.e. ``Eval(Solve(f),(0,),(v,)) = solve(fᵀ, v)``.  This makes it
+    # consistent with ``PinvApply`` and with how ``diff`` already differentiates it, and inherits
+    # Eval/Solve's honest per-axis basis handling.  (Was ``SolveOp = solve(f, v) = f⁻¹·v``, the
+    # OPPOSITE — cod-axis — orientation, which was not cleanly basis-covariant.)
+    return _rep(T.Eval(T.Solve(f), (0,), (v,)), ctx, target)
 
 
 def _rep_pinv_apply(
