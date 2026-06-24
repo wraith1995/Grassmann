@@ -370,6 +370,44 @@ def spaces_iso(a: Space, b: Space) -> bool:
     return normalize_space(a) == normalize_space(b)
 
 
+def _static_space_dim(s: Space) -> int | None:
+    """The static (concrete) dimension of a space, or ``None`` if it is symbolic."""
+    from grassmann.core.space import (
+        DimLit,
+        Dual,
+        OPlus,
+        OPlusRep,
+        OProd,
+        Scalar,
+        WithInner,
+    )
+
+    if isinstance(s, Scalar):
+        return 1
+    if isinstance(s, (Dual, WithInner)):
+        return _static_space_dim(s.space)
+    if isinstance(s, OPlusRep):
+        inner = _static_space_dim(s.space)
+        return s.count.value * inner if isinstance(s.count, DimLit) and inner is not None else None
+    if isinstance(s, OProd):
+        prod = 1
+        for f in s.spaces:
+            d = _static_space_dim(f)
+            if d is None:
+                return None
+            prod *= d
+        return prod
+    if isinstance(s, OPlus):
+        total = 0
+        for c in s.spaces:
+            d = _static_space_dim(c)
+            if d is None:
+                return None
+            total += d
+        return total
+    return None
+
+
 def _is_num(x: object) -> bool:
     return isinstance(x, (int, float))
 
@@ -804,6 +842,39 @@ def rule_project_embed(node: Term) -> Term | None:
     return None
 
 
+def rule_kron(node: Term) -> Term | None:
+    """``Kron`` (map ⊗) algebra: the identity is multiplicative — ``Id(a)⊗Id(b) → Id(a⊗b)`` —
+    and ``Kron`` is a **bifunctor** — ``(f⊗g)∘(h⊗k) → (f∘h)⊗(g∘k)``. Value-exact (verified);
+    collapses toward fewer ``Kron``/``Compose`` nodes (and toward ``Identity``)."""
+    from grassmann.core.space import oprod
+
+    if isinstance(node, Kron):
+        if isinstance(node.f, Identity) and isinstance(node.g, Identity):
+            return Identity(oprod(node.f.space, node.g.space))
+        return None
+    if (
+        isinstance(node, Compose)
+        and node.positions == (0,)
+        and len(node.gs) == 1
+        and isinstance(node.f, Kron)
+        and isinstance(node.gs[0], Kron)
+    ):
+        (a, b), (c, d) = (node.f.f, node.f.g), (node.gs[0].f, node.gs[0].g)
+        return Kron(Compose(a, (0,), (c,)), Compose(b, (0,), (d,)))
+    return None
+
+
+def rule_trace_identity(node: Term) -> Term | None:
+    """``tr(Id(s)) → |s|`` (the dimension), when ``s`` has a static dimension — the full trace of
+    the 2-factor identity map."""
+    if not isinstance(node, Trace) or not isinstance(node.f, Identity):
+        return None
+    if {node.i, node.j} != {0, 1}:
+        return None
+    d = _static_space_dim(node.f.space)
+    return Lit(float(d)) if d is not None else None
+
+
 def rule_permute(node: Term) -> Term | None:
     """Collapse reshape ``Permute`` corrections: an identity permutation vanishes, and two
     nested permutations compose. Value-exact (a permutation of tensor axes). Keeps the
@@ -1108,6 +1179,8 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_dagger_push,
     rule_musical,
     rule_inverse_compose,
+    rule_kron,
+    rule_trace_identity,
     rule_project_embed,
     rule_permute,
     rule_tuplepermute,

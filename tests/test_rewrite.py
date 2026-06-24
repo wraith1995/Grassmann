@@ -916,6 +916,37 @@ def test_applied_inverse_cancels_via_fold() -> None:
     assert simplify(T.Eval(T.Pinv(fi), (0,), (T.Eval(fi, (0,), (x,)),))) == x
 
 
+# ===========================================================================
+# Kron / Trace algebra.
+# ===========================================================================
+
+
+def test_kron_algebra() -> None:
+    A, B = S.base("A", 2), S.base("B", 3)
+    f, g = T.var("f", S.linear_map_space(A, A)), T.var("g", S.linear_map_space(B, B))
+    h, k = T.var("h", S.linear_map_space(A, A)), T.var("k", S.linear_map_space(B, B))
+    # Id ⊗ Id → Id ; and the bifunctor law (f⊗g)∘(h⊗k) → (f∘h)⊗(g∘k).
+    assert simplify(T.Kron(T.Identity(A), T.Identity(B))) == T.Identity(S.oprod(A, B))
+    assert simplify(T.Compose(T.Kron(f, g), (0,), (T.Kron(h, k),))) == T.Kron(
+        T.Compose(f, (0,), (h,)), T.Compose(g, (0,), (k,))
+    )
+    feed = {
+        _key(f): np.array([[1.0, 2.0], [3.0, 4.0]]), _key(g): np.arange(9.0).reshape(3, 3),
+        _key(h): np.array([[0.0, 1.0], [1.0, 0.0]]), _key(k): np.eye(3),
+    }
+    _same(
+        T.Compose(T.Kron(f, g), (0,), (T.Kron(h, k),)),
+        simplify(T.Compose(T.Kron(f, g), (0,), (T.Kron(h, k),))),
+        feed,
+    )
+
+
+def test_trace_of_identity_is_dimension() -> None:
+    A, B = S.base("A", 2), S.base("B", 3)
+    assert simplify(T.Trace(T.Identity(A), 1, 0)) == T.Lit(2.0)
+    assert simplify(T.Trace(T.Identity(S.oprod(A, B)), 1, 0)) == T.Lit(6.0)  # |A⊗B| = 6
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
