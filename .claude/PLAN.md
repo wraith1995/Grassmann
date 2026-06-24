@@ -36,12 +36,16 @@ Decisions locked with user:
   from embed/__init__ + grassmann/__init__. Value-verified through G.* surface.
 - Step F: nat-binder β — _subst_nat_in_term (generic DimVar subst over Term/Space/Dim);
   rule_beta_neval handles SpaceSort + SPACE + NAT binders, full + partial application.
-- 36 tests in tests/test_rewrite.py; full suite 1405 passed / 6 skipped; ruff clean.
-- Originally-scoped 1+2+4 DONE (1=A canonicalization, 2=E embed, 4=F nat-β) + bonus B.
+- Step C: up-to-iso canonical ⊗ ordering — order_otimes config (default OFF; AGGRESSIVE_SOP
+  preset ON); rule_order_otimes emits Permute(OProdV(sorted), σ⁻¹) as the output correction 𝒞;
+  rule_permute collapses identity/nested Permutes (canonicity). Verified: value-exact via 𝒞,
+  idempotent, and TWO spellings of the same value → identical NF (real up-to-iso canonicity).
+- Commits: 5aa1cd8 (A/B/E/F) on branch rewrite-sop-normal-form (pushed). Step C committed after.
+- 41 tests in tests/test_rewrite.py; full suite 1410 passed / 6 skipped; ruff clean.
+- Originally-scoped 1+2+4 DONE (1=A canonicalization, 2=E embed, 4=F nat-β) + bonus B + C.
 
-### Next
-- Step C: up-to-iso canonical ⊗ (and optional ⊕) factor order + assemble output correction 𝒞;
-  prove run-equality incl. 𝒞. (the big one; Permute/reshape bookkeeping; needs order_otimes
-  /order_oplus config switches + 𝒞 representation)
-- Deferred: cross-factor Trace→Eval; Dagger/Solve/Pinv push-to-leaves; rational scalar-NF;
-  α/De-Bruijn binder canonicalization; ⊕-dissolve-to-injections (most aggressive variant).
+### Next / deferred
+- order_oplus (⊕ component ordering) — needs a ⊕-block-permute correction (no direct IR node;
+  build from TupleEmbed/TupleProject). Flag not yet added.
+- cross-factor Trace→Eval; Dagger/Solve/Pinv push-to-leaves; rational scalar-NF;
+  α/De-Bruijn binder canonicalization; ⊕-dissolve-to-injections; hoist 𝒞 to a single top wrapper.
