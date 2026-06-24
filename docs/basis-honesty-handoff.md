@@ -19,7 +19,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 
 ## What's done (this session)
 
-**Eight silent-wrong bugs fixed**, all of the class above:
+**Nine silent-wrong bugs fixed**, all of the class above:
 
 | arm | the lie | fix | commit |
 |---|---|---|---|
@@ -30,6 +30,8 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 | `embed` subspace list | `_ffs_immersion` gives sub-internal cols ⇒ reshape crash | gate the literal-col branch on `ImageBasis` | `a1268d4` |
 | `eval`/`compose` ortho pairing | `_reconcile_pairing` fired only for *immersed* bases | fire on not-pairing-consistent (rank-1 gated) | `5f8410c` |
 | `inner`/`flat`/`dot` metric Eval | Gram built/tagged `default` for a non-immersed operand | build + tag in any **non-default** operand basis | `529b5d1` |
+| `sharp` metric Eval (covector operand) | `_peel_one_dual` gives the wrong primal for a literal covector basis | `_covector_primal` (DualBasis peels; literal covector → `dual_basis`) | `daa4434` |
+| `pinv_apply` unsteered | `v` left unreconciled vs f's cod-slot when not steered (`⟨w,f⁺v⟩`) | cob `v` to f's cod-slot before the matvec (no-op when steered) | `2a0cb5d` |
 
 The `vmap` LLam lowering is the **default** (`GRASSMANN_LLAM_INDEX=eye` = the old fast path, which
 raises on a cod-non-default body).
@@ -48,39 +50,37 @@ Two rules baked in (learned the hard way): **coords in basis B are derived via t
 (`represent(op, target=B)`), never hand-transforms; and **a loud `RepresentError` is acceptable**.
 Flavors: non-orthonormal `list_basis`, `ORTHONORMALIZE` (non-standard orthonormal), `BasisProd` map
 (non-ortho + ortho). **To add an arm: append a `_case(...)` to `CASES`** — `make_term() -> (term,
-{var: (space, std_value)})`; the sweep auto-applies the flavors. A known-broken arm is a
+{var: (space, std_value)})`; the sweep auto-applies the flavors. A known-broken arm can be marked a
 `strict-xfail` (XPASSes + flags removal when fixed).
 
-Run: `pytest tests/test_basis_honesty_sweep.py` (and once with `GRASSMANN_LLAM_INDEX=eye`).
+**Unsteered variants.** Arms with a surviving slot **steer at `target=STD`**, which avoids the
+contraction/reconcile path and *masks* a reconcile bug. To exercise the unsteered path, wrap the arm in
+a **scalar** contraction `⟨w, …⟩` (a scalar result can't be steered) — that's how `pinv_apply`'s
+v-reconcile bug surfaced (`_c_eval_map_scalar`/`_c_compose_scalar`/`_c_pinv_apply_scalar`).
+
+The sweep currently has **29 cases, 0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
+with `GRASSMANN_LLAM_INDEX=eye`).
 
 ## Remaining work (prioritized — resume here)
 
-1. **`sharp_apply` metric-Eval covector variance** *(the live strict-xfail in the sweep).* `Sharp` is
-   the (2,0) inverse metric on a **covector** operand; building it in a non-`DualBasis` covector basis
-   hits a result-slot variance gap (`_rep_sharp` peels a dual that isn't there → space-mismatch). It's
-   scoped out in `_rep_eval_operands` (kept on build-in-default ⇒ silent-wrong for a non-standard
-   covector). Fix: handle the covector-operand variance in `_rep_sharp`/`_sharp_map_basis` (the
-   "primal" of a covector `ListBasis` is `dual_basis(b)`, not `peel_one_dual(b)`), then drop the
-   scope-out and the xfail. This is the most concrete next bug.
+*(Done since first draft: **#1 sharp** covector variance — fixed `daa4434`; **#2 coverage** — var/
+external/solve_apply/assert added; **#3 unsteered variants** — added, found + fixed the `pinv_apply`
+v-reconcile bug `2a0cb5d`. What remains:)*
 
-2. **Round out sweep coverage.** Arms not yet in `CASES` (some covered by other tests, but not the
-   systematic sweep): `var`/`const`/`zeros`/`identity`/`external`, `neval_lam`, `solve_apply`,
-   `remetric`, `tuple_embed`/`tuple_project`, `assert`, and a **multi-var `llam`**. Each is a one-line
-   `_case`. Given the sweep found 3 bugs from ~5 added cases, completing it may find more.
+1. **Finish sweep coverage.** Still not in `CASES`: `neval_lam` (needs the `lam(binders, body,
+   term_vars)` form — fiddly; has a dedicated test), `remetric` (the metric is a rank-2 var the auto-
+   flavor mis-wraps), a **multi-var `llam`**, and the **unsteered variants for `solve`/`trace`** (only
+   `eval-map`/`compose`/`pinv_apply` got the `⟨w,…⟩` wrapper). `const`/`zeros`/`identity`/`tuple_embed`/
+   `tuple_project` have no pinnable operand (not sweep-able; covered by structural tests). Adding the
+   `solve`/`trace` unsteered wrappers is the highest-value remaining check (they steer, so a reconcile
+   bug there is currently masked — same shape as the `pinv_apply` bug just found).
 
-3. **The sweep's structural blind spot.** Arms that **steer at `target=STD`** (`eval`-map, `compose`,
-   `trace`, `solve`, `pinv`) have their STD route steered, which *avoids* the reconcile path — so a
-   reconcile bug there is **masked** (it only surfaces at `AUTO`-pinned). The ortho-pairing bug was
-   caught only because scalar `eval`/`⟨a,x⟩` doesn't steer. Enhancement: add an **AUTO-pinned
-   round-trip** variant (pin operands, `target=AUTO`, then cob the result — in the known operand-derived
-   basis — to std and compare to ref). This exercises the unsteered contraction.
+2. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
+   debug mode where `_rep`, per arm, two-route-checks the realized-basis claim on the actual feeds and
+   asserts. Heavy (doubles work), but it catches a dishonest tag in *any* program a user runs, not just
+   tests. Optional.
 
-4. **Option (3): runtime self-check.** The literal form of "consumer always checks": a
-   `GRASSMANN_CHECK_BASIS=1` debug mode where `_rep`, per arm, two-route-checks the realized-basis claim
-   on the actual feeds and asserts. Heavy (doubles work), but it catches a dishonest tag in *any*
-   program a user runs, not just tests. Optional.
-
-5. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
+3. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
    lowering is correct but slower (a runtime vmap loop; suite ~20s vs ~6s for `eye`). Path A would make
    the index a typed axis whose basis flows through `eval`'s reconciliation, so the single-einsum `eye`
    path stays correct — fast *and* correct, letting both modes collapse and the env var retire. The
@@ -94,7 +94,10 @@ Run: `pytest tests/test_basis_honesty_sweep.py` (and once with `GRASSMANN_LLAM_I
     pairing-consistent; rank-1 gated for `_reconcile_pairing`). `_basis_pairing_consistent`,
     `_pairing_partner`, `_slot_basis_at` (rank-1 = its own slot 0).
   - `_rep_eval_operands` / `_operand_metric_basis` — the metric-Eval seam (build the Gram in any
-    non-default operand basis; sharp scoped out). `_rep_metric`, `_inner_map_basis`, `_sharp_map_basis`.
+    non-default operand basis). `_rep_metric`, `_inner_map_basis`, `_sharp_map_basis`, `_covector_primal`
+    (the primal of a covector basis — DualBasis peels, a literal covector basis is `dual_basis`'d).
+  - `_rep_pinv_apply` — GSVD branch (metric in f's slots) + PinvOp branch; both cob `v` to f's cod-slot
+    before the `"ab,a->b"` matvec (the unsteered-reconcile fix).
   - `_rep_llam` → `_rep_llam_vmap` (default) / `_rep_llam_eye`; `GRASSMANN_LLAM_INDEX`.
   - `_is_immersed_metric_basis` (immersed = ImageBasis / non-ortho list), `_is_standard_orthonormal`
     (= "orthonormal", **not** "is the default basis" — a footgun; use `_basis_eq(b, default_basis(sp))`
@@ -115,4 +118,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1217 passed, 1 xfailed** (the documented `sharp_apply` gap) in both modes; ruff clean.
+Current: **1225 passed, 0 xfailed** in both modes; ruff clean (sweep: 29/29).
