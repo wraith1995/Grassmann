@@ -3271,12 +3271,11 @@ def _rep_lift(
     # The reshape FUSES/UNFUSES axes, so the operand's per-axis bases cannot be re-wrapped as
     # a single honest tensor basis of the reshaped layout (a fused axis would need a genuine
     # Kronecker-product basis object).  Honest-tagging is intractable, so we take the roadmap's
-    # FALLBACK: under a non-AUTO target, cob the operand to its default basis first, making the
-    # ``default_basis`` result tag genuinely honest.  Under AUTO this is skipped — byte-identical.
-    if target is not B.AUTO:
-        v_rep = _rep(e.vector, ctx, target=B.STD)
-    else:
-        v_rep = _rep(e.vector, ctx)
+    # FALLBACK: cob the operand to its default basis first, making the ``default_basis`` result tag
+    # genuinely honest.  ALWAYS (incl. AUTO) — a default operand cob is a no-op (byte-identical), but a
+    # NON-default operand under AUTO (e.g. ``lift`` as a sub-term) must still be coerced, else the
+    # ``default_basis`` tag lies about a non-default-operand result (silent-wrong, `⟨lift(m),x⊗y⟩`).
+    v_rep = _rep(e.vector, ctx, target=B.STD)
     space = _synth(e)
     out_shape = _shape_of_space(space)
     [out] = ctx.prog.emit_stmt(
@@ -3303,14 +3302,12 @@ def _rep_kron(
     # The Kron block FUSES the operands' slots (dom = a0⊗a1, cod = b0⊗b1), so the per-slot
     # operand bases cannot be re-wrapped as honest factors of the 2-axis fused result (a fused
     # axis would need a genuine Kronecker-product basis object).  Honest-tagging is intractable,
-    # so under a non-AUTO target we take the roadmap FALLBACK: build the operands in their default
-    # basis, making the ``default_basis`` result tag genuinely honest.  AUTO is byte-identical.
-    if target is not B.AUTO:
-        f_rep = _rep(f, ctx, target=B.STD)
-        g_rep = _rep(g, ctx, target=B.STD)
-    else:
-        f_rep = _rep(f, ctx)
-        g_rep = _rep(g, ctx)
+    # so we take the roadmap FALLBACK: build the operands in their default basis, making the
+    # ``default_basis`` result tag genuinely honest.  ALWAYS (incl. AUTO) — a default operand cob is a
+    # no-op (byte-identical), but a NON-default operand under AUTO (kron as a sub-term) must still be
+    # coerced, else the ``default_basis`` tag lies.  Free labels (a differentiated Kron) ride the cob.
+    f_rep = _rep(f, ctx, target=B.STD)
+    g_rep = _rep(g, ctx, target=B.STD)
     space = _synth(e)
     # f : (a0,b0), g : (a1,b1) ⇒ result[(a0 a1),(b0 b1)] = f[a0,b0] g[a1,b1] (Kron block).
     # A *differentiated* Kron'd map (e.g. Kron(I,…,Γ(h),…,I) for a per-slot connection) may

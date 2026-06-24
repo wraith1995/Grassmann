@@ -58,36 +58,41 @@ def _frame_feeds(frame_vars, M):
 # ---------------------------------------------------------------------------
 
 
+def _factor_basis(factor, tag, ortho):
+    """A non-default basis for ONE rank-1 factor, respecting its variance: a ``Dual(W)`` factor →
+    ``dual_basis(list over W)`` (the map-slot convention `_peel_one_dual` expects); a primal ``W`` →
+    ``list over W``.  ``ortho`` ⇒ an ORTHONORMALIZE (non-standard orthonormal) frame.  Returns
+    ``(basis, frame_feeds)``."""
+    import grassmann.core.space as S
+    n = represent.__globals__["_static_dim"](factor)
+    M = _LB3 if n == 3 else _LB2
+    kw = {"reduce": C.Reduce.ORTHONORMALIZE} if ortho else {}
+    if isinstance(factor, S.Dual):
+        vs = [C.var(f"{tag}{i}", factor.space) for i in range(n)]
+        return B.dual_basis(B.list_basis(*vs, **kw)), _frame_feeds(vs, M)
+    vs = [C.var(f"{tag}{i}", factor) for i in range(n)]
+    return B.list_basis(*vs, **kw), _frame_feeds(vs, M)
+
+
 def _flavors(space, tag):
-    """Non-default basis flavors valid for ``space``: a non-orthonormal list, an ORTHONORMALIZE list
-    (vector/covector spaces), and a BasisProd(dual(lb), lb) for a rank-2 map space."""
+    """Non-default basis flavors for ``space``: a non-orthonormal and an ORTHONORMALIZE frame.  Rank-1
+    (vector/covector) → a literal ``list_basis`` over the space (so a covector gets a literal covector
+    basis, exercising `_covector_primal`).  Rank-2 → a ``BasisProd`` of per-factor variance-correct
+    bases (`_factor_basis`) — so ``oprod(V,V)`` is primal⊗primal, a map ``dual(V)⊗V`` is dual⊗primal."""
     out = []
     factors = represent.__globals__["_factors"](space)
-    if len(factors) == 1:  # rank-1: a vector or covector space
+    if len(factors) == 1:  # rank-1: a vector or covector space — literal list over the space
         n = represent.__globals__["_static_dim"](space)
         M = _LB3 if n == 3 else _LB2
         fv = [C.var(f"{tag}l{i}", space) for i in range(n)]
         out.append((B.list_basis(*fv), _frame_feeds(fv, M)))
         ov = [C.var(f"{tag}o{i}", space) for i in range(n)]
         out.append((B.list_basis(*ov, reduce=C.Reduce.ORTHONORMALIZE), _frame_feeds(ov, M)))
-    elif len(factors) == 2:  # rank-2 map: dom ⊗ cod
-        dom, cod = factors
-        nd = represent.__globals__["_static_dim"](dom)
-        nc = represent.__globals__["_static_dim"](cod)
-        # non-orthonormal map basis BasisProd(dual(lb), lb)
-        dv = [C.var(f"{tag}d{i}", _primal_space(dom)) for i in range(nd)]
-        cv = [C.var(f"{tag}c{i}", cod) for i in range(nc)]
-        feeds = {**_frame_feeds(dv, _LB3 if nd == 3 else _LB2),
-                 **_frame_feeds(cv, _LB3 if nc == 3 else _LB2)}
-        out.append((B.basis_prod(B.dual_basis(B.list_basis(*dv)), B.list_basis(*cv)), feeds))
-        # ORTHONORMALIZE (non-standard orthonormal) map basis — Gram=I but ≠ default
-        odv = [C.var(f"{tag}od{i}", _primal_space(dom)) for i in range(nd)]
-        ocv = [C.var(f"{tag}oc{i}", cod) for i in range(nc)]
-        ofeeds = {**_frame_feeds(odv, _LB3 if nd == 3 else _LB2),
-                  **_frame_feeds(ocv, _LB3 if nc == 3 else _LB2)}
-        oref = C.Reduce.ORTHONORMALIZE
-        out.append((B.basis_prod(B.dual_basis(B.list_basis(*odv, reduce=oref)),
-                                 B.list_basis(*ocv, reduce=oref)), ofeeds))
+    elif len(factors) == 2:  # rank-2 — per-factor variance-correct
+        for ortho, suff in [(False, "n"), (True, "o")]:
+            b0, f0 = _factor_basis(factors[0], f"{tag}{suff}0_", ortho)
+            b1, f1 = _factor_basis(factors[1], f"{tag}{suff}1_", ortho)
+            out.append((B.basis_prod(b0, b1), {**f0, **f1}))
     return out
 
 
@@ -508,3 +513,40 @@ def test_basis_honesty_sweep(name, builder):
     """No arm is silent-wrong: a non-default operand basis either matches the std reference or raises."""
     term, var_specs = builder()
     _sweep(lambda: term, var_specs)
+
+
+def _cob_to_std(space, basis, frame_feeds, value):
+    """``value`` (coords in ``basis``) re-expressed in std, via the machinery (a fresh result var pinned
+    to ``basis``, target=STD).  The inverse of ``_machine_coords`` — used to check a CONCRETE-target
+    (``_match_result``) result was honestly tagged in ``basis``."""
+    res = C.var("res_cob", space)
+    prog = represent(res, basis_env={res.uid: basis}, target=B.STD)
+    return _run(prog, {_vk(res): value, **frame_feeds})
+
+
+@pytest.mark.parametrize("name,builder", CASES)
+def test_concrete_target_honesty(name, builder):
+    """The CONCRETE-target path (``_match_result``) is honest: representing a term at a non-default
+    RESULT basis G and then cob'ing G→std (via the machinery) recovers the std reference.  This
+    exercises ``_match_result`` (every arm's case-3 epilogue), which ``target=STD`` (``_std_result``)
+    never reaches."""
+    term, var_specs = builder()
+    space = represent.__globals__["_synth"](term)
+    result_flavors = _flavors(space, "rt_")
+    if not result_flavors:
+        pytest.skip("scalar / no result flavor — concrete target is trivial")
+    ref_env = {v.uid: default_basis(_norm_spec(s)[0]) for v, s in var_specs.items()}
+    op_feeds = {_vk(v): _norm_spec(s)[1] for v, s in var_specs.items()}
+    try:
+        ref = _run(represent(term, basis_env=ref_env, target=B.STD), op_feeds)
+    except RepresentError:
+        pytest.skip("term bailed at STD with default operands")
+    for G, g_feeds in result_flavors:
+        try:
+            got_G = _run(represent(term, basis_env=ref_env, target=G), {**op_feeds, **g_feeds})
+        except RepresentError:
+            continue  # a loud bail on the concrete target is acceptable
+        std_from_G = _cob_to_std(space, G, g_feeds, got_G)
+        assert np.allclose(std_from_G, ref), (
+            f"DISHONEST concrete-target tag: target=G then cob G→std gave {std_from_G}, ref {ref}"
+        )
