@@ -179,6 +179,8 @@ def test_diff_through_marked_map_applied() -> None:
 
 
 def test_inverse_through_map_is_rejected() -> None:
+    # The APPLIED inverse SolveApply(A, b) with A marked still routes the seed through the bulk op
+    # ⇒ rejected.  (The BARE form Eval(Solve(A), b) is now supported — see below.)
     V = S.base("V", 2)
     x = T.var("x", V)
     A = T.var("A", S.oprod(S.dual(V), V), props=G.bij)
@@ -186,6 +188,52 @@ def test_inverse_through_map_is_rejected() -> None:
     DA = T.var("DA", S.oprod(S.dual(V), S.oprod(S.dual(V), V)))
     with pytest.raises(DiffError):
         diff(T.SolveApply(A, b), x, deps={A.uid: DA})
+
+
+def _fd_marked_map(term, x, mapvar, Dvar, base_feed, mapval, Dval, hv, atol=1e-4):
+    """FD-check diff(term, x, {mapvar: Dvar}) where term depends on x only through the marked map:
+    perturb mapval along ∂map·h (machinery) and central-difference."""
+    J = diff(term, x, deps={mapvar.uid: Dvar})
+    seed = J.vars[0]
+    feed = {**base_feed, f"{mapvar.name}_{mapvar.uid}": mapval, f"{Dvar.name}_{Dvar.uid}": Dval}
+    jh = _run(J.body, {**feed, f"{seed.name}_{seed.uid}": hv})
+    hd = T.var("hd", x.space)
+    dmh = _run(T.Eval(Dvar, (0,), (hd,)), {**feed, f"hd_{hd.uid}": hv})
+    fp = _run(term, {**feed, f"{mapvar.name}_{mapvar.uid}": mapval + 1e-6 * dmh})
+    fm = _run(term, {**feed, f"{mapvar.name}_{mapvar.uid}": mapval - 1e-6 * dmh})
+    np.testing.assert_allclose(np.asarray(jh).ravel(), ((fp - fm) / 2e-6).ravel(), atol=atol)
+
+
+def test_bare_solve_map_derivative() -> None:
+    # d(f⁻¹)/dx = −f⁻¹(df)f⁻¹, the BARE inverse-map derivative (un-gated, term→term).  Probed as
+    # ⟨w, Eval(Solve(f), z)⟩ with f marked.  The seed threads through the einsum Composes, not the
+    # bulk SolveOp.
+    rng = np.random.default_rng(1)
+    V = S.base("V", 3)
+    x = T.var("x", V)
+    f = T.var("f", S.oprod(S.dual(V), V), props=G.bij)
+    Df = T.var("Df", S.oprod(S.dual(V), S.dual(V), V))
+    w, z = T.var("w", S.dual(V)), T.var("z", V)
+    e = T.Eval(w, (0,), (T.Eval(T.Solve(f), (0,), (z,)),))
+    fv = rng.standard_normal((3, 3)) + 3 * np.eye(3)
+    base = {f"w_{w.uid}": rng.standard_normal(3), f"z_{z.uid}": rng.standard_normal(3)}
+    _fd_marked_map(e, x, f, Df, base, fv, rng.standard_normal((3, 3, 3)), rng.standard_normal(3))
+
+
+@pytest.mark.parametrize("ambient", [2, 4])  # square (=Solve) and rectangular (=Golub–Pereyra rank term)
+def test_bare_pinv_map_derivative(ambient) -> None:
+    # d(J⁺)/dx — the BARE pseudoinverse-map derivative.  ⟨w, Eval(Pinv(J), z)⟩ with J marked.
+    # This is exactly `project` through a moving Img(J): project ≡ Eval(Pinv(J), ·), term→term.
+    rng = np.random.default_rng(2 + ambient)
+    Rt, Re = S.base("Rt", 2), S.base("Re", ambient)
+    x = T.var("x", Rt)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.bij if ambient == 2 else G.inj)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    w, z = T.var("w", S.dual(Rt)), T.var("z", Re)
+    e = T.Eval(w, (0,), (T.Eval(T.Pinv(J), (0,), (z,)),))
+    Jv = rng.standard_normal((2, ambient))
+    base = {f"w_{w.uid}": rng.standard_normal(2), f"z_{z.uid}": rng.standard_normal(ambient)}
+    _fd_marked_map(e, x, J, DJ, base, Jv, rng.standard_normal((2, 2, ambient)), rng.standard_normal(2))
 
 
 # ---------------------------------------------------------------------------
