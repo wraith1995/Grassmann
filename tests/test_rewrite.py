@@ -864,6 +864,36 @@ def test_inverse_compose_needs_property() -> None:
     assert isinstance(out, T.Compose)  # left as-is — Pinv(h)∘h ≠ Id for a general h
 
 
+# ===========================================================================
+# Phase 3 (plans/91) — application fold + applied-form inverse cancellation.
+# ===========================================================================
+
+
+def test_eval_compose_fold() -> None:
+    U, V, W = S.base("U", 2), S.base("V", 2), S.base("W", 3)
+    f = T.var("f", S.linear_map_space(V, W))
+    h = T.var("h", S.linear_map_space(U, V))
+    x = T.var("x", U)
+    # Eval(f, Eval(h, x)) → Eval(f∘h, x) : nested application folds into a composition.
+    term = T.Eval(f, (0,), (T.Eval(h, (0,), (x,)),))
+    out = simplify(term)
+    assert out == T.Eval(T.Compose(f, (0,), (h,)), (0,), (x,))
+    feed = {_key(f): np.arange(6.0).reshape(2, 3), _key(h): np.array([[1.0, 2.0], [3.0, 4.0]]), _key(x): np.array([5.0, 6.0])}
+    _same(term, out, feed)
+
+
+def test_applied_inverse_cancels_via_fold() -> None:
+    from grassmann.core.props import MapProps
+
+    V, W = S.base("V", 2), S.base("W", 3)
+    y, x = T.var("y", V), T.var("x", V)
+    g = T.var("g", S.linear_map_space(V, V), MapProps(bij=True))
+    fi = T.var("fi", S.linear_map_space(V, W), MapProps(inj=True))
+    # fold → Solve(g)∘g→Id → Id·y → y
+    assert simplify(T.Eval(T.Solve(g), (0,), (T.Eval(g, (0,), (y,)),))) == y
+    assert simplify(T.Eval(T.Pinv(fi), (0,), (T.Eval(fi, (0,), (x,)),))) == x
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))

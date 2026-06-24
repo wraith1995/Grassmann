@@ -252,9 +252,11 @@ def _solve_apply():
     A = np.round(np.random.default_rng(7).standard_normal((3, 3)), 2)
     vv = [1.0, 2.0, 3.0]
     got = _run(C.solve_apply(f, v), {f: A, v: vv})
-    _ck(np.allclose(A @ got, vv))
-    return Example("Solve `f·x = v` for `x`.", 'solve(f)(v)',
-                   [("f", _show(A)), ("v", _show(vv))], _show(got))
+    # Convention (plans/91): SolveApply(f,v) ≡ Eval(Solve(f),(0,),v) = solve(fᵀ, v) — apply the
+    # inverse MAP in Eval's canonical contraction-view (input = the Dual slot).
+    _ck(np.allclose(A.T @ got, vv))
+    return Example("Apply the inverse map (contraction-view): `Eval(Solve(f), v) = solve(fᵀ·x = v)`.",
+                   'solve(f)(v)', [("f", _show(A)), ("v", _show(vv))], _show(got))
 
 
 @_ex("PinvApply")

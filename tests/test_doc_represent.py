@@ -181,14 +181,15 @@ def test_pinv_matches_numpy() -> None:
 
 
 def test_solve_apply_solves() -> None:
-    """`SolveApply` — `f⁻¹·v` without forming the inverse."""
+    """`SolveApply` — apply the inverse map in Eval's contraction-view (`= solve(fᵀ, v)`)."""
     V = C.base("V", 3)
     f = C.var("f", C.linear_map_space(V, V), props=C.props.bij)
     v = C.var("v", V)
     A = np.random.default_rng(7).standard_normal((3, 3))
     vv = np.array([1.0, 2.0, 3.0])
     got = np.asarray(_run(C.solve_apply(f, v), {_k(f): A, _k(v): vv}), float)
-    assert A @ got == pytest.approx(vv)  # stored layout contracts axis 0
+    # Convention (plans/91): SolveApply(f,v) ≡ Eval(Solve(f),v) = solve(fᵀ,v) ⇒ Aᵀ·got = v.
+    assert A.T @ got == pytest.approx(vv)
 
 
 def test_pinv_apply_least_squares() -> None:

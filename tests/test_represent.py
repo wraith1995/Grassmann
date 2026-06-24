@@ -200,17 +200,43 @@ def test_solve_emits_invop_and_full_rank_assert() -> None:
     np.testing.assert_allclose(res, np.linalg.inv(A))
 
 
-def test_solve_apply_matches_solve() -> None:
+def test_application_convention_invariant() -> None:
+    # plans/91 — the application convention: every bundled apply equals applying the
+    # corresponding MAP via Eval (the canonical contraction-view):
+    #     XApply(f, v) ≡ Eval(X(f), (0,), v).
+    # SolveApply was the lone violator (solve(f,v)=f⁻¹v); now it conforms like PinvApply.
+    V = C.base("V", 3)
+    rng = np.random.default_rng(1)
+    A = rng.standard_normal((3, 3))
+    bv = rng.standard_normal(3)
+    g = C.var("g", C.linear_map_space(V, V), props=P.bij)
+    v = C.var("v", V)
+    feed = {_var_key(g): A, _var_key(v): bv}
+    for apply_node, map_node in [
+        (C.solve_apply(g, v), C.eval_(C.solve(g), (0,), v)),
+        (C.pinv_apply(g, v), C.eval_(C.pinv(g), (0,), v)),
+    ]:
+        np.testing.assert_allclose(
+            represent(apply_node).run(feed)["result"],
+            represent(map_node).run(feed)["result"],
+        )
+
+
+def test_solve_apply_is_eval_of_solve() -> None:
+    # Convention (plans/91): SolveApply(f,v) lowers as Eval(Solve(f),(0,),v) — apply the inverse
+    # MAP in Eval's contraction-view, = solve(fᵀ, v).  (No longer a bare SolveOp = solve(f,v).)
     V = C.base("V", 3)
     f = C.var("f", C.linear_map_space(V, V), props=P.bij)
     b = C.var("b", V)
     prog = represent(C.solve_apply(f, b))
-    assert any(isinstance(s.fn, pa.SolveOp) for s in prog.statements)
     rng = np.random.default_rng(7)
     A = rng.standard_normal((3, 3))
     bv = rng.standard_normal(3)
     res = prog.run({_var_key(f): A, _var_key(b): bv})["result"]
-    np.testing.assert_allclose(res, np.linalg.solve(A, bv))
+    np.testing.assert_allclose(res, np.linalg.solve(A.T, bv))
+    # identical to explicitly applying the inverse map via Eval
+    eq = represent(C.eval_(C.solve(f), (0,), b)).run({_var_key(f): A, _var_key(b): bv})["result"]
+    np.testing.assert_allclose(res, eq)
 
 
 # ===========================================================================

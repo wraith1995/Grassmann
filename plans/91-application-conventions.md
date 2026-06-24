@@ -1,9 +1,9 @@
 # 91 — Application conventions: normative spec + sync plan
 
-> **STATUS: convention DECIDED, implementation DEFERRED to a cross-branch sync.**
-> Other branches (`ad`, `main`/stable, …) are in flight; changing application semantics now
-> would diverge them. This document **records the agreed convention** so every branch migrates
-> to it together at the sync. Do **not** implement Phases 1–3 on a single branch in isolation.
+> **STATUS: convention DECIDED; Phases 0/1/3 IMPLEMENTED on `rewrite-sop-normal-form`.**
+> The fix is made **here** (this branch) and intentionally diverges from the other in-flight
+> branches (`ad`, `main`/stable, …) — the merge will need a cross-branch sync (below). Phase 2
+> (LLam storage) is assessed and deferred. This doc remains the spec to drive the sync.
 
 ## Convention (DECIDED — `Eval`'s contraction-view is canonical)
 
@@ -56,60 +56,64 @@ that "applies a map" must satisfy the single invariant:
 
 `PinvApply` already obeys it; `SolveApply` does not. We do **not** touch `Eval` itself.
 
-## Migration plan (execute at the cross-branch sync, not before)
+## Migration plan
 
-### Phase 0 — Specify & add a conformance test (no behavior change)
-- Pin the rule in `docs/terms/{eval,solve-apply,pinv-apply,llam}.md`.
-- Add a **convention-conformance** property test: for every map-application op and a battery of
-  random maps, assert `Apply(f,v) == Eval(map(f), v)` numerically. It **fails for `SolveApply`
-  today** — that failing test is the acceptance gate for Phase 1.
+### Phase 0 — Specify & conformance test ✅ DONE
+- Convention pinned in `docs/_authored/terms/solve-apply.md` (regenerated to `docs/terms/`).
+- `tests/test_represent.py::test_application_convention_invariant` asserts `XApply(f,v) ==
+  Eval(X(f),v)` for `SolveApply`/`PinvApply` — the acceptance gate.
 
-### Phase 1 — Fix the `SolveApply` orientation (the outlier)
-- `_rep_solve_apply` (`represent.py`): compute in the `Eval` orientation — `solve(Fᵀ, v)`
-  (equivalently, lower `SolveApply(f,v)` by desugaring to `Eval(Solve(f),(0,),(v,))`).
-- Update `_dd_solve_apply` (`transform/diff.py:363`) if it bakes the old orientation.
-- Audit `f.solve(v)` callers (`embed/ops.py:280`) and every test using `solve_apply`/`SolveApply`;
-  any that encoded the old `F⁻¹v` switch to the new `F⁻ᵀv` (or, to keep `F⁻¹v`, write
-  `SolveApply(Dagger(f),v)` / `Eval(Dagger(Solve(f)),v)`).
-- Green: conformance test + full suite.
+### Phase 1 — Fix the `SolveApply` orientation ✅ DONE
+- `_rep_solve_apply` now desugars to `_rep(Eval(Solve(f),(0,),(v,)))` = `solve(Fᵀ, v)` — inherits
+  Eval/Solve's honest per-axis bases. `diff` already differentiated `SolveApply` via `Eval(Solve(f),…)`,
+  so this also **aligns the lowering with diff** (no `_dd_solve_apply` change needed).
+- Tests updated to the new semantics: `test_represent.py::test_solve_apply_is_eval_of_solve`,
+  `test_doc_represent.py::test_solve_apply_solves` (`Aᵀ·got = v`), the `SolveApply` doc example.
+- Full suite green (1434).
 
-### Phase 2 (optional, deeper) — `LLam` storage orientation
+### Phase 3 — Rewriter dividend ✅ DONE
+- `rule_eval_compose_fold`: `Eval(f, Eval(h, x)) → Eval(f∘h, x)` (application associativity). With
+  `rule_inverse_compose` + `rule_eval_identity` this cancels applied inverse chains:
+  `Eval(Solve(g), Eval(g, x)) → x`, `Eval(Pinv(fi), Eval(fi, x)) → x` (inj). Tests in
+  `tests/test_rewrite.py`.
+
+### Phase 2 (deeper) — `LLam` storage orientation — ASSESSED, DEFERRED
 Two options:
-- **(2a, light, recommended)** Keep `(cod,dom)` at the FFS/pullback seam (it's load-bearing for
-  §7), but fix the `Rep` self-inconsistency (tag the array with the basis order that matches it)
-  and add the missing axis-pairing guard/assert for the non-default-body / concrete-MATCH path.
-- **(2b, full)** Make `_rep_llam` emit canonical `(dom,cod)` and transpose at the seam instead.
-  Higher risk — touches the §7 pullback einsum and its consumers.
+**Assessment — NOT changed here (deliberately).** The `(cod,dom)` LLam storage is **load-bearing**
+for the §7 pullback einsum (`plans/41 §0/§7`), and the `Rep` tag/array mismatch only bites a
+**non-default-body / concrete-MATCH path that "is not exercised by callers"** (`represent.py:3656`).
+Re-tagging or re-orienting risks the working pullback seam for a path nothing currently hits, so
+touching it unprompted is the wrong trade. Options when someone has bandwidth to test the seam:
+- **(2a, light, recommended)** keep `(cod,dom)`; fix the `Rep` tag to match the array and add a
+  loud guard on the non-exercised path (so it fails fast instead of silently mis-pairing).
+- **(2b, full)** make `_rep_llam` emit `(dom,cod)` and transpose at the seam — higher risk.
+This is a **separate concern** from the apply-orientation fix (it's basis-tagging honesty, not the
+apply convention), so it does not block Phases 0/1/3.
 
-### Phase 3 — Rewriter dividend (closes #11's remainder)
-Once the convention is uniform, the applied-form inverse identities and the
-`Eval(f, Eval(h, x)) → Eval(Compose(f,h), x)` fold become unambiguous → wire them into the
-rewriter (the pieces held back under the item-4 "where does Compose go" caution).
+### Phase 3 — Rewriter dividend (closes #11's remainder) ✅ DONE — see above.
 
 ## Decisions
-1. **Canonical orientation** — ✅ DECIDED: `Eval`'s contraction-view (input = `Dual` slot).
-   (Rejected: flipping to natural `F@x` — too invasive.)
-2. **`SolveApply`** — ✅ DECIDED in principle: redefine to satisfy the invariant
-   (`solve(F,v) → solve(Fᵀ,v)`). Execute at sync.
-3. **`LLam`** — ⏳ OPEN at sync: Phase 2a (light: fix `Rep` tag + axis-pairing guard, keep the
-   `(cod,dom)` seam) vs 2b (full re-orientation). Lean 2a.
+1. **Canonical orientation** — ✅ DONE: `Eval`'s contraction-view (input = `Dual` slot).
+2. **`SolveApply`** — ✅ DONE on this branch: now `Eval(Solve(f),v) = solve(Fᵀ,v)`.
+3. **`LLam`** — ⏳ deferred (2a leaning), separate concern; not changed here.
 
 ## Cross-branch sync
 
-This convention must land **uniformly** across the active worktrees/branches so they don't
-diverge on application semantics:
+The fix now lives on **`rewrite-sop-normal-form`** and **intentionally diverges** from the other
+worktrees, which still have the old `SolveApply` orientation:
 
-- `grassmann` (`transform-pullback-covariant-diff`), `grassmann-rw` (`rewrite-sop-normal-form`,
-  where this doc lives), `grassmann-ad` (`ad`), `grassmann-stable` (`main`).
-- At the sync: cherry-pick/port this doc to the shared base, run Phase 0 (the conformance test)
-  on each branch to confirm they all exhibit the same `SolveApply` violation, then apply Phase 1
-  once on the base and merge. Phase 2/3 follow.
-- Until then: **rewriter rules added on `rewrite-sop-normal-form` rely only on `Eval`'s
-  contraction-view and the verified map-level identities** — none depend on the (future)
-  `SolveApply` fix, so this branch stays correct under the current semantics.
+- `grassmann` (`transform-pullback-covariant-diff`), `grassmann-ad` (`ad`), `grassmann-stable`
+  (`main`) — **not yet migrated**.
+- **Merge will be tricky** (`_rep_solve_apply` + the `SolveApply` tests changed semantics). At the
+  sync: port this doc + the `_rep_solve_apply` desugar + the test updates to the shared base; run
+  `test_application_convention_invariant` on each branch (it FAILS pre-migration — the gate);
+  apply once; then re-run each branch's suite (esp. anything asserting the old `F⁻¹v`).
+- **Diff alignment dividend:** because `diff` already differentiated `SolveApply` via
+  `Eval(Solve(f),…)`, the old branches' primal lowering disagreed with their own derivative — this
+  fix removes that latent inconsistency, so the migration is a correctness win, not just tidiness.
 
-## Risk / blast radius
-- Phase 1 is a **semantic change to `SolveApply`** (its result transposes). Few construction
-  sites (`embed/ops.py`, `diff.py`) but **several tests** reference it — expect to update the ones
-  that asserted the old `F⁻¹v` value. Lower-level lowering change, well-covered by the suite.
-- Phase 2 touches the FFS/pullback seam; 2a is contained, 2b is not.
+## Risk / blast radius (as executed here)
+- The `SolveApply` semantic change broke exactly **3 tests** (all asserting the old `F⁻¹v`); fixed
+  to the new `F⁻ᵀv`. Full suite green (1434). The lowering change is contained (`_rep_solve_apply`
+  desugar) and well-covered.
+- `LLam` Phase 2 deliberately untouched (load-bearing seam, non-exercised mismatch).

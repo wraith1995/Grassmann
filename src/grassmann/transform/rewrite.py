@@ -629,6 +629,23 @@ def rule_eval_identity(node: Term) -> Term | None:
     return None
 
 
+def rule_eval_compose_fold(node: Term) -> Term | None:
+    """Fold a nested application into a composition (application associativity, now unambiguous
+    under the normalized convention, `plans/91`):
+
+        ``Eval(f, (0,), (Eval(h,(0,),(x,)),)) → Eval(Compose(f,(0,),(h,)), (0,), (x,))``.
+
+    Grouping the map algebra lets the map-level identities fire on the ``Compose`` — e.g.
+    ``Eval(Solve(g), Eval(g, x))`` folds to ``Eval(Solve(g)∘g, x) → Eval(Id, x) → x``. Direction:
+    compose maps before applying (value-exact)."""
+    if not (isinstance(node, Eval) and node.positions == (0,) and len(node.args) == 1):
+        return None
+    inner = node.args[0]
+    if isinstance(inner, Eval) and inner.positions == (0,) and len(inner.args) == 1:
+        return Eval(Compose(node.f, (0,), (inner.f,)), (0,), inner.args)
+    return None
+
+
 def rule_eval_zero(node: Term) -> Term | None:
     """``0·… → 0`` and ``f(…,0,…) → 0`` — a linear application with a zero map or a zero
     argument vanishes."""
@@ -1056,6 +1073,7 @@ _BETA_RULES: tuple[Rule, ...] = (rule_beta_eval, rule_beta_neval)
 # involutions) — strictly reducing, run in every preset.
 _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_eval_identity,
+    rule_eval_compose_fold,
     rule_eval_zero,
     rule_compose,
     rule_involution,
