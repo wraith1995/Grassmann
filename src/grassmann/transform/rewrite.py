@@ -30,7 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 
 from grassmann.core.kinds import NAT, SPACE, SpaceSort
-from grassmann.core.space import OProd, Scalar, Space, is_dim, is_space
+from grassmann.core.space import OProd, Scalar, Space, is_dim, is_space, oplus
 from grassmann.core.term import (
     Assert,
     Compose,
@@ -55,6 +55,8 @@ from grassmann.core.term import (
     Sum,
     Term,
     Trace,
+    TupleEmbed,
+    TupleProject,
     Var,
     Zero,
     is_term,
@@ -86,6 +88,7 @@ class SoPConfig:
     collect: bool = True         # collect like monomials (v + v → 2·v, cancellation)
     order_sum: bool = True       # sort + summands by term_key — value-safe (commutative)
     order_otimes: bool = False   # canonical ⊗ factor order — UP-TO-ISO (emits a Permute 𝒞)
+    order_oplus: bool = False    # canonical ⊕ component order — UP-TO-ISO (synthesized 𝒞; heavy)
     canon_binders: bool = True   # α-canonicalize bound vars (α-variant terms → identical NF)
 
 
@@ -949,6 +952,42 @@ def rule_order_otimes(node: Term) -> Term | None:
     return Permute(OProdV(sorted_facs), tuple(inv))
 
 
+def rule_order_oplus(node: Term) -> Term | None:
+    """Canonicalize the component order of a ``⊕`` stack **up to isomorphism**, restoring the
+    original block layout with a synthesized ``⊕``-block-permutation map (no IR reshape node
+    exists for ``⊕``, so the correction is built from ``TupleEmbed``/``TupleProject``):
+
+        ``OPlusV(comps)  ≡  P · OPlusV(sorted)``,
+        ``P = Σᵢ ιᵢ^{orig} ∘ π_{σ⁻¹[i]}^{sorted} : (⊕ sorted) ⊸ (⊕ orig)``
+
+    where ``sorted[k] = comps[σ[k]]``. Heavyweight (the correction is a sum of
+    inject∘project maps, which then distributes) — hence opt-in via ``order_oplus``.
+    Conservative: clean components only (no ``Sum``/``Scale``/``Zero`` to distribute first)."""
+    if not isinstance(node, OPlusV):
+        return None
+    comps = node.vectors
+    if any(isinstance(c, (Sum, Scale, Zero)) for c in comps):
+        return None
+    spaces = [_space(c) for c in comps]
+    if any(s is None for s in spaces):
+        return None
+    sigma = sorted(range(len(comps)), key=lambda i: term_key(comps[i]))
+    if sigma == list(range(len(comps))):
+        return None  # already canonical
+    orig_space = oplus(*spaces)  # type: ignore[arg-type]
+    sorted_space = oplus(*[spaces[i] for i in sigma])  # type: ignore[arg-type]
+    inv = [0] * len(sigma)
+    for k, i in enumerate(sigma):
+        inv[i] = k
+    perm_map = Sum(
+        tuple(
+            Compose(TupleEmbed(orig_space, i), (0,), (TupleProject(sorted_space, inv[i]),))
+            for i in range(len(comps))
+        )
+    )
+    return Eval(perm_map, (0,), (OPlusV(tuple(comps[i] for i in sigma)),))
+
+
 def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
     """Assemble the rule tuple selected by ``cfg`` (the always-valid algebraic cleanups run
     unconditionally; everything else is gated)."""
@@ -964,6 +1003,8 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
         rules.append(rule_collect)
     if cfg.order_otimes:
         rules.append(rule_order_otimes)
+    if cfg.order_oplus:
+        rules.append(rule_order_oplus)
     if cfg.order_sum:
         rules.append(rule_sort_sum)
     return tuple(rules)
