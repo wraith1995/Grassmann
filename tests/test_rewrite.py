@@ -652,6 +652,36 @@ def test_alpha_invariance_inside_sum() -> None:
     assert sum_of_products(s1) == sum_of_products(s2)
 
 
+# ===========================================================================
+# Deferred-tail task #4 — order_oplus (canonical ⊕ component order, opt-in).
+# ===========================================================================
+
+
+def test_order_oplus_canonicalizes_with_correction() -> None:
+    from grassmann.transform.rewrite import SoPConfig
+
+    A, B = S.base("A", 2), S.base("B", 3)
+    a, b = T.var("zz", A), T.var("aa", B)  # 'aa' < 'zz' ⇒ OPlusV(zz, aa) is unsorted
+    term = T.OPlusV((a, b))
+    cfg = SoPConfig(order_oplus=True)
+    out = sum_of_products(term, cfg)
+    assert is_normalized_sop(out, cfg)
+    assert sum_of_products(out, cfg) == out  # idempotent
+    feed = {_key(a): np.array([1.0, 2.0]), _key(b): np.array([10.0, 20.0, 30.0])}
+    _same(term, out, feed)  # the synthesized correction restores the exact ⊕ layout
+
+
+def test_order_oplus_leaves_sorted_and_is_opt_in() -> None:
+    from grassmann.transform.rewrite import SoPConfig
+
+    A, B = S.base("A", 2), S.base("B", 3)
+    a, b = T.var("zz", A), T.var("aa", B)
+    sorted_stack = T.OPlusV((b, a))  # 'aa' then 'zz' = already canonical
+    assert sum_of_products(sorted_stack, SoPConfig(order_oplus=True)) == sorted_stack
+    # Off by default: an unsorted stack is left exactly as-is.
+    assert sum_of_products(T.OPlusV((a, b))) == T.OPlusV((a, b))
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
