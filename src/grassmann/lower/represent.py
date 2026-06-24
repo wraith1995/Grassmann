@@ -1094,14 +1094,20 @@ def _reconcile_pairing(
     Fires whenever the two are not pairing-consistent — a default/already-dual pair is consistent, so
     that path stays byte-identical; a non-standard pair (immersed OR rotated-orthonormal) reconciles.
     """
-    # Only a RANK-1 operand (a vector/covector) is reconciled here: ``_coerce_rep_to_basis`` cobs the
-    # operand's axis 0 using its whole basis, which is the contracted slot only for a rank-1 operand.
-    # A multi-axis (``BasisProd``) operand has surviving slots, so a blind axis-0 cob is invalid —
-    # leave it (the OLD immersed-only gate happened to exclude these; they need per-axis handling).
-    if (slot_basis is None or isinstance(op_rep.basis, B.BasisProd)
-            or _basis_pairing_consistent(slot_basis, op_rep.basis)):
+    if slot_basis is None or _basis_pairing_consistent(slot_basis, op_rep.basis):
         return op_rep
-    return _coerce_rep_to_basis(ctx, op_rep, _pairing_partner(slot_basis), note=note)
+    partner = _pairing_partner(slot_basis)
+    # A MULTI-AXIS operand (e.g. ``x⊗y`` contracted against a FUSED dual slot from ``Lift``/``alt``)
+    # has all its space axes fused into the one contracted slot, so every axis must be reconciled.
+    # The fused slot's dual partner decomposes to a ``BasisProd`` matching the operand's axes — cob
+    # per-axis (``_coerce_rep_to_target``; the axis-0 whole-basis ``_coerce_rep_to_basis`` below is
+    # invalid for a multi-axis operand — that mismatch is what the old rank-1 gate sidestepped).  If
+    # the partner doesn't axis-match, leave it (genuinely inconsistent; the contraction asserts dims).
+    if isinstance(op_rep.basis, B.BasisProd):
+        if isinstance(partner, B.BasisProd) and len(partner.bases) == len(op_rep.basis.bases):
+            return _coerce_rep_to_target(ctx, op_rep, partner, note=note)
+        return op_rep
+    return _coerce_rep_to_basis(ctx, op_rep, partner, note=note)
 
 
 def _reconcile_compose_g(ctx: _Ctx, slot_basis: B.Basis | None, g_rep: Rep) -> Rep:

@@ -372,16 +372,6 @@ def _c_embed():
     return C.embed(v, V), {v: (V, np.array([1.0, 2, 3]))}
 
 
-_MULTIAXIS_RECONCILE_GAP = (
-    "KNOWN GAP: an Eval contracting a SINGLE multi-axis (fused) operand against a fused slot in a non-"
-    "default basis isn't reconciled — `_reconcile_pairing` is rank-1-gated (the gate added to avoid the "
-    "pullback multi-axis crash, 5f8410c), and a fused `dual(V⊗V)` slot vs a 2-axis `x⊗y` operand also "
-    "has an axis-count mismatch for the axis-0 cob.  So ⟨lift(m), x⊗y⟩ contracts basis-blind when x/y "
-    "are pinned (25.5 vs 102).  Fix = per-axis reconcile against a fused slot (deferred multi-axis work; "
-    "see the _reconcile_pairing rank-1 gate).  strict xfail XPASSes + flags removal when done."
-)
-
-
 def _case(name, builder, xfail=None):
     marks = [pytest.mark.xfail(reason=xfail, strict=True)] if xfail else []
     return pytest.param(name, builder, marks=marks, id=name)
@@ -404,7 +394,7 @@ CASES = [
     _case("solve_scalar", _c_solve_scalar), _case("trace_scalar", _c_trace_scalar),
     _case("dagger_scalar", _c_dagger_scalar), _case("kron_scalar", _c_kron_scalar),
     _case("permute_scalar", _c_permute_scalar),
-    _case("lift_scalar", _c_lift_scalar, xfail=_MULTIAXIS_RECONCILE_GAP),
+    _case("lift_scalar", _c_lift_scalar),  # multi-axis fused-slot reconcile (per-axis _coerce_rep_to_target)
     _case("oprod_scalar", _c_oprod_scalar),
 ]
 
