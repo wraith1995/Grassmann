@@ -2583,6 +2583,15 @@ def _rep_pinv_apply(
         f_rep = _rep(f, ctx, B.basis_prod(B.dual_basis(want), v_rep.basis))
     else:
         f_rep = _rep(f, ctx)
+    # The "ab,a->b" einsum contracts fp's cod axis (= f's cod slot) against ``v``, so ``v`` MUST be in
+    # f's cod-slot basis.  The steered path aligns f's cod slot to ``v_rep.basis`` (the cob below is a
+    # no-op); when UNSTEERED ``f`` arrives in its own basis, so cob ``v`` into it (mirrors the GSVD
+    # branch).  Without this an inconsistent v/f pairing contracts basis-blind — silent-wrong (e.g.
+    # ⟨w, f⁺v⟩ with f pinned, v default).
+    _, cod_slot = _map_slot_bases(f_rep.basis)
+    v_arr = v_rep.array
+    if cod_slot is not None and not _basis_eq(v_rep.basis, cod_slot):
+        v_arr = _coerce_rep_to_target(ctx, v_rep, cod_slot, note="pinvapply:cob-v→cod-slot").array
     [fp] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
         [pa.OutSpec("pinv", _transpose_shape(_shape_of(f_rep.array)))],
@@ -2591,7 +2600,7 @@ def _rep_pinv_apply(
     # fp is the pinv map cod⊸dom stored (|cod|,|dom|); applying to v[cod] contracts the
     # input (cod) axis 0, mirroring the Eval contraction convention (`41 §3`).
     [out] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("ab,a->b"), [fp, v_rep.array],
+        pa.EinsumStmtOp("ab,a->b"), [fp, v_arr],
         [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
     )
     # Honest tag: ``x = f⁺ v`` lives in f's domain-slot primal basis (PinvOp acts in whatever

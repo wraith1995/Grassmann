@@ -269,6 +269,53 @@ def _c_sharp_apply():
     return C.eval_(C.sharp(V), (0,), co), {co: (DV, np.array([1.0, 2, 3]))}
 
 
+# Scalar-wrapped variants ⟨w, …⟩: a scalar result can't be steered, so these exercise the UNSTEERED
+# contraction/reconcile path that `target=STD` steering masks for eval-map/compose/pinv_apply.
+def _c_eval_map_scalar():
+    w, f, v = C.var("w", DV), C.var("f", MS), _vec("v")
+    return (C.eval_(w, (0,), C.eval_(f, (0,), v)),
+            {w: (DV, np.array([1.0, 2, 3])), f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+             v: (V, np.array([1.0, 0, 2]))})
+
+
+def _c_compose_scalar():
+    w, f, g, v = C.var("w", DV), C.var("f", MS), C.var("g", MS), _vec("v")
+    Mf = np.array([[2.0, 0, 1], [1, 1, 0], [0, 3, 1]])
+    Mg = np.array([[1.0, 2, 0], [0, 1, 1], [1, 0, 2]])
+    return (C.eval_(w, (0,), C.eval_(C.compose(f, (0,), g), (0,), v)),
+            {w: (DV, np.array([1.0, 2, 3])), f: (MS, Mf), g: (MS, Mg), v: (V, np.array([1.0, 0, 2]))})
+
+
+def _c_pinv_apply_scalar():
+    w, f, v = C.var("w", DV), C.var("f", MS), _vec("v")
+    return (C.eval_(w, (0,), C.pinv_apply(f, v)),
+            {w: (DV, np.array([1.0, 2, 3])), f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+             v: (V, np.array([1.0, 0, 2]))})
+
+
+def _c_var():
+    u = _vec("u")
+    return u, {u: (V, np.array([1.0, 2, 3]))}
+
+
+def _c_external():
+    from grassmann.lower.represent import BasisReq, ExternalOp
+    neg = ExternalOp(name="neg", fn=np.negative, basis_req=BasisReq.EQUIVARIANT)
+    v = _vec("v")
+    return C.external(V, neg, v), {v: (V, np.array([1.0, 2, 3]))}
+
+
+def _c_solve_apply():
+    f, v = C.var("f", MS, C.bij), _vec("v")
+    return C.solve_apply(f, v), {f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+                                 v: (V, np.array([1.0, 0, 2]))}
+
+
+def _c_assert():
+    v = _vec("v")
+    return C.assert_(v, V), {v: (V, np.array([1.0, 2, 3]))}
+
+
 def _c_project():
     v = _vec("v")
     return C.project(v, V), {v: (V, np.array([1.0, 2, 3]))}
@@ -293,6 +340,11 @@ CASES = [
     _case("dot", _c_dot), _case("project", _c_project), _case("embed", _c_embed),
     _case("flat_apply", _c_flat_apply),  # metric Eval builds + tags in the operand basis
     _case("sharp_apply", _c_sharp_apply),  # + covector-operand variance (_covector_primal)
+    _case("var", _c_var), _case("external", _c_external), _case("solve_apply", _c_solve_apply),
+    _case("assert", _c_assert),
+    # scalar-wrapped (UNSTEERED) variants — exercise the contraction/reconcile that STD steering masks
+    _case("eval_map_scalar", _c_eval_map_scalar), _case("compose_scalar", _c_compose_scalar),
+    _case("pinv_apply_scalar", _c_pinv_apply_scalar),
 ]
 
 
