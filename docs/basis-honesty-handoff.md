@@ -19,7 +19,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 
 ## What's done (this session)
 
-**Twelve silent-wrong bugs fixed**, all of the class above:
+**Thirteen silent-wrong bugs fixed**, all of the class above:
 
 | arm | the lie | fix | commit |
 |---|---|---|---|
@@ -35,6 +35,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 | `trace` unsteered | traced slots summed basis-blind when a contracted slot is pinned + f unsteered | cob axis `j` to `dual(slot i)` before the diagonal (no-op when steered) | `f56ba9d` |
 | `eval` multi-axis fused slot | a single fused operand (`x⊗y`) vs a fused `dual(V⊗V)` slot left unreconciled (rank-1 gate) | per-axis reconcile via `_coerce_rep_to_target` (retires the rank-1 gate; subsumes the pullback) | `26c75a9` |
 | `dot`/metric-Eval mixed operands | `_reconcile_metric_operands` immersed-only gate ⇒ two different orthonormal frames stayed mismatched | reconcile whenever operands disagree (not just immersed) | `1e7dd86` |
+| `lift`/`kron` non-default operand (AUTO) | operands cob'd to default only under a non-AUTO target ⇒ as a sub-term the `default` tag lied | always cob operands to default (no-op for default ⇒ byte-identical) | `f76bb9d` |
 
 The `vmap` LLam lowering is the **default** (`GRASSMANN_LLAM_INDEX=eye` = the old fast path, which
 raises on a cod-non-default body).
@@ -65,13 +66,17 @@ The sweep multiplies several **axes of variation**, each of which has caught a d
   `lift`). Covers eval-map/compose/pinv_apply/solve/trace/dagger/kron/permute/oprod/lift.
 - **Varied consumers** — arms fed to `sum`/`oprod`/`compose`, not just eval (different reconcile paths).
 - **Rectangular maps** (`V→W`) and **3 flavors × both `GRASSMANN_LLAM_INDEX` modes**.
+- **Concrete result target** (`test_concrete_target_honesty`) — represent at a non-default RESULT basis
+  G, then cob G→std == ref, exercising the `_match_result` path that `target=STD` never reaches. A
+  round-trip guard (`_basis_round_trips`) skips any unsound result flavor (fused/direct-sum spaces the
+  2×2/3×3-frame harness can't build). Found the `pinv_apply_rect` gap (below).
 
 FFS coverage: the **immersed Gram** is already exercised by the non-ortho `list_basis` flavor (it *is*
 an immersed-metric basis). A literal `ImageBasis` (lives in its own `Img(J)` space — can't pin a
 `V`-var to it) and `WithInner` (changes the metric ⇒ different value) don't fit this two-route-on-`V`
 sweep; they're covered by `test_pinv_gsvd` / `test_embed_subspace` / `test_algorithm_corpus`.
 
-The sweep currently has **46 cases, 0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
+The sweep currently has **47 cases** (two-route honesty) **+ a concrete-target test**; 1 xfail (the pinv-rect gap below). Run: `pytest tests/test_basis_honesty_sweep.py` (and once
 with `GRASSMANN_LLAM_INDEX=eye`).
 
 ## Remaining work (prioritized — resume here)
@@ -85,12 +90,19 @@ frame-var-free + `_rep_neval_lam` cobs free operands per-axis). The feed-only ma
 (`(space, value, False)`) remains available for any future un-threadable operand basis. What's left is
 optional/perf:
 
-1. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
+1. **Rectangular pinv at a non-orthonormal concrete target** *(the live `pinv_apply_rect` xfail in
+   `test_concrete_target_honesty`).* `pinv_apply(f, w)` with a rectangular `f : V→W` represented at a
+   non-orthonormal concrete RESULT basis G is silent-wrong: the PinvOp branch steers to G and applies
+   the *plain* Moore-Penrose pinv, which is basis-covariant only under **orthonormal** changes — a
+   non-ortho target needs the metric. Fix = build the pinv metric in the **target** basis (the analogue
+   of the operand-basis GSVD fix `ac8e28a`). Square pinv/solve are the inverse ⇒ covariant ⇒ fine.
+
+2. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
    debug mode where `_rep`, per arm, two-route-checks the realized-basis claim on the actual feeds and
    asserts. Heavy (doubles work), but it catches a dishonest tag in *any* program a user runs, not just
    tests. Optional.
 
-2. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
+3. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
    lowering is correct but slower (a runtime vmap loop; suite ~20s vs ~6s for `eye`). Path A would make
    the index a typed axis whose basis flows through `eval`'s reconciliation, so the single-einsum `eye`
    path stays correct — fast *and* correct, letting both modes collapse and the env var retire. The
@@ -131,4 +143,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1242 passed, 0 xfailed** in both modes; ruff clean (sweep: 46/46).
+Current: **1284 passed, 3 skipped, 1 xfailed** in both modes; ruff clean.
