@@ -184,6 +184,23 @@ def test_pinv_map_matches_numpy_pinv() -> None:
     np.testing.assert_allclose(res, np.linalg.pinv(Gm), atol=1e-9)
 
 
+def test_sqrt_spd_value_and_fails_loud() -> None:
+    # Sqrt(f) — the SPD operator square root: S·S = f, symmetric, computed by eigendecomposition.
+    # A non-SPD operand must FAIL LOUDLY (never a silent wrong answer).
+    import pytest
+
+    V = C.base("V", 3)
+    Gm = C.var("G", C.linear_map_space(V, V))
+    rng = np.random.default_rng(11)
+    A = rng.standard_normal((3, 3))
+    Gv = A @ A.T + 3 * np.eye(3)  # SPD
+    res = np.asarray(represent(C.sqrt(Gm)).run({_var_key(Gm): Gv})["result"], float)
+    np.testing.assert_allclose(res @ res, Gv, atol=1e-9)  # S·S = G
+    np.testing.assert_allclose(res, res.T, atol=1e-12)  # symmetric
+    with pytest.raises(Exception):  # noqa: B017 - non-SPD must raise, never silently proceed
+        represent(C.sqrt(Gm)).run({_var_key(Gm): -Gv})  # negative-definite ⇒ not SPD
+
+
 def test_solve_emits_invop_and_full_rank_assert() -> None:
     V = C.base("V", 3)
     f = C.var("f", C.linear_map_space(V, V), props=P.bij)

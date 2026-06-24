@@ -66,6 +66,7 @@ from grassmann.core.term import (
     Sharp,
     Solve,
     SolveApply,
+    Sqrt,
     Sum,
     Term,
     Trace,
@@ -179,6 +180,8 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             return _dd_solve(e, ctx)
         case Pinv():
             return _dd_pinv(e, ctx)
+        case Sqrt():
+            return _dd_sqrt(e, ctx)
         case SolveApply():
             return _dd_solve_apply(e, ctx)
         case PinvApply():
@@ -421,6 +424,38 @@ def _dd_pinv(e: Pinv, ctx: _DCtx) -> Term:
     if isinstance(df, Zero):
         return _zero(e, ctx)
     return _pinv_map_grad(e.f, df)
+
+
+def _dd_sqrt(e: Sqrt, ctx: _DCtx) -> Term:
+    """``d(√f)`` for an SPD endomorphism ``f : V ⊸ V`` — the symmetric operator-square-root
+    derivative.  ``dS`` (``S = √f``) is the unique solution of the Sylvester equation
+
+        S·dS + dS·S = df ,
+
+    which we solve term→term as the inverse of the Sylvester operator built on the **map space**
+    ``(V⊸V) ⊸ (V⊸V)`` (NOT a fused ``V⊗V`` covector — that route can't un-fuse back to a map):
+
+        L = Kron(Sᵈ, I_V) + Kron(I_{V*}, S)        (left-mult ``S·`` + right-mult ``·S``),
+
+    with ``Sᵈ = ♭∘S∘♯ : V* ⊸ V*`` the action of ``S`` on covariant indices.  Then
+    ``dS = Pinv(L)·df`` lands directly in ``V⊸V``.  ``L`` is SPD (eigenvalues ``√λᵢ + √λⱼ > 0``),
+    and the seed in ``df`` enters only the final ``Eval`` einsum — ``L`` itself is seed-free."""
+    from grassmann.core.space import dual
+    from grassmann.infer.synth import synth_space
+
+    df = _dd(e.f, ctx)
+    if isinstance(df, Zero):
+        return _zero(e, ctx)
+    _dom, cod = _map_dom_cod(synth_space(e.f))  # f : V ⊸ V ⇒ V = cod (= dom)
+    v = cod
+    s = e  # Sqrt(e.f) : V ⊸ V
+    # The value lowers sqrt(sym(f)) (``_SqrtSpdOp`` symmetrizes), so the honest derivative sees the
+    # SYMMETRIC part of df — the antisymmetric part doesn't move sqrt(sym(f)).  No-op for the
+    # immersed-metric use (``f = JᵀJ`` ⇒ df = dJᵀJ + JᵀdJ already symmetric); guards the rest.
+    df_sym = Scale(0.5, Sum((df, Dagger(df))))
+    s_dual = Compose(Flat(v), (0,), (Compose(s, (0,), (Sharp(v),)),))  # V* ⊸ V*, S on covectors
+    syl = Sum((Kron(s_dual, Identity(v)), Kron(Identity(dual(v)), s)))  # (V⊸V) ⊸ (V⊸V)
+    return Eval(Pinv(syl), (0,), (df_sym,))  # solve  syl · dS = df_sym  for dS : V ⊸ V
 
 
 def _pinv_map_grad(f: Term, df: Term) -> Term:

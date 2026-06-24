@@ -482,6 +482,8 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_solve(e, f, ctx, target)
         case T.Pinv(f):
             return _rep_pinv(e, f, ctx, target)
+        case T.Sqrt(f):
+            return _rep_sqrt(e, f, ctx, target)
         case T.SolveApply(f, v):
             return _rep_solve_apply(e, f, v, ctx, target)
         case T.PinvApply(f, v):
@@ -2065,6 +2067,14 @@ def _rep_eval(
         note=f"eval:contract@{sorted(contracted)}",
     )
     rep = Rep(out, basis, space, free_labels=out_free)
+    # Un-fuse a surviving map-space slot.  When ``f``'s surviving slot is itself a *fused*
+    # map space (its f-array axis is a single product-dim — e.g. the cod of a ``Kron``/``Pinv``
+    # map-space operator, where ``_shape_of_space`` flattens a sub-``OProd`` factor to one
+    # ``_static_dim`` axis), the einsum hands that slot back as one fused axis, but the result
+    # ``space``/``basis`` describe it as several factors.  Reshape the result's *space* axes to
+    # ``_shape_of_space(space)`` so the array, its basis, and its space agree and the value
+    # composes downstream as a genuine multi-factor map (`41 §3`, mirrors ``_fuse_arg_to_slot``).
+    rep = _unfuse_eval_result(ctx, rep)
     if steered:
         return rep  # f was steered so the surviving slots are already `want` — no result cob
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
@@ -2111,6 +2121,47 @@ def _fuse_arg_to_slot(
         [pa.OutSpec("fuse-arg", new_shape)], note=f"eval:fuse-arg-axes@{pos}",
     )
     return Rep(fused, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
+
+
+def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
+    """Reshape an ``Eval`` result whose surviving slot is a *fused* map-space axis.
+
+    When ``f`` is a map-space operator (e.g. ``Pinv``/``Kron`` of ``(V⊸V)⊸(V⊸V)``) one
+    surviving slot is itself a map space ``OProd(Dual(V), V)``: ``_shape_of_space`` flattens
+    that top-level factor to a single ``_static_dim`` axis (dim ``9``), so the einsum returns it
+    as one fused axis even though the result ``space``/``basis`` carry it as several factors
+    (here ``(3, 3)``).  Reshape the result's *space* axes to ``_shape_of_space(rep.space)`` so
+    the array, its basis (``_result_basis_from_factors`` already 2-factor) and its space all
+    agree — the value then composes downstream as a genuine multi-factor map.
+
+    No-op (byte-identical) when the array's space axes already match ``_shape_of_space`` — the
+    ordinary ``Eval`` path is untouched.  Bails on any dynamic/FFS axis (non-``int`` dims) or a
+    total-size mismatch, so only a genuine static fused↔unfused reshape is performed.
+    """
+    want_space_shape = _shape_of_space(rep.space)
+    if not all(isinstance(d, int) for d in want_space_shape):
+        return rep
+    ashape = _shape_of(rep.array)
+    n_free = len(rep.free_labels)
+    n_space = len(ashape) - n_free
+    cur_space_dims = ashape[:n_space]
+    if tuple(cur_space_dims) == tuple(want_space_shape):
+        return rep  # already in the unfused layout — no-op
+    if not all(isinstance(d, int) for d in cur_space_dims):
+        return rep
+    cur_prod, want_prod = 1, 1
+    for d in cur_space_dims:
+        cur_prod *= d
+    for d in want_space_shape:
+        want_prod *= d
+    if cur_prod != want_prod:
+        return rep  # not a pure reshape of the space axes — leave untouched
+    new_shape = tuple(want_space_shape) + tuple(ashape[n_space:])
+    [unfused] = ctx.prog.emit_stmt(
+        _ReshapeOp(new_shape), [rep.array],
+        [pa.OutSpec("eval-unfuse", new_shape)], note="eval:unfuse-result-slot",
+    )
+    return Rep(unfused, rep.basis, rep.space, free_labels=rep.free_labels)
 
 
 def _rep_compose(
@@ -2457,6 +2508,40 @@ def _basis_term_vars(basis: B.Basis) -> list[T.Var]:
 # ---------------------------------------------------------------------------
 # Inverses & adjoint (`41 §3`). ⟨min-sym⟩ numeric Stmts — symbolics never enter them.
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SqrtSpdOp:
+    """The symmetric-positive-definite operator square root ``S`` with ``S·S = G`` — via
+    eigendecomposition of the symmetrized matrix.  **Fails loudly** if ``G`` is not SPD."""
+
+    def __call__(self, G: np.ndarray) -> np.ndarray:  # noqa: N803
+        A = 0.5 * (np.asarray(G, dtype=float) + np.asarray(G, dtype=float).T)
+        w, V = np.linalg.eigh(A)
+        if w.min() <= 0:
+            raise ValueError(f"Sqrt: operator is not SPD (min eigenvalue {w.min():.3e})")
+        return (V * np.sqrt(w)) @ V.T
+
+
+def _rep_sqrt(
+    e: T.Sqrt, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``Sqrt(f)`` — the SPD operator square root.  Computed in the standard (symmetric) rep of the
+    operand, so the result is honestly ``default_basis``; the STD/AUTO/MATCH epilogue cobs as usual."""
+    f_rep = _rep(f, ctx, target=B.STD)
+    space = _synth(e)
+    [out] = ctx.prog.emit_stmt(
+        _SqrtSpdOp(), [f_rep.array],
+        [pa.OutSpec("sqrt", _shape_of_space(space))], note="sqrt:SqrtSpdOp",
+    )
+    rep = Rep(out, default_basis(space), space)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _rep_solve(
