@@ -712,3 +712,57 @@ def test_pinned_operands_and_concrete_target(name, builder):
         )
     if not tested:
         pytest.skip("no sound result flavor")
+
+
+# ---------------------------------------------------------------------------
+# FFS (Img) operand two-route — a var of an Img(J) space (its own immersed space, which the generic
+# V-sweep can't pin), pinned to a list_basis IN img(J) coordinates.  Bespoke: the FFS realization map
+# J is fed; the value/frame are in img(J) coords.  Covers the immersed-Gram seam through eval/dot/sum.
+# ---------------------------------------------------------------------------
+_FFS_J = np.array([[2.0, 0], [1, 3], [1, 1.0]]).T  # injective R2→R3, stored (dom,cod)=(2,3)
+_FFS_LQ = np.array([[1.0, 1], [0, 1.0]])  # a non-orthonormal list frame in img(J) coords
+
+
+def _ffs_cases():
+    R3 = C.base("Re3", 3)
+    J = C.var("Jffs", C.linear_map_space(C.base("Rt2", 2), R3), C.props.inj)
+    imgJ = C.img(J)
+    a, b, w = C.var("a", imgJ), C.var("b", imgJ), C.var("w", C.dual(R3))
+    av, bv, wv = np.array([1.0, 2]), np.array([0.0, 1]), np.array([1.0, 1, 1])
+    cases = [
+        ("ffs_embed", C.embed(a, R3), {a: av}),
+        ("ffs_embed_eval", C.eval_(w, (0,), C.embed(a, R3)), {a: av, w: wv}),
+        ("ffs_sum", C.embed(C.sum_(a, b), R3), {a: av, b: bv}),
+        ("ffs_dot", C.eval_(C.inner(imgJ), (0, 1), a, b), {a: av, b: bv}),
+        ("ffs_flat", C.eval_(C.flat(imgJ), (0,), a), {a: av}),
+    ]
+    return J, imgJ, cases
+
+
+_FFS_J_VAR, _FFS_IMG, _FFS_CASES = _ffs_cases()
+
+
+@pytest.mark.parametrize("name,term,ffs_vals", _FFS_CASES, ids=[c[0] for c in _FFS_CASES])
+def test_ffs_operand_two_route(name, term, ffs_vals):
+    """An Img(J)-space operand pinned to a list basis (in img(J) coords) gives the same std result as
+    the default-pinned operand — the embedded/contracted ambient value is basis-independent."""
+    Jf = _FFS_J
+    ref_env = {v.uid: default_basis(v.space) for v in ffs_vals}
+    ref = _run(represent(term, basis_env=ref_env), {**{_vk(v): val for v, val in ffs_vals.items()},
+                                                    _vk(_FFS_J_VAR): Jf})
+    std_env, std_feeds = {}, {_vk(_FFS_J_VAR): Jf}
+    for v, val in ffs_vals.items():
+        if v.space == _FFS_IMG:  # FFS operand → pin to a list basis of img(J)
+            q = [C.var(f"{v.name}q{i}", _FFS_IMG) for i in range(2)]
+            lb = B.list_basis(*q)
+            lf = {_vk(q[i]): _FFS_LQ[:, i] for i in range(2)}
+            coords = _run(represent(v, basis_env={v.uid: default_basis(_FFS_IMG)}, target=lb),
+                          {_vk(v): val, _vk(_FFS_J_VAR): Jf, **lf})
+            std_env[v.uid] = lb
+            std_feeds[_vk(v)] = coords
+            std_feeds.update(lf)
+        else:
+            std_env[v.uid] = default_basis(v.space)
+            std_feeds[_vk(v)] = val
+    got = _run(represent(term, basis_env=std_env, target=B.STD), std_feeds)
+    assert np.allclose(got, ref), f"FFS-pinned {name}: got {got}, ref {ref}"
