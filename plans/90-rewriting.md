@@ -75,17 +75,26 @@ correction, opt-in); `dissolve_oplus` (⊕ → sum of injections, opt-in); `rule
 `order_oplus` and gives `rule_tuplepermute` (identity/nested collapse); `rule_tuple_roundtrip`
 (`π_i∘ι_j → [i=j]·I`, an Iverson bracket over block indices).
 
-**Findings / still deferred**
-- A single global `𝒞` is *not* well-defined: in a valid `Sum` the monomials share the output
-  space but canonicalize different interiors, so corrections are intrinsically per-monomial.
-- **η-reduction is unsound as-is**: `f` and `λ⊸x.f(x)` share the synth space `dual(V)⊗W` but
-  lower to *transposed* shapes ((2,3) vs (3,2)) — a base-system LLam axis-order inconsistency
-  to investigate separately; not worked around here.
-- **Inverse-apply** identities are convention-tangled (`Eval` is transpose-apply, so
-  `SolveApply(f, Eval(f,x)) ≠ x`). **Lift/InvLift / Project∘Embed round-trips** need non-trivial
-  inverse-spec / subspace machinery. All deferred.
-- Full **rational scalar NF** (`P/Q` with `div`/`reciprocal` + gcd cancellation — a mini-CAS)
-  is the one large remainder.
+**Space normalization & more identities (done)** — `normalize_space`/`space_key`/`spaces_iso`
+(canonical iso-class of a space, modulo term normalization — the foundation for the `𝒞` view of
+#5); `rule_project_embed` (`Project(Embed(v,S),s)→v`, gated by a naive `spaces_iso` check);
+`rule_inverse_compose` (`Solve(g)∘g→Id`, `Pinv(f)∘f→Id` for inj, `f∘Pinv(f)→Id` for surj — the
+convention-correct, property-guarded map cancellations).
+
+**Conventions (investigated, sub-agents)** — (1) `Eval(f,(0,),x)` applies the **transpose** of
+the stored `(dom,cod)` matrix; `SolveApply` inverts the *opposite* orientation and `PinvApply`
+the *same* one, so the naive `SolveApply(f,Eval(f,x))` is value-wrong — hence the *map-level*
+identities above instead of applied-form ones. (2) The **LLam lowers codomain-major** `(cod,dom)`
+by **documented design** (`plans/41 §0/§7`, the FFS/pullback einsum seam), not a bug — so
+η-reduction stays out (η→f would change the array). Latent hazard flagged: the LLam `Rep` tags a
+`(cod,dom)` array with a `(dom,cod)` basis; a non-default-body / concrete-MATCH lowering path
+could mis-pair axes (`represent.py:3656`, noted "not exercised by callers").
+
+**Still deferred** — A single global `𝒞` is not well-defined (corrections are intrinsically
+per-monomial). η-reduction (documented transpose convention). Applied-form inverse identities and
+the general `Eval(f,Eval(h,x))→Eval(f∘h,x)` fold (convention-heavy; held per the "where does
+Compose go" caution). `Lift/InvLift` round-trips (inverse-spec). Full **rational scalar NF**
+(`P/Q` + cancellation — a mini-CAS) — the one large remainder.
 
 ## §5 Public API
 
