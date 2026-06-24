@@ -1,0 +1,71 @@
+# 90 — Term rewriting & a sum-of-products normal form
+
+A **Term→Term** pass family (`grassmann.transform.rewrite`), sibling of `diff` / `pullback`.
+It rewrites a core `Term` into an equivalent, more-normal `Term`. Every rule is an **equality
+of the coordinate-free algebra**, so a rewritten term lowers to the same numbers (the suite
+checks this by running both forms through `G.run`). An **independent component** — it only
+*reads* the core IR (`core/term.py`, `core/space.py`), never modifies it.
+
+Design constraints (locked with the user): ordered rewriting only (**no e-graph** — we are
+normalizing, not deciding equality); **confluence is not a goal**; **do not touch the IR**;
+**inputs are never changed** — intermediates may be canonicalized up-to-iso provided a single
+**output correction `𝒞`** restores the original layout.
+
+## §1 Engine
+
+`_normalize(term, rules)` — innermost (bottom-up): rewrite children to a fixpoint, then apply
+local `rules` at the root until none fire; re-normalize each rule's output. `Rule = Term →
+Term | None`. A step cap (`_MAX_STEPS`) turns a runaway set into a `RewriteError`. Shared
+primitives: `subst` (capture-avoiding value-var substitution), `_subst_space_in_term`,
+`_subst_nat_in_term` (generic `SVar`/`DimVar` substitution over the Term/Space/Dim tree).
+
+## §2 Config
+
+`SoPConfig` selects how aggressively `sum_of_products` normalizes (and what
+`is_normalized_sop` certifies). Implemented switches:
+
+| flag | effect |
+|------|--------|
+| `beta` | β-reduce `Eval(LLam …)` / `NEval(Lam …)` (value/space/nat binders, partial) |
+| `distribute` | push linear/multilinear ops through `+`, incl. the zero-padded `⊕` split |
+| `push_contractions` | localize `Eval`/`Compose` into the `⊗` factor (`Eval(x⊗y,c)→x(c)·y`) |
+| `collect` | collect like monomials (`v+v→2v`, cancellation) |
+| `order_sum` | sort `+` summands by `term_key` — value-safe (commutative, same space) |
+
+Planned (Step C): `order_otimes`, `order_oplus` — up-to-iso factor ordering that accrues into `𝒞`.
+
+## §3 Target grammar (`+` > `⊕` > `⊗`, total over the language)
+
+```
+nf     ::= 𝒞⟦ body ⟧                       -- 𝒞 the output-correction iso (identity for now)
+body   ::= Zero | Sum(stack₁,…)            -- ≥1 stacks; atoms distinct (collect) + sorted (order_sum)
+stack  ::= mono | OPlusV(mono₁,…)          -- ⊕ layer; components +-free (zero-padded split)
+mono   ::= prod | Scale(coeff, prod)       -- coeff ∉ {0,1}
+prod   ::= atom | OProdV(atom₁,…)          -- factors canonical (up-to-iso, Step C)
+atom   ::= Var | leaf | application | binder   -- head not Sum/Scale/Zero/⊕/⊗, no β-redex,
+           no Eval(Identity), no Eval/Compose/Trace whose target is a ⊗ (those push in)
+```
+
+`term_key` is the total order (repr-based today; swappable). Cross-factor contraction is
+represented as `Eval(x, y)` (atoms stay single-head).
+
+## §4 Status
+
+**Done** — Step A (config; canonical `+` order; correct zero-padded `⊕` distribution;
+config-aware `sum_of_products`/`is_normalized_sop`), Step B (contraction-push
+`Eval`/`Compose` into `⊗`), Step E (embed builders `G.simplify`/`G.normal_form`/
+`G.sum_of_products`/`G.beta`), Step F (nat-binder β). 36 tests; full suite green; ruff clean.
+This finished the originally-scoped 1+2+4 plus the contraction-push bonus.
+
+**Next** — Step C: up-to-iso canonical `⊗`/`⊕` factor order + assemble `𝒞`, proving
+run-equality incl. the correction.
+
+**Deferred** (the "most aggressive" tail, `plans/90` history): cross-factor `Trace→Eval`;
+`Dagger`/`Solve`/`Pinv` pushed to leaves; rational scalar normal form (`P/Q`); α/De-Bruijn
+binder canonicalization; `⊕`-dissolve-to-injections.
+
+## §5 Public API
+
+`grassmann.transform.{subst, beta, simplify, sum_of_products, normal_form, is_normalized_sop,
+term_key, rewrite, SoPConfig, DEFAULT_SOP, RewriteError}`; embed surface `G.{beta, simplify,
+normal_form, sum_of_products}`. Tests: `tests/test_rewrite.py`.

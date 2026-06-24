@@ -1,0 +1,954 @@
+"""Term→Term **rewriting**: β-reduction, algebraic simplification, and a
+**sum-of-products** normal form (a new pass in the :mod:`grassmann.transform`
+family, alongside :mod:`~grassmann.transform.diff` / :mod:`~grassmann.transform.pullback`).
+
+Three public entry points, in increasing strength:
+
+- :func:`beta` — β-reduce applied binders only: ``Eval(LLam …)`` (linear) and
+  ``NEval(Lam …)`` (non-linear, value / space binders), incl. partial application.
+- :func:`simplify` — β + the always-valid algebraic cleanups (scalar/zero/identity
+  laws, sum flattening, involutions). Strictly shrinks a term; never distributes.
+- :func:`sum_of_products` (alias :func:`normal_form`) — :func:`simplify` plus the
+  **linearity / multilinearity distribution** rules that push every linear operator
+  through ``+`` and pull scalars to the front, then collect like terms. The result is a
+  flat ``Sum`` of monomials ``c · atom`` where no ``atom`` hides a distributable ``+``.
+
+Everything is **semantics-preserving**: each rule is an equality of the coordinate-free
+algebra, so a rewritten term lowers to the same numbers (the test-suite checks this by
+running both forms through :func:`grassmann.run`).
+
+The engine itself is a tiny innermost (bottom-up) normalizer (:func:`_normalize`): it
+rewrites children to a fixpoint first, then applies the local rules at the root until none
+fire. Rules are ``Term -> Term | None`` (``None`` = "I don't apply"). They must be
+strictly reducing under the chosen measure; a global step cap (:data:`_MAX_STEPS`) turns a
+runaway non-confluent set into a :class:`RewriteError` rather than a hang.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, fields, replace
+
+from grassmann.core.kinds import NAT, SPACE, SpaceSort
+from grassmann.core.space import Scalar, Space, is_dim, is_space
+from grassmann.core.term import (
+    Assert,
+    Compose,
+    Dagger,
+    Embed,
+    Eval,
+    Identity,
+    InvLift,
+    Kron,
+    Lam,
+    Lift,
+    LLam,
+    NEval,
+    OPlusV,
+    OProdV,
+    Permute,
+    Project,
+    Remetric,
+    Scale,
+    Solve,
+    Sum,
+    Term,
+    Trace,
+    Var,
+    Zero,
+    is_term,
+)
+
+Rule = Callable[[Term], Term | None]
+
+
+class RewriteError(Exception):
+    """Raised when a rewrite cannot proceed (e.g. the engine fails to terminate)."""
+
+
+# A backstop against a non-terminating / non-confluent rule set: the number of *local*
+# rule firings allowed at a single node before we declare non-termination.
+_MAX_STEPS = 100_000
+
+
+@dataclass(frozen=True)
+class SoPConfig:
+    """Switches that select how aggressively :func:`sum_of_products` normalizes (and what
+    :func:`is_normalized_sop` then certifies). Each flag turns a rule group on/off; the
+    surface grows as the build ladder lands (contraction-push, ⊕-dissolve, up-to-iso ⊗/⊕
+    ordering, …). Confluence is *not* assumed — the engine just runs the chosen rules to a
+    fixpoint (`plans/90`)."""
+
+    beta: bool = True            # β-reduce applied binders (Eval(LLam …) / NEval(Lam …))
+    distribute: bool = True      # push linear/multilinear ops through + (incl. zero-padded ⊕)
+    push_contractions: bool = True  # localize Eval/Compose into the ⊗ factor (x(c)·y)
+    collect: bool = True         # collect like monomials (v + v → 2·v, cancellation)
+    order_sum: bool = True       # sort + summands by term_key — value-safe (commutative)
+
+
+# The default preset: the conservative, value-safe end of the ladder (Step A).
+DEFAULT_SOP = SoPConfig()
+
+
+# ===========================================================================
+# Generic term traversal (rebuild + substitution).
+# ===========================================================================
+
+
+def _child_terms(node: Term) -> tuple[Term, ...]:
+    """The immediate *Term* children of ``node`` (a ``Scale`` scalar may be one)."""
+    out: list[Term] = []
+    for fld in fields(node):
+        val = getattr(node, fld.name)
+        for c in (val if isinstance(val, tuple) else (val,)):
+            if is_term(c):
+                out.append(c)
+    return tuple(out)
+
+
+def _rebuild(node: Term, f: Callable[[Term], Term]) -> Term:
+    """Reconstruct ``node`` with ``f`` applied to each *Term* child (spaces, dims, ints,
+    strings, the opaque ``External`` payload, and binder sorts pass through untouched).
+
+    Returns ``node`` itself when nothing changed, so identity rewrites don't churn."""
+    changed = False
+    new_fields: dict[str, object] = {}
+    for fld in fields(node):
+        val = getattr(node, fld.name)
+        if isinstance(val, tuple):
+            new_tuple = tuple(f(c) if is_term(c) else c for c in val)
+            if any(a is not b for a, b in zip(new_tuple, val, strict=True)):
+                changed = True
+            new_fields[fld.name] = new_tuple
+        elif is_term(val):
+            nv = f(val)
+            if nv is not val:
+                changed = True
+            new_fields[fld.name] = nv
+        else:
+            new_fields[fld.name] = val
+    if not changed:
+        return node
+    return replace(node, **new_fields)
+
+
+def subst(term: Term, mapping: dict[int, Term]) -> Term:
+    """Capture-avoiding substitution of value variables: replace every ``Var`` whose
+    ``uid`` is a key of ``mapping`` by the mapped Term.
+
+    Capture-avoidance is automatic: binder variables carry globally fresh ``uid``s, so an
+    inner binder never shares a ``uid`` with the (outer) variable being substituted, and a
+    substituted-in Term cannot mention a variable bound by a binder we pass under.
+    """
+
+    def go(node: Term) -> Term:
+        if isinstance(node, Var):
+            return mapping.get(node.uid, node)
+        return _rebuild(node, go)
+
+    return go(term)
+
+
+def _subst_space_in_term(term: Term, name: str, repl: Space) -> Term:
+    """Substitute the rigid space variable ``SVar(name) := repl`` through every space that
+    ``term`` embeds (used by space-binder β). Recurses into Term children and applies
+    :func:`grassmann.infer.subst.subst_space` to every Space-typed field."""
+    from grassmann.infer.subst import subst_space
+
+    def go(node: Term) -> Term:
+        new_fields: dict[str, object] = {}
+        changed = False
+        for fld in fields(node):
+            val = getattr(node, fld.name)
+            if isinstance(val, tuple):
+                new = tuple(
+                    go(c) if is_term(c) else (subst_space(c, name, repl) if is_space(c) else c)
+                    for c in val
+                )
+                if any(a is not b for a, b in zip(new, val, strict=True)):
+                    changed = True
+                new_fields[fld.name] = new
+            elif is_term(val):
+                nv = go(val)
+                if nv is not val:
+                    changed = True
+                new_fields[fld.name] = nv
+            elif is_space(val):
+                nv = subst_space(val, name, repl)
+                if nv is not val:
+                    changed = True
+                new_fields[fld.name] = nv
+            else:
+                new_fields[fld.name] = val
+        return replace(node, **new_fields) if changed else node
+
+    return go(term)
+
+
+def _subst_nat_in_term(term: Term, name: str, repl: object) -> Term:
+    """Substitute the nat parameter ``DimVar(name) := repl`` through every dimension that
+    ``term`` embeds (used by nat-binder β). A single generic structural walk over the whole
+    Term/Space/Dim tree — every ``DimVar(name)`` (in an ``OPlusRep`` count, an ``App``/``NEval``
+    nat arg, a ``DimSum``/``DimProd``/…) is replaced. (Capture under a shadowing inner nat
+    binder is not handled in v1 — nat binders are rare; noted in plans/90.)"""
+    from grassmann.core.space import DimVar
+
+    def go(node: object) -> object:
+        if isinstance(node, DimVar):
+            return repl if node.name == name else node
+        if not (is_term(node) or is_space(node) or is_dim(node)):
+            return node
+        new_fields: dict[str, object] = {}
+        changed = False
+        for fld in fields(node):
+            val = getattr(node, fld.name)
+            if isinstance(val, tuple):
+                new = tuple(
+                    go(c) if (is_term(c) or is_space(c) or is_dim(c)) else c for c in val
+                )
+                if any(a is not b for a, b in zip(new, val, strict=True)):
+                    changed = True
+                new_fields[fld.name] = new
+            elif is_term(val) or is_space(val) or is_dim(val):
+                nv = go(val)
+                if nv is not val:
+                    changed = True
+                new_fields[fld.name] = nv
+            else:
+                new_fields[fld.name] = val
+        return replace(node, **new_fields) if changed else node
+
+    return go(term)  # type: ignore[return-value]
+
+
+# ===========================================================================
+# Spaces & scalars.
+# ===========================================================================
+
+
+def _space(t: Term) -> Space | None:
+    """The synthesized space of ``t`` (or ``None`` if it does not type-check yet) — used
+    to give a fresh ``Zero`` its space. ``Zero(None)`` is a valid B1 placeholder, so a
+    failure degrades gracefully rather than aborting the rewrite."""
+    from grassmann.infer.synth import synth_space
+
+    try:
+        return synth_space(t)
+    except Exception:
+        return None
+
+
+def _is_num(x: object) -> bool:
+    return isinstance(x, (int, float))
+
+
+def _mul_scalar(a: float | Term, b: float | Term) -> float | Term:
+    """Scalar·scalar, collapsing numeric factors and the 0/1 identities. A genuinely
+    symbolic product of two scalar *Terms* is represented as ``Scale(a, b)`` (both are
+    ``Scalar``-valued, so this is the scalar product)."""
+    if _is_num(a) and _is_num(b):
+        return a * b
+    if _is_num(a):
+        if a == 1:
+            return b
+        if a == 0:
+            return 0.0
+    if _is_num(b):
+        if b == 1:
+            return a
+        if b == 0:
+            return 0.0
+    return Scale(a, b)  # type: ignore[arg-type]
+
+
+def _split_num_scale(v: Term) -> tuple[float, Term]:
+    """Peel a leading run of *numeric* ``Scale``s off ``v`` → ``(coeff, atom)``. A symbolic
+    scalar stops the peel (it stays part of the atom)."""
+    c = 1.0
+    while isinstance(v, Scale) and _is_num(v.scalar):
+        c *= float(v.scalar)
+        v = v.vector
+    return c, v
+
+
+# ===========================================================================
+# β-reduction rules.
+# ===========================================================================
+
+
+def rule_beta_eval(node: Term) -> Term | None:
+    """``Eval(LLam([x₀,…,xₙ₋₁]. body), pos, args)`` — linear β.
+
+    Slot ``p < n`` is the dual input of linear var ``xₚ``; applying ``args[k]`` there
+    substitutes ``xₚ := args[k]``. Full application returns the substituted body; a partial
+    one returns a residual ``LLam`` over the still-unapplied vars. Positions into the
+    *codomain* (``p ≥ n``) are not var redexes and are left alone."""
+    if not isinstance(node, Eval) or not isinstance(node.f, LLam):
+        return None
+    vars_ = node.f.vars
+    n = len(vars_)
+    if any(p >= n for p in node.positions):
+        return None
+    mapping = {vars_[p].uid: a for p, a in zip(node.positions, node.args, strict=True)}
+    applied = set(node.positions)
+    new_body = subst(node.f.body, mapping)
+    remaining = tuple(vars_[i] for i in range(n) if i not in applied)
+    if not remaining:
+        return new_body
+    return LLam(remaining, new_body)
+
+
+def _term_var_for_binder(lam: Lam, idx: int) -> Var | None:
+    """The ``Var`` introduced by the ``idx``-th binder, if it is a value (``SpaceSort``)
+    binder. ``term_vars`` lists those vars in binder order, skipping space/nat sorts."""
+    j = 0
+    for i, (_name, sort) in enumerate(lam.binders):
+        if isinstance(sort, SpaceSort):
+            if i == idx:
+                return lam.term_vars[j] if j < len(lam.term_vars) else None
+            j += 1
+    return None
+
+
+def rule_beta_neval(node: Term) -> Term | None:
+    """``NEval(Lam([b:σ]. body), pos, args)`` — non-linear β.
+
+    Each supplied slot substitutes into the body: a **value** binder (``SpaceSort``)
+    replaces its term var by the argument Term; a **space** binder replaces ``SVar(name)``
+    by the argument Space throughout the body's spaces; a **nat** binder replaces
+    ``DimVar(name)`` by the argument ``Dim`` throughout the body's dimensions. Unapplied
+    binders survive as a residual ``Lam`` (partial application)."""
+    if not isinstance(node, NEval) or not isinstance(node.f, Lam):
+        return None
+    lam = node.f
+    n = len(lam.binders)
+    if any(p >= n for p in node.positions):
+        return None
+    supplied = dict(zip(node.positions, node.args, strict=True))
+
+    term_map: dict[int, Term] = {}
+    body: Term = lam.body  # type: ignore[assignment]
+    if not is_term(body):
+        return None  # SpaceFunction / TypeFunction body — not a term β redex here.
+    consumed: set[int] = set()
+    for p, arg in supplied.items():
+        name, sort = lam.binders[p]
+        if isinstance(sort, SpaceSort):
+            v = _term_var_for_binder(lam, p)
+            if v is None or not is_term(arg):
+                return None
+            term_map[v.uid] = arg
+            consumed.add(p)
+        elif sort == SPACE and is_space(arg):
+            body = _subst_space_in_term(body, name, arg)
+            consumed.add(p)
+        elif sort == NAT and is_dim(arg):
+            body = _subst_nat_in_term(body, name, arg)
+            consumed.add(p)
+        else:
+            return None  # unsupported argument kind — leave for later.
+    if term_map:
+        body = subst(body, term_map)
+
+    remaining = tuple(
+        (name, sort) for i, (name, sort) in enumerate(lam.binders) if i not in consumed
+    )
+    if not remaining:
+        return body
+    # Rebuild the residual Lam, keeping only the term vars of the surviving value binders.
+    rem_term_vars = tuple(
+        v
+        for i, (_n, sort) in enumerate(lam.binders)
+        if i not in consumed
+        and isinstance(sort, SpaceSort)
+        and (v := _term_var_for_binder(lam, i)) is not None
+    )
+    return Lam(remaining, body, rem_term_vars)
+
+
+# ===========================================================================
+# Algebraic simplification rules (always strictly reducing).
+# ===========================================================================
+
+
+def rule_scale(node: Term) -> Term | None:
+    """Scalar laws: ``0·v → 0``, ``1·v → v``, ``r·0 → 0``, ``r·(s·w) → (r·s)·w``."""
+    if not isinstance(node, Scale):
+        return None
+    r, v = node.scalar, node.vector
+    if _is_num(r) and r == 0:
+        return Zero(_space(v))
+    if _is_num(r) and r == 1:
+        return v
+    if isinstance(v, Zero):
+        return v
+    if isinstance(v, Scale):
+        return Scale(_mul_scalar(r, v.scalar), v.vector)
+    return None
+
+
+def rule_sum(node: Term) -> Term | None:
+    """Flatten nested ``Sum``s and drop ``Zero`` summands; collapse to the single summand
+    (or a ``Zero``) when that is all that remains."""
+    if not isinstance(node, Sum):
+        return None
+    flat: list[Term] = []
+    changed = False
+    for v in node.vectors:
+        if isinstance(v, Sum):
+            flat.extend(v.vectors)
+            changed = True
+        elif isinstance(v, Zero):
+            changed = True
+        else:
+            flat.append(v)
+    if not flat:
+        return Zero(_space(node.vectors[0]))
+    if len(flat) == 1:
+        return flat[0]
+    return Sum(tuple(flat)) if changed else None
+
+
+def rule_collect(node: Term) -> Term | None:
+    """Collect like monomials in a ``Sum``: group summands by atom (after peeling a numeric
+    scalar) and add their coefficients. ``v + v → 2·v``; ``2·v + (−2)·v → 0``."""
+    if not isinstance(node, Sum):
+        return None
+    order: list[Term] = []
+    coeff: dict[Term, float] = {}
+    for v in node.vectors:
+        c, atom = _split_num_scale(v)
+        if atom in coeff:
+            coeff[atom] += c
+        else:
+            coeff[atom] = c
+            order.append(atom)
+    if len(order) == len(node.vectors) and all(
+        _split_num_scale(v)[0] == coeff[_split_num_scale(v)[1]] for v in node.vectors
+    ):
+        return None  # nothing merged
+    out: list[Term] = []
+    for atom in order:
+        c = coeff[atom]
+        if c == 0:
+            continue
+        out.append(atom if c == 1 else Scale(c, atom))
+    if not out:
+        return Zero(_space(node.vectors[0]))
+    return out[0] if len(out) == 1 else Sum(tuple(out))
+
+
+def rule_eval_identity(node: Term) -> Term | None:
+    """``Identity(s)·v → v`` (applying the identity map to a single vector)."""
+    if (
+        isinstance(node, Eval)
+        and isinstance(node.f, Identity)
+        and node.positions == (0,)
+        and len(node.args) == 1
+    ):
+        return node.args[0]
+    return None
+
+
+def rule_eval_zero(node: Term) -> Term | None:
+    """``0·… → 0`` and ``f(…,0,…) → 0`` — a linear application with a zero map or a zero
+    argument vanishes."""
+    if isinstance(node, Eval) and (
+        isinstance(node.f, Zero) or any(isinstance(a, Zero) for a in node.args)
+    ):
+        return Zero(_space(node))
+    return None
+
+
+def rule_compose(node: Term) -> Term | None:
+    """Identity / zero laws for composition: drop ``Identity`` operands, ``Identity ∘ g →
+    g``, and ``0 ∘ … → 0`` / ``… ∘ 0 → 0``."""
+    if not isinstance(node, Compose):
+        return None
+    if isinstance(node.f, Identity) and node.positions == (0,) and len(node.gs) == 1:
+        return node.gs[0]
+    if isinstance(node.f, Zero) or any(isinstance(g, Zero) for g in node.gs):
+        return Zero(_space(node))
+    keep_pos: list[int] = []
+    keep_gs: list[Term] = []
+    dropped = False
+    for p, g in zip(node.positions, node.gs, strict=True):
+        if isinstance(g, Identity):
+            dropped = True
+        else:
+            keep_pos.append(p)
+            keep_gs.append(g)
+    if not dropped:
+        return None
+    if not keep_gs:
+        return node.f
+    return Compose(node.f, tuple(keep_pos), tuple(keep_gs))
+
+
+def rule_involution(node: Term) -> Term | None:
+    """``(fᵀ)ᵀ → f`` (``Dagger``) and ``(f⁻¹)⁻¹ → f`` (``Solve``) — involutive operators."""
+    if isinstance(node, Dagger) and isinstance(node.f, Dagger):
+        return node.f.f
+    if isinstance(node, Solve) and isinstance(node.f, Solve):
+        return node.f.f
+    return None
+
+
+# ===========================================================================
+# Linearity / multilinearity distribution (toward sum-of-products).
+# ===========================================================================
+
+
+def _push_sum_then_scale(node: Term, slots: list[tuple[Term, Callable[[Term], Term]]]) -> Term | None:
+    """Generic distribution over a node that is **multilinear** in the given ``slots``
+    (each ``slot`` is a child plus a rebuild-with-new-child closure).
+
+    Pushes a ``Sum`` outward (preferred — moves ``+`` toward the root) before pulling a
+    scalar outward (``Scale``). Doing one slot per call lets the engine iterate to a
+    fixpoint; trying sums across all slots first keeps the result a clean SoP."""
+    for child, rebuild in slots:
+        if isinstance(child, Sum):
+            return Sum(tuple(rebuild(c) for c in child.vectors))
+    for child, rebuild in slots:
+        if isinstance(child, Scale):
+            return Scale(child.scalar, rebuild(child.vector))
+    return None
+
+
+def dist_scale(node: Term) -> Term | None:
+    """``r·(a+b) → r·a + r·b`` and ``(p+q)·v → p·v + q·v`` — ``Scale`` is bilinear."""
+    if not isinstance(node, Scale):
+        return None
+    r, v = node.scalar, node.vector
+    if isinstance(v, Sum):
+        return Sum(tuple(Scale(r, x) for x in v.vectors))
+    if is_term(r) and isinstance(r, Sum):
+        return Sum(tuple(Scale(p, v) for p in r.vectors))
+    return None
+
+
+def dist_eval(node: Term) -> Term | None:
+    """Multilinearity of linear application in the map and every argument."""
+    if not isinstance(node, Eval):
+        return None
+    slots: list[tuple[Term, Callable[[Term], Term]]] = [
+        (node.f, lambda g: Eval(g, node.positions, node.args))
+    ]
+    for k in range(len(node.args)):
+        def rb(a: Term, k: int = k) -> Term:
+            new = list(node.args)
+            new[k] = a
+            return Eval(node.f, node.positions, tuple(new))
+
+        slots.append((node.args[k], rb))
+    return _push_sum_then_scale(node, slots)
+
+
+def dist_compose(node: Term) -> Term | None:
+    """Multilinearity of composition in ``f`` and every ``gₖ``."""
+    if not isinstance(node, Compose):
+        return None
+    slots: list[tuple[Term, Callable[[Term], Term]]] = [
+        (node.f, lambda h: Compose(h, node.positions, node.gs))
+    ]
+    for k in range(len(node.gs)):
+        def rb(g: Term, k: int = k) -> Term:
+            new = list(node.gs)
+            new[k] = g
+            return Compose(node.f, node.positions, tuple(new))
+
+        slots.append((node.gs[k], rb))
+    return _push_sum_then_scale(node, slots)
+
+
+def dist_oprod(node: Term) -> Term | None:
+    """``⊗`` is multilinear: distribute over a ``+`` in any factor, pull a scalar from any
+    factor, and vanish if any factor is ``0``."""
+    if not isinstance(node, OProdV):
+        return None
+    if any(isinstance(v, Zero) for v in node.vectors):
+        return Zero(_space(node))
+    slots: list[tuple[Term, Callable[[Term], Term]]] = []
+    for k in range(len(node.vectors)):
+        def rb(x: Term, k: int = k) -> Term:
+            new = list(node.vectors)
+            new[k] = x
+            return OProdV(tuple(new))
+
+        slots.append((node.vectors[k], rb))
+    return _push_sum_then_scale(node, slots)
+
+
+def dist_oplus(node: Term) -> Term | None:
+    """Pull a ``+`` out of one ``⊕`` (``OPlusV``) slot by **zero-padding** — ``⊕`` is a
+    *stack*, not additive per component, so the other slots must be ZEROED in the extra
+    copies, not duplicated: ``(a+b)⊕c → a⊕c + b⊕0`` (NOT ``a⊕c + b⊕c``, which doubles ``c``).
+
+    The first addend keeps the original siblings; each further addend gets a copy with that
+    slot's value and ``Zero`` everywhere else. Keeps ``⊕`` as a layer whose components are
+    ``+``-free (the v2 ``+ > ⊕ > ⊗`` grammar)."""
+    if not isinstance(node, OPlusV):
+        return None
+    for k, v in enumerate(node.vectors):
+        if isinstance(v, Sum):
+            parts: list[Term] = []
+            first = list(node.vectors)
+            first[k] = v.vectors[0]
+            parts.append(OPlusV(tuple(first)))
+            for addend in v.vectors[1:]:
+                slot = [Zero(_space(s)) for s in node.vectors]
+                slot[k] = addend
+                parts.append(OPlusV(tuple(slot)))
+            return Sum(tuple(parts))
+    return None
+
+
+def dist_kron(node: Term) -> Term | None:
+    """``Kron`` (map ⊗) is bilinear in its two maps; vanishes if either is ``0``."""
+    if not isinstance(node, Kron):
+        return None
+    if isinstance(node.f, Zero) or isinstance(node.g, Zero):
+        return Zero(_space(node))
+    slots = [
+        (node.f, lambda f: Kron(f, node.g)),
+        (node.g, lambda g: Kron(node.f, g)),
+    ]
+    return _push_sum_then_scale(node, slots)
+
+
+# ---------------------------------------------------------------------------
+# Contraction-push: localize Eval/Compose into the ⊗ factor it acts on.
+#
+# An `Eval`/`Compose` on `OProdV(g₀,…,gₘ)` indexes ONE slot per value-factor (slot i ↔ gᵢ
+# as a whole). For the term to type-check, a contracted slot must be a single Dual factor —
+# so an Eval'd factor is always fully consumed to a SCALAR (the `x(c)·y` rule), and a
+# Compose'd factor stays a covector. No flattened-arity bookkeeping is needed.
+# ---------------------------------------------------------------------------
+
+
+def dist_eval_oprod(node: Term) -> Term | None:
+    """Push a contraction into a tensor product: ``Eval(⊗(g₀,…,gₘ), pos, args)`` contracts
+    each selected factor fully (it is a single dual ⇒ a scalar ``gᵢ(argᵢ)``) and pulls it
+    out as a coefficient — the ``Eval(x⊗y, c) → x(c)·y`` rule. Bails if a contracted factor
+    does not reduce to a scalar (an atypical / untypable slot)."""
+    if not isinstance(node, Eval) or not isinstance(node.f, OProdV):
+        return None
+    gs = node.f.vectors
+    contracted = dict(zip(node.positions, node.args, strict=True))
+    if any(p >= len(gs) for p in contracted):
+        return None
+    coeffs: list[Term] = []
+    factors: list[Term] = []
+    for i, g in enumerate(gs):
+        if i in contracted:
+            cf = Eval(g, (0,), (contracted[i],))
+            if not isinstance(_space(cf), Scalar):
+                return None
+            coeffs.append(cf)
+        else:
+            factors.append(g)
+    if not factors:  # every factor contracted → the product of the scalar coefficients
+        body: Term = coeffs[0]
+        for cf in coeffs[1:]:
+            body = Scale(cf, body)
+        return body
+    body = OProdV(tuple(factors)) if len(factors) > 1 else factors[0]
+    for cf in coeffs:
+        body = Scale(cf, body)
+    return body
+
+
+def dist_compose_oprod(node: Term) -> Term | None:
+    """Push a composition into a tensor product: ``Compose(⊗(g₀,…,gₘ), pos, hs)`` precomposes
+    each selected factor (a single dual input slot) with its map ``hₖ``, leaving the other
+    factors untouched."""
+    if not isinstance(node, Compose) or not isinstance(node.f, OProdV):
+        return None
+    gs = node.f.vectors
+    composed = dict(zip(node.positions, node.gs, strict=True))
+    if any(p >= len(gs) for p in composed):
+        return None
+    factors = [
+        Compose(g, (0,), (composed[i],)) if i in composed else g for i, g in enumerate(gs)
+    ]
+    return OProdV(tuple(factors)) if len(factors) > 1 else factors[0]
+
+
+def _unary_linear(node: Term, child: Term, rebuild: Callable[[Term], Term]) -> Term | None:
+    """Distribution for a node **linear in one child**: ``L(a+b) → L(a)+L(b)``,
+    ``L(r·v) → r·L(v)``, ``L(0) → 0``."""
+    if isinstance(child, Zero):
+        return Zero(_space(node))
+    if isinstance(child, Sum):
+        return Sum(tuple(rebuild(c) for c in child.vectors))
+    if isinstance(child, Scale):
+        return Scale(child.scalar, rebuild(child.vector))
+    return None
+
+
+def dist_unary(node: Term) -> Term | None:
+    """Single-child linear operators: ``Dagger`` / ``Trace`` / the movement & reshape nodes
+    (``Project``/``Embed``/``Assert``/``Lift``/``InvLift``/``Permute``/``Remetric``)."""
+    if isinstance(node, Dagger):
+        return _unary_linear(node, node.f, Dagger)
+    if isinstance(node, Trace):
+        return _unary_linear(node, node.f, lambda g: Trace(g, node.i, node.j))
+    if isinstance(node, Project):
+        return _unary_linear(node, node.vector, lambda v: Project(v, node.space))
+    if isinstance(node, Embed):
+        return _unary_linear(node, node.vector, lambda v: Embed(v, node.space))
+    if isinstance(node, Assert):
+        return _unary_linear(node, node.vector, lambda v: Assert(v, node.space))
+    if isinstance(node, Lift):
+        return _unary_linear(node, node.vector, lambda v: Lift(v, node.fused, node.k))
+    if isinstance(node, InvLift):
+        return _unary_linear(node, node.vector, lambda v: InvLift(v, node.fused, node.k))
+    if isinstance(node, Permute):
+        return _unary_linear(node, node.vector, lambda v: Permute(v, node.perm))
+    if isinstance(node, Remetric):
+        return _unary_linear(node, node.vector, lambda v: Remetric(v, node.metric))
+    return None
+
+
+# ===========================================================================
+# Rule sets and the normalization engine.
+# ===========================================================================
+
+_BETA_RULES: tuple[Rule, ...] = (rule_beta_eval, rule_beta_neval)
+
+# The always-valid algebraic cleanups (scalar/zero/identity laws, sum flattening,
+# involutions) — strictly reducing, run in every preset.
+_CLEANUP_RULES: tuple[Rule, ...] = (
+    rule_eval_identity,
+    rule_eval_zero,
+    rule_compose,
+    rule_involution,
+    rule_scale,
+    rule_sum,
+)
+
+_SIMPLIFY_RULES: tuple[Rule, ...] = (*_BETA_RULES, *_CLEANUP_RULES)
+
+_DISTRIBUTE_RULES: tuple[Rule, ...] = (
+    dist_scale,
+    dist_eval,
+    dist_compose,
+    dist_oprod,
+    dist_oplus,
+    dist_kron,
+    dist_unary,
+)
+
+# Contraction-push: localize Eval/Compose into the ⊗ factor that owns each slot.
+_CONTRACTION_RULES: tuple[Rule, ...] = (dist_eval_oprod, dist_compose_oprod)
+
+
+# ===========================================================================
+# Sum-of-products normal form: the canonical ordering key and its predicate.
+#
+# Grammar (what :func:`sum_of_products` aims to produce, and what
+# :func:`is_normalized_sop` certifies):
+#
+#   nf     ::= Zero                              -- the additive unit
+#           |  mono                              -- a single monomial
+#           |  Sum(mono₁, …, monoₖ)              -- k ≥ 2; the monomials' atoms are
+#                                                --   DISTINCT and sorted by `term_key`
+#   mono   ::= atom                              -- coefficient 1 (implicit)
+#           |  Scale(coeff, atom)                -- coeff ∉ {0, 1}
+#   coeff  ::= r ∈ ℝ∖{0,1}                        -- a numeric scalar, or
+#           |  s                                 -- a Scalar-valued atom (no top-level +)
+#   atom   ::= a Term whose head is NOT Sum / Scale / Zero, is NOT a β-redex
+#              (Eval(LLam …) / NEval(Lam …)) nor Eval(Identity …), and ALL of whose
+#              subterms are themselves fully reduced — no distributable `+` and no
+#              pullable scalar sits in any linear position.
+#
+# `term_key` is the total order that makes the form canonical (α-equal terms ⇒ equal
+# key ⇒ identical sorted output). It is `repr`-based today — deterministic and total —
+# and is the single hook step 1 swaps for a structural key if needed.
+# ===========================================================================
+
+
+def term_key(t: Term) -> str:
+    """A total, deterministic ordering key on Terms (used to sort ``Sum`` summands into a
+    canonical order). ``repr`` is injective over these frozen dataclasses, so equal terms
+    map to equal keys and the sort is stable; swap this for a structural key if a
+    smaller/faster key is wanted."""
+    return repr(t)
+
+
+def _atom_of(mono: Term) -> Term:
+    """The atom of a monomial (strip a leading ``Scale`` coefficient)."""
+    return mono.vector if isinstance(mono, Scale) else mono
+
+
+def rule_sort_sum(node: Term) -> Term | None:
+    """Order ``Sum`` summands into canonical order by ``term_key`` of their atoms. Sorting
+    by the *atom* (not the whole monomial) is well-defined once :func:`rule_collect` has made
+    atoms distinct. Reordering ``+`` is value-safe — addition is commutative and same-space."""
+    if not isinstance(node, Sum):
+        return None
+    monos = node.vectors
+    order = sorted(range(len(monos)), key=lambda i: term_key(_atom_of(monos[i])))
+    if order == list(range(len(monos))):
+        return None
+    return Sum(tuple(monos[i] for i in order))
+
+
+def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
+    """Assemble the rule tuple selected by ``cfg`` (the always-valid algebraic cleanups run
+    unconditionally; everything else is gated)."""
+    rules: list[Rule] = []
+    if cfg.beta:
+        rules += _BETA_RULES
+    rules += _CLEANUP_RULES
+    if cfg.distribute:
+        rules += _DISTRIBUTE_RULES
+    if cfg.push_contractions:
+        rules += _CONTRACTION_RULES
+    if cfg.collect:
+        rules.append(rule_collect)
+    if cfg.order_sum:
+        rules.append(rule_sort_sum)
+    return tuple(rules)
+
+
+def _is_atom_head(a: Term) -> bool:
+    """``a``'s *head* is a legal atom head: not additive/scalable/zero, and not a redex the
+    normal form forbids (β or ``Id·v``)."""
+    if isinstance(a, (Sum, Scale, Zero)):
+        return False
+    if isinstance(a, Eval) and isinstance(a.f, (LLam, Identity)):
+        return False
+    if isinstance(a, NEval) and isinstance(a.f, Lam):
+        return False
+    return True
+
+
+def _is_monomial(mono: Term) -> bool:
+    """``mono`` is ``atom`` or ``Scale(coeff, atom)`` with ``coeff ∉ {0, 1}`` (numeric) or a
+    sum-free scalar term (symbolic), and ``atom`` a legal atom head."""
+    if isinstance(mono, (Sum, Zero)):
+        return False
+    if isinstance(mono, Scale):
+        c = mono.scalar
+        if _is_num(c):
+            if c == 0 or c == 1:
+                return False
+        elif isinstance(c, Sum):
+            return False  # a distributable scalar sum must have been pushed out
+        return _is_atom_head(mono.vector)
+    return _is_atom_head(mono)
+
+
+def _fully_reduced(t: Term, rules: tuple[Rule, ...]) -> bool:
+    """No rule in ``rules`` fires anywhere in ``t`` (the operational "no redex remains" half
+    of the normal-form check; the additive *shape* is checked separately by
+    :func:`is_normalized_sop`)."""
+    for rule in rules:
+        out = rule(t)
+        if out is not None and out != t:
+            return False
+    return all(_fully_reduced(c, rules) for c in _child_terms(t))
+
+
+def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
+    """Decide whether ``t`` is in **sum-of-products normal form** under ``config`` (the
+    grammar above).
+
+    Two independent checks: (1) the additive *shape* — ``Zero``, a lone monomial, or a
+    ``Sum`` of ≥2 monomials whose atoms are distinct (when ``collect``) and sorted by
+    :func:`term_key` (when ``order_sum``); and (2) *full reduction* — no enabled rule fires
+    anywhere. Together they make ``is_normalized_sop(sum_of_products(t, c), c)`` the
+    acceptance test for the normalizer.
+    """
+    if not is_term(t):
+        return False
+    if isinstance(t, Zero):
+        return True
+    if isinstance(t, Sum):
+        monos = t.vectors
+        if len(monos) < 2 or not all(_is_monomial(m) for m in monos):
+            return False
+        keys = [term_key(_atom_of(m)) for m in monos]
+        if config.collect and len(set(keys)) != len(keys):  # atoms not collected
+            return False
+        if config.order_sum and keys != sorted(keys):  # not in canonical order
+            return False
+    elif not _is_monomial(t):
+        return False
+    return _fully_reduced(t, _sop_rules(config))
+
+
+def _normalize(term: Term, rules: tuple[Rule, ...]) -> Term:
+    """Innermost (bottom-up) normalization to a fixpoint of ``rules``."""
+    node = _rebuild(term, lambda c: _normalize(c, rules))
+    steps = 0
+    while True:
+        for rule in rules:
+            new = rule(node)
+            if new is not None and new != node:
+                # The rule's result may have un-normalized children → renormalize.
+                node = _rebuild(new, lambda c: _normalize(c, rules))
+                steps += 1
+                if steps > _MAX_STEPS:
+                    raise RewriteError(
+                        f"rewrite did not terminate after {_MAX_STEPS} steps at {type(node).__name__}; "
+                        f"the rule set may be non-confluent"
+                    )
+                break
+        else:
+            return node
+
+
+# ===========================================================================
+# Public API.
+# ===========================================================================
+
+
+def rewrite(term: Term, rules: tuple[Rule, ...]) -> Term:
+    """Normalize ``term`` to a fixpoint of a custom ``rules`` tuple (the open-ended entry
+    point; :func:`simplify` / :func:`sum_of_products` are the curated presets)."""
+    if not is_term(term):
+        raise RewriteError(f"rewrite: expected a Term, got {term!r}")
+    return _normalize(term, rules)
+
+
+def beta(term: Term) -> Term:
+    """β-reduce applied binders (``Eval(LLam …)`` / ``NEval(Lam …)``) to a fixpoint, with
+    no other simplification."""
+    return rewrite(term, _BETA_RULES)
+
+
+def simplify(term: Term) -> Term:
+    """β-reduce and apply the always-valid algebraic cleanups (scalar/zero/identity laws,
+    sum flattening, involutions). Strictly shrinks the term; never distributes ``+``."""
+    return rewrite(term, _SIMPLIFY_RULES)
+
+
+def sum_of_products(term: Term, config: SoPConfig = DEFAULT_SOP) -> Term:
+    """Rewrite to **sum-of-products normal form** under ``config``: β + the algebraic
+    cleanups, distribute every linear/multilinear operator through ``+`` (incl. the
+    zero-padded ``⊕`` split), pull scalars to the front, collect like terms, and sort the
+    summands canonically. The result is a ``Zero``, a single monomial, or a flat, canonically
+    ordered ``Sum`` of monomials ``c · atom`` with no distributable ``+`` left inside."""
+    return rewrite(term, _sop_rules(config))
+
+
+# A readable alias.
+normal_form = sum_of_products
+
+
+__all__ = [
+    "Rule",
+    "RewriteError",
+    "SoPConfig",
+    "DEFAULT_SOP",
+    "subst",
+    "rewrite",
+    "beta",
+    "simplify",
+    "sum_of_products",
+    "normal_form",
+    "term_key",
+    "is_normalized_sop",
+]
