@@ -801,6 +801,39 @@ def test_tuplepermute_value_correct() -> None:
     np.testing.assert_allclose(_run(tp, feed), expected)
 
 
+# ===========================================================================
+# Task #13 — space normalization (modulo term normalization).
+# ===========================================================================
+
+
+def test_space_normalization_iso_classes() -> None:
+    from grassmann.transform.rewrite import normalize_space, spaces_iso
+
+    V, W, U = S.base("V", 2), S.base("W", 3), S.base("U", 2)
+    assert spaces_iso(S.oprod(V, W), S.oprod(W, V))  # ⊗ commutes up to iso
+    assert spaces_iso(S.oplus(V, W), S.oplus(W, V))  # ⊕ commutes up to iso
+    assert not spaces_iso(S.oprod(V, W), S.oprod(V, V))  # different multiset of factors
+    assert not spaces_iso(S.dual(V), V)  # dual is structural
+    nested = S.oplus(S.oprod(W, V), U)
+    assert normalize_space(normalize_space(nested)) == normalize_space(nested)  # idempotent
+
+
+# ===========================================================================
+# Task #14 — Project(Embed(v, S), s) → v on the subspace.
+# ===========================================================================
+
+
+def test_project_embed_cancellation() -> None:
+    V = S.base("V", 2)
+    v = T.var("v", V)
+    pe = T.Project(T.Embed(v, V), V)
+    assert simplify(pe) == v
+    assert simplify(T.Project(T.Embed(v, V))) == v  # omitted target inferred
+    feed = {_key(v): np.array([1.0, 2.0])}
+    _same(pe, v, feed)
+    assert is_normalized_sop(sum_of_products(pe))
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
