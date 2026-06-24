@@ -293,6 +293,20 @@ def _c_pinv_apply_scalar():
              v: (V, np.array([1.0, 0, 2]))})
 
 
+def _c_solve_scalar():  # ⟨w, f⁻¹v⟩
+    w, f, v = C.var("w", DV), C.var("f", MS, C.bij), _vec("v")
+    return (C.eval_(w, (0,), C.eval_(C.solve(f), (0,), v)),
+            {w: (DV, np.array([1.0, 2, 3])), f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+             v: (V, np.array([1.0, 0, 2]))})
+
+
+def _c_trace_scalar():  # ⟨w, ⟨b,a⟩·c⟩ — trace has a surviving slot (c), so it steers without the wrap
+    w, a, b, c = C.var("w", DV), _vec("a"), C.var("b", DV), _vec("c")
+    return (C.eval_(w, (0,), C.trace(C.oprod_v(a, b, c), 0, 1)),
+            {w: (DV, np.array([1.0, 2, 3])), a: (V, np.array([1.0, 2, 0])),
+             b: (DV, np.array([0.0, 1, 3])), c: (V, np.array([2.0, 1, 1]))})
+
+
 def _c_var():
     u = _vec("u")
     return u, {u: (V, np.array([1.0, 2, 3]))}
@@ -345,6 +359,7 @@ CASES = [
     # scalar-wrapped (UNSTEERED) variants — exercise the contraction/reconcile that STD steering masks
     _case("eval_map_scalar", _c_eval_map_scalar), _case("compose_scalar", _c_compose_scalar),
     _case("pinv_apply_scalar", _c_pinv_apply_scalar),
+    _case("solve_scalar", _c_solve_scalar), _case("trace_scalar", _c_trace_scalar),
 ]
 
 
