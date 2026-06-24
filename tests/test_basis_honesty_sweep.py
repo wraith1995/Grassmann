@@ -168,7 +168,10 @@ def _sweep(make_term, var_specs):
 V = C.base("V", 3)
 W = C.base("W", 2)
 DV = C.dual(V)
+DW = C.dual(W)
 MS = C.linear_map_space(V, V)
+MVW = C.linear_map_space(V, W)  # rectangular 3→2 (stored (dom=V, cod=W) ⇒ shape (3,2))
+_MR = np.array([[2.0, 0], [1, 3], [0, 1.0]])  # a 3×2 rectangular map
 
 
 def _vec(name, sp=V):
@@ -353,6 +356,51 @@ def _c_oprod_scalar():  # ⟨b, a⟩ — oprod consumed by trace (unsteered)
             {a: (V, np.array([1.0, 2, 0])), b: (DV, np.array([0.0, 1, 3]))})
 
 
+# Vary the CONSUMER: an arm's AUTO result fed to sum/oprod/compose (different reconcile paths than eval).
+def _c_sum_of_applies():  # (f·v) + (g·u) — sum reconciles two eval results in different bases
+    f, g, v, u = C.var("f", MS), C.var("g", MS), _vec("v"), _vec("u")
+    return (C.sum_(C.eval_(f, (0,), v), C.eval_(g, (0,), u)),
+            {f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+             g: (MS, np.array([[1.0, 2, 0], [0, 1, 1], [1, 0, 2.0]])),
+             v: (V, np.array([1.0, 2, 3])), u: (V, np.array([0.0, 1, 2]))})
+
+
+def _c_oprod_of_applies():  # (f·v) ⊗ w
+    f, v, w = C.var("f", MS), _vec("v"), _vec("w")
+    return (C.oprod_v(C.eval_(f, (0,), v), w),
+            {f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+             v: (V, np.array([1.0, 2, 3])), w: (V, np.array([2.0, 1, 0]))})
+
+
+def _c_compose_dagger_scalar():  # ⟨z, (f†∘g) x⟩ — dagger consumed by compose
+    z, f, g, x = C.var("z", DV), C.var("f", MS), C.var("g", MS), _vec("x")
+    return (C.eval_(z, (0,), C.eval_(C.compose(C.dagger(f), (0,), g), (0,), x)),
+            {z: (DV, np.array([1.0, 2, 3])), f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
+             g: (MS, np.array([[1.0, 2, 0], [0, 1, 1], [1, 0, 2.0]])), x: (V, np.array([1.0, 0, 2]))})
+
+
+# Rectangular maps (V→W, 3→2): non-square dagger/pinv + a rectangular fused slot.
+def _c_eval_map_rect():
+    f, v = C.var("f", MVW), _vec("v")
+    return C.eval_(f, (0,), v), {f: (MVW, _MR), v: (V, np.array([1.0, 2, 3]))}
+
+
+def _c_dagger_rect():
+    f = C.var("f", MVW)
+    return C.dagger(f), {f: (MVW, _MR)}
+
+
+def _c_pinv_apply_rect():
+    f, w = C.var("f", MVW), C.var("w", W)
+    return C.pinv_apply(f, w), {f: (MVW, _MR), w: (W, np.array([1.0, 2]))}
+
+
+def _c_eval_map_rect_scalar():  # ⟨w′, f·v⟩, f: V→W (unsteered)
+    wp, f, v = C.var("wp", DW), C.var("f", MVW), _vec("v")
+    return (C.eval_(wp, (0,), C.eval_(f, (0,), v)),
+            {wp: (DW, np.array([1.0, 1])), f: (MVW, _MR), v: (V, np.array([1.0, 2, 3]))})
+
+
 def _c_var():
     u = _vec("u")
     return u, {u: (V, np.array([1.0, 2, 3]))}
@@ -410,6 +458,12 @@ CASES = [
     _case("permute_scalar", _c_permute_scalar),
     _case("lift_scalar", _c_lift_scalar),  # multi-axis fused-slot reconcile (per-axis _coerce_rep_to_target)
     _case("oprod_scalar", _c_oprod_scalar),
+    # rectangular maps (V→W)
+    _case("eval_map_rect", _c_eval_map_rect), _case("dagger_rect", _c_dagger_rect),
+    _case("pinv_apply_rect", _c_pinv_apply_rect), _case("eval_map_rect_scalar", _c_eval_map_rect_scalar),
+    # vary the consumer (sum / oprod / compose)
+    _case("sum_of_applies", _c_sum_of_applies), _case("oprod_of_applies", _c_oprod_of_applies),
+    _case("compose_dagger_scalar", _c_compose_dagger_scalar),
 ]
 
 
