@@ -186,9 +186,9 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
         case Dagger(f):
             return _wrap_linear(Dagger, _dd(f, ctx), e, ctx)
         case Project(v, s):
-            return _wrap_linear(lambda d: Project(d, s), _dd(v, ctx), e, ctx)
+            return _dd_project(v, s, e, ctx)
         case Embed(v, s):
-            return _wrap_linear(lambda d: Embed(d, s), _dd(v, ctx), e, ctx)
+            return _dd_embed(v, s, e, ctx)
         case Assert(v, s):
             return _wrap_linear(lambda d: Assert(d, s), _dd(v, ctx), e, ctx)
         case Lift(v, fused, k):
@@ -332,6 +332,57 @@ def _dd_compose(e: Compose, ctx: _DCtx) -> Term:
         new[k] = dgk
         parts.append(Compose(f, pos, tuple(new)))
     return _sum(parts, e, ctx)
+
+
+def _subspace_defining_map(space: Space) -> Term | None:
+    """The defining map ``f`` of a term-dependent subspace ``Img(f)/CoImg(f)/Ker(f)/CoKer(f)``,
+    else ``None``."""
+    from grassmann.core.space import CoImg, CoKer, Img, Ker
+
+    if isinstance(space, (Img, CoImg, Ker, CoKer)):
+        return space.f
+    return None
+
+
+def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
+    """``d(embed(v, big))`` — embed IS ``di`` (the differential of the embedding).  So when ``v``'s
+    home space ``Sub(J)`` has an x-dependent defining map ``J``, the derivative is
+
+        d(embed(v)) = embed(dv)  +  ∂(di)·v ,
+
+    the second term being the immersion's directional derivative applied to ``v``: ``∂J`` applied to
+    ``v``'s **source coordinates** ``J⁺·embed(v)`` (recovered through the ambient, so it is
+    basis-consistent).  A constant ``J`` ⇒ the ordinary linear rule (``embed(dv)``)."""
+    from grassmann.infer.synth import synth_space
+
+    dv = _dd(v, ctx)
+    frozen = None if isinstance(dv, Zero) else Embed(dv, big)
+    J = _subspace_defining_map(synth_space(v))
+    if J is not None and _depends_on_x(J, ctx):
+        dJ = _dd(J, ctx)
+        if not isinstance(dJ, Zero):
+            # ∂(di)·v : apply the immersion direction ∂J to v's source coords J⁺·embed(v).
+            realiz = Eval(dJ, (0,), (Eval(Pinv(J), (0,), (Embed(v, big),)),))
+            return _sum([p for p in (frozen, realiz) if p is not None], e, ctx)
+    return frozen if frozen is not None else _zero(e, ctx)
+
+
+def _dd_project(z: Term, sub: Space, e: Term, ctx: _DCtx) -> Term:
+    """``d(project(z, Sub(J)))`` — project IS ``di⁺`` (the co-immersion / pseudoinverse).  So when
+    the target subspace ``Sub(J)`` has an x-dependent defining map ``J``,
+
+        d(project(z)) = project(dz)  +  ∂(J⁺)·z ,
+
+    with ``∂(J⁺)`` the bare pseudoinverse-map derivative (:func:`_pinv_map_grad`)."""
+    dz = _dd(z, ctx)
+    frozen = None if isinstance(dz, Zero) else Project(dz, sub)
+    J = _subspace_defining_map(sub)
+    if J is not None and _depends_on_x(J, ctx):
+        dJ = _dd(J, ctx)
+        if not isinstance(dJ, Zero):
+            realiz = Eval(_pinv_map_grad(J, dJ), (0,), (z,))
+            return _sum([p for p in (frozen, realiz) if p is not None], e, ctx)
+    return frozen if frozen is not None else _zero(e, ctx)
 
 
 def _dd_kron(e: Kron, ctx: _DCtx) -> Term:
@@ -760,17 +811,15 @@ def _mul(a: Term, b: Term) -> Scale:
 
 
 def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None]) -> None:
-    """Reject an open term (free space variable / unresolved metavar) and any **x-dependent term**
-    in a *space* position — differentiating through a term-dependent space is unsupported.
+    """Reject an open term (free space variable / unresolved metavar), a ``Frame`` on the path, and
+    an x-dependent term in a *non-subspace* space position (a genuine space-function dependence).
 
-    A space built from an x-dependent term (``x`` itself or a marked dep) — e.g. ``Img(J(x))`` — has
-    an x-dependent *realization* (the immersion/projector), so an op that materializes it
-    (``Embed``/``Project``/``Assert``/musical maps) genuinely depends on x THROUGH the space.  The
-    value-level rules differentiate only the value and miss the ``∂(space)`` contribution, so the
-    derivative would be **silent-wrong**.  Bail loudly.  (A *constant* defining term ⇒ a constant
-    space ⇒ the value-level rule is correct, so it does not fire — the common FEM case of a section
-    in ``Img(J)`` with a per-cell-constant ``J`` still differentiates.)"""
-    from grassmann.core.space import is_space
+    An x-dependent term in a **subspace** (``Img(J)/CoImg/Ker/CoKer`` with ``J`` x-dependent) is NOT
+    rejected: ``embed`` IS ``di`` (the differential of the embedding), so the realizing arms
+    differentiate it term→term — ``embed``/``project`` add the immersion-derivative term, and the
+    musical maps raise their own specific error.  Only x flowing into a non-subspace space (an SVar
+    / a space made to depend on x by a Frame/SpaceFunction) is genuinely higher-order."""
+    from grassmann.core.space import CoImg, CoKer, Img, Ker, is_space
     from grassmann.infer.synth import InferError, synth_space
 
     try:
@@ -783,23 +832,20 @@ def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None])
     def is_xdep(v: Var) -> bool:
         return v.uid == x.uid or v.uid in deps
 
-    def walk(node: object, in_space: bool) -> None:
+    def walk(node: object, in_space: bool, in_subspace: bool) -> None:
         if isinstance(node, Frame):
             raise DiffError("diff: cannot differentiate through a Frame (basis binder)")
-        if in_space and isinstance(node, Var) and is_xdep(node):
+        if in_space and not in_subspace and isinstance(node, Var) and is_xdep(node):
             raise DiffError(
-                "diff: an x-dependent term flows into a space position (e.g. Img(J) with J "
-                "x-dependent / Img(x)). The orthonormal ImageBasis of Img(J) is NOT frame-free "
-                "differentiable (its derivative carries a Cholesky/triangular gauge term with no "
-                "coordinate-free term form). Represent the tangent vector in the PARAMETER frame "
-                "instead — immerse via Eval(J, w) for w in dom(J) — which differentiates term→term "
-                "by the ordinary product rule (covariant part = embed∘project = the frame "
-                "connection Pinv(J)∘∂J; normal part = the second fundamental form)."
+                "diff: an x-dependent term flows into a non-subspace space position "
+                "(a space made to depend on x — e.g. a SpaceFunction); differentiating through a "
+                "space function is unsupported."
             )
         for child in _children(node):
-            walk(child, in_space or is_space(child))
+            walk(child, in_space or is_space(child),
+                 in_subspace or isinstance(child, (Img, CoImg, Ker, CoKer)))
 
-    walk(e, is_space(e))
+    walk(e, is_space(e), False)
 
 
 def _mentions_space_meta(s: Space) -> bool:
