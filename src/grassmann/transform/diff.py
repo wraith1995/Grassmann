@@ -146,8 +146,18 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
         case Zero() | Lit() | Identity() | TupleEmbed() | TupleProject():
             return _zero(e, ctx)
         case Inner() | Flat() | Sharp():
-            # Musical maps of a *constant* space are constant; an x-dependent metric is
-            # handled by the covariant correction, not by differentiating the operator.
+            # Musical maps of a *constant* space are constant. But if the operator's space is a
+            # ``WithInner(s, g)`` whose metric ``g`` depends on x, the operator itself varies — its
+            # derivative is nonzero (e.g. ``d⟨a,b⟩_g = aᵀ(∂g)b``).  The covariant correction only
+            # intercepts ``Remetric`` sections, NOT a bare Inner/Flat/Sharp, so returning Zero here
+            # would be silent-wrong; raise loudly instead (wrap the section in ``Remetric`` for the
+            # connection, or differentiate the explicit ``WithInner``-metric form).
+            if _xdep_metric_space(e.space, ctx):
+                raise DiffError(
+                    "diff: Inner/Flat/Sharp of a space with an x-dependent metric has a nonzero "
+                    "operator derivative (not yet supported); use Remetric(sec, g) for the covariant "
+                    "connection, or supply the metric-pairing in an explicit form"
+                )
             return _zero(e, ctx)
         case External():
             return _dd_external(e, ctx)
@@ -648,6 +658,16 @@ def _depends_on_x(node: object, ctx: _DCtx) -> bool:
     return any(_depends_on_x(c, ctx) for c in _children(node))
 
 
+def _xdep_metric_space(space: Space, ctx: _DCtx) -> bool:
+    """True if ``space`` carries a ``WithInner`` metric that depends on ``x`` (so a musical operator
+    of that space is itself x-dependent)."""
+    return (
+        isinstance(space, WithInner)
+        and is_term(space.metric)
+        and _depends_on_x(space.metric, ctx)
+    )
+
+
 # ===========================================================================
 # Helpers.
 # ===========================================================================
@@ -717,7 +737,7 @@ def _guard_closed_and_first_order(e: Term, x: Var) -> None:
     """Reject an open term (free space variable / unresolved metavar) and any occurrence of
     ``x`` in a *space* position (a dependence position) — differentiating through a space
     function is unsupported."""
-    from grassmann.core.space import SpaceMeta, SVar, is_space
+    from grassmann.core.space import is_space
     from grassmann.infer.synth import InferError, synth_space
 
     try:
@@ -727,15 +747,22 @@ def _guard_closed_and_first_order(e: Term, x: Var) -> None:
     if _mentions_space_meta(s):
         raise DiffError("diff: term has an unresolved space; it must be closed")
 
-    # x must not flow into a space (a Frame/SpaceFunction would make a space depend on x).
-    def walk(node: object) -> None:
+    # x must not flow into a *space* position — a Frame/SpaceFunction, or x buried in a dependent
+    # space such as ``Img(x)`` (the projected/embedded coords then depend on x through the space,
+    # which the value-level rules don't see ⇒ silent-wrong).  Differentiating through a space
+    # function is genuinely higher-order; bail loudly.
+    def walk(node: object, in_space: bool) -> None:
         if isinstance(node, Frame):
             raise DiffError("diff: cannot differentiate through a Frame (basis binder)")
+        if in_space and isinstance(node, Var) and node.uid == x.uid:
+            raise DiffError(
+                "diff: the differentiation variable flows into a space position (e.g. Img(x) / a "
+                "dependent space); differentiating through a space function is unsupported"
+            )
         for child in _children(node):
-            walk(child)
+            walk(child, in_space or is_space(child))
 
-    walk(e)
-    _ = (SpaceMeta, SVar, is_space)
+    walk(e, is_space(e))
 
 
 def _mentions_space_meta(s: Space) -> bool:

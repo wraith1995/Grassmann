@@ -478,6 +478,34 @@ def test_higher_order_is_rejected() -> None:
         diff(T.NEval(T.var("f", V), (0,), (x,)), x)
 
 
+def test_diff_into_space_position_raises() -> None:
+    # Differentiating w.r.t. the very map that DEFINES a space (here Img(f)): the projected coords
+    # depend on f through the space, which the value-level rules can't see — was a SILENT Zero,
+    # now a loud DiffError (audit bug A).  The guard must descend into space-valued fields.
+    W, V = S.base("W", 2), S.base("V", 4)
+    f = T.var("f", S.oprod(S.dual(W), V), props=G.inj)
+    z = T.var("z", V)
+    with pytest.raises(DiffError):
+        diff(T.Project(z, S.img(f)), f)
+
+
+def test_inner_with_xdep_metric_raises_else_zero() -> None:
+    # Inner/Flat/Sharp of a WithInner space whose metric depends on x has a NONZERO operator
+    # derivative (d⟨a,b⟩_g = aᵀ(∂g)b); the covariant path only intercepts Remetric, so a bare
+    # Inner here was a SILENT Zero — now a loud DiffError (audit bug B).  A CONSTANT metric is
+    # genuinely x-independent ⇒ the zero map (no raise).
+    V = S.base("V", 4)
+    GS = S.oprod(S.dual(V), S.dual(V))
+    g = T.var("g", GS)
+    a, b = T.var("a", V), T.var("b", V)
+    x = T.var("x", S.base("X", 2))
+    Dg = T.var("Dg", S.oprod(S.dual(x.space), S.dual(V), S.dual(V)))
+    pairing = T.Eval(T.inner(S.WithInner(V, g)), (0, 1), (a, b))
+    with pytest.raises(DiffError):
+        diff(pairing, x, deps={g.uid: Dg})  # x-dependent metric ⇒ loud bail
+    assert isinstance(diff(pairing, x), T.Zero)  # constant metric (g ∉ deps) ⇒ zero map
+
+
 def test_surface_diff_reachable() -> None:
     V = G.space("V", 3)
     x = G.var("x", V)
