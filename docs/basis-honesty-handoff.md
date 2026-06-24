@@ -79,10 +79,11 @@ with `GRASSMANN_LLAM_INDEX=eye`).
 Coverage is **complete**: every arm with a pinnable operand is in `CASES` (incl. `neval_lam`,
 `multi_llam` = the pullback form, `remetric`), plus subset pinning, unsteered `⟨…⟩` wrappers, varied
 consumers, and rectangular maps. `const`/`zeros`/`identity`/`tuple_embed`/`tuple_project` have no
-pinnable operand (covered by structural tests). One *known loud* edge (NOT silent-wrong): pinning a
-`Lam`'s **free var** when its basis is realized by frame vars isn't threaded into the `NEval`
-sub-program → a missing-input crash; `neval_lam` marks `f` **feed-only** (`(space, value, False)`) and
-pins only the arg. What's left is optional/perf:
+pinnable operand (covered by structural tests). `neval_lam` now pins **both** its free var `f` and the
+arg (the free-var-with-frame-var-basis crash is fixed — `_build_lam_subprogram` declares sub-inputs
+frame-var-free + `_rep_neval_lam` cobs free operands per-axis). The feed-only marker
+(`(space, value, False)`) remains available for any future un-threadable operand basis. What's left is
+optional/perf:
 
 1. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
    debug mode where `_rep`, per arm, two-route-checks the realized-basis claim on the actual feeds and
@@ -108,6 +109,8 @@ pins only the arg. What's left is optional/perf:
     (the primal of a covector basis — DualBasis peels, a literal covector basis is `dual_basis`'d).
   - `_rep_pinv_apply` — GSVD branch (metric in f's slots) + PinvOp branch; both cob `v` to f's cod-slot
     before the `"ab,a->b"` matvec (the unsteered-reconcile fix).
+  - `_rep_neval_lam` / `_build_lam_subprogram` — Lam sub-program: sub-inputs declared frame-var-free
+    (free vars not re-pinned inside the sub-program); free operands cob'd per-axis (`_coerce_rep_to_target`).
   - `_rep_llam` → `_rep_llam_vmap` (default) / `_rep_llam_eye`; `GRASSMANN_LLAM_INDEX`.
   - `_is_immersed_metric_basis` (immersed = ImageBasis / non-ortho list), `_is_standard_orthonormal`
     (= "orthonormal", **not** "is the default basis" — a footgun; use `_basis_eq(b, default_basis(sp))`
