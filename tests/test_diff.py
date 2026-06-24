@@ -236,6 +236,39 @@ def test_bare_pinv_map_derivative(ambient) -> None:
     _fd_marked_map(e, x, J, DJ, base, Jv, rng.standard_normal((2, 2, ambient)), rng.standard_normal(2))
 
 
+def test_moving_subspace_ad_term_to_term() -> None:
+    # Term→term AD through a moving subspace, "everywhere it appears", all built from the defining
+    # map J and Pinv(J) (no orthonormal basis differentiated): the FEM tangent (immersion), the
+    # cotangent metric (JᵀJ)⁻¹ that gradients use, and the projectors that mediate Img/CoImg/Ker/
+    # CoKer.  Every case is FD-verified against a moving J.
+    rng = np.random.default_rng(9)
+    Rt, Re = S.base("Rt", 2), S.base("Re", 3)
+    x = T.var("x", Rt)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    w1, w2 = T.var("w1", Rt), T.var("w2", Rt)
+    z, z2 = T.var("z", Re), T.var("z2", S.dual(Re))
+    Jv = rng.standard_normal((2, 3))
+    base = {f"w1_{w1.uid}": rng.standard_normal(2), f"w2_{w2.uid}": rng.standard_normal(2),
+            f"z_{z.uid}": rng.standard_normal(3), f"z2_{z2.uid}": rng.standard_normal(3)}
+    DJv, hv = rng.standard_normal((2, 2, 3)), rng.standard_normal(2)
+    Jp = T.Pinv(J)
+    gram = T.Compose(T.Dagger(J), (0,), (J,))  # JᵀJ : the immersed (tangent) metric
+    cases = {
+        # immersed tangent metric ⟨J w1, J w2⟩ (the FEM stiffness/mass integrand structure)
+        "immersed_metric": T.Eval(T.inner(Re), (0, 1), (T.Eval(J, (0,), (w1,)), T.Eval(J, (0,), (w2,)))),
+        # cotangent metric (JᵀJ)⁻¹ — what gradient/cotangent values pair with
+        "cotangent_metric": T.Eval(T.inner(Rt), (0, 1), (T.Eval(T.Pinv(gram), (0,), (w1,)), w2)),
+        # ambient projector onto Img(J): JJ⁺  (the Img / CoImg realization)
+        "img_projector": T.Eval(z2, (0,), (T.Eval(J, (0,), (T.Eval(Jp, (0,), (z,)),)),)),
+        # complementary projector I − JJ⁺ onto Img(J)^⊥ (the CoKer side)
+        "coker_projector": T.Eval(z2, (0,),
+                                  (T.Sum((z, T.Scale(-1.0, T.Eval(J, (0,), (T.Eval(Jp, (0,), (z,)),))))),)),
+    }
+    for name, e in cases.items():
+        _fd_marked_map(e, x, J, DJ, base, Jv, DJv, hv)
+
+
 # ---------------------------------------------------------------------------
 # Covariant connection (tangent space with a non-constant metric).
 # ---------------------------------------------------------------------------
