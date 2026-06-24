@@ -109,7 +109,9 @@ def _machine_coords(v, space, basis, frame_feeds, std_value):
 
 
 def _sweep_one(make_term, var_specs, flavor_choice):
-    """One non-default flavor per operand (``flavor_choice``: var -> (basis, feeds)).  Assert
+    """``flavor_choice``: var -> ``(basis, feeds)`` to pin, or ``None`` to leave it DEFAULT (subset
+    pinning — a mix of pinned + default operands is a distinct, often more sensitive, trigger than
+    all-pinned, e.g. pinv_apply/trace were wrong with one operand pinned + one default).  Assert
     two-route match OR a loud RepresentError; FAIL only on a silent mismatch."""
     term = make_term()
     # route_REF: every operand default, AUTO.
@@ -119,13 +121,18 @@ def _sweep_one(make_term, var_specs, flavor_choice):
         ref = _run(represent(term, basis_env=ref_env, target=B.AUTO), ref_feeds)
     except RepresentError:
         return  # the default case itself bailed — nothing to compare (rare; tolerate)
-    # route_STD: operands pinned to their chosen non-default basis, fed machine-derived coords.
+    # route_STD: chosen operands pinned (machine-derived coords); the rest stay default.
     std_env, std_feeds = {}, {}
     for v, (sp, val) in var_specs.items():
-        basis, feeds = flavor_choice[v]
-        std_env[v.uid] = basis
-        std_feeds[_vk(v)] = _machine_coords(v, sp, basis, feeds, val)
-        std_feeds.update(feeds)
+        choice = flavor_choice[v]
+        if choice is None:
+            std_env[v.uid] = default_basis(sp)
+            std_feeds[_vk(v)] = val
+        else:
+            basis, feeds = choice
+            std_env[v.uid] = basis
+            std_feeds[_vk(v)] = _machine_coords(v, sp, basis, feeds, val)
+            std_feeds.update(feeds)
     try:
         got = _run(represent(term, basis_env=std_env, target=B.STD), std_feeds)
     except RepresentError:
@@ -136,13 +143,20 @@ def _sweep_one(make_term, var_specs, flavor_choice):
 
 
 def _sweep(make_term, var_specs):
-    """Sweep every combination of one-non-default-flavor-per-operand."""
+    """Sweep every (per-operand: default OR one of its non-default flavors) combination — the product
+    of ``[None, *flavors]`` over operands, which covers BOTH all-pinned and every pinned/default subset.
+    Skips the trivial all-default combo."""
     import itertools
-    per_var = {v: _flavors(sp, f"{_vk(v)}_") for v, (sp, _val) in var_specs.items()}
-    if any(not flavs for flavs in per_var.values()):
-        pytest.skip("a flavor could not be built for some operand space (e.g. FFS) — covered elsewhere")
+    per_var = {}
+    for v, (sp, _val) in var_specs.items():
+        flavs = _flavors(sp, f"{_vk(v)}_")
+        if not flavs:
+            pytest.skip("a flavor could not be built for some operand space (e.g. FFS) — covered elsewhere")
+        per_var[v] = [None, *flavs]
     vars_ = list(var_specs)
     for combo in itertools.product(*(per_var[v] for v in vars_)):
+        if all(c is None for c in combo):
+            continue  # all-default ⇒ route_STD == route_REF trivially
         _sweep_one(make_term, var_specs, dict(zip(vars_, combo)))
 
 

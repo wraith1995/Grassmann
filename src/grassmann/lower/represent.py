@@ -1036,18 +1036,18 @@ def _reconcile_metric_operands(ctx: _Ctx, arg_reps: list[Rep]) -> list[Rep]:
 
     A metric ``Eval`` (``dot``/``Flat``/``Sharp`` application) builds its Gram in the
     operands' *shared* basis (`43 §2b`).  When the operands are pinned to **different** bases
-    and at least one is a non-orthonormal ``ImageBasis``, there is no shared basis — the raw
-    contraction would silently use the identity metric (``aᵀb`` instead of ``aᵀ·G·b``).
-    Rather than reject, we **change-of-basis** every later operand into the first operand's
-    basis (through the FFS realization seam, `43 §2c`), so the metric is built once in a
-    genuinely shared basis.  ``choose``/consistent pins never trigger this (all operands of a
-    space already agree) — the orthonormal path is byte-identical.
+    there is no shared basis — the raw contraction would silently build the Gram in one basis
+    while the other operand's coords live elsewhere (``aᵀ·G·b`` with mismatched ``a``/``b``, or
+    the identity metric when one side defaults).  Rather than reject, we **change-of-basis**
+    every later operand into the first operand's basis (FFS-aware, `43 §2c`), so the metric is
+    built once in a genuinely shared basis.  Fires whenever the operands DISAGREE — immersed OR
+    merely a non-standard-orthonormal vs default (the old immersed-only gate wrongly skipped the
+    latter: two different orthonormal frames are NOT a shared identity metric).  Consistent /
+    all-default pins return early ⇒ byte-identical.
     """
     if len(arg_reps) < 2:
         return arg_reps
     bases = [r.basis for r in arg_reps]
-    if not any(_is_immersed_metric_basis(b) for b in bases):
-        return arg_reps  # orthonormal-only: out of scope, identity metric is correct.
     target = bases[0]
     if all(_basis_eq(target, b) for b in bases[1:]):
         return arg_reps
