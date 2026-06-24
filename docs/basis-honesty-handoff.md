@@ -72,13 +72,15 @@ The sweep multiplies several **axes of variation**, each of which has caught a d
   round-trip guard (`_basis_round_trips`) skips any unsound result flavor (fused/direct-sum spaces the
   generic-frame harness can't soundly build). Found + fixed the rectangular-pinv-at-non-ortho-target bug.
 - **Pinned operands × concrete target** (`test_pinned_operands_and_concrete_target`) — the hardest
-  corner: operands pinned AND a non-default result target at once. Found the rectangular-pinv operand
-  side (PinvOp needs an orthonormal operand basis too, not just target).
+  corner: operands pinned AND a non-default result target at once. Found the rectangular-pinv operand side.
+- **Nested hard arms**, **var aliasing**, **multi-arg contractions**, **edge dims (4)**, and **FFS
+  operands** (`test_ffs_operand_two_route`) — all probed, all honest (the vein has converged).
 
-FFS coverage: the **immersed Gram** is already exercised by the non-ortho `list_basis` flavor (it *is*
-an immersed-metric basis). A literal `ImageBasis` (lives in its own `Img(J)` space — can't pin a
-`V`-var to it) and `WithInner` (changes the metric ⇒ different value) don't fit this two-route-on-`V`
-sweep; they're covered by `test_pinv_gsvd` / `test_embed_subspace` / `test_algorithm_corpus`.
+FFS coverage: the **immersed Gram** is exercised by the non-ortho `list_basis` flavor (it *is* an
+immersed-metric basis), AND directly by **`test_ffs_operand_two_route`** — a var of an `Img(J)` space
+pinned to a list basis in img(J) coords (embed / embed+eval / sum-in-FFS / dot / flat), all honest.
+`WithInner` (changes the metric ⇒ different value) is the one structure that doesn't fit a two-route
+(covered by `test_pinv_gsvd` / `test_algorithm_corpus`).
 
 The sweep has **48 two-route cases** + a **concrete-target** test + a **pinned-operands×concrete-target** test; **0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
 with `GRASSMANN_LLAM_INDEX=eye`).
@@ -140,4 +142,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1331 passed, 6 skipped, 0 xfailed** in both modes; ruff clean.
+Current: **1369 passed, 6 skipped, 0 xfailed** in both modes; ruff clean.
