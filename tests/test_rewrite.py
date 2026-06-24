@@ -834,6 +834,36 @@ def test_project_embed_cancellation() -> None:
     assert is_normalized_sop(sum_of_products(pe))
 
 
+# ===========================================================================
+# Task #11 — inverse-apply / map cancellation (sound, convention-correct).
+# ===========================================================================
+
+
+def test_inverse_compose_cancellation() -> None:
+    from grassmann.core.props import MapProps
+
+    V, W3 = S.base("V", 2), S.base("W3", 3)
+    g = T.var("g", S.linear_map_space(V, V), MapProps(bij=True))
+    fi = T.var("fi", S.linear_map_space(V, W3), MapProps(inj=True))
+    fs = T.var("fs", S.linear_map_space(W3, V), MapProps(surj=True))
+    # Solve/Pinv inverse pairs cancel to Identity in the direction the rank condition allows.
+    assert simplify(T.Compose(T.Solve(g), (0,), (g,))) == T.Identity(V)
+    assert simplify(T.Compose(g, (0,), (T.Solve(g),))) == T.Identity(V)
+    assert simplify(T.Compose(T.Pinv(fi), (0,), (fi,))) == T.Identity(V)  # inj: left inverse
+    assert simplify(T.Compose(fs, (0,), (T.Pinv(fs),))) == T.Identity(V)  # surj: right inverse
+    # value-exact check
+    fg = {_key(g): np.array([[1.0, 2.0], [3.0, 4.0]])}
+    _same(T.Compose(T.Solve(g), (0,), (g,)), T.Identity(V), fg)
+
+
+def test_inverse_compose_needs_property() -> None:
+    # Without an asserted inj/surj/bij property the cancellation must NOT fire (unsound otherwise).
+    V = S.base("V", 2)
+    h = T.var("h", S.linear_map_space(V, V))  # no MapProps
+    out = simplify(T.Compose(T.Pinv(h), (0,), (h,)))
+    assert isinstance(out, T.Compose)  # left as-is — Pinv(h)∘h ≠ Id for a general h
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))

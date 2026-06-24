@@ -713,6 +713,35 @@ def rule_musical(node: Term) -> Term | None:
     return None
 
 
+def rule_inverse_compose(node: Term) -> Term | None:
+    """Cancel an inverse/forward map pair in a composition toward ``Identity`` (the map-algebra
+    analogue of the musical ``g⁻¹∘g→Id``):
+
+    - ``Solve(g)∘g → Id(dom)`` and ``g∘Solve(g) → Id(cod)``    (``g`` asserted ``bij``);
+    - ``Pinv(f)∘f → Id(dom)``  (``f`` asserted ``inj`` — left inverse) and
+      ``f∘Pinv(f) → Id(cod)``  (``f`` asserted ``surj`` — right inverse).
+
+    The property guards read the operand ``Var``'s asserted ``MapProps``; a pseudo-inverse only
+    cancels in the direction its rank condition guarantees (verified). The ``Eval``-applies-
+    transpose convention does **not** intrude here — these are stored-matrix map identities.
+    Direction: toward ``Identity``."""
+    if not (isinstance(node, Compose) and node.positions == (0,) and len(node.gs) == 1):
+        return None
+    from grassmann.infer.properties import is_bijective, is_injective, is_surjective
+    from grassmann.infer.synth import map_domain_codomain
+
+    f, g = node.f, node.gs[0]
+    if isinstance(f, Solve) and f.f == g and is_bijective(g):
+        return Identity(map_domain_codomain(g)[0])
+    if isinstance(g, Solve) and g.f == f and is_bijective(f):
+        return Identity(map_domain_codomain(f)[1])
+    if isinstance(f, Pinv) and f.f == g and is_injective(g):
+        return Identity(map_domain_codomain(g)[0])
+    if isinstance(g, Pinv) and g.f == f and is_surjective(f):
+        return Identity(map_domain_codomain(f)[1])
+    return None
+
+
 def rule_project_embed(node: Term) -> Term | None:
     """``Project(Embed(v, S), s) → v`` — embedding into a larger space and projecting straight
     back onto ``v``'s own subspace is the identity *on that subspace*. We **naively check via
@@ -1032,6 +1061,7 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_involution,
     rule_dagger_push,
     rule_musical,
+    rule_inverse_compose,
     rule_project_embed,
     rule_permute,
     rule_tuplepermute,
