@@ -382,6 +382,90 @@ def test_metric_pairing_is_parallel() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Frame / chart-Jacobian connection (task 3): ∇ from a moving frame J(x), the FEM case.
+# The induced (pullback) metric is g = JᵀJ; the connection Γ(h) = J⁺·(∂J·h) needs no rank-3
+# metric gradient.  Cross-checked against the trusted marked-(g, Dg) metric connection.
+# ---------------------------------------------------------------------------
+
+
+def _jtj_and_grad(Jv: np.ndarray, DJv: np.ndarray):
+    """The pullback metric ``g = JᵀJ`` and its gradient ``Dg = ∂(JᵀJ)`` for a chart Jacobian
+    ``J`` (stored ``[tangent i, ambient p]``) with derivative ``DJv[a, i, p] = ∂ₐ J[i, p]``."""
+    g = Jv @ Jv.T  # g_ij = Σ_p J[i,p] J[j,p]
+    Dg = np.einsum("aip,jp->aij", DJv, Jv) + np.einsum("ip,ajp->aij", Jv, DJv)
+    return g, Dg
+
+
+def _frame_vs_metric(sec, ssp, M, A):
+    """Build the frame section ``Remetric(sec, JᵀJ)`` and the equivalent marked-metric section
+    ``Remetric(sec, g)``; return ``(diff_frame, diff_metric, vars)`` ready to feed consistently."""
+    x = T.var("x", M)
+    DM = S.dual(M)
+    J = T.var("J", S.oprod(DM, A), props=G.bij if M == A else G.inj)
+    DJ = T.var("DJ", S.oprod(DM, DM, A))
+    ssp_factors = ssp.spaces if isinstance(ssp, S.OProd) else (ssp,)
+    Dsec = T.var("Dsec", S.oprod(DM, *ssp_factors))  # X ⊸ ssp, FLAT (not nested-oprod)
+    gV = T.var("g", S.oprod(DM, DM))
+    DgV = T.var("Dg", S.oprod(DM, DM, DM))
+    frame = diff(T.Remetric(sec, T.Compose(T.Dagger(J), (0,), (J,))), x,
+                 deps={sec.uid: Dsec, J.uid: DJ})
+    metric = diff(T.Remetric(sec, gV), x, deps={sec.uid: Dsec, gV.uid: DgV})
+    return frame, metric, (x, J, DJ, Dsec, gV, DgV)
+
+
+@pytest.mark.parametrize("ambient_dim", [2, 3])  # square chart (=change of coords) and codim-1 immersion
+@pytest.mark.parametrize("kind", ["vector", "covector", "endo"])
+def test_frame_connection_matches_metric_connection(kind, ambient_dim) -> None:
+    rng = np.random.default_rng(20 + ambient_dim + len(kind))
+    M = S.base("M", 2)
+    A = S.base("A", ambient_dim)
+    DM = S.dual(M)
+    if kind == "vector":
+        sec, ssp = T.var("sec", M), M
+        secv = rng.standard_normal(2)
+    elif kind == "covector":
+        sec, ssp = T.var("sec", DM), DM
+        secv = rng.standard_normal(2)
+    else:  # (1,1) endomorphism T : M ⊸ M
+        ssp = S.oprod(DM, M)
+        sec = T.var("sec", ssp)
+        secv = rng.standard_normal((2, 2))
+
+    frame, metric, (x, J, DJ, Dsec, gV, DgV) = _frame_vs_metric(sec, ssp, M, A)
+    Jv = rng.standard_normal((2, ambient_dim))
+    D = rng.standard_normal((2, 2, ambient_dim))
+    DJv = 0.5 * (D + D.transpose(1, 0, 2))  # a valid chart Hessian (∂J symmetric in dir↔tangent)
+    g0, Dg0 = _jtj_and_grad(Jv, DJv)
+    Dsecv = rng.standard_normal((2, *np.shape(secv)))  # X ⊸ ssp, flat axes
+    hv = rng.standard_normal(2)
+
+    base = {f"sec_{sec.uid}": secv, f"Dsec_{Dsec.uid}": Dsecv}
+    sf = _seed_key(frame)
+    sm = _seed_key(metric)
+    got_frame = _run(frame.body, {**base, f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, sf[0]: hv})
+    got_metric = _run(metric.body, {**base, f"g_{gV.uid}": g0, f"Dg_{DgV.uid}": Dg0, sm[0]: hv})
+    np.testing.assert_allclose(got_frame, got_metric, atol=1e-6)
+
+
+def _seed_key(J):
+    s = J.vars[0]
+    return (f"{s.name}_{s.uid}",)
+
+
+def test_constant_chart_is_flat() -> None:
+    # J not marked (x-independent chart) ⇒ Remetric(sec, JᵀJ) is flat ⇒ plain total derivative.
+    from grassmann.transform.diff import _covariant_section, _DCtx
+
+    M = S.base("M", 2)
+    A = S.base("A", 3)
+    J = T.var("J", S.oprod(S.dual(M), A), props=G.inj)
+    sec = T.var("sec", M)
+    e = T.Remetric(sec, T.Compose(T.Dagger(J), (0,), (J,)))
+    ctx = _DCtx(x=T.var("x", M), h=T.var("dx", M), deps={})  # J absent ⇒ constant chart
+    assert _covariant_section(e, ctx) is None
+
+
+# ---------------------------------------------------------------------------
 # Failure modes.
 # ---------------------------------------------------------------------------
 

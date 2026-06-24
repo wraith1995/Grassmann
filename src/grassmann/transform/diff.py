@@ -118,9 +118,9 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
         # A covariant section ``Remetric(sec, g)`` over a manifold with an x-dependent
         # metric: ∇sec = d(sec) + Γ(h)·sec, computed entirely in the bare (coordinate-free)
         # basis — the derivative never realizes a metric basis.
-        sec, M, g, Dg = cov
+        sec, M, conn_builder = cov
         sspace = synth_space(sec)
-        body = _add(_dd(sec, ctx), _connection_correction(sec, sspace, M, g, Dg, ctx), sspace)
+        body = _add(_dd(sec, ctx), _connection_correction(sec, sspace, M, conn_builder, ctx), sspace)
         rspace = sspace
     else:
         body = _dd(e, ctx)
@@ -456,13 +456,23 @@ def _dd_llam(e: LLam, vars_: tuple[Var, ...], body: Term, ctx: _DCtx) -> Term:
 # ===========================================================================
 
 
-def _covariant_section(e: Term, ctx: _DCtx) -> tuple[Term, Space, Term, Term] | None:
+def _covariant_section(e: Term, ctx: _DCtx):
     """If ``e`` is a covariant *section* ``Remetric(sec, g)`` over a manifold ``M`` with an
-    **x-dependent** metric ``g``, return ``(sec, M, g, Dg)``; otherwise ``None``.
+    **x-dependent** metric, return ``(sec, M, conn)`` where ``conn(h)`` builds the connection map
+    ``Γ(h) : M ⊸ M``; otherwise ``None``.
 
-    A constant metric (``Dg`` ``None``) is *not* covariant — the plain total derivative is
-    correct — so it falls through to the ordinary path. ``Remetric`` is the marker placing a
-    value into the (co)tangent bundle of ``M``; ``g`` is ``M``'s metric (``M*⊗M*``)."""
+    Two metric sources are recognized:
+
+    * a marked metric **Var** ``g`` (with gradient ``Dg`` via ``deps``) ⇒ the Levi-Civita
+      connection from ``∂g`` (:func:`_connection_map`);
+    * a **chart-induced** metric ``g = JᵀJ`` with ``J`` a marked chart immersion (task 3) ⇒ the
+      frame connection ``Γ(h) = J⁺·(∂J·h)`` (:func:`_frame_connection_map`), which needs no
+      rank-3 metric gradient.
+
+    A constant metric (``Dg``/``J`` not x-dependent) is *not* covariant — the plain total
+    derivative is correct — so it falls through to the ordinary path."""
+    from functools import partial
+
     from grassmann.infer.synth import synth_space
 
     if not isinstance(e, Remetric) or not is_term(e.metric):
@@ -471,15 +481,48 @@ def _covariant_section(e: Term, ctx: _DCtx) -> tuple[Term, Space, Term, Term] | 
     M = _manifold_of(synth_space(sec))
     if M is None:
         return None
-    Dg = _metric_gradient(g, M, ctx)
-    if Dg is None:  # constant / x-independent metric ⇒ flat ⇒ ordinary derivative
-        return None
+    frame = _chart_frame_of(g, ctx)
+    if frame is not None:  # chart immersion g = JᵀJ with J marked ⇒ frame connection
+        J, DJ = frame
+        conn = partial(_frame_connection_map, M, J, DJ)
+    else:
+        Dg = _metric_gradient(g, M, ctx)
+        if Dg is None:  # constant / x-independent metric ⇒ flat ⇒ ordinary derivative
+            return None
+        conn = partial(_connection_map, M, g, Dg)
     if _strip_space(ctx.X) != M:
         raise DiffError(
             "diff: the metric connection requires the differentiation variable to live in "
             "the tangent space (X == the manifold base space M)"
         )
-    return (sec, M, g, Dg)
+    return (sec, M, conn)
+
+
+def _chart_jacobian_var(g: Term) -> Var | None:
+    """If ``g`` is a chart-induced metric ``JᵀJ`` — ``Compose(Dagger(J),(0,),(J,))`` or
+    ``Compose(J,(0,),(Dagger(J),))`` for a single map ``Var J`` — return ``J``; else ``None``."""
+    if isinstance(g, Compose) and len(g.gs) == 1:
+        f, gg = g.f, g.gs[0]
+        if isinstance(f, Dagger) and isinstance(f.f, Var) and gg == f.f:
+            return f.f
+        if isinstance(gg, Dagger) and isinstance(gg.f, Var) and f == gg.f:
+            return f
+    return None
+
+
+def _chart_frame_of(g: Term, ctx: _DCtx) -> tuple[Var, Term] | None:
+    """If ``g`` is a chart metric ``JᵀJ`` over an **x-dependent** marked immersion ``J``, return
+    ``(J, DJ)`` — the frame and its derivative map ``∂J/∂x : X ⊸ (M ⊸ A)`` (from ``deps``, or a
+    fresh symbolic map var for a ``None`` dep). ``None`` if ``g`` is not a chart metric or ``J``
+    is x-independent (a constant chart ⇒ flat)."""
+    J = _chart_jacobian_var(g)
+    if J is None or J.uid not in ctx.deps:
+        return None
+    dval = ctx.deps[J.uid]
+    if dval is not None:
+        return (J, dval)
+    DJ = Var(f"d_{J.name}_{next(_counter)}", linear_map_space(ctx.X, J.space))
+    return (J, DJ)
 
 
 def _manifold_of(s: Space) -> Space | None:
@@ -497,13 +540,13 @@ def _manifold_of(s: Space) -> Space | None:
 
 
 def _connection_correction(
-    sec: Term, sspace: Space, M: Space, g: Term, Dg: Term, ctx: _DCtx
+    sec: Term, sspace: Space, M: Space, conn_builder, ctx: _DCtx
 ) -> Term:
     """The Levi-Civita correction ``∇sec − d(sec)`` in direction ``h``, **basis-free**.
 
-    The tensor-product/Leibniz rule: apply the connection map ``Γ(h) : M ⊸ M`` to each slot
-    of the section — ``+Γ`` on a contravariant (``M``) factor, ``−Γ`` on a covariant
-    (``M*``) factor:
+    The tensor-product/Leibniz rule: apply the connection map ``Γ(h) : M ⊸ M`` (built by
+    ``conn_builder(h)`` — metric or frame source) to each slot of the section — ``+Γ`` on a
+    contravariant (``M``) factor, ``−Γ`` on a covariant (``M*``) factor:
 
     - vector ``v : M``        →  ``Γ(h)·v``                       (Eval)
     - covector ``ω : M*``     →  ``−ωᵀ·Γ(h)``                     (precompose)
@@ -513,7 +556,7 @@ def _connection_correction(
     basis is ever realized (the lowering stays in standard coordinates)."""
     from grassmann.core.space import OProd, dual
 
-    conn = _connection_map(M, g, Dg, ctx.h)  # Γ(h) : M ⊸ M, bare
+    conn = conn_builder(ctx.h)  # Γ(h) : M ⊸ M, bare
     factors = list(sspace.spaces) if isinstance(sspace, OProd) else [sspace]
     M_dual = dual(M)
 
@@ -553,6 +596,20 @@ def _connection_map(M: Space, g: Term, Dg: Term, h: Var) -> Term:
     t2 = Eval(Dg, (1,), (h,))  # ∂ⱼg_{il} hⁱ, indexed (j, l)
     g_lower_map = Scale(0.5, Sum((t1, t2, Scale(-1.0, Permute(t2, (1, 0))))))  # M ⊸ M*
     return Compose(Pinv(g), (0,), (g_lower_map,))  # raise the cod index with g⁻¹ ⇒ M ⊸ M
+
+
+def _frame_connection_map(M: Space, J: Term, DJ: Term, h: Var) -> Term:
+    """The Levi-Civita connection of a **chart immersion** ``J : M ⊸ A`` (a moving frame),
+    direction ``h`` — ``Γ(h) = J⁺·(∂J·h) : M ⊸ M`` (task 3).
+
+    For the induced (pullback) metric ``g = JᵀJ`` the Christoffel symbols are
+    ``Γ^k_{mi} = (J⁺ ∂_i J)^k_m``, so ``Γ(h) = Pinv(J) ∘ Eval(DJ,(0,),h)`` — built from the bare
+    pseudo-inverse and the **rank-2** directional derivative of the frame, with no rank-3 metric
+    gradient (sidestepping the nested-⊗ substrate gap that ``∂(JᵀJ)`` would hit).  Numerically
+    identical to :func:`_connection_map` fed ``g = JᵀJ``, ``Dg = ∂(JᵀJ)`` (verified), so it plugs
+    into the same per-slot :func:`_connection_correction`.  Assumes a true chart Jacobian
+    (``J = ∂Φ`` ⇒ ``∂J`` symmetric in direction ↔ tangent slot ⇒ a torsion-free connection)."""
+    return Compose(Pinv(J), (0,), (Eval(DJ, (0,), (h,)),))  # J⁺ ∘ (∂J·h) : M ⊸ M
 
 
 def _metric_gradient(g: Term, M: Space, ctx: _DCtx) -> Term | None:
