@@ -701,6 +701,40 @@ def test_dissolve_oplus_to_injections() -> None:
     _same(term, out, feed)
 
 
+# ===========================================================================
+# Deferred-tail task #6 — scalar-product canonicalization (partial rational NF).
+# ===========================================================================
+
+
+def test_scalar_product_is_commutative_canonical() -> None:
+    from grassmann.transform.rewrite import SoPConfig
+
+    V = S.base("V", 2)
+    x, y = T.var("x", V), T.var("y", V)
+    c, d = T.var("c", S.dual(V)), T.var("d", S.dual(V))
+    s1, s2 = T.Eval(c, (0,), (x,)), T.Eval(d, (0,), (y,))  # two scalar dot-products
+    cfg = SoPConfig(canon_scalars=True)
+    # ⟨c,x⟩·⟨d,y⟩ and ⟨d,y⟩·⟨c,x⟩ canonicalize to the same scalar.
+    assert sum_of_products(T.Scale(s1, s2), cfg) == sum_of_products(T.Scale(s2, s1), cfg)
+    feed = {_key(x): np.array([1.0, 2.0]), _key(y): np.array([5.0, 6.0]), _key(c): np.array([3.0, 4.0]), _key(d): np.array([1.0, 0.0])}
+    _same(T.Scale(s1, s2), sum_of_products(T.Scale(s1, s2), cfg), feed)
+
+
+def test_scalar_product_folds_numeric_factors() -> None:
+    from grassmann.transform.rewrite import SoPConfig
+
+    V = S.base("V", 2)
+    x, y = T.var("x", V), T.var("y", V)
+    c, d = T.var("c", S.dual(V)), T.var("d", S.dual(V))
+    s1, s2 = T.Eval(c, (0,), (x,)), T.Eval(d, (0,), (y,))
+    cfg = SoPConfig(canon_scalars=True)
+    # 2·s1·3·s2  ==  6·s2·s1  after folding numerics and sorting factors.
+    q1 = sum_of_products(T.Scale(2.0, T.Scale(s1, T.Scale(3.0, s2))), cfg)
+    q2 = sum_of_products(T.Scale(6.0, T.Scale(s2, s1)), cfg)
+    assert q1 == q2
+    assert sum_of_products(q1, cfg) == q1  # idempotent
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
