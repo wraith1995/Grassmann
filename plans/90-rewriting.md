@@ -70,10 +70,22 @@ spellings of one value reach an identical NF), Step E (embed builders), Step F (
 correction, opt-in); `dissolve_oplus` (⊕ → sum of injections, opt-in); `rule_scalar_product`
 (commutative scalar-product canonicalization, opt-in `canon_scalars`).
 
-**Findings / still deferred** — A single global `𝒞` is *not* well-defined: in a valid `Sum`
-the monomials share the output space but canonicalize different interiors, so corrections are
-intrinsically per-monomial (already at each monomial's product-top). Full **rational scalar
-NF** (`P/Q` with `div`/`reciprocal` + gcd cancellation — a mini-CAS) is the one large remainder.
+**More aggressive identities (done)** — `rule_musical` (`Flat→Inner`, `Sharp→Pinv(Inner)`,
+`g⁻¹∘g→Id`); the new IR node **`TuplePermute`** (⊕ analogue of `Permute`) cleans up
+`order_oplus` and gives `rule_tuplepermute` (identity/nested collapse); `rule_tuple_roundtrip`
+(`π_i∘ι_j → [i=j]·I`, an Iverson bracket over block indices).
+
+**Findings / still deferred**
+- A single global `𝒞` is *not* well-defined: in a valid `Sum` the monomials share the output
+  space but canonicalize different interiors, so corrections are intrinsically per-monomial.
+- **η-reduction is unsound as-is**: `f` and `λ⊸x.f(x)` share the synth space `dual(V)⊗W` but
+  lower to *transposed* shapes ((2,3) vs (3,2)) — a base-system LLam axis-order inconsistency
+  to investigate separately; not worked around here.
+- **Inverse-apply** identities are convention-tangled (`Eval` is transpose-apply, so
+  `SolveApply(f, Eval(f,x)) ≠ x`). **Lift/InvLift / Project∘Embed round-trips** need non-trivial
+  inverse-spec / subspace machinery. All deferred.
+- Full **rational scalar NF** (`P/Q` with `div`/`reciprocal` + gcd cancellation — a mini-CAS)
+  is the one large remainder.
 
 ## §5 Public API
 
