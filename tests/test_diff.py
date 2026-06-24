@@ -134,6 +134,10 @@ def test_scalar_chain_rules_vs_fd(op) -> None:
 
 
 def test_inverse_apply_through_vector() -> None:
+    import os
+
+    from grassmann.lower.represent import RepresentError
+
     V = S.base("V", 2)
     x = T.var("x", V)
     A = T.var("A", S.oprod(S.dual(V), V), props=G.bij)
@@ -142,9 +146,22 @@ def test_inverse_apply_through_vector() -> None:
     Aval = np.random.randn(2, 2) + 3 * np.eye(2)
     xval = np.random.randn(2)
     feed = {f"A_{A.uid}": Aval, _xkey(x): xval}
-    Jv = _run(J, feed)
-    fd = _fd_jacobian(e, x, feed, 2)
-    assert np.allclose(Jv, fd, atol=1e-4) or np.allclose(Jv, fd.T, atol=1e-4)
+    # The derivative is the *applied* inverse SolveApply(A, h) = A⁻¹h (the same operator as the
+    # primal), NOT the transpose A⁻ᵀh that routing through Eval(Solve(A), ·) would give.  Verify the
+    # directional derivative directly (seed the body — layout-clean) against the central FD.
+    hv = np.random.randn(2)
+    seed = J.vars[0]
+    if os.environ.get("GRASSMANN_LLAM_INDEX", "vmap") == "eye":
+        # eye mode cannot thread the free seed through the bulk SolveOp — a loud, clean raise.
+        with pytest.raises(RepresentError):
+            _run(J, feed)
+        return
+    jh = _run(J.body, {**feed, f"{seed.name}_{seed.uid}": hv})
+    fdh = (
+        np.asarray(G.compile(e).run({**feed, _xkey(x): xval + 1e-6 * hv})["result"])
+        - np.asarray(G.compile(e).run({**feed, _xkey(x): xval - 1e-6 * hv})["result"])
+    ) / 2e-6
+    np.testing.assert_allclose(np.asarray(jh).ravel(), fdh.ravel(), atol=1e-4)
 
 
 def test_diff_through_marked_map_applied() -> None:

@@ -2572,6 +2572,17 @@ def _rep_solve_apply(
         f_rep = _rep(f, ctx)
         v_rep = _rep(v, ctx)
     _assert_square_full_rank(ctx, f_rep.array, note="assert:solveapply-bij")
+    if f_rep.free_labels or v_rep.free_labels:
+        # The bulk ``SolveOp`` (``np.linalg.solve``) operates on fixed-shape arrays — it cannot
+        # carry a *free* (LLam-seed) basis-index axis the way an einsum stmt can.  This arises when
+        # differentiating ``SolveApply(f, x)`` and lowering the Jacobian ``LLam`` in ``eye`` mode
+        # (the seed is a free axis): raise loudly instead of feeding the op a mis-shaped operand.
+        # The default ``vmap`` mode lowers this correctly (a concrete seed per slice).
+        raise RepresentError(
+            "represent: SolveApply cannot thread a free (LLam-seed) index through the bulk "
+            "SolveOp; differentiate in the default vmap mode (free-label threading in SolveOp is "
+            "task 15 — `41 §7`)."
+        )
     space = _synth(e)
     [out] = ctx.prog.emit_stmt(
         pa.SolveOp(), [f_rep.array, v_rep.array],
@@ -2594,6 +2605,15 @@ def _rep_pinv_apply(
 ) -> Rep:
     space = _synth(e)
     v_rep = _rep(v, ctx)
+    if v_rep.free_labels:
+        # As with ``SolveApply``: the ``f⁺ v`` matvec cannot carry a free (LLam-seed) basis-index
+        # axis on ``v`` (the einsum subscript has no slot for it).  Lowering the Jacobian ``LLam``
+        # of ``PinvApply(f, x)`` in ``eye`` mode hits this; raise loudly (the default ``vmap`` mode
+        # handles it with a concrete seed per slice).
+        raise RepresentError(
+            "represent: PinvApply cannot thread a free (LLam-seed) index through the f⁺ matvec; "
+            "differentiate in the default vmap mode (free-label threading is task 15 — `41 §7`)."
+        )
     metric = _map_metrics(f)
     if metric is not None:
         # GSVD/metric branch — build ``fp = f⁺`` with its metric in f's per-slot bases (consistent

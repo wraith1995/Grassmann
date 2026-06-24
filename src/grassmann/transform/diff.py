@@ -361,29 +361,27 @@ def _dd_pinv(e: Pinv, ctx: _DCtx) -> Term:
 
 
 def _dd_solve_apply(e: SolveApply, ctx: _DCtx) -> Term:
-    """``d(f⁻¹ v) = f⁻¹(dv) − f⁻¹ (df)(f⁻¹ v)``.
-
-    The applied form is routed through the inverse *map* ``Solve(f)`` so the seed only ever
-    flows through ``Eval`` (einsum, free-label-aware), never the bulk ``SolveOp``."""
-    return _dd_inverse_apply(e, e.f, e.v, Solve, ctx)
+    """``d(f⁻¹ v) = f⁻¹(dv) − f⁻¹ (df)(f⁻¹ v)``."""
+    return _dd_inverse_apply(e, e.f, e.v, SolveApply, ctx)
 
 
 def _dd_pinv_apply(e: PinvApply, ctx: _DCtx) -> Term:
     """``d(f† v) = f†(dv) − f† (df)(f† v)`` (leading term; square-bijective exact)."""
-    return _dd_inverse_apply(e, e.f, e.v, Pinv, ctx)
+    return _dd_inverse_apply(e, e.f, e.v, PinvApply, ctx)
 
 
-def _dd_inverse_apply(e: Term, f: Term, v: Term, inv, ctx: _DCtx) -> Term:
-    """Shared ``d((inv f) v)`` rule for ``Solve``/``Pinv``. The seed must stay out of the
-    bulk inverse op, so we apply the inverse *map* ``inv(f)`` via ``Eval``: the
-    vector-position seed (``dv``) threads cleanly. Differentiating w.r.t. the inverted map
-    itself (``df ≠ 0``) yields a higher tensor the substrate cannot yet thread through the
-    bulk op — that case is rejected (v1)."""
-    finv = inv(f)
+def _dd_inverse_apply(e: Term, f: Term, v: Term, apply_inv, ctx: _DCtx) -> Term:
+    """Shared ``d((inv f) v)`` rule for ``Solve``/``Pinv``. The ``dv`` term is built with the
+    **applied** inverse node (``apply_inv`` = ``SolveApply``/``PinvApply``) so it inverts ``f`` in
+    the *same* operator convention as the primal ``e`` — routing through ``Eval(inv(f), …)``
+    instead silently applies the *transpose* inverse (``Eval(f, ·)`` contracts the dom slot, so
+    ``Eval(Solve(f), ·) = f⁻ᵀ·`` whereas ``SolveApply(f, ·) = f⁻¹·``).  Differentiating w.r.t. the
+    inverted map itself (``df ≠ 0``) yields a higher tensor the substrate cannot yet thread
+    through the bulk op — that case is rejected (v1)."""
     parts: list[Term] = []
     dv = _dd(v, ctx)
     if not isinstance(dv, Zero):
-        parts.append(Eval(finv, (0,), (dv,)))
+        parts.append(apply_inv(f, dv))
     df = _dd(f, ctx)
     if not isinstance(df, Zero):
         raise DiffError(
