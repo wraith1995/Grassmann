@@ -16,6 +16,7 @@ from __future__ import annotations
 from .diff import DiffError, diff
 from .pullback import PullbackError, pullback, transport_map
 from .rewrite import (
+    AGGRESSIVE_SOP,
     DEFAULT_SOP,
     RewriteError,
     SoPConfig,
@@ -46,5 +47,6 @@ __all__ = [
     "term_key",
     "SoPConfig",
     "DEFAULT_SOP",
+    "AGGRESSIVE_SOP",
     "RewriteError",
 ]

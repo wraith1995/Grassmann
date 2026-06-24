@@ -499,6 +499,73 @@ def test_beta_nat_binder_partial_application() -> None:
     _ = V
 
 
+# ===========================================================================
+# Step C — up-to-iso canonical ⊗ ordering with the Permute output correction 𝒞.
+# ===========================================================================
+
+
+def test_otimes_ordering_emits_permute_correction() -> None:
+    from grassmann.transform.rewrite import AGGRESSIVE_SOP
+
+    V, W = S.base("V", 2), S.base("W", 3)
+    a, b = T.var("aw", W), T.var("bv", V)
+    assert term_key(a) < term_key(b)  # so (b ⊗ a) is NOT in canonical order
+    term = T.OProdV((b, a))  # space V⊗W, unsorted
+    out = sum_of_products(term, AGGRESSIVE_SOP)
+    # → Permute(OProdV(a, b), (1,0)): canonical interior + the 𝒞 correction.
+    assert isinstance(out, T.Permute)
+    assert isinstance(out.vector, T.OProdV)
+    assert [v.name for v in out.vector.vectors] == ["aw", "bv"]
+    assert is_normalized_sop(out, AGGRESSIVE_SOP)
+    feed = {_key(a): np.array([1.0, 2.0, 3.0]), _key(b): np.array([10.0, 20.0])}
+    _same(term, out, feed)  # the Permute restores the exact layout
+
+
+def test_otimes_ordering_value_exact_and_idempotent() -> None:
+    from grassmann.transform.rewrite import AGGRESSIVE_SOP
+
+    V, W = S.base("V", 2), S.base("W", 3)
+    a, b = T.var("aw", W), T.var("bv", V)
+    out = sum_of_products(T.OProdV((b, a)), AGGRESSIVE_SOP)
+    assert sum_of_products(out, AGGRESSIVE_SOP) == out  # idempotent
+    # Already-canonical products are left untouched (no spurious Permute).
+    canon = T.OProdV((a, b))
+    assert sum_of_products(canon, AGGRESSIVE_SOP) == canon
+
+
+def test_permute_collapse_identity_and_nesting() -> None:
+    V, W = S.base("V", 2), S.base("W", 3)
+    a, b = T.var("aw", W), T.var("bv", V)
+    base = T.OProdV((a, b))
+    # Identity permutation vanishes; two inverse permutations compose to identity.
+    assert simplify(T.Permute(base, (0, 1))) == base
+    assert simplify(T.Permute(T.Permute(base, (1, 0)), (1, 0))) == base
+
+
+def test_otimes_ordering_is_canonical_across_spellings() -> None:
+    from grassmann.transform.rewrite import AGGRESSIVE_SOP
+
+    V, W = S.base("V", 2), S.base("W", 3)
+    a, b = T.var("aw", W), T.var("bv", V)
+    # Two spellings of the SAME value (V⊗W): the bare product and its Permute-corrected form.
+    t1 = T.OProdV((b, a))
+    t2 = T.Permute(T.OProdV((a, b)), (1, 0))
+    n1 = sum_of_products(t1, AGGRESSIVE_SOP)
+    n2 = sum_of_products(t2, AGGRESSIVE_SOP)
+    assert n1 == n2  # up-to-iso canonical: identical normal forms
+    feed = {_key(a): np.array([1.0, 2.0, 3.0]), _key(b): np.array([10.0, 20.0])}
+    _same(t1, n1, feed)
+    _same(t2, n2, feed)
+
+
+def test_default_preset_leaves_otimes_order() -> None:
+    # DEFAULT_SOP is value-EXACT: it never reorders ⊗ (no 𝒞 emitted).
+    V, W = S.base("V", 2), S.base("W", 3)
+    a, b = T.var("aw", W), T.var("bv", V)
+    term = T.OProdV((b, a))
+    assert sum_of_products(term) == term
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))

@@ -30,7 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 
 from grassmann.core.kinds import NAT, SPACE, SpaceSort
-from grassmann.core.space import Scalar, Space, is_dim, is_space
+from grassmann.core.space import OProd, Scalar, Space, is_dim, is_space
 from grassmann.core.term import (
     Assert,
     Compose,
@@ -84,10 +84,16 @@ class SoPConfig:
     push_contractions: bool = True  # localize Eval/Compose into the ⊗ factor (x(c)·y)
     collect: bool = True         # collect like monomials (v + v → 2·v, cancellation)
     order_sum: bool = True       # sort + summands by term_key — value-safe (commutative)
+    order_otimes: bool = False   # canonical ⊗ factor order — UP-TO-ISO (emits a Permute 𝒞)
 
 
-# The default preset: the conservative, value-safe end of the ladder (Step A).
+# The default preset: the conservative, value-EXACT end of the ladder — only the commutative
+# `+` is reordered, so every rewrite is layout-identical (no `𝒞` correction is ever emitted).
 DEFAULT_SOP = SoPConfig()
+
+# The aggressive preset: also canonicalizes ⊗ factor order up-to-iso, inserting a `Permute`
+# output correction `𝒞` so the value/layout is still restored exactly.
+AGGRESSIVE_SOP = SoPConfig(order_otimes=True)
 
 
 # ===========================================================================
@@ -494,6 +500,21 @@ def rule_involution(node: Term) -> Term | None:
     return None
 
 
+def rule_permute(node: Term) -> Term | None:
+    """Collapse reshape ``Permute`` corrections: an identity permutation vanishes, and two
+    nested permutations compose. Value-exact (a permutation of tensor axes). Keeps the
+    up-to-iso ``𝒞`` corrections (Step C) from stacking up into non-canonical
+    ``Permute(Permute(…))`` towers."""
+    if not isinstance(node, Permute):
+        return None
+    if list(node.perm) == list(range(len(node.perm))):
+        return node.vector
+    if isinstance(node.vector, Permute):
+        p, q = node.vector.perm, node.perm  # Permute(Permute(v, p), q)_i = v[p[q[i]]]
+        return Permute(node.vector.vector, tuple(p[i] for i in q))
+    return None
+
+
 # ===========================================================================
 # Linearity / multilinearity distribution (toward sum-of-products).
 # ===========================================================================
@@ -723,6 +744,7 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_eval_zero,
     rule_compose,
     rule_involution,
+    rule_permute,
     rule_scale,
     rule_sum,
 )
@@ -794,6 +816,46 @@ def rule_sort_sum(node: Term) -> Term | None:
     return Sum(tuple(monos[i] for i in order))
 
 
+def _top_arity(g: Term) -> int | None:
+    """Number of top-level tensor factors of ``g``'s space (1 for a non-⊗), or ``None`` if
+    untypable."""
+    sp = _space(g)
+    if sp is None:
+        return None
+    return len(sp.spaces) if isinstance(sp, OProd) else 1
+
+
+def rule_order_otimes(node: Term) -> Term | None:
+    """Canonicalize the factor order of a tensor product **up to isomorphism**, restoring the
+    original layout with a ``Permute`` correction (the ``𝒞`` of ``plans/90``):
+
+        ``OProdV(factors)  ≡  Permute(OProdV(sorted), σ⁻¹)``
+
+    where ``sorted[i] = factors[σ[i]]`` (``σ`` = argsort by ``term_key``). Reordering ``⊗``
+    factors changes the space (``s_a⊗s_b ≠ s_b⊗s_a``) and the array axes, so it is *not*
+    value-safe on its own — the ``Permute`` swaps the axes back, making the whole rewrite
+    layout-exact (verified by run-equality).
+
+    Conservative: only fires for an unsorted product of **single-axis** factors that are
+    already clean atoms (no ``Sum``/``Scale``/``Zero`` to distribute first)."""
+    if not isinstance(node, OProdV):
+        return None
+    facs = node.vectors
+    if any(isinstance(f, (Sum, Scale, Zero)) for f in facs):
+        return None  # let distribution/scalar-pull run first
+    keys = [term_key(f) for f in facs]
+    sigma = sorted(range(len(facs)), key=lambda i: keys[i])
+    if sigma == list(range(len(facs))):
+        return None  # already canonical
+    if any((_top_arity(f) or 2) != 1 for f in facs):
+        return None  # multi-axis factor — Permute-on-blocks deferred (Step C+)
+    sorted_facs = tuple(facs[i] for i in sigma)
+    inv = [0] * len(sigma)  # perm = σ⁻¹ : Permute(OProdV(sorted), inv) reconstructs the original
+    for position, i in enumerate(sigma):
+        inv[i] = position
+    return Permute(OProdV(sorted_facs), tuple(inv))
+
+
 def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
     """Assemble the rule tuple selected by ``cfg`` (the always-valid algebraic cleanups run
     unconditionally; everything else is gated)."""
@@ -807,6 +869,8 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
         rules += _CONTRACTION_RULES
     if cfg.collect:
         rules.append(rule_collect)
+    if cfg.order_otimes:
+        rules.append(rule_order_otimes)
     if cfg.order_sum:
         rules.append(rule_sort_sum)
     return tuple(rules)
@@ -943,6 +1007,7 @@ __all__ = [
     "RewriteError",
     "SoPConfig",
     "DEFAULT_SOP",
+    "AGGRESSIVE_SOP",
     "subst",
     "rewrite",
     "beta",
