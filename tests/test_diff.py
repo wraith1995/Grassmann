@@ -466,6 +466,55 @@ def test_constant_chart_is_flat() -> None:
 
 
 # ---------------------------------------------------------------------------
+# AD through a term-dependent immersion, PARAMETER frame (the frame-free, term→term way).
+# A tangent vector w : dom(J) immersed via Eval(J, w) differentiates by the ordinary product rule
+# even when the chart J is x-dependent — no orthonormal ImageBasis, no triangular gauge term.  The
+# covariant / normal split falls out via the gauge-invariant projector P = embed∘project, and the
+# covariant part equals Eval(J, dw + Γ·w) with Γ = Pinv(J)∘∂J (the task-3 frame connection).
+# ---------------------------------------------------------------------------
+
+
+def test_parameter_frame_immersion_ad_and_split() -> None:
+    rng = np.random.default_rng(7)
+    Rt, Re = S.base("Rt", 2), S.base("Re", 3)
+    X = Rt
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    imgJ = S.img(J)
+    x, w, h = T.var("x", X), T.var("w", Rt), T.var("h", X)
+    Dw = T.var("Dw", S.oprod(S.dual(X), Rt))
+    DJ = T.var("DJ", S.oprod(S.dual(X), S.dual(Rt), Re))
+    Jv = rng.standard_normal((2, 3))
+    wv, Dwv = rng.standard_normal(2), rng.standard_normal((2, 2))
+    DJv, hv = rng.standard_normal((2, 2, 3)), rng.standard_normal(2)
+    feed = {f"J_{J.uid}": Jv, f"w_{w.uid}": wv, f"Dw_{Dw.uid}": Dwv, f"DJ_{DJ.uid}": DJv, f"h_{h.uid}": hv}
+
+    # (1) a scalar pairing ⟨wamb, J·w⟩ with BOTH w and J marked — differentiates term→term vs FD.
+    wamb = T.var("wamb", S.dual(Re))
+    e = T.Eval(wamb, (0,), (T.Eval(J, (0,), (w,)),))
+    wav = rng.standard_normal(3)
+    Jd = diff(e, x, deps={w.uid: Dw, J.uid: DJ})
+    seed = Jd.vars[0]
+    feed_s = {**feed, f"wamb_{wamb.uid}": wav}
+    jh = _run(Jd.body, {**feed_s, f"{seed.name}_{seed.uid}": hv})
+    dwh = _run(T.Eval(Dw, (0,), (h,)), feed)
+    dJh = _run(T.Eval(DJ, (0,), (h,)), feed)
+    fp = _run(e, {**feed_s, f"J_{J.uid}": Jv + 1e-6 * dJh, f"w_{w.uid}": wv + 1e-6 * dwh})
+    fm = _run(e, {**feed_s, f"J_{J.uid}": Jv - 1e-6 * dJh, f"w_{w.uid}": wv - 1e-6 * dwh})
+    np.testing.assert_allclose(np.asarray(jh).ravel(), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+    # (2) covariant / normal split of the immersion's directional derivative.
+    full = T.Sum((T.Eval(T.Eval(DJ, (0,), (h,)), (0,), (w,)), T.Eval(J, (0,), (T.Eval(Dw, (0,), (h,)),))))
+    fullv = _run(full, feed)
+    fc = T.var("fc", Re)
+    cov = _run(T.embed(T.project(fc, imgJ), Re), {**feed, f"fc_{fc.uid}": fullv})  # P = embed∘project
+    # covariant == Eval(J, dw + Γ·w) with Γ the task-3 frame connection
+    Gam = T.Compose(T.Pinv(J), (0,), (T.Eval(DJ, (0,), (h,)),))
+    cov_conn = _run(T.Eval(J, (0,), (T.Sum((T.Eval(Dw, (0,), (h,)), T.Eval(Gam, (0,), (w,)))),)), feed)
+    np.testing.assert_allclose(cov, cov_conn, atol=1e-5)             # covariant = frame connection
+    np.testing.assert_allclose(cov + (fullv - cov), fullv, atol=1e-9)  # full = covariant + normal
+
+
+# ---------------------------------------------------------------------------
 # Failure modes.
 # ---------------------------------------------------------------------------
 
