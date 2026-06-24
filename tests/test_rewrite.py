@@ -756,6 +756,51 @@ def test_musical_value_preserved() -> None:
     assert is_normalized_sop(sum_of_products(term))
 
 
+# ===========================================================================
+# Task #12 — TuplePermute IR node, order_oplus rewire, ⊕ round-trips.
+# ===========================================================================
+
+
+def test_order_oplus_emits_tuplepermute() -> None:
+    from grassmann.transform.rewrite import SoPConfig
+
+    A, B = S.base("A", 2), S.base("B", 3)
+    a, b = T.var("zz", A), T.var("aa", B)  # unsorted
+    cfg = SoPConfig(order_oplus=True)
+    out = sum_of_products(T.OPlusV((a, b)), cfg)
+    assert isinstance(out, T.TuplePermute)  # the clean ⊕-correction node, not a heavy map sum
+    assert isinstance(out.vector, T.OPlusV)
+    assert is_normalized_sop(out, cfg)
+    feed = {_key(a): np.array([1.0, 2.0]), _key(b): np.array([10.0, 20.0, 30.0])}
+    _same(T.OPlusV((a, b)), out, feed)
+
+
+def test_tuplepermute_collapse() -> None:
+    A, B = S.base("A", 2), S.base("B", 3)
+    a, b = T.var("a", A), T.var("b", B)
+    base = T.OPlusV((a, b))
+    assert simplify(T.TuplePermute(base, (0, 1))) == base  # identity vanishes
+    assert simplify(T.TuplePermute(T.TuplePermute(base, (1, 0)), (1, 0))) == base  # nested compose
+
+
+def test_tuple_roundtrip_iverson() -> None:
+    A, B = S.base("A", 2), S.base("B", 3)
+    oplus = S.oplus(A, B)
+    # π_i ∘ ι_j  →  [i=j]·I :  Identity(block_i) when i=j, else the Zero map.
+    assert simplify(T.Compose(T.TupleProject(oplus, 0), (0,), (T.TupleEmbed(oplus, 0),))) == T.Identity(A)
+    z = simplify(T.Compose(T.TupleProject(oplus, 0), (0,), (T.TupleEmbed(oplus, 1),)))
+    assert isinstance(z, T.Zero)
+
+
+def test_tuplepermute_value_correct() -> None:
+    A, B, C = S.base("A", 2), S.base("B", 3), S.base("C", 2)
+    a, b, c = T.var("a", A), T.var("b", B), T.var("c", C)
+    tp = T.TuplePermute(T.OPlusV((a, b, c)), (2, 0, 1))  # [a;b;c] → [c;a;b]
+    feed = {_key(a): np.array([1.0, 2.0]), _key(b): np.array([10.0, 20.0, 30.0]), _key(c): np.array([100.0, 200.0])}
+    expected = np.concatenate([feed[_key(c)], feed[_key(a)], feed[_key(b)]])
+    np.testing.assert_allclose(_run(tp, feed), expected)
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))

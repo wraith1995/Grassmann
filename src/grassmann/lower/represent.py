@@ -509,6 +509,8 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_remetric(e, vector, metric, ctx, target)
         case T.Permute():
             return _rep_permute(e, ctx, target)
+        case T.TuplePermute():
+            return _rep_tuple_permute(e, ctx, target)
         case T.Lift() | T.InvLift():
             return _rep_lift(e, ctx, target)
         case T.Kron(f, g):
@@ -3292,6 +3294,22 @@ def _rep_permute(
             return rep
         case _:
             return _match_result(ctx, rep, target)
+
+
+def _rep_tuple_permute(
+    e: T.TuplePermute, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``TuplePermute(v, perm)`` — reorder ``v``'s ``⊕`` components, lowered by **re-stacking
+    the extracted blocks**: ``OPlusV( TupleProject(⊕space, perm[i]) · v )``. Reuses the existing
+    ``⊕``/``TupleProject`` lowering rather than introducing a new array op (`plans/90`)."""
+    src = _synth(e.vector)
+    if not isinstance(src, S.OPlus):
+        raise RepresentError(f"TuplePermute: value must have a ⊕ space, got {src!r}")
+    n = len(src.spaces)
+    blocks = tuple(
+        T.Eval(T.TupleProject(src, e.perm[i]), (0,), (e.vector,)) for i in range(n)
+    )
+    return _rep(T.OPlusV(blocks), ctx, target)
 
 
 def _rep_lift(

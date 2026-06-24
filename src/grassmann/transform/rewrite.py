@@ -30,7 +30,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 
 from grassmann.core.kinds import NAT, SPACE, SpaceSort
-from grassmann.core.space import OProd, Scalar, Space, dual, is_dim, is_space, oplus
+from grassmann.core.space import (
+    OProd,
+    Scalar,
+    Space,
+    dual,
+    is_dim,
+    is_space,
+    linear_map_space,
+    oplus,
+)
 from grassmann.core.term import (
     Assert,
     Compose,
@@ -61,6 +70,7 @@ from grassmann.core.term import (
     Term,
     Trace,
     TupleEmbed,
+    TuplePermute,
     TupleProject,
     Var,
     Zero,
@@ -660,6 +670,36 @@ def rule_permute(node: Term) -> Term | None:
     return None
 
 
+def rule_tuplepermute(node: Term) -> Term | None:
+    """Collapse ``⊕``-permutation corrections: an identity permutation vanishes and two nested
+    ``TuplePermute``s compose (the ``⊕`` analogue of :func:`rule_permute`)."""
+    if not isinstance(node, TuplePermute):
+        return None
+    if list(node.perm) == list(range(len(node.perm))):
+        return node.vector
+    if isinstance(node.vector, TuplePermute):
+        p, q = node.vector.perm, node.perm
+        return TuplePermute(node.vector.vector, tuple(p[i] for i in q))
+    return None
+
+
+def rule_tuple_roundtrip(node: Term) -> Term | None:
+    """The ``⊕`` injection/projection round-trip ``π_i ∘ ι_j`` — an **Iverson bracket** over the
+    block indices times the identity, ``[i=j]·I`` (the bracket is purely index/dim data):
+    ``Compose(TupleProject(s,i), TupleEmbed(s,j))`` is ``Identity(block_i)`` when ``i=j`` and the
+    ``Zero`` map ``block_j ⊸ block_i`` otherwise. (Indices are concrete here, so the bracket
+    folds immediately; symbolic-index spaces would keep it as ``δ[i=j]``.)"""
+    if not isinstance(node, Compose) or node.positions != (0,) or len(node.gs) != 1:
+        return None
+    f, g = node.f, node.gs[0]
+    if isinstance(f, TupleProject) and isinstance(g, TupleEmbed) and f.space == g.space:
+        comps = f.space.spaces
+        if f.i == g.i:
+            return Identity(comps[f.i])
+        return Zero(linear_map_space(comps[g.i], comps[f.i]))
+    return None
+
+
 # ===========================================================================
 # Linearity / multilinearity distribution (toward sum-of-products).
 # ===========================================================================
@@ -894,6 +934,8 @@ def dist_unary(node: Term) -> Term | None:
         return _unary_linear(node, node.vector, lambda v: InvLift(v, node.fused, node.k))
     if isinstance(node, Permute):
         return _unary_linear(node, node.vector, lambda v: Permute(v, node.perm))
+    if isinstance(node, TuplePermute):
+        return _unary_linear(node, node.vector, lambda v: TuplePermute(v, node.perm))
     if isinstance(node, Remetric):
         return _unary_linear(node, node.vector, lambda v: Remetric(v, node.metric))
     return None
@@ -915,6 +957,8 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_dagger_push,
     rule_musical,
     rule_permute,
+    rule_tuplepermute,
+    rule_tuple_roundtrip,
     rule_scale,
     rule_sum,
 )
@@ -1028,38 +1072,28 @@ def rule_order_otimes(node: Term) -> Term | None:
 
 def rule_order_oplus(node: Term) -> Term | None:
     """Canonicalize the component order of a ``⊕`` stack **up to isomorphism**, restoring the
-    original block layout with a synthesized ``⊕``-block-permutation map (no IR reshape node
-    exists for ``⊕``, so the correction is built from ``TupleEmbed``/``TupleProject``):
+    original block layout with a single ``TuplePermute`` correction (the ``⊕`` analogue of the
+    ``Permute`` used for ``⊗``):
 
-        ``OPlusV(comps)  ≡  P · OPlusV(sorted)``,
-        ``P = Σᵢ ιᵢ^{orig} ∘ π_{σ⁻¹[i]}^{sorted} : (⊕ sorted) ⊸ (⊕ orig)``
+        ``OPlusV(comps)  ≡  TuplePermute(OPlusV(sorted), σ⁻¹)``
 
-    where ``sorted[k] = comps[σ[k]]``. Heavyweight (the correction is a sum of
-    inject∘project maps, which then distributes) — hence opt-in via ``order_oplus``.
-    Conservative: clean components only (no ``Sum``/``Scale``/``Zero`` to distribute first)."""
+    where ``sorted[k] = comps[σ[k]]`` (``σ`` = argsort by ``term_key``). Opt-in via
+    ``order_oplus``; conservative — clean components only (no ``Sum``/``Scale``/``Zero`` to
+    distribute first)."""
     if not isinstance(node, OPlusV):
         return None
     comps = node.vectors
     if any(isinstance(c, (Sum, Scale, Zero)) for c in comps):
         return None
-    spaces = [_space(c) for c in comps]
-    if any(s is None for s in spaces):
+    if any(_space(c) is None for c in comps):
         return None
     sigma = sorted(range(len(comps)), key=lambda i: term_key(comps[i]))
     if sigma == list(range(len(comps))):
         return None  # already canonical
-    orig_space = oplus(*spaces)  # type: ignore[arg-type]
-    sorted_space = oplus(*[spaces[i] for i in sigma])  # type: ignore[arg-type]
     inv = [0] * len(sigma)
     for k, i in enumerate(sigma):
         inv[i] = k
-    perm_map = Sum(
-        tuple(
-            Compose(TupleEmbed(orig_space, i), (0,), (TupleProject(sorted_space, inv[i]),))
-            for i in range(len(comps))
-        )
-    )
-    return Eval(perm_map, (0,), (OPlusV(tuple(comps[i] for i in sigma)),))
+    return TuplePermute(OPlusV(tuple(comps[i] for i in sigma)), tuple(inv))
 
 
 def rule_dissolve_oplus(node: Term) -> Term | None:
