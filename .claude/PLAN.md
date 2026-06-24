@@ -44,8 +44,15 @@ Decisions locked with user:
 - 41 tests in tests/test_rewrite.py; full suite 1410 passed / 6 skipped; ruff clean.
 - Originally-scoped 1+2+4 DONE (1=A canonicalization, 2=E embed, 4=F nat-β) + bonus B + C.
 
-### Next / deferred
-- order_oplus (⊕ component ordering) — needs a ⊕-block-permute correction (no direct IR node;
-  build from TupleEmbed/TupleProject). Flag not yet added.
-- cross-factor Trace→Eval; Dagger/Solve/Pinv push-to-leaves; rational scalar-NF;
-  α/De-Bruijn binder canonicalization; ⊕-dissolve-to-injections; hoist 𝒞 to a single top wrapper.
+### Aggressive-tail tasks (queued #1-7; all addressed)
+- #1 Dagger push-to-leaves (rule_dagger_push); Solve/Pinv N/A (arg must be bij-var; Pinv
+  doesn't distribute over ∘). commit 79c5221.
+- #2 cross-factor Trace→Eval (dist_trace_oprod). commit 79c5221.
+- #3 α-canonicalization (alpha_canon + α-invariant term_key, canon_binders). commit a1a0bba.
+- #4 order_oplus (synthesized TupleEmbed/TupleProject ⊕-block-permute 𝒞, opt-in). commit 3acca1c.
+- #5 hoist 𝒞 → RESOLVED AS NON-GOAL: corrections are intrinsically per-monomial (valid Sum
+  monomials share output space but canonicalize different interiors). No code.
+- #6 rational scalar NF → PARTIAL: scalar-PRODUCT canon (rule_scalar_product, canon_scalars)
+  + _mul_scalar bugfix. REMAINING: full P/Q (additive + div/reciprocal + gcd cancellation, a CAS).
+- #7 dissolve_oplus (⊕ → sum of injections, opt-in). commit 44fe739.
+- Status: 52 rewrite tests; full suite 1419 passed / 6 skipped; ruff clean. Branch pushed.
