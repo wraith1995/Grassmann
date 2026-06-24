@@ -2227,12 +2227,21 @@ def _rep_trace(
     if i >= n or j >= n:
         raise RepresentError(f"Trace: index out of range for {n} factors")
     _assert_axes_equal(ctx, f_rep.array, i, j, note=f"assert:trace-dim@{i},{j}")
+    # Reconcile the traced slots: the diagonal sum is the natural pairing ⟨slot_j, slot_i⟩ only when
+    # slot_j is dual(slot_i).  When an operand pins them to inconsistent bases (and f wasn't steered to
+    # defaults), cob axis j into slot_i's dual partner first — else the diagonal sums basis-blind
+    # (silent-wrong, e.g. ⟨w, trace(a⊗b⊗c, 0, 1)⟩ with a or b pinned).  No-op when steered/default.
+    f_arr = f_rep.array
+    slot_i, slot_j = _slot_basis_at(f_rep.basis, i), _slot_basis_at(f_rep.basis, j)
+    if slot_i is not None and slot_j is not None and not _basis_pairing_consistent(slot_i, slot_j):
+        m = _basis_cob_matrix(ctx, slot_j, _pairing_partner(slot_i))
+        f_arr = _apply_cob_on_axis(ctx, m, f_arr, j, f_rep.free_labels, note=f"trace-reconcile@{i},{j}")
     f_labels = [chr(ord("a") + k) for k in range(n)]
     f_labels[j] = f_labels[i]  # same label ⇒ einsum contracts the diagonal
     out_labels = "".join(f_labels[k] for k in range(n) if k not in (i, j))
     spec = "".join(f_labels) + "->" + out_labels
     [out] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp(spec), [f_rep.array],
+        pa.EinsumStmtOp(spec), [f_arr],
         [pa.OutSpec("trace", _shape_of_space(space))],
         note=f"trace:contract@{i},{j}",
     )
