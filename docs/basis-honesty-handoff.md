@@ -19,7 +19,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 
 ## What's done (this session)
 
-**Eleven silent-wrong bugs fixed**, all of the class above:
+**Twelve silent-wrong bugs fixed**, all of the class above:
 
 | arm | the lie | fix | commit |
 |---|---|---|---|
@@ -34,6 +34,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 | `pinv_apply` unsteered | `v` left unreconciled vs f's cod-slot when not steered (`⟨w,f⁺v⟩`) | cob `v` to f's cod-slot before the matvec (no-op when steered) | `2a0cb5d` |
 | `trace` unsteered | traced slots summed basis-blind when a contracted slot is pinned + f unsteered | cob axis `j` to `dual(slot i)` before the diagonal (no-op when steered) | `f56ba9d` |
 | `eval` multi-axis fused slot | a single fused operand (`x⊗y`) vs a fused `dual(V⊗V)` slot left unreconciled (rank-1 gate) | per-axis reconcile via `_coerce_rep_to_target` (retires the rank-1 gate; subsumes the pullback) | `26c75a9` |
+| `dot`/metric-Eval mixed operands | `_reconcile_metric_operands` immersed-only gate ⇒ two different orthonormal frames stayed mismatched | reconcile whenever operands disagree (not just immersed) | `1e7dd86` |
 
 The `vmap` LLam lowering is the **default** (`GRASSMANN_LLAM_INDEX=eye` = the old fast path, which
 raises on a cod-non-default body).
@@ -55,14 +56,23 @@ Flavors: non-orthonormal `list_basis`, `ORTHONORMALIZE` (non-standard orthonorma
 {var: (space, std_value)})`; the sweep auto-applies the flavors. A known-broken arm can be marked a
 `strict-xfail` (XPASSes + flags removal when fixed).
 
-**Unsteered variants.** Arms with a surviving slot **steer at `target=STD`**, which avoids the
-contraction/reconcile path and *masks* a reconcile bug. To exercise the unsteered path, wrap the arm in
-a **scalar** contraction `⟨w, …⟩` (a scalar result can't be steered) — that's how `pinv_apply`'s
-v-reconcile bug surfaced (`_c_eval_map_scalar`/`_c_compose_scalar`/`_c_pinv_apply_scalar`).
+The sweep multiplies several **axes of variation**, each of which has caught a distinct bug:
+- **Subset pinning** — each operand is independently `default` OR one of its non-default flavors (the
+  product of `[None, *flavors]`). A *mix* of pinned + default operands is a more sensitive trigger than
+  all-pinned (it found the `dot` metric-operand bug; `pinv_apply`/`trace` were also wrong this way).
+- **Unsteered `⟨…⟩` wrappers** — an arm with a surviving slot **steers at `target=STD`**, masking a
+  reconcile bug; a scalar wrapper (a scalar can't be steered) exposes it (found `pinv_apply`, `trace`,
+  `lift`). Covers eval-map/compose/pinv_apply/solve/trace/dagger/kron/permute/oprod/lift.
+- **Varied consumers** — arms fed to `sum`/`oprod`/`compose`, not just eval (different reconcile paths).
+- **Rectangular maps** (`V→W`) and **3 flavors × both `GRASSMANN_LLAM_INDEX` modes**.
 
-The sweep currently has **36 cases, 0 xfail**. Unsteered
-`⟨…⟩` wrappers cover eval-map/compose/pinv_apply/solve/trace/dagger/kron/permute/oprod/lift. Run:
-`pytest tests/test_basis_honesty_sweep.py` (and once with `GRASSMANN_LLAM_INDEX=eye`).
+FFS coverage: the **immersed Gram** is already exercised by the non-ortho `list_basis` flavor (it *is*
+an immersed-metric basis). A literal `ImageBasis` (lives in its own `Img(J)` space — can't pin a
+`V`-var to it) and `WithInner` (changes the metric ⇒ different value) don't fit this two-route-on-`V`
+sweep; they're covered by `test_pinv_gsvd` / `test_embed_subspace` / `test_algorithm_corpus`.
+
+The sweep currently has **43 cases, 0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
+with `GRASSMANN_LLAM_INDEX=eye`).
 
 ## Remaining work (prioritized — resume here)
 
@@ -95,8 +105,8 @@ v-reconcile bug `2a0cb5d`. What remains:)*
     pairing-consistent; multi-axis operands reconcile per-axis via `_coerce_rep_to_target`).
     `_basis_pairing_consistent`,
     `_pairing_partner`, `_slot_basis_at` (rank-1 = its own slot 0).
-  - `_rep_eval_operands` / `_operand_metric_basis` — the metric-Eval seam (build the Gram in any
-    non-default operand basis). `_rep_metric`, `_inner_map_basis`, `_sharp_map_basis`, `_covector_primal`
+  - `_rep_eval_operands` / `_operand_metric_basis` / `_reconcile_metric_operands` — the metric-Eval
+    seam (build the Gram in any non-default operand basis; reconcile disagreeing operands to one basis). `_rep_metric`, `_inner_map_basis`, `_sharp_map_basis`, `_covector_primal`
     (the primal of a covector basis — DualBasis peels, a literal covector basis is `dual_basis`'d).
   - `_rep_pinv_apply` — GSVD branch (metric in f's slots) + PinvOp branch; both cob `v` to f's cod-slot
     before the `"ab,a->b"` matvec (the unsteered-reconcile fix).
@@ -120,4 +130,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1232 passed, 0 xfailed** in both modes; ruff clean (sweep: 36/36).
+Current: **1239 passed, 0 xfailed** in both modes; ruff clean (sweep: 43/43).
