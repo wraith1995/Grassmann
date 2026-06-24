@@ -383,6 +383,23 @@ class Dagger:
 
 
 @dataclass(frozen=True)
+class Sqrt:
+    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of a square endomorphism
+    ``f : V ⊸ V`` (the unique SPD ``S`` with ``S·S = f``).  Lowers via an eigendecomposition and
+    **fails loudly if ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization
+    factor: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the
+    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame (`§ realization`)."""
+
+    f: Term
+
+    def __post_init__(self) -> None:
+        _require_term(self.f, "Sqrt.f")
+
+    def __repr__(self) -> str:
+        return f"Sqrt({self.f!r})"
+
+
+@dataclass(frozen=True)
 class Inner:
     """``Inner(s)`` — the inner-product map of ``s`` (reads ``s``'s metric)."""
 
@@ -698,7 +715,7 @@ class Frame:
 
 
 # A Term is any of the node types above.
-Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Solve | Pinv | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | Kron | LLam | Lam | Frame
+Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Solve | Pinv | Sqrt | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | Kron | LLam | Lam | Frame
 
 _TERM_TYPES = (
     Var,
@@ -718,6 +735,7 @@ _TERM_TYPES = (
     Pinv,
     SolveApply,
     PinvApply,
+    Sqrt,
     Dagger,
     Inner,
     Flat,
@@ -959,6 +977,10 @@ def pinv(f: Term) -> Pinv:
     return Pinv(f)
 
 
+def sqrt(f: Term) -> Sqrt:
+    return Sqrt(f)
+
+
 def solve_apply(f: Term, v: Term) -> SolveApply:
     return SolveApply(f, v)
 
@@ -1059,6 +1081,8 @@ __all__ = [
     "Trace",
     "Solve",
     "Pinv",
+    "sqrt",
+    "Sqrt",
     "SolveApply",
     "PinvApply",
     "Dagger",

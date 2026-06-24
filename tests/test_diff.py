@@ -236,6 +236,26 @@ def test_bare_pinv_map_derivative(ambient) -> None:
     _fd_marked_map(e, x, J, DJ, base, Jv, rng.standard_normal((2, 2, ambient)), rng.standard_normal(2))
 
 
+def test_sqrt_spd_map_derivative() -> None:
+    # d(√f) — the SPD operator-square-root derivative.  dS solves the Sylvester  S·dS + dS·S = df
+    # (S = √f), built term→term as the inverse of the Sylvester operator on the MAP space
+    # (V⊸V)⊸(V⊸V) — Kron of the dual(V) and V factors, NO basis fuse, result lands as a genuine
+    # V⊸V map.  Probed as ⟨w, √(JᵀJ)·u⟩ with J marked, so the immersed metric G = JᵀJ (hence df) is
+    # automatically symmetric.  √G is the metric-whitening factor whose derivative makes the
+    # moving-subspace embed/project AD basis-honest in any frame.
+    rng = np.random.default_rng(7)
+    Rt, Re = S.base("Rt", 3), S.base("Re", 3)
+    x = T.var("x", Rt)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    w, u = T.var("w", S.dual(Rt)), T.var("u", Rt)
+    Gm = T.Compose(T.Dagger(J), (0,), (J,))  # JᵀJ : Rt ⊸ Rt, SPD
+    e = T.Eval(w, (0,), (T.Eval(T.Sqrt(Gm), (0,), (u,)),))
+    Jv = rng.standard_normal((3, 3))
+    base = {f"w_{w.uid}": rng.standard_normal(3), f"u_{u.uid}": rng.standard_normal(3)}
+    _fd_marked_map(e, x, J, DJ, base, Jv, rng.standard_normal((3, 3, 3)), rng.standard_normal(3))
+
+
 def test_gauss_decomposition_of_embed() -> None:
     # embed IS di (the pushforward of the embedding i).  Differentiating it term→term gives the
     # second covariant derivative ∇di, which obeys the Gauss formula
