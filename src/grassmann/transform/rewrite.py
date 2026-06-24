@@ -89,6 +89,7 @@ class SoPConfig:
     order_sum: bool = True       # sort + summands by term_key — value-safe (commutative)
     order_otimes: bool = False   # canonical ⊗ factor order — UP-TO-ISO (emits a Permute 𝒞)
     order_oplus: bool = False    # canonical ⊕ component order — UP-TO-ISO (synthesized 𝒞; heavy)
+    dissolve_oplus: bool = False  # dissolve ⊕ into a sum of injections (⊕ disappears; + outermost)
     canon_binders: bool = True   # α-canonicalize bound vars (α-variant terms → identical NF)
 
 
@@ -988,6 +989,22 @@ def rule_order_oplus(node: Term) -> Term | None:
     return Eval(perm_map, (0,), (OPlusV(tuple(comps[i] for i in sigma)),))
 
 
+def rule_dissolve_oplus(node: Term) -> Term | None:
+    """Dissolve a ``⊕`` stack into a sum of single-slot injections — the *most aggressive*
+    ``⊕`` treatment: ``OPlusV(c₀,…,cₘ) → Σᵢ ιᵢ(cᵢ)`` where ``ιᵢ = Eval(TupleEmbed(⊕space, i))``
+    zero-pads component ``i`` into the full space. ``⊕`` then disappears as a former and ``+``
+    is strictly outermost (value-preserving). Opt-in via ``dissolve_oplus`` (mutually
+    exclusive in spirit with ``order_oplus``)."""
+    if not isinstance(node, OPlusV):
+        return None
+    comps = node.vectors
+    spaces = [_space(c) for c in comps]
+    if any(s is None for s in spaces):
+        return None
+    full = oplus(*spaces)  # type: ignore[arg-type]
+    return Sum(tuple(Eval(TupleEmbed(full, i), (0,), (comps[i],)) for i in range(len(comps))))
+
+
 def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
     """Assemble the rule tuple selected by ``cfg`` (the always-valid algebraic cleanups run
     unconditionally; everything else is gated)."""
@@ -1005,6 +1022,8 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
         rules.append(rule_order_otimes)
     if cfg.order_oplus:
         rules.append(rule_order_oplus)
+    if cfg.dissolve_oplus:
+        rules.append(rule_dissolve_oplus)
     if cfg.order_sum:
         rules.append(rule_sort_sum)
     return tuple(rules)

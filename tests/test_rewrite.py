@@ -682,6 +682,25 @@ def test_order_oplus_leaves_sorted_and_is_opt_in() -> None:
     assert sum_of_products(T.OPlusV((a, b))) == T.OPlusV((a, b))
 
 
+# ===========================================================================
+# Deferred-tail task #7 — ⊕-dissolve-to-injections (opt-in, most aggressive).
+# ===========================================================================
+
+
+def test_dissolve_oplus_to_injections() -> None:
+    from grassmann.transform.rewrite import SoPConfig
+
+    A, B = S.base("A", 2), S.base("B", 3)
+    a, b = T.var("a", A), T.var("b", B)
+    term = T.OPlusV((a, b))
+    out = sum_of_products(term, SoPConfig(dissolve_oplus=True))
+    # ⊕ is gone — replaced by a sum of injections; no OPlusV remains.
+    assert _count(out, T.OPlusV) == 0
+    assert isinstance(out, T.Sum)
+    feed = {_key(a): np.array([1.0, 2.0]), _key(b): np.array([10.0, 20.0, 30.0])}
+    _same(term, out, feed)
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
