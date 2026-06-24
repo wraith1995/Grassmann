@@ -571,8 +571,9 @@ def test_llam_nondefault_body_basis_fails_loudly():
     x = C.var("x", V)
     llam = C.llam(x, body=C.eval_(f, (0,), x))  # LLam([x]. f·x) — the matrix of f
     std_env = {f.uid: default_basis(MS)}
-    assert np.allclose(_run(represent(llam, basis_env=std_env), {_vk(f): Mf}), Mf.T)
-    assert np.allclose(_run(represent(llam, basis_env=std_env, target=B.STD), {_vk(f): Mf}), Mf.T)
+    # LLam([x]. f·x) IS the map f, so it lowers to Mf (canonical (dom,cod) — plans/92; was Mfᵀ).
+    assert np.allclose(_run(represent(llam, basis_env=std_env), {_vk(f): Mf}), Mf)
+    assert np.allclose(_run(represent(llam, basis_env=std_env, target=B.STD), {_vk(f): Mf}), Mf)
     # f pinned to a non-default map basis ⇒ body lands in `lb`.  EYE: raise.  VMAP: STD == Mfᵀ.
     a = [C.var(f"e{i}", V) for i in range(3)]
     lb = B.list_basis(*a)
@@ -588,7 +589,7 @@ def test_llam_nondefault_body_basis_fails_loudly():
             assert "non-default" in str(ex)
     else:
         got = _run(represent(llam, basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_lb})
-        assert np.allclose(got, Mf.T)
+        assert np.allclose(got, Mf)  # canonical (dom,cod) — plans/92
     # domain-only case: LLam([x]. ⟨a, x⟩) with `a` pinned non-default.  EYE raises (pin pre-check);
     # VMAP gives the honest STD covector row == the std-coords of `a` (the value fed in `lbd`).
     a = C.var("a", C.dual(V))

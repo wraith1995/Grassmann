@@ -3390,6 +3390,27 @@ def _rep_llam(
     return _rep_llam_eye(e, vars_, body, ctx, target)
 
 
+def _reorient_to_dom_cod(ctx: _Ctx, arr: pa.SymArray, n_cod_axes: int, n_dom_axes: int) -> pa.SymArray:
+    """Transpose an LLam map tensor from the body's physical ``(cod…, dom…)`` layout to the
+    CANONICAL ``(dom…, cod…)`` storage that matches its declared space ``~s_v…⊗s_e`` (plans/92).
+
+    This is the heart of the FFS re-orientation: with it an ``LLam`` lowers identically to a stored
+    map-var (η-sound), and the standard per-space basis epilogue applies with no transposed-axis
+    special case. A scalar body or a zero-arity domain needs no reorder."""
+    if n_cod_axes == 0 or n_dom_axes == 0:
+        return arr
+    labels = [chr(ord("a") + i) for i in range(n_cod_axes + n_dom_axes)]
+    cod_l, dom_l = labels[:n_cod_axes], labels[n_cod_axes:]
+    spec = "".join(labels) + "->" + "".join(dom_l + cod_l)
+    shp = _shape_of(arr)
+    out_shape = tuple(shp[n_cod_axes:]) + tuple(shp[:n_cod_axes])
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp(spec), [arr],
+        [pa.OutSpec("llam:to-(dom,cod)", out_shape)], note="llam:reorient",
+    )
+    return out
+
+
 def _rep_llam_eye(
     e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
@@ -3454,7 +3475,13 @@ def _rep_llam_eye(
             f"vmap mode (unset GRASSMANN_LLAM_INDEX) or realize the body's operand(s) in default "
             f"(LLam free-label-basis tracking is future work — `41 §7`)."
         )
-    rep = Rep(body_rep.array, default_basis(space), space, free_labels="")
+    # Re-orient to CANONICAL (dom,cod) storage (plans/92): the eye einsum lands the body in
+    # (cod…, dom…); transpose to (dom…, cod…) so the LLam matches its declared space (η-sound) and
+    # ``default_basis(space)`` (a (dom,cod) tag) honestly describes the array.
+    n_cod_axes = len(_shape_of_space(body_rep.space))
+    n_dom_axes = len(_shape_of(body_rep.array)) - n_cod_axes
+    out = _reorient_to_dom_cod(ctx, body_rep.array, n_cod_axes, n_dom_axes)
+    rep = Rep(out, default_basis(space), space, free_labels="")
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -3598,7 +3625,6 @@ def _rep_llam_vmap(
     # byte-identical for a default body (and the honest tag below describes THIS physical order).
     cod_shape = _shape_of_space(body_rep.space)
     n_cod_axes = len(cod_shape)          # ARRAY axes of the body (0 for a scalar body)
-    n_cod = len(_factors(body_rep.space))  # codomain BASIS factors (1 for a scalar body)
     fn = _nested_vmap(sub, n_vars, n_shared, n_cod_axes)
     dom_shape = tuple(_static_dim(_synth(v)) for v in vars_)
     out_shape = cod_shape + dom_shape
@@ -3608,58 +3634,34 @@ def _rep_llam_vmap(
         note="llam:vmap:call",
     )
 
-    # 4. Honest result basis, in the PHYSICAL axis order (cod axes first, then one domain axis per
-    #    var).  Codomain slots carry the body's ACTUAL basis; domain slots are ``dual(binding_i)``
-    #    (covariant).  A SCALAR body contributes no codomain axis (only the var/domain axes appear).
-    #    For a default body this collapses to ``default_basis``'s factors transposed — matching the
-    #    array — so AUTO is byte-identical to eye and STD/MATCH cob honestly.
-    body_cod_factors = _basis_factors(body_rep.basis, n_cod) if n_cod_axes else []
-    if body_cod_factors is None:
-        # Cod basis structure does not split into the expected arity — fall back to default tag.
+    # 4. Re-orient to CANONICAL (dom,cod) storage (plans/92): the vmap layout lands the body in
+    #    (cod…, dom…); transpose to (dom…, cod…) so the LLam matches its declared space (η-sound).
+    #    The honest result basis is then in plain (dom,cod) order — domain slots ``dual(binding_i)``
+    #    (covariant), then the body's codomain basis — so the STANDARD per-space epilogue applies
+    #    (no transposed-axis special case, no MATCH guard needed: the array is now canonical).
+    out = _reorient_to_dom_cod(ctx, out, n_cod_axes, len(dom_shape))
+    # Honest result basis in (dom,cod) order, structured to MATCH the space's factors: one
+    # ``dual`` per domain var, then the body's codomain as ONE factor (``s_e`` is a single space
+    # factor — possibly itself a ⊗ — so it must not be flattened, else a consumer cob sees a
+    # different factor structure).  For a default body this is exactly ``default_basis(space)``.
+    try:
+        body_is_default = _basis_eq(body_rep.basis, default_basis(body_rep.space))
+    except S.SpaceError:
+        body_is_default = False
+    if body_is_default:
         out_basis: B.Basis = default_basis(space)
     else:
         dom_factors = [B.dual_basis(vb) for vb in binding_bases]
-        factors = body_cod_factors + dom_factors
+        factors = dom_factors + [body_rep.basis]  # cod as a single nested factor
         out_basis = factors[0] if len(factors) == 1 else B.basis_prod(*factors)
     rep = Rep(out, out_basis, space, free_labels="")
-    # target — the output basis.  The array/tag are in PHYSICAL order ``(cod…, dom…)`` — the
-    # TRANSPOSE of the space's ``(dom…, cod…)`` factor order (the historical eye convention).  The
-    # standard per-space epilogue cobs each array axis against ``default_basis(space).bases[axis]``
-    # positionally, which would mis-pair the transposed axes; so we cob against a PHYSICAL-order
-    # target (cod factors first) and hand the result back tagged ``default_basis(space)`` — i.e. the
-    # exact eye convention (transposed array, default tag), so AUTO is byte-identical to eye and an
-    # outer consumer sees the same thing it would from the eye path.
-    if target is B.TargetBasis.AUTO:
-        return rep
-    # STD (the supported targeted case): build the PHYSICAL-order standard basis (cod axes first,
-    # then one ``dual`` domain axis per var) so the per-axis cob lines up with the transposed array.
-    # A concrete MATCH target on a transposed map tensor is rare.  It is safe for a DEFAULT body
-    # (its tag matches the (cod,dom) array), but for a NON-DEFAULT body the standard per-axis
-    # epilogue would mis-pair the transposed (cod,dom) axes against (dom,cod) factors and silently
-    # miscompute.  Guard that hazardous case LOUDLY (the path the audit flagged as unexercised —
-    # plans/91 / `41 §7`); the default-body fallback is unchanged.
-    if target is not B.TargetBasis.STD:
-        try:
-            _body_nondefault = not _basis_eq(body_rep.basis, default_basis(body_rep.space))
-        except S.SpaceError:
-            _body_nondefault = False
-        if _body_nondefault:
-            raise RepresentError(
-                "represent: a concrete-basis MATCH target on an LLam with a non-default body "
-                "basis (vmap mode) would mis-pair the transposed (cod,dom) axes; realize the body "
-                "in its default basis or use an AUTO/STD target (LLam free-axis basis tracking is "
-                "future work — `41 §7`)."
-            )
-        return _match_result(ctx, rep, target)
-    cod_factors = _basis_factors(default_basis(body_rep.space), n_cod) if n_cod_axes else []
-    dom_factors = [B.dual_basis(default_basis(_synth(v))) for v in vars_]
-    phys = (cod_factors or []) + dom_factors
-    want = phys[0] if len(phys) == 1 else B.basis_prod(*phys)
-    cob_rep = rep if _basis_eq(out_basis, want) else _coerce_rep_to_target(
-        ctx, rep, want, note="llam:vmap:target-std"
-    )
-    # Hand back in the eye convention: transposed array, ``default_basis(space)`` tag.
-    return Rep(cob_rep.array, default_basis(space), space, free_labels="")
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 # Free (basis-index) einsum labels live in a pool disjoint from the lowercase space labels

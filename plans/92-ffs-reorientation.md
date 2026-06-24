@@ -1,9 +1,25 @@
-# 92 — Scope: FFS storage re-orientation ("2b", unify map storage to `(dom,cod)`)
+# 92 — FFS storage re-orientation ("2b", unify map storage to `(dom,cod)`)
 
-> **Status: SCOPE / not started.** This is the dedicated effort `plans/91 §Phase 2` defers. Goal:
-> collapse the two-layer map-orientation design into a single canonical `(dom,cod)` storage, so an
-> `LLam` lowers identically to a stored map-var. Consequence: **η-reduction becomes sound**
-> (`λ⊸x.f(x) → f` value-exact) and the `Rep` tag/array self-inconsistency disappears.
+> **Status: DONE** (branch `ffs-reorientation`). Maps now lower in a single canonical `(dom,cod)`
+> storage: an `LLam` lowers **identically to a stored map-var**, so **η-reduction is sound** and is
+> a live rewrite rule (`rule_eta`), and the `Rep` tag/array self-inconsistency is gone.
+>
+> **What it took (vs the scope's fear):** far smaller than "rewrite the FFS substrate". The change
+> was localized to the two LLam producers — `_reorient_to_dom_cod` transposes the body's
+> `(cod…,dom…)` layout to `(dom…,cod…)` at the end of `_rep_llam_eye` / `_rep_llam_vmap`, and the
+> basis is tagged in `(dom,cod)` order (one nested cod factor) so the **standard** epilogue applies
+> (the transposed-axis special-case and its MATCH guard were deleted). The de-risking finding held:
+> the FFS realizers transpose boundary→internal themselves, so they needed **no change**.
+>
+> **Verification:** the re-orientation broke **134** tests at first — but on inspection every one was
+> a *consumer encoding the old `(cod,dom)` convention* (a basis-structure mismatch fixed by tagging
+> the cod as one nested factor cleared 127; the rest were tests hand-computing Jacobians/maps in the
+> old layout — `test_diff` einsum index orders, `test_target_correctness` `Mf.T`, a redex that now
+> lowers). **Zero** were numeric bugs in the FFS math (pullback / GSVD / geometry-volume all passed
+> untouched). Pins in `tests/test_map_orientation_pins.py`; full suite **1438 passed / 6 skipped**;
+> both LLam modes (`vmap`/`eye`) green.
+
+The original scope (strategy / migration ladder / risk register) is retained below for the record.
 
 ## 1. Why (and why it's hard)
 
