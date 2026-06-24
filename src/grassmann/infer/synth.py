@@ -63,6 +63,7 @@ from grassmann.core.term import (
     Term,
     Trace,
     TupleEmbed,
+    TuplePermute,
     TupleProject,
     Var,
     Zero,
@@ -225,6 +226,8 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
             return _synth_lift(e, ctx)
         case Permute():
             return _synth_permute(e, ctx)
+        case TuplePermute():
+            return _synth_tuple_permute(e, ctx)
         case LLam():
             return _synth_llam(e, ctx)
         case Lam():
@@ -691,6 +694,22 @@ def _synth_permute(e: Permute, ctx: Ctx) -> Space:
     if len(out) == 1:
         return out[0]
     return oprod(*out)
+
+
+def _synth_tuple_permute(e: TuplePermute, ctx: Ctx) -> Space:
+    """``TuplePermute(v, perm)`` — reorder ``v``'s ``⊕`` components: result component ``i`` is
+    ``v``'s component ``perm[i]`` (the direct-sum analogue of :func:`_synth_permute`)."""
+    s = ctx.store.resolve(_synth_value(e.vector, ctx))
+    if not isinstance(s, OPlus):
+        raise InferError(f"TuplePermute: value must have a ⊕ space, got {s!r}")
+    comps = list(s.spaces)
+    n = len(comps)
+    if sorted(e.perm) != list(range(n)):
+        raise InferError(
+            f"TuplePermute: perm {e.perm!r} must be a permutation of range({n}) for a "
+            f"{n}-component ⊕, got space {s!r}"
+        )
+    return oplus(*(comps[e.perm[i]] for i in range(n)))
 
 
 # ===========================================================================
