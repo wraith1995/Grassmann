@@ -2336,8 +2336,11 @@ def _rep_neval_lam(
         operands.append(_coerce_basis(ctx, arg_rep, in_bases[k], note="neval:operand-cob"))
     for j, v in enumerate(free_vars):
         free_rep = _rep_var(v, ctx)
-        operands.append(_coerce_basis(ctx, free_rep, in_bases[len(bound_vars) + j],
-                                      note="neval:free-cob"))
+        # ``_coerce_rep_to_target`` (per-axis) not ``_coerce_basis`` (rank-1 axis-0 only): a free var
+        # may be a MULTI-AXIS map pinned to a frame-var basis (e.g. f : V⊸V in ``BasisProd(dual lb, lb)``),
+        # whose cob into the sub-program's default input basis needs every axis cob'd.
+        operands.append(_coerce_rep_to_target(ctx, free_rep, in_bases[len(bound_vars) + j],
+                                              note="neval:free-cob").array)
 
     space = _synth(e)
     [out] = ctx.prog.emit_stmt(
@@ -2378,7 +2381,15 @@ def _build_lam_subprogram(
     if cached is not None:
         return cached
     sub = pa.Program("lam", budget=pa.SymbolicBudget.force_stmts())
-    sub_ctx = _Ctx(prog=sub, basis_env=parent.basis_env, inputs={})
+    # Do NOT inherit the parent's pins for the sub-inputs: a free var pinned to a basis realized by
+    # FRAME VARS (a list_basis etc.) would be re-realized inside the sub-Program, leaking those frame
+    # vars as un-fed sub-inputs.  Declaring the sub-inputs frame-var-free (default/natural) keeps the
+    # body basis-agnostic in its inputs; the PARENT cobs each operand into ``in_bases`` (resolving any
+    # frame vars where they're actually fed).  This also makes the memo sound — the sub-Program no
+    # longer depends on the parent ``basis_env``, which the cache key does not capture (`41 §3`).
+    input_uids = {v.uid for v in sub_inputs}
+    sub_env = {k: val for k, val in parent.basis_env.items() if k not in input_uids}
+    sub_ctx = _Ctx(prog=sub, basis_env=sub_env, inputs={})
     # Force each sub-input to be allocated as a sub-Program input, in the declared order
     # (so the parent's operand list lines up positionally with sub.inputs).
     in_bases = [_rep_var(v, sub_ctx).basis for v in sub_inputs]

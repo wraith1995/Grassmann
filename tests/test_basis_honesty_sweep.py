@@ -414,12 +414,11 @@ def _c_eval_map_rect_scalar():  # ⟨w′, f·v⟩, f: V→W (unsteered)
             {wp: (DW, np.array([1.0, 1])), f: (MVW, _MR), v: (V, np.array([1.0, 2, 3]))})
 
 
-def _c_neval_lam():  # NEval of λx. f·x applied to op (op is the pinned arg; f is feed-only — pinning a
-    # free var realized by frame vars into the sub-program isn't threaded ⇒ a loud missing-input crash,
-    # not silent-wrong; the dedicated test_neval_lam pins op too)
+def _c_neval_lam():  # NEval of λx. f·x applied to op — both the free var f and the arg op are pinnable
+    # (the sub-program declares its inputs frame-var-free, so pinning f no longer leaks frame vars)
     f, x, op = C.var("f", MS), C.var("x", V), C.var("op", V)
     lam = C.lam(((x.name, SpaceSort(V)),), C.eval_(f, (0,), x), (x,))
-    return C.neval(lam, (0,), op), {f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]]), False),
+    return C.neval(lam, (0,), op), {f: (MS, np.array([[2.0, 0, 1], [1, 3, 0], [0, 1, 2.0]])),
                                     op: (V, np.array([2.0, 3, 5]))}
 
 
