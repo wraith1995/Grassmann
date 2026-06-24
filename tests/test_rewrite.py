@@ -566,6 +566,63 @@ def test_default_preset_leaves_otimes_order() -> None:
     assert sum_of_products(term) == term
 
 
+# ===========================================================================
+# Deferred-tail task #1 — Dagger pushed to leaves.
+# ===========================================================================
+
+
+def test_dagger_push_to_leaves() -> None:
+    U, V, W = S.base("U", 2), S.base("V", 2), S.base("W", 2)
+    f = T.var("f", S.linear_map_space(V, W))
+    g = T.var("g", S.linear_map_space(U, V))
+    # (f∘g)† → g†∘f†
+    assert simplify(T.Dagger(T.Compose(f, (0,), (g,)))) == T.Compose(
+        T.Dagger(g), (0,), (T.Dagger(f),)
+    )
+    # (f⊗g)† → f†⊗g†
+    assert simplify(T.Dagger(T.Kron(f, g))) == T.Kron(T.Dagger(f), T.Dagger(g))
+    # Id† → Id
+    assert simplify(T.Dagger(T.Identity(V))) == T.Identity(V)
+
+
+def test_dagger_push_value_preserved() -> None:
+    U, V, W = S.base("U", 2), S.base("V", 2), S.base("W", 2)
+    f = T.var("f", S.linear_map_space(V, W))
+    g = T.var("g", S.linear_map_space(U, V))
+    term = T.Dagger(T.Compose(f, (0,), (g,)))
+    out = simplify(term)
+    feed = {_key(f): np.array([[1.0, 2.0], [3.0, 4.0]]), _key(g): np.array([[2.0, 0.0], [1.0, 1.0]])}
+    _same(term, out, feed)
+
+
+# ===========================================================================
+# Deferred-tail task #2 — cross-factor Trace → Eval.
+# ===========================================================================
+
+
+def test_trace_cross_factor_becomes_eval() -> None:
+    V, W = S.base("V", 2), S.base("W", 3)
+    x, c, z = T.var("x", V), T.var("c", S.dual(V)), T.var("z", W)
+    # Trace(x⊗c⊗z, 0, 1) → ⟨c,x⟩·z : contraction between two atoms becomes an Eval coeff.
+    term = T.Trace(T.OProdV((x, c, z)), 0, 1)
+    out = sum_of_products(term)
+    assert out == T.Scale(T.Eval(c, (0,), (x,)), z)
+    assert is_normalized_sop(out)
+    feed = {_key(x): np.array([1.0, 2.0]), _key(c): np.array([3.0, 4.0]), _key(z): np.array([1.0, 0.0, -1.0])}
+    _same(term, out, feed)
+
+
+def test_trace_full_contraction_to_scalar() -> None:
+    V = S.base("V", 2)
+    x, c = T.var("x", V), T.var("c", S.dual(V))
+    # Trace(x⊗c, 0, 1) → ⟨c,x⟩ : nothing remains, a bare scalar.
+    term = T.Trace(T.OProdV((x, c)), 0, 1)
+    out = sum_of_products(term)
+    assert _count(out, T.OProdV) == 0
+    feed = {_key(x): np.array([1.0, 2.0]), _key(c): np.array([3.0, 4.0])}
+    _same(term, out, feed)
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))

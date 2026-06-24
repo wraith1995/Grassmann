@@ -500,6 +500,27 @@ def rule_involution(node: Term) -> Term | None:
     return None
 
 
+def rule_dagger_push(node: Term) -> Term | None:
+    """Push the metric-transpose adjoint ``Dagger`` toward the leaves so it only ever wraps a
+    primitive map (the grammar's ``atom``): ``Id† → Id``, ``(f⊗g)† → f†⊗g†`` (``Kron``),
+    ``(f∘g)† → g†∘f†`` (``Compose``, single slot). Value-exact (verified). ``(f†)† → f`` is
+    handled by :func:`rule_involution`; ``Dagger`` over ``+``/``Scale`` by :func:`dist_unary`.
+
+    Not done for ``Solve``/``Pinv``: ``Solve``'s argument must be a ``bij``-asserted *var* (it
+    can never be a ``Compose``/``Kron``), and ``Pinv`` does **not** distribute over composition
+    (the pseudo-inverse of a product is not the product of pseudo-inverses)."""
+    if not isinstance(node, Dagger):
+        return None
+    f = node.f
+    if isinstance(f, Identity):
+        return f
+    if isinstance(f, Kron):
+        return Kron(Dagger(f.f), Dagger(f.g))
+    if isinstance(f, Compose) and f.positions == (0,) and len(f.gs) == 1:
+        return Compose(Dagger(f.gs[0]), (0,), (Dagger(f.f),))
+    return None
+
+
 def rule_permute(node: Term) -> Term | None:
     """Collapse reshape ``Permute`` corrections: an identity permutation vanishes, and two
     nested permutations compose. Value-exact (a permutation of tensor axes). Keeps the
@@ -679,6 +700,29 @@ def dist_eval_oprod(node: Term) -> Term | None:
     return body
 
 
+def dist_trace_oprod(node: Term) -> Term | None:
+    """Push a ``Trace`` into a tensor product. In ``⊗(g₀,…,gₘ)`` each ``Trace`` index is a
+    whole factor, so contracting primal slot ``i`` with dual slot ``j`` is a contraction
+    *between* two atoms — represented as ``Eval(gⱼ, gᵢ)`` (the user's choice) — yielding a
+    scalar coefficient times the remaining product: ``Trace(x⊗c⊗z, 0, 1) → ⟨c,x⟩·z``."""
+    if not isinstance(node, Trace) or not isinstance(node.f, OProdV):
+        return None
+    gs = node.f.vectors
+    i, j = node.i, node.j
+    if i >= len(gs) or j >= len(gs) or i == j:
+        return None
+    coeff = Eval(gs[j], (0,), (gs[i],))  # j is the dual slot, i the primal (Trace convention)
+    if not isinstance(_space(coeff), Scalar):
+        coeff = Eval(gs[i], (0,), (gs[j],))  # tolerate swapped primal/dual roles
+        if not isinstance(_space(coeff), Scalar):
+            return None
+    rest = [g for k, g in enumerate(gs) if k not in (i, j)]
+    if not rest:
+        return coeff
+    body = OProdV(tuple(rest)) if len(rest) > 1 else rest[0]
+    return Scale(coeff, body)
+
+
 def dist_compose_oprod(node: Term) -> Term | None:
     """Push a composition into a tensor product: ``Compose(⊗(g₀,…,gₘ), pos, hs)`` precomposes
     each selected factor (a single dual input slot) with its map ``hₖ``, leaving the other
@@ -744,6 +788,7 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_eval_zero,
     rule_compose,
     rule_involution,
+    rule_dagger_push,
     rule_permute,
     rule_scale,
     rule_sum,
@@ -761,8 +806,8 @@ _DISTRIBUTE_RULES: tuple[Rule, ...] = (
     dist_unary,
 )
 
-# Contraction-push: localize Eval/Compose into the ⊗ factor that owns each slot.
-_CONTRACTION_RULES: tuple[Rule, ...] = (dist_eval_oprod, dist_compose_oprod)
+# Contraction-push: localize Eval/Compose/Trace into the ⊗ factor that owns each slot.
+_CONTRACTION_RULES: tuple[Rule, ...] = (dist_eval_oprod, dist_compose_oprod, dist_trace_oprod)
 
 
 # ===========================================================================
