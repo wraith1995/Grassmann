@@ -19,7 +19,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 
 ## What's done (this session)
 
-**Ten silent-wrong bugs fixed**, all of the class above:
+**Eleven silent-wrong bugs fixed**, all of the class above:
 
 | arm | the lie | fix | commit |
 |---|---|---|---|
@@ -33,6 +33,7 @@ symbolic until `run()`), so the enforcement is the **two-route sweep** below.
 | `sharp` metric Eval (covector operand) | `_peel_one_dual` gives the wrong primal for a literal covector basis | `_covector_primal` (DualBasis peels; literal covector → `dual_basis`) | `daa4434` |
 | `pinv_apply` unsteered | `v` left unreconciled vs f's cod-slot when not steered (`⟨w,f⁺v⟩`) | cob `v` to f's cod-slot before the matvec (no-op when steered) | `2a0cb5d` |
 | `trace` unsteered | traced slots summed basis-blind when a contracted slot is pinned + f unsteered | cob axis `j` to `dual(slot i)` before the diagonal (no-op when steered) | `f56ba9d` |
+| `eval` multi-axis fused slot | a single fused operand (`x⊗y`) vs a fused `dual(V⊗V)` slot left unreconciled (rank-1 gate) | per-axis reconcile via `_coerce_rep_to_target` (retires the rank-1 gate; subsumes the pullback) | `26c75a9` |
 
 The `vmap` LLam lowering is the **default** (`GRASSMANN_LLAM_INDEX=eye` = the old fast path, which
 raises on a cod-non-default body).
@@ -59,7 +60,7 @@ contraction/reconcile path and *masks* a reconcile bug. To exercise the unsteere
 a **scalar** contraction `⟨w, …⟩` (a scalar result can't be steered) — that's how `pinv_apply`'s
 v-reconcile bug surfaced (`_c_eval_map_scalar`/`_c_compose_scalar`/`_c_pinv_apply_scalar`).
 
-The sweep currently has **36 cases, 1 strict-xfail** (`lift_scalar`, see remaining work). Unsteered
+The sweep currently has **36 cases, 0 xfail**. Unsteered
 `⟨…⟩` wrappers cover eval-map/compose/pinv_apply/solve/trace/dagger/kron/permute/oprod/lift. Run:
 `pytest tests/test_basis_honesty_sweep.py` (and once with `GRASSMANN_LLAM_INDEX=eye`).
 
@@ -69,27 +70,18 @@ The sweep currently has **36 cases, 1 strict-xfail** (`lift_scalar`, see remaini
 external/solve_apply/assert added; **#3 unsteered variants** — added, found + fixed the `pinv_apply`
 v-reconcile bug `2a0cb5d`. What remains:)*
 
-1. **The multi-axis / fused-slot reconcile gap** *(the live `lift_scalar` strict-xfail).* An `Eval`
-   contracting a SINGLE multi-axis (fused) operand against a fused slot in a non-default basis is not
-   reconciled: `_reconcile_pairing` is **rank-1-gated** (the gate added in `5f8410c` to avoid the
-   pullback multi-axis crash), and a fused `dual(V⊗V)` slot vs a 2-axis `x⊗y` operand also has an
-   axis-count mismatch for the axis-0 cob. So `⟨lift(m), x⊗y⟩` contracts basis-blind when `x`/`y` are
-   pinned (`25.5` vs `102`). Fix = **per-axis reconcile against a fused slot** (this also subsumes the
-   pullback case the rank-1 gate sidestepped). This is the deepest remaining item and the highest-value:
-   it's a *general* eval gap, not lift-specific.
-
-2. **Finish sweep coverage.** Still not in `CASES`: `neval_lam` (needs the `lam(binders, body,
+1. **Finish sweep coverage.** Still not in `CASES`: `neval_lam` (needs the `lam(binders, body,
    term_vars)` form — fiddly; has a dedicated test), `remetric` (the metric is a rank-2 var the auto-
    flavor mis-wraps), and a **multi-var `llam`**. `const`/`zeros`/`identity`/`tuple_embed`/`tuple_project`
    have no pinnable operand (not sweep-able; covered by structural tests). All steering arms now have an
    unsteered `⟨…⟩` wrapper.
 
-3. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
+2. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
    debug mode where `_rep`, per arm, two-route-checks the realized-basis claim on the actual feeds and
    asserts. Heavy (doubles work), but it catches a dishonest tag in *any* program a user runs, not just
    tests. Optional.
 
-4. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
+3. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
    lowering is correct but slower (a runtime vmap loop; suite ~20s vs ~6s for `eye`). Path A would make
    the index a typed axis whose basis flows through `eval`'s reconciliation, so the single-einsum `eye`
    path stays correct — fast *and* correct, letting both modes collapse and the env var retire. The
@@ -100,7 +92,8 @@ v-reconcile bug `2a0cb5d`. What remains:)*
 
 - **`src/grassmann/lower/represent.py`** — all `_rep_X` arms + the seam helpers:
   - `_reconcile_pairing` / `_reconcile_compose_g` — natural-pairing reconcile (fire on not
-    pairing-consistent; rank-1 gated for `_reconcile_pairing`). `_basis_pairing_consistent`,
+    pairing-consistent; multi-axis operands reconcile per-axis via `_coerce_rep_to_target`).
+    `_basis_pairing_consistent`,
     `_pairing_partner`, `_slot_basis_at` (rank-1 = its own slot 0).
   - `_rep_eval_operands` / `_operand_metric_basis` — the metric-Eval seam (build the Gram in any
     non-default operand basis). `_rep_metric`, `_inner_map_basis`, `_sharp_map_basis`, `_covector_primal`
@@ -127,4 +120,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1231 passed, 1 xfailed** (the documented `lift_scalar` multi-axis gap) in both modes; ruff clean (sweep: 35 pass + 1 xfail).
+Current: **1232 passed, 0 xfailed** in both modes; ruff clean (sweep: 36/36).
