@@ -32,9 +32,13 @@ primitives: `subst` (capture-avoiding value-var substitution), `_subst_space_in_
 | `collect` | collect like monomials (`v+v→2v`, cancellation) |
 | `order_sum` | sort `+` summands by `term_key` — value-safe (commutative, same space) |
 | `order_otimes` | canonical `⊗` factor order **up-to-iso** — emits a `Permute` correction `𝒞` |
+| `order_oplus` | canonical `⊕` component order — synthesized `TupleEmbed`/`TupleProject` `𝒞` (heavy) |
+| `dissolve_oplus` | dissolve `⊕` into a sum of injections (`⊕` disappears; `+` strictly outermost) |
+| `canon_scalars` | canonicalize scalar **products** (commutative `·`); partial rational NF |
+| `canon_binders` | α-canonicalize bound variables (α-variant terms → identical NF) — default on |
 
-Presets: `DEFAULT_SOP` (value-exact, `order_otimes=False`) and `AGGRESSIVE_SOP`
-(`order_otimes=True`). Planned: `order_oplus` (needs a `⊕`-block-permute correction).
+Presets: `DEFAULT_SOP` (value-exact: only `+`/binders canonical) and `AGGRESSIVE_SOP`
+(`order_otimes=True`). The `order_oplus`/`dissolve_oplus`/`canon_scalars` switches are opt-in.
 
 ## §3 Target grammar (`+` > `⊕` > `⊗`, total over the language)
 
@@ -60,10 +64,16 @@ config-aware `sum_of_products`/`is_normalized_sop`), Step B (contraction-push
 spellings of one value reach an identical NF), Step E (embed builders), Step F (nat-binder β).
 41 tests; full suite green; ruff clean. Finished the originally-scoped 1+2+4 plus B and C.
 
-**Deferred** (the "most aggressive" tail): `order_oplus` (⊕ component ordering — needs a
-⊕-block-permute correction built from `TupleEmbed`/`TupleProject`); hoisting `𝒞` to a single
-top wrapper; cross-factor `Trace→Eval`; `Dagger`/`Solve`/`Pinv` pushed to leaves; rational
-scalar normal form (`P/Q`); α/De-Bruijn binder canonicalization; `⊕`-dissolve-to-injections.
+**Aggressive tail (done)** — `rule_dagger_push` (`Dagger` to leaves; `Solve`/`Pinv` N/A);
+`dist_trace_oprod` (cross-factor `Trace→Eval`); `alpha_canon` + α-invariant `term_key`
+(`canon_binders`); `order_oplus` (⊕ order via a synthesized `TupleEmbed`/`TupleProject`
+correction, opt-in); `dissolve_oplus` (⊕ → sum of injections, opt-in); `rule_scalar_product`
+(commutative scalar-product canonicalization, opt-in `canon_scalars`).
+
+**Findings / still deferred** — A single global `𝒞` is *not* well-defined: in a valid `Sum`
+the monomials share the output space but canonicalize different interiors, so corrections are
+intrinsically per-monomial (already at each monomial's product-top). Full **rational scalar
+NF** (`P/Q` with `div`/`reciprocal` + gcd cancellation — a mini-CAS) is the one large remainder.
 
 ## §5 Public API
 

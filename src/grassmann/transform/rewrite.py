@@ -43,6 +43,7 @@ from grassmann.core.term import (
     Kron,
     Lam,
     Lift,
+    Lit,
     LLam,
     NEval,
     OPlusV,
@@ -90,6 +91,7 @@ class SoPConfig:
     order_otimes: bool = False   # canonical ⊗ factor order — UP-TO-ISO (emits a Permute 𝒞)
     order_oplus: bool = False    # canonical ⊕ component order — UP-TO-ISO (synthesized 𝒞; heavy)
     dissolve_oplus: bool = False  # dissolve ⊕ into a sum of injections (⊕ disappears; + outermost)
+    canon_scalars: bool = False  # canonicalize scalar PRODUCTS (commutative ·); partial rational NF
     canon_binders: bool = True   # α-canonicalize bound vars (α-variant terms → identical NF)
 
 
@@ -311,12 +313,14 @@ def _mul_scalar(a: float | Term, b: float | Term) -> float | Term:
             return b
         if a == 0:
             return 0.0
+        return Scale(a, b)  # type: ignore[arg-type]  num · term
     if _is_num(b):
         if b == 1:
             return a
         if b == 0:
             return 0.0
-    return Scale(a, b)  # type: ignore[arg-type]
+        return Scale(b, a)  # type: ignore[arg-type]  term · num → put the number in the scalar slot
+    return Scale(a, b)  # type: ignore[arg-type]  term · term (scalar product)
 
 
 def _split_num_scale(v: Term) -> tuple[float, Term]:
@@ -441,7 +445,12 @@ def rule_scale(node: Term) -> Term | None:
     if isinstance(v, Zero):
         return v
     if isinstance(v, Scale):
-        return Scale(_mul_scalar(r, v.scalar), v.vector)
+        # Collapse a nested scale into one coefficient — but a *symbolic scalar product*
+        # (inner vector also Scalar-valued) is owned by rule_scalar_product, so defer it to
+        # avoid the two rules fighting over where the numeric coefficient nests.
+        if (_is_num(r) and _is_num(v.scalar)) or not isinstance(_space(v.vector), Scalar):
+            return Scale(_mul_scalar(r, v.scalar), v.vector)
+        return None
     return None
 
 
@@ -465,6 +474,46 @@ def rule_sum(node: Term) -> Term | None:
     if len(flat) == 1:
         return flat[0]
     return Sum(tuple(flat)) if changed else None
+
+
+def _gather_scalar_product(t: Term, num: float, syms: list[Term]) -> float:
+    """Flatten a product of scalars (nested ``Scale`` whose operands are all ``Scalar``-valued)
+    into a numeric coefficient ``num`` and a list of symbolic scalar-atom factors ``syms``."""
+    if isinstance(t, Lit):
+        return num * t.value
+    if isinstance(t, Scale) and isinstance(_space(t.vector), Scalar):
+        if _is_num(t.scalar):
+            num *= t.scalar
+        else:
+            num = _gather_scalar_product(t.scalar, num, syms)  # type: ignore[arg-type]
+        return _gather_scalar_product(t.vector, num, syms)
+    syms.append(t)  # an atomic scalar factor (a dot-product Eval, External scalar, scalar Var…)
+    return num
+
+
+def rule_scalar_product(node: Term) -> Term | None:
+    """Canonicalize a **product of scalars** (the commutative multiplicative monoid): flatten
+    nested ``Scale``s whose operands are all ``Scalar``-valued, fold the numeric factor, and
+    sort the symbolic factors by ``term_key``. So ``⟨c,x⟩·⟨d,y⟩`` and ``⟨d,y⟩·⟨c,x⟩`` reach the
+    same form. Opt-in via ``canon_scalars``.
+
+    This is the *multiplicative* half of a scalar normal form; the full rational ``P/Q`` (sums
+    of scalar products + ``div``/``reciprocal`` with cancellation) is left as future work."""
+    if not isinstance(node, Scale) or not isinstance(_space(node.vector), Scalar):
+        return None  # not a scalar product (a genuine vector scaling, or untypable)
+    syms: list[Term] = []
+    num = _gather_scalar_product(node, 1.0, syms)
+    syms.sort(key=term_key)
+    if num == 0:
+        return Lit(0.0)
+    # Rebuild right-nested with the numeric coefficient (if ≠ 1) at the front.
+    if not syms:
+        return Lit(num)
+    body: Term = syms[-1]
+    for s in reversed(syms[:-1]):
+        body = Scale(s, body)
+    canon = body if num == 1 else Scale(num, body)
+    return canon if canon != node else None
 
 
 def rule_collect(node: Term) -> Term | None:
@@ -1016,6 +1065,8 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
         rules += _DISTRIBUTE_RULES
     if cfg.push_contractions:
         rules += _CONTRACTION_RULES
+    if cfg.canon_scalars:
+        rules.append(rule_scalar_product)
     if cfg.collect:
         rules.append(rule_collect)
     if cfg.order_otimes:
