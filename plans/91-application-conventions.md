@@ -79,16 +79,25 @@ that "applies a map" must satisfy the single invariant:
 
 ### Phase 2 (deeper) — `LLam` storage orientation — ASSESSED, DEFERRED
 Two options:
-**Assessment — NOT changed here (deliberately).** The `(cod,dom)` LLam storage is **load-bearing**
-for the §7 pullback einsum (`plans/41 §0/§7`), and the `Rep` tag/array mismatch only bites a
-**non-default-body / concrete-MATCH path that "is not exercised by callers"** (`represent.py:3656`).
-Re-tagging or re-orienting risks the working pullback seam for a path nothing currently hits, so
-touching it unprompted is the wrong trade. Options when someone has bandwidth to test the seam:
-- **(2a, light, recommended)** keep `(cod,dom)`; fix the `Rep` tag to match the array and add a
-  loud guard on the non-exercised path (so it fails fast instead of silently mis-pairing).
-- **(2b, full)** make `_rep_llam` emit `(dom,cod)` and transpose at the seam — higher risk.
-This is a **separate concern** from the apply-orientation fix (it's basis-tagging honesty, not the
-apply convention), so it does not block Phases 0/1/3.
+**Investigated; full re-orientation (2b) DECLINED, safe guard added.** `(cod,dom)` is **not** a
+localized LLam quirk — it is the **pervasive internal math-orientation of the whole FFS/pullback/
+pinv substrate** (`represent.py` 289, 2681–2696, 3971, 4626, 4634, 4997, 5128, 5174). The system is
+genuinely **two-layered**: *boundary* storage keeps maps `(dom,cod)` (`~A⊗B`); the *internal* FFS
+math runs `(cod,dom)`. An `LLam`, a producer at the FFS seam, emits in the internal `(cod,dom)`
+convention; a stored map-var is boundary `(dom,cod)`. η just crosses those two layers.
+
+- **2b (make `_rep_llam` emit `(dom,cod)`)** would not be a localized change — it requires
+  re-orienting the entire FFS seam (pinv, ffs-basis conversions, pullback), a major refactor whose
+  numerics the suite may not fully protect. **Declined**: the payoff (sound η, a minor rewrite) does
+  not justify the risk to a load-bearing substrate.
+- **Done (the safe part of 2a):** added a **loud guard** at the vmap concrete-MATCH / non-default-
+  body path (`represent.py` ~3638) — it now raises instead of silently mis-pairing the transposed
+  `(cod,dom)` axes. The exercised default-body path is unchanged (full suite 1434 green). The `Rep`
+  *tag* is intentionally left (it flows correctly through the seam for the default case; "fixing" it
+  would disturb the working AUTO/STD path).
+
+**Consequence for η:** η-reduction stays out of the rewriter — making it sound needs 2b's full FFS
+re-orientation, which is out of scope.
 
 ### Phase 3 — Rewriter dividend (closes #11's remainder) ✅ DONE — see above.
 

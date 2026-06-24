@@ -3633,9 +3633,23 @@ def _rep_llam_vmap(
         return rep
     # STD (the supported targeted case): build the PHYSICAL-order standard basis (cod axes first,
     # then one ``dual`` domain axis per var) so the per-axis cob lines up with the transposed array.
-    # A concrete MATCH target on a transposed map tensor is rare; fall back to the standard epilogue
-    # (it may then mis-pair axes for a non-default body — but that path is not exercised by callers).
+    # A concrete MATCH target on a transposed map tensor is rare.  It is safe for a DEFAULT body
+    # (its tag matches the (cod,dom) array), but for a NON-DEFAULT body the standard per-axis
+    # epilogue would mis-pair the transposed (cod,dom) axes against (dom,cod) factors and silently
+    # miscompute.  Guard that hazardous case LOUDLY (the path the audit flagged as unexercised —
+    # plans/91 / `41 §7`); the default-body fallback is unchanged.
     if target is not B.TargetBasis.STD:
+        try:
+            _body_nondefault = not _basis_eq(body_rep.basis, default_basis(body_rep.space))
+        except S.SpaceError:
+            _body_nondefault = False
+        if _body_nondefault:
+            raise RepresentError(
+                "represent: a concrete-basis MATCH target on an LLam with a non-default body "
+                "basis (vmap mode) would mis-pair the transposed (cod,dom) axes; realize the body "
+                "in its default basis or use an AUTO/STD target (LLam free-axis basis tracking is "
+                "future work — `41 §7`)."
+            )
         return _match_result(ctx, rep, target)
     cod_factors = _basis_factors(default_basis(body_rep.space), n_cod) if n_cod_axes else []
     dom_factors = [B.dual_basis(default_basis(_synth(v))) for v in vars_]
