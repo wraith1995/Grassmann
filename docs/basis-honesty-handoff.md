@@ -71,27 +71,25 @@ an immersed-metric basis). A literal `ImageBasis` (lives in its own `Img(J)` spa
 `V`-var to it) and `WithInner` (changes the metric ⇒ different value) don't fit this two-route-on-`V`
 sweep; they're covered by `test_pinv_gsvd` / `test_embed_subspace` / `test_algorithm_corpus`.
 
-The sweep currently has **43 cases, 0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
+The sweep currently has **46 cases, 0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
 with `GRASSMANN_LLAM_INDEX=eye`).
 
 ## Remaining work (prioritized — resume here)
 
-*(Done since first draft: **#1 sharp** covector variance — fixed `daa4434`; **#2 coverage** — var/
-external/solve_apply/assert added; **#3 unsteered variants** — added, found + fixed the `pinv_apply`
-v-reconcile bug `2a0cb5d`. What remains:)*
+Coverage is **complete**: every arm with a pinnable operand is in `CASES` (incl. `neval_lam`,
+`multi_llam` = the pullback form, `remetric`), plus subset pinning, unsteered `⟨…⟩` wrappers, varied
+consumers, and rectangular maps. `const`/`zeros`/`identity`/`tuple_embed`/`tuple_project` have no
+pinnable operand (covered by structural tests). One *known loud* edge (NOT silent-wrong): pinning a
+`Lam`'s **free var** when its basis is realized by frame vars isn't threaded into the `NEval`
+sub-program → a missing-input crash; `neval_lam` marks `f` **feed-only** (`(space, value, False)`) and
+pins only the arg. What's left is optional/perf:
 
-1. **Finish sweep coverage.** Still not in `CASES`: `neval_lam` (needs the `lam(binders, body,
-   term_vars)` form — fiddly; has a dedicated test), `remetric` (the metric is a rank-2 var the auto-
-   flavor mis-wraps), and a **multi-var `llam`**. `const`/`zeros`/`identity`/`tuple_embed`/`tuple_project`
-   have no pinnable operand (not sweep-able; covered by structural tests). All steering arms now have an
-   unsteered `⟨…⟩` wrapper.
-
-2. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
+1. **Runtime self-check (the literal form of "consumer always checks").** A `GRASSMANN_CHECK_BASIS=1`
    debug mode where `_rep`, per arm, two-route-checks the realized-basis claim on the actual feeds and
    asserts. Heavy (doubles work), but it catches a dishonest tag in *any* program a user runs, not just
    tests. Optional.
 
-3. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
+2. **Path A — typed one-pass LLam index** *(performance, NOT correctness).* The default `vmap` LLam
    lowering is correct but slower (a runtime vmap loop; suite ~20s vs ~6s for `eye`). Path A would make
    the index a typed axis whose basis flows through `eval`'s reconciliation, so the single-einsum `eye`
    path stays correct — fast *and* correct, letting both modes collapse and the env var retire. The
@@ -130,4 +128,4 @@ GRASSMANN_LLAM_INDEX=eye pytest -q          # full suite (eye mode)
 pytest tests/test_basis_honesty_sweep.py -q # the guard alone
 ruff check src/grassmann tests
 ```
-Current: **1239 passed, 0 xfailed** in both modes; ruff clean (sweep: 43/43).
+Current: **1242 passed, 0 xfailed** in both modes; ruff clean (sweep: 46/46).
