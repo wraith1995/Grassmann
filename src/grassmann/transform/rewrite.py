@@ -37,6 +37,7 @@ from grassmann.core.term import (
     Dagger,
     Embed,
     Eval,
+    Frame,
     Identity,
     InvLift,
     Kron,
@@ -85,6 +86,7 @@ class SoPConfig:
     collect: bool = True         # collect like monomials (v + v → 2·v, cancellation)
     order_sum: bool = True       # sort + summands by term_key — value-safe (commutative)
     order_otimes: bool = False   # canonical ⊗ factor order — UP-TO-ISO (emits a Permute 𝒞)
+    canon_binders: bool = True   # α-canonicalize bound vars (α-variant terms → identical NF)
 
 
 # The default preset: the conservative, value-EXACT end of the ladder — only the commutative
@@ -225,6 +227,52 @@ def _subst_nat_in_term(term: Term, name: str, repl: object) -> Term:
         return replace(node, **new_fields) if changed else node
 
     return go(term)  # type: ignore[return-value]
+
+
+def alpha_canon(term: Term) -> Term:
+    """α-canonicalize **value-binder** bound variables (``LLam.vars`` / ``Lam.term_vars``):
+    rename each to ``%k`` with a canonical *negative* ``uid`` assigned in deterministic
+    traversal order. Free variables (non-negative ``uid``s) are untouched and never collide.
+
+    Two α-equivalent terms map to the **identical** term, so it is the basis of an
+    α-invariant :func:`term_key` and of `is_normalized_sop`'s binder check. Idempotent.
+    (Space/nat binder *names* — ``SVar``/``DimVar`` in ``Lam`` annotations — are left for a
+    later refinement; value binders are the common case.)"""
+    counter = [0]
+
+    def fresh(v: Var) -> Var:
+        counter[0] += 1
+        return Var(f"%{counter[0]}", v.space, v.props, uid=-counter[0])
+
+    def go(node: Term, env: dict[int, Var]) -> Term:
+        if isinstance(node, Var):
+            return env.get(node.uid, node)
+        if isinstance(node, LLam):
+            env2 = dict(env)
+            nv = []
+            for v in node.vars:
+                cv = fresh(v)
+                env2[v.uid] = cv
+                nv.append(cv)
+            return LLam(tuple(nv), go(node.body, env2))
+        if isinstance(node, Lam):
+            env2 = dict(env)
+            ntv = []
+            for v in node.term_vars:
+                cv = fresh(v)
+                env2[v.uid] = cv
+                ntv.append(cv)
+            body = go(node.body, env2) if is_term(node.body) else node.body
+            return Lam(node.binders, body, tuple(ntv))
+        return _rebuild(node, lambda c: go(c, env))
+
+    return go(term, {})
+
+
+def _has_binder(t: Term) -> bool:
+    if isinstance(t, (LLam, Lam, Frame)):
+        return True
+    return any(_has_binder(c) for c in _child_terms(t))
 
 
 # ===========================================================================
@@ -836,11 +884,11 @@ _CONTRACTION_RULES: tuple[Rule, ...] = (dist_eval_oprod, dist_compose_oprod, dis
 
 
 def term_key(t: Term) -> str:
-    """A total, deterministic ordering key on Terms (used to sort ``Sum`` summands into a
-    canonical order). ``repr`` is injective over these frozen dataclasses, so equal terms
-    map to equal keys and the sort is stable; swap this for a structural key if a
-    smaller/faster key is wanted."""
-    return repr(t)
+    """A total, deterministic, **α-invariant** ordering key on Terms (used to sort ``Sum``
+    summands canonically). ``repr`` is injective over these frozen dataclasses; for terms
+    that contain a binder we key on the α-canonical form so α-equivalent atoms sort
+    identically (the common no-binder case takes the fast path)."""
+    return repr(alpha_canon(t) if _has_binder(t) else t)
 
 
 def _atom_of(mono: Term) -> Term:
@@ -985,6 +1033,8 @@ def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
             return False
     elif not _is_monomial(t):
         return False
+    if config.canon_binders and _has_binder(t) and alpha_canon(t) != t:
+        return False  # bound variables are not in α-canonical form
     return _fully_reduced(t, _sop_rules(config))
 
 
@@ -1040,7 +1090,10 @@ def sum_of_products(term: Term, config: SoPConfig = DEFAULT_SOP) -> Term:
     zero-padded ``⊕`` split), pull scalars to the front, collect like terms, and sort the
     summands canonically. The result is a ``Zero``, a single monomial, or a flat, canonically
     ordered ``Sum`` of monomials ``c · atom`` with no distributable ``+`` left inside."""
-    return rewrite(term, _sop_rules(config))
+    out = rewrite(term, _sop_rules(config))
+    if config.canon_binders and _has_binder(out):
+        out = alpha_canon(out)
+    return out
 
 
 # A readable alias.
@@ -1061,4 +1114,5 @@ __all__ = [
     "normal_form",
     "term_key",
     "is_normalized_sop",
+    "alpha_canon",
 ]

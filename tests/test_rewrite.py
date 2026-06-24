@@ -623,6 +623,35 @@ def test_trace_full_contraction_to_scalar() -> None:
     _same(term, out, feed)
 
 
+# ===========================================================================
+# Deferred-tail task #3 — α / binder canonicalization.
+# ===========================================================================
+
+
+def test_alpha_variant_maps_normalize_identically() -> None:
+    from grassmann.transform.rewrite import alpha_canon
+
+    V, W = S.base("V", 2), S.base("W", 3)
+    f = T.var("f", S.linear_map_space(V, W))
+    a1, a2 = T.var("a", V), T.var("zzz", V)  # different bound-var identities
+    m1 = T.LLam((a1,), T.Eval(f, (0,), (a1,)))
+    m2 = T.LLam((a2,), T.Eval(f, (0,), (a2,)))
+    assert m1 != m2  # raw terms differ (uid + name)
+    assert alpha_canon(m1) == alpha_canon(m2)  # α-equivalent → identical
+    assert sum_of_products(m1) == sum_of_products(m2)
+    assert is_normalized_sop(sum_of_products(m1))
+
+
+def test_alpha_invariance_inside_sum() -> None:
+    V, W = S.base("V", 2), S.base("W", 3)
+    f, x = T.var("f", S.linear_map_space(V, W)), T.var("x", V)  # shared free vars
+    a1, a2 = T.var("a", V), T.var("zzz", V)
+    s1 = T.Sum((T.LLam((a1,), T.Eval(f, (0,), (a1,))), T.Eval(f, (0,), (x,))))
+    s2 = T.Sum((T.LLam((a2,), T.Eval(f, (0,), (a2,))), T.Eval(f, (0,), (x,))))
+    # term_key is α-invariant, so the summands order the same way and the NFs coincide.
+    assert sum_of_products(s1) == sum_of_products(s2)
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
