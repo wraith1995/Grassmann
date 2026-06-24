@@ -106,7 +106,7 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
         raise DiffError(f"diff: expected a Term, got {e!r}")
     if not isinstance(x, Var):
         raise DiffError(f"diff: the differentiation variable must be a Var, got {x!r}")
-    _guard_closed_and_first_order(e, x)
+    _guard_closed_and_first_order(e, x, deps or {})
 
     from grassmann.infer.synth import synth_space
 
@@ -733,10 +733,17 @@ def _mul(a: Term, b: Term) -> Scale:
 # --- well-formedness guard --------------------------------------------------
 
 
-def _guard_closed_and_first_order(e: Term, x: Var) -> None:
-    """Reject an open term (free space variable / unresolved metavar) and any occurrence of
-    ``x`` in a *space* position (a dependence position) — differentiating through a space
-    function is unsupported."""
+def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None]) -> None:
+    """Reject an open term (free space variable / unresolved metavar) and any **x-dependent term**
+    in a *space* position — differentiating through a term-dependent space is unsupported.
+
+    A space built from an x-dependent term (``x`` itself or a marked dep) — e.g. ``Img(J(x))`` — has
+    an x-dependent *realization* (the immersion/projector), so an op that materializes it
+    (``Embed``/``Project``/``Assert``/musical maps) genuinely depends on x THROUGH the space.  The
+    value-level rules differentiate only the value and miss the ``∂(space)`` contribution, so the
+    derivative would be **silent-wrong**.  Bail loudly.  (A *constant* defining term ⇒ a constant
+    space ⇒ the value-level rule is correct, so it does not fire — the common FEM case of a section
+    in ``Img(J)`` with a per-cell-constant ``J`` still differentiates.)"""
     from grassmann.core.space import is_space
     from grassmann.infer.synth import InferError, synth_space
 
@@ -747,17 +754,20 @@ def _guard_closed_and_first_order(e: Term, x: Var) -> None:
     if _mentions_space_meta(s):
         raise DiffError("diff: term has an unresolved space; it must be closed")
 
-    # x must not flow into a *space* position — a Frame/SpaceFunction, or x buried in a dependent
-    # space such as ``Img(x)`` (the projected/embedded coords then depend on x through the space,
-    # which the value-level rules don't see ⇒ silent-wrong).  Differentiating through a space
-    # function is genuinely higher-order; bail loudly.
+    def is_xdep(v: Var) -> bool:
+        return v.uid == x.uid or v.uid in deps
+
     def walk(node: object, in_space: bool) -> None:
         if isinstance(node, Frame):
             raise DiffError("diff: cannot differentiate through a Frame (basis binder)")
-        if in_space and isinstance(node, Var) and node.uid == x.uid:
+        if in_space and isinstance(node, Var) and is_xdep(node):
             raise DiffError(
-                "diff: the differentiation variable flows into a space position (e.g. Img(x) / a "
-                "dependent space); differentiating through a space function is unsupported"
+                "diff: an x-dependent term flows into a space position (e.g. Img(J) with J "
+                "x-dependent / Img(x)); the space's realization then varies with x and the "
+                "value-level rules would miss the ∂(space) contribution (silent-wrong). "
+                "Differentiating through a term-dependent space is unsupported — keep the "
+                "space-defining term (the chart/immersion) constant w.r.t. x, or use the "
+                "frame/chart connection for the tangent case."
             )
         for child in _children(node):
             walk(child, in_space or is_space(child))

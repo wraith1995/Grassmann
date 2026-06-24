@@ -489,6 +489,50 @@ def test_diff_into_space_position_raises() -> None:
         diff(T.Project(z, S.img(f)), f)
 
 
+def test_section_in_img_space_differentiates_with_constant_chart() -> None:
+    # A section LIVING in a term-dependent space Img(J) (the FEM tangent model): with the chart J
+    # held constant (the common per-cell case) the total derivative is correct — diff supports
+    # values in term-dependent spaces.
+    Rt, Re = S.base("Rt", 2), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    imgJ = S.img(J)
+    x = T.var("x", Rt)
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))  # ⟨w, embed_J(v)⟩
+    Jv = diff(e, x, deps={v.uid: Dv})  # J constant ⇒ embedding constant ⇒ correct
+    seed = Jv.vars[0]
+    rng = np.random.default_rng(5)
+    Jval = np.array([[2.0, 0.3, 1], [0.5, 1.5, 0]])
+    vv, Dvv, wv, hv = (rng.standard_normal(2), rng.standard_normal((2, 2)),
+                       rng.standard_normal(3), rng.standard_normal(2))
+    feed = {f"J_{J.uid}": Jval, f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"w_{w.uid}": wv}
+    jh = _run(Jv.body, {**feed, f"{seed.name}_{seed.uid}": hv})
+    hd = T.var("hd", Rt)
+    duh = _run(T.Eval(Dv, (0,), (hd,)), {**feed, f"hd_{hd.uid}": hv})
+    fdp = _run(e, {**feed, f"v_{v.uid}": vv + 1e-6 * duh})
+    fdm = _run(e, {**feed, f"v_{v.uid}": vv - 1e-6 * duh})
+    np.testing.assert_allclose(np.asarray(jh).ravel(), ((fdp - fdm) / 2e-6).ravel(), atol=1e-4)
+
+
+def test_xdep_chart_in_img_space_raises() -> None:
+    # The curved-element case: the chart J ITSELF is x-dependent (marked), so the term-dependent
+    # space Img(J) — and the embedding it defines — varies with x.  The value-level Embed rule
+    # differentiates only v and misses the ∂J contribution ⇒ was SILENT-WRONG; now a loud bail.
+    Rt, Re = S.base("Rt", 2), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    imgJ = S.img(J)
+    x = T.var("x", Rt)
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+    with pytest.raises(DiffError):
+        diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+
+
 def test_inner_with_xdep_metric_raises_else_zero() -> None:
     # Inner/Flat/Sharp of a WithInner space whose metric depends on x has a NONZERO operator
     # derivative (d⟨a,b⟩_g = aᵀ(∂g)b); the covariant path only intercepts Remetric, so a bare
