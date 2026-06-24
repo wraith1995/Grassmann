@@ -2479,6 +2479,23 @@ def _rep_solve(
             return _match_result(ctx, rep, target)
 
 
+def _pinv_steer_ok(map_space: S.Space, want: B.Basis | None) -> bool:
+    """May a plain ``PinvOp`` be steered into ``want`` (tagged directly, no cob)?  Yes when ``want`` is
+    ORTHONORMAL (pinv is covariant under orthonormal changes), OR when the map is SQUARE — then pinv is
+    the inverse, which is covariant under ANY change.  A RECTANGULAR pinv at a non-orthonormal target is
+    NOT covariant (Moore-Penrose minimises the target-coord L2 norm, not the metric norm) ⇒ don't steer;
+    fall through to the default build + ``_match_result`` cob (correct for any ``want``)."""
+    if want is None:
+        return False
+    if _is_standard_orthonormal(want):
+        return True
+    facs = _factors(map_space)
+    try:
+        return len(facs) == 2 and _static_dim(facs[0]) == _static_dim(facs[1])
+    except Exception:
+        return False
+
+
 def _rep_pinv(
     e: T.Pinv, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
@@ -2507,8 +2524,11 @@ def _rep_pinv(
                 return _match_result(ctx, rep, target)
     # PinvOp branch — arm-C operand steering: realize ``f`` in the slots whose dual-swap ==
     # ``want`` so the numeric pinv lands directly in ``want``.  ``None`` ⇒ existing bail.
+    # Steer only when a plain PinvOp lands honestly in ``want`` (ortho target, or a square map whose
+    # pinv is the covariant inverse); a rectangular pinv at a non-ortho target falls through to the
+    # default build + ``_match_result`` cob (correct for any ``want``) — else silent-wrong.
     want = _resolve_target(ctx, space, target)
-    f_target = _slot_swap_operand_target(want)
+    f_target = _slot_swap_operand_target(want) if _pinv_steer_ok(_synth(f), want) else None
     f_rep = _rep(f, ctx, f_target) if f_target is not None else _rep(f, ctx)
     [out] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
@@ -2604,7 +2624,10 @@ def _rep_pinv_apply(
     # f's domain-slot primal.  Steer f's domain slot to ``DualBasis(want)`` (so primal == want) while
     # keeping its cod slot == v's basis (the einsum "ab,a->b" contracts fp's cod axis against v).
     want = _resolve_target(ctx, space, target)
-    steer = want is not None
+    # Steer only when a plain PinvOp lands honestly in ``want`` (ortho target, or a square map whose
+    # pinv is the covariant inverse); a rectangular pinv at a non-ortho target falls through to the
+    # default build + ``_match_result`` cob (correct for any ``want``) — else silent-wrong.
+    steer = _pinv_steer_ok(_synth(f), want)
     if steer:
         f_rep = _rep(f, ctx, B.basis_prod(B.dual_basis(want), v_rep.basis))
     else:
