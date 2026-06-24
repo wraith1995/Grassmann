@@ -629,6 +629,33 @@ def rule_eval_identity(node: Term) -> Term | None:
     return None
 
 
+def _mentions_vars(node: Term, uids: set[int]) -> bool:
+    if isinstance(node, Var):
+        return node.uid in uids
+    return any(_mentions_vars(c, uids) for c in _child_terms(node))
+
+
+def rule_eta(node: Term) -> Term | None:
+    """η-reduction (the inverse of β): ``λ⊸(x₀,…,xₙ₋₁). f(x₀,…,xₙ₋₁) → f`` when ``f`` does not
+    mention the bound vars and applies them at slots ``0..n-1`` in order. Now **sound** because an
+    ``LLam`` lowers identically to the stored map it expands (the FFS re-orientation, plans/92).
+    Collapses an η-expanded map back to the map itself."""
+    if not isinstance(node, LLam):
+        return None
+    vars_ = node.vars
+    n = len(vars_)
+    body = node.body
+    if not (
+        isinstance(body, Eval)
+        and body.positions == tuple(range(n))
+        and tuple(body.args) == vars_
+    ):
+        return None
+    if _mentions_vars(body.f, {v.uid for v in vars_}):
+        return None  # f must be closed w.r.t. the bound vars
+    return body.f
+
+
 def rule_eval_compose_fold(node: Term) -> Term | None:
     """Fold a nested application into a composition (application associativity, now unambiguous
     under the normalized convention, `plans/91`):
@@ -1072,6 +1099,7 @@ _BETA_RULES: tuple[Rule, ...] = (rule_beta_eval, rule_beta_neval)
 # The always-valid algebraic cleanups (scalar/zero/identity laws, sum flattening,
 # involutions) — strictly reducing, run in every preset.
 _CLEANUP_RULES: tuple[Rule, ...] = (
+    rule_eta,
     rule_eval_identity,
     rule_eval_compose_fold,
     rule_eval_zero,

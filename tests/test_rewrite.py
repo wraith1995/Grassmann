@@ -12,7 +12,6 @@ Two kinds of check:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 import grassmann as G
 from grassmann.core import space as S
@@ -98,12 +97,35 @@ def test_beta_eval_full_application() -> None:
     redex = T.Eval(T.LLam((a,), T.Eval(f, (0,), (a,))), (0,), (x,))
     out = beta(redex)
     assert out == T.Eval(f, (0,), (x,))
-    # The un-reduced redex (an applied LLam) does not even lower; β is what makes it
-    # runnable — and the reduced form computes the coordinate-free matvec fᵀx.
+    # The reduced form computes the coordinate-free matvec fᵀx; with the canonical LLam storage
+    # (plans/92) the un-reduced redex now ALSO lowers, to the same value — β is a simplification,
+    # no longer a prerequisite for running.
     fv, xv = np.arange(6.0).reshape(2, 3), np.array([1.0, 2.0])
     np.testing.assert_allclose(_run(out, {_key(f): fv, _key(x): xv}), fv.T @ xv)
-    with pytest.raises(Exception):
-        _run(redex, {_key(f): fv, _key(x): xv})
+    np.testing.assert_allclose(_run(redex, {_key(f): fv, _key(x): xv}), fv.T @ xv)
+
+
+def test_eta_reduction() -> None:
+    # η (sound now that an LLam lowers like a stored map — plans/92): λ⊸x.f(x) → f.
+    V, W = S.base("V", 2), S.base("W", 3)
+    f, a = T.var("f", S.linear_map_space(V, W)), T.var("a", V)
+    assert simplify(T.LLam((a,), T.Eval(f, (0,), (a,)))) == f
+    # multi-var: λ⊸(a,b).g(a,b) → g
+    g, b = T.var("g", S.oprod(S.dual(V), S.dual(V))), T.var("b", V)
+    assert simplify(T.LLam((a, b), T.Eval(g, (0, 1), (a, b)))) == g
+    # value-preserved
+    feed = {_key(f): np.arange(6.0).reshape(2, 3), _key(a): np.zeros(2)}
+    _same(T.LLam((a,), T.Eval(f, (0,), (a,))), f, feed)
+
+
+def test_eta_not_applied_when_f_uses_var() -> None:
+    # η must NOT fire if the head mentions the bound var (it isn't a pure η-expansion).
+    V = S.base("V", 2)
+    a = T.var("a", V)
+    g = T.var("g", S.oprod(S.dual(V), S.dual(V)))
+    # λ⊸a. g(a, a) — a appears twice; not η-reducible.
+    node = T.LLam((a,), T.Eval(g, (0, 1), (a, a)))
+    assert simplify(node) == node
 
 
 def test_beta_eval_partial_application() -> None:

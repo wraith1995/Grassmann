@@ -77,7 +77,14 @@ that "applies a map" must satisfy the single invariant:
   `Eval(Solve(g), Eval(g, x)) → x`, `Eval(Pinv(fi), Eval(fi, x)) → x` (inj). Tests in
   `tests/test_rewrite.py`.
 
-### Phase 2 (deeper) — `LLam` storage orientation — ASSESSED, DEFERRED
+### Phase 2 (deeper) — `LLam` storage orientation — ✅ DONE (see `plans/92`)
+
+Re-orientation executed on branch `ffs-reorientation`: maps lower in canonical `(dom,cod)`, an
+`LLam` lowers like a stored map-var, **η-reduction is now sound** (`rule_eta` added to the
+rewriter). Turned out far smaller than feared (the FFS realizers transpose boundary→internal
+themselves); full suite green (1438), zero FFS numeric regressions. Details in `plans/92`.
+
+<details><summary>(original deferral assessment — kept for the record)</summary>
 Two options:
 **Investigated; full re-orientation (2b) DECLINED, safe guard added.** `(cod,dom)` is **not** a
 localized LLam quirk — it is the **pervasive internal math-orientation of the whole FFS/pullback/
@@ -98,6 +105,8 @@ convention; a stored map-var is boundary `(dom,cod)`. η just crosses those two 
 
 **Consequence for η:** η-reduction stays out of the rewriter — making it sound needs 2b's full FFS
 re-orientation, which is out of scope.
+
+</details>
 
 ### Phase 3 — Rewriter dividend (closes #11's remainder) ✅ DONE — see above.
 

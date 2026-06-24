@@ -158,7 +158,8 @@ def test_diff_through_marked_map_applied() -> None:
     DAv, vval, Aval = np.random.randn(3, 3, 3), np.random.randn(3), np.random.randn(3, 3)
     feed = {f"A_{A.uid}": Aval, f"v_{v.uid}": vval, f"DA_{DA.uid}": DAv}
     Jv = _run(J, feed)
-    np.testing.assert_allclose(Jv, np.einsum("imk,m->ki", DAv, vval), atol=1e-6)
+    # Jacobian now stored (dom, cod) (plans/92 re-orientation) — output indices (i, k).
+    np.testing.assert_allclose(Jv, np.einsum("imk,m->ik", DAv, vval), atol=1e-6)
 
 
 def test_inverse_through_map_is_rejected() -> None:
@@ -212,7 +213,7 @@ def test_covariant_derivative_matches_christoffel() -> None:
             for j in range(2):
                 gam_lower[k, i, j] = 0.5 * (Dgv[i, j, k] + Dgv[j, i, k] - Dgv[k, i, j])
     hand = Dsecv.T + np.einsum("kl,lij,j->ki", ginv, gam_lower, secv)
-    np.testing.assert_allclose(Jv, hand, atol=1e-6)
+    np.testing.assert_allclose(Jv, hand.T, atol=1e-6)  # Jv now (dom,cod) (plans/92)
 
 
 def test_cotangent_connection_matches_christoffel() -> None:
@@ -240,7 +241,7 @@ def test_cotangent_connection_matches_christoffel() -> None:
                 gam_low[k, i, j] = 0.5 * (Dgv[i, j, k] + Dgv[j, i, k] - Dgv[k, i, j])
     gam2 = np.einsum("kl,lmi->kmi", ginv, gam_low)  # Γ^k_{mi}
     hand = Domv.T - np.einsum("kmi,k->mi", gam2, omv)
-    np.testing.assert_allclose(Jv, hand, atol=1e-6)
+    np.testing.assert_allclose(Jv, hand.T, atol=1e-6)  # Jv now (dom,cod) (plans/92)
 
 
 def test_connection_map_applied_to_vector() -> None:
@@ -301,7 +302,7 @@ def test_covariant_endomorphism_tensor() -> None:
     Dgv = 0.5 * (Dgv + Dgv.transpose(0, 2, 1))
     Tval, DTv = np.random.randn(2, 2), np.random.randn(2, 2, 2)
     feed = {f"g_{g.uid}": g0, f"Dg_{Dg.uid}": Dgv, f"Tt_{Tt.uid}": Tval, f"DT_{DT.uid}": DTv}
-    Jv = _run(J, feed)  # stored (dom, cod, X)
+    Jv = _run(J, feed)  # stored (X, dom, cod) — the binder X leads (plans/92)
 
     def conn_op(i):  # Γ(e_i) as the operator matrix [k, m]
         out = np.zeros((2, 2))
@@ -316,7 +317,9 @@ def test_covariant_endomorphism_tensor() -> None:
         Ci = conn_op(i)
         corr = Ci @ Top - Top @ Ci  # ΓT − TΓ, operator [k, l]
         dT_op = DTv[i, :, :].T  # the i-th x-slice of dT, as an operator
-        np.testing.assert_allclose(Jv[:, :, i].T, dT_op + corr, atol=1e-6)
+        # Jv now (X, dom, cod) (plans/92): slice the leading X axis, then transpose the (dom,cod)
+        # block to operator form to match dT_op + corr.
+        np.testing.assert_allclose(Jv[i, :, :].T, dT_op + corr, atol=1e-6)
 
 
 def test_metric_is_compatible_nabla_g_zero() -> None:
@@ -359,7 +362,8 @@ def test_metric_pairing_is_parallel() -> None:
     }
     Jtv = _run(Jt, feed)  # (∇v)^k_i
     Jcv = _run(Jc, feed)  # (∇ω)_m_i
-    lhs = secv @ Jcv + omv @ Jtv  # ⟨∇ω,v⟩ + ⟨ω,∇v⟩, indexed by direction i
+    # Jacobians now stored (dom, cod) (plans/92): contract the COD axis (axis 1) with the pairing.
+    lhs = Jcv @ secv + Jtv @ omv  # ⟨∇ω,v⟩ + ⟨ω,∇v⟩, indexed by direction i
     rhs = Domv @ secv + Dsecv @ omv  # d⟨ω,v⟩ = (∂ω)v + ω(∂v)
     np.testing.assert_allclose(lhs, rhs, atol=1e-6)
 
