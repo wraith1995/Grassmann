@@ -312,6 +312,64 @@ def _space(t: Term) -> Space | None:
         return None
 
 
+def normalize_space(s: Space) -> Space:
+    """Canonical representative of a space's **isomorphism class** — "space normalization
+    *modulo* term normalization" (`plans/90`, the `𝒞` framework for #5):
+
+    - ``⊗`` factors and ``⊕`` components are sorted by canonical key (symmetric-monoidal: two
+      spaces are iso iff their normal forms are equal), recursing through ``Dual``/``WithInner``;
+    - any **term** a space embeds (``Ker``/``Img``/``CoKer``/``CoImg`` map, ``WithInner`` metric,
+      ``App`` args) is normalized with :func:`sum_of_products`, so space equality is decided
+      modulo term normalization.
+
+    Two values live in iso spaces iff ``normalize_space`` agrees; the up-to-iso term corrections
+    (``Permute`` for ``⊗``, ``TuplePermute`` for ``⊕``) are exactly the witnesses of that iso."""
+    from grassmann.core.space import (
+        App,
+        CoImg,
+        CoKer,
+        Dual,
+        Img,
+        Ker,
+        OPlus,
+        OProd,
+        WithInner,
+        with_inner,
+    )
+
+    if isinstance(s, OProd):
+        return OProd(tuple(sorted((normalize_space(f) for f in s.spaces), key=repr)))
+    if isinstance(s, OPlus):
+        return OPlus(tuple(sorted((normalize_space(c) for c in s.spaces), key=repr)))
+    if isinstance(s, Dual):
+        return Dual(normalize_space(s.space))
+    if isinstance(s, WithInner):
+        return with_inner(normalize_space(s.space), sum_of_products(s.metric))
+    if isinstance(s, (Ker, Img, CoKer, CoImg)):
+        src = normalize_space(s.source) if s.source is not None else None
+        tgt = normalize_space(s.target) if s.target is not None else None
+        return type(s)(sum_of_products(s.f), src, tgt)
+    if isinstance(s, App):
+        args = tuple(
+            normalize_space(a) if is_space(a) else (sum_of_products(a) if is_term(a) else a)
+            for a in s.args
+        )
+        return App(sum_of_products(s.g), s.positions, args)
+    return s  # Scalar / SVar / OPlusRep (base) / SpaceMeta — atomic
+
+
+def space_key(s: Space) -> str:
+    """A total, iso-invariant ordering key on Spaces — ``repr`` of the :func:`normalize_space`
+    form (so iso spaces share a key)."""
+    return repr(normalize_space(s))
+
+
+def spaces_iso(a: Space, b: Space) -> bool:
+    """Whether two spaces are isomorphic (equal up to ``⊗``/``⊕`` reordering and term
+    normalization) — i.e. ``normalize_space(a) == normalize_space(b)``."""
+    return normalize_space(a) == normalize_space(b)
+
+
 def _is_num(x: object) -> bool:
     return isinstance(x, (int, float))
 
@@ -655,6 +713,24 @@ def rule_musical(node: Term) -> Term | None:
     return None
 
 
+def rule_project_embed(node: Term) -> Term | None:
+    """``Project(Embed(v, S), s) → v`` — embedding into a larger space and projecting straight
+    back onto ``v``'s own subspace is the identity *on that subspace*. We **naively check via
+    space normalization** (`#3`) that the projection target is ``v``'s space up to iso
+    (``spaces_iso``); only then is the round-trip valid. Value-exact. Direction: cancel the
+    coercion pair toward the bare value."""
+    if not isinstance(node, Project) or not isinstance(node.vector, Embed):
+        return None
+    v = node.vector.vector
+    sv = _space(v)
+    if sv is None:
+        return None
+    target = node.space if node.space is not None else sv  # omitted target ⇒ inferred = sv
+    if spaces_iso(target, sv):
+        return v
+    return None
+
+
 def rule_permute(node: Term) -> Term | None:
     """Collapse reshape ``Permute`` corrections: an identity permutation vanishes, and two
     nested permutations compose. Value-exact (a permutation of tensor axes). Keeps the
@@ -956,6 +1032,7 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_involution,
     rule_dagger_push,
     rule_musical,
+    rule_project_embed,
     rule_permute,
     rule_tuplepermute,
     rule_tuple_roundtrip,
@@ -1284,4 +1361,7 @@ __all__ = [
     "term_key",
     "is_normalized_sop",
     "alpha_canon",
+    "normalize_space",
+    "space_key",
+    "spaces_iso",
 ]
