@@ -345,31 +345,57 @@ def _dd_kron(e: Kron, ctx: _DCtx) -> Term:
 
 
 def _dd_solve(e: Solve, ctx: _DCtx) -> Term:
-    """``d(f⁻¹) = −f⁻¹ (df) f⁻¹`` (the bare map's derivative).
+    """``d(f⁻¹) = −f⁻¹ (df) f⁻¹`` — the bare inverse-map derivative (``f`` square).
 
-    When ``f`` is x-independent this is the zero map. When ``f`` depends on ``x`` the
-    derivative is a higher tensor (``∂f`` carries the seed *and* a full map codomain) that
-    the substrate cannot yet thread through the bulk inverse op — rejected (v1); apply the
-    map and differentiate ``Solve(f) v`` instead, where the seed flows through ``v``."""
+    Built term→term from ``Solve``/``Compose``: the seed in ``df`` flows through the einsum
+    ``Compose``s, NEVER the bulk ``SolveOp`` (which only ever sees the seed-free ``f``), so it
+    threads in both llam modes — unlike the *applied* ``Solve(f)·v`` where the seed enters the
+    bulk op directly."""
     df = _dd(e.f, ctx)
     if isinstance(df, Zero):
         return _zero(e, ctx)
-    raise DiffError(
-        "diff: differentiating a bare Solve(f) w.r.t. x with x in f is not supported in "
-        "v1; differentiate the applied form Solve(f)·v (seed through v) instead"
-    )
+    inv = Solve(e.f)
+    return Scale(-1.0, Compose(inv, (0,), (Compose(df, (0,), (inv,)),)))
 
 
 def _dd_pinv(e: Pinv, ctx: _DCtx) -> Term:
-    """``d(f†) = −f† (df) f†`` (leading term). Same v1 restriction as :func:`_dd_solve`:
-    zero map when ``f`` is x-independent, otherwise rejected."""
+    """``d(f⁺)`` — the bare pseudoinverse-map derivative (Golub–Pereyra).
+
+    ``d(f⁺) = −f⁺ (df) f⁺ + (fᵀf)⁻¹ (df)ᵀ (I − f f⁺)``. The rank term vanishes for a square map
+    (``f f⁺ = I``), so the same formula is exact for square *and* injective (full-column-rank)
+    ``f``. Pure ``Pinv``/``Dagger``/``Compose`` — the seed threads through the einsum ``Compose``s
+    (the bulk ``PinvOp`` only sees the seed-free ``f``).  This is what makes ``project`` through a
+    moving ``Img(J)`` differentiate term→term (``project ≡ Eval(Pinv(J), ·)``)."""
     df = _dd(e.f, ctx)
     if isinstance(df, Zero):
         return _zero(e, ctx)
-    raise DiffError(
-        "diff: differentiating a bare Pinv(f) w.r.t. x with x in f is not supported in v1; "
-        "differentiate the applied form Pinv(f)·v (seed through v) instead"
-    )
+    return _pinv_map_grad(e.f, df)
+
+
+def _pinv_map_grad(f: Term, df: Term) -> Term:
+    """The bare pseudoinverse-map derivative ``d(f⁺)`` (see :func:`_dd_pinv`)."""
+    from grassmann.infer.synth import synth_space
+
+    fp = Pinv(f)
+    lead = Scale(-1.0, Compose(fp, (0,), (Compose(df, (0,), (fp,)),)))  # −f⁺ (df) f⁺
+    dom, cod = _map_dom_cod(synth_space(f))
+    if dom is not None and dom == cod:
+        return lead  # square ⇒ I − f f⁺ = 0 ⇒ no rank term
+    gram = Compose(Dagger(f), (0,), (f,))  # fᵀf : dom ⊸ dom
+    im_proj = Sum((Identity(cod), Scale(-1.0, Compose(f, (0,), (fp,)))))  # I − f f⁺ : cod ⊸ cod
+    rank = Compose(Pinv(gram), (0,), (Compose(Dagger(df), (0,), (im_proj,)),))
+    return Sum((lead, rank))
+
+
+def _map_dom_cod(space: Space):
+    """``(dom, cod)`` of a simple linear-map space ``Dual(dom) ⊗ cod``, else ``(None, None)``."""
+    from grassmann.core.space import Dual, OProd
+
+    if isinstance(space, OProd) and len(space.spaces) == 2:
+        dom_slot, cod = space.spaces
+        dom = dom_slot.space if isinstance(dom_slot, Dual) else dom_slot
+        return dom, cod
+    return None, None
 
 
 def _dd_solve_apply(e: SolveApply, ctx: _DCtx) -> Term:
