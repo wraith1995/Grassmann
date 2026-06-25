@@ -479,30 +479,36 @@ def _qr_gauge_vars(J: Term, ctx: _DCtx) -> Var:
     return _QR_AUTO_VARS[key]
 
 
-# Per-order step for the nested central difference: small enough that the O(eps²) truncation is
-# tiny, large enough that the ``order``-fold cancellation (error ~ macheps/eps^order) stays bounded.
-# Tuned so order 1 hits <1e-6 (cross-checks the analytic ``_qr_dQ``) and orders 2–3 stay ~1e-4.
+# Per-order step for the nested Richardson-extrapolated central difference (:func:`_nth_deriv_tensor`,
+# O(eps⁴) per level): large enough that the ``order``-fold cancellation (error ~ macheps/eps^order)
+# stays bounded.  With Richardson, order 1 cross-checks the analytic ``_qr_dQ`` to <1e-7 and orders
+# 2–3 reach ~1e-6 (a sharp 3rd-order FD check, not a smoke test).
 _NESTED_FD_EPS = {1: 1e-4, 2: 4e-3, 3: 8e-3}
 
 
 def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -> np.ndarray:
-    """The ``order``-th derivative tensor of ``f : R^nX → array`` at ``x0`` by NESTED central
-    differences over the ``nX`` coordinate directions.  Returns an array of shape
-    ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th differentiation direction).  ``order == 0``
-    is just ``f(x0)``.  Mixed partials are symmetric, so the result is symmetric in its first
-    ``order`` axes."""
+    """The ``order``-th derivative tensor of ``f : R^nX → array`` at ``x0`` by NESTED,
+    **Richardson-extrapolated** central differences over the ``nX`` coordinate directions.  Each
+    level uses ``(4·D(h/2) − D(h))/3`` (``D`` the central difference), cancelling the ``O(eps²)``
+    truncation ⇒ ``O(eps⁴)`` per level — sharp enough that the fed ``∂ⁿQ`` tower is accurate, not
+    smoke-accurate.  Returns shape ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th direction);
+    mixed partials are symmetric, so it is symmetric in its first ``order`` axes."""
     if order == 0:
         return np.asarray(f(x0), dtype=float)
     if eps is None:
         eps = _NESTED_FD_EPS.get(order, 1e-2)
     nX = x0.shape[0]
+
+    def g(x):  # the (order-1) tensor — itself Richardson-extrapolated
+        return _nth_deriv_tensor(f, x, order - 1, eps)
+
     blocks = []
-    for a in range(nX):  # differentiate the (order-1) tensor once more in direction a
+    for a in range(nX):  # differentiate the (order-1) tensor once more in direction a (Richardson)
         ea = np.zeros(nX)
-        ea[a] = eps
-        hi = _nth_deriv_tensor(f, x0 + ea, order - 1, eps)
-        lo = _nth_deriv_tensor(f, x0 - ea, order - 1, eps)
-        blocks.append((hi - lo) / (2.0 * eps))
+        ea[a] = 1.0
+        d_h = (g(x0 + eps * ea) - g(x0 - eps * ea)) / (2.0 * eps)
+        d_h2 = (g(x0 + (eps / 2.0) * ea) - g(x0 - (eps / 2.0) * ea)) / eps  # = /(2·eps/2)
+        blocks.append((4.0 * d_h2 - d_h) / 3.0)
     return np.stack(blocks, axis=0)
 
 

@@ -633,13 +633,20 @@ def test_immersion_second_order_project_fd() -> None:
 
 
 def _third_central(runp, e, perturb, eps=1e-2):
-    """``(f(+2d) − 2 f(+d) + 2 f(−d) − f(−2d)) / (2 ε³)`` — central THIRD difference of the lowered
-    term."""
-    fp2 = runp(e, perturb(+2.0 * eps))
-    fp1 = runp(e, perturb(+eps))
-    fm1 = runp(e, perturb(-eps))
-    fm2 = runp(e, perturb(-2.0 * eps))
-    return (fp2 - 2.0 * fp1 + 2.0 * fm1 - fm2) / (2.0 * eps * eps * eps)
+    """Central THIRD difference with one **Richardson** step ⇒ ``O(ε⁴)`` error.
+
+    The bare 5-point third difference ``D(h) = [f(2h) − 2f(h) + 2f(−h) − f(−2h)] / (2h³)`` has an
+    ``O(ε²)`` truncation error; combining it at ``h`` and ``h/2`` as ``(4·D(h/2) − D(h))/3`` cancels
+    that leading term, leaving ``O(ε⁴)`` — sharp enough to *verify* the 3rd-order AD rather than
+    smoke-test it."""
+    def D(h):
+        fp2 = runp(e, perturb(+2.0 * h))
+        fp1 = runp(e, perturb(+h))
+        fm1 = runp(e, perturb(-h))
+        fm2 = runp(e, perturb(-2.0 * h))
+        return (fp2 - 2.0 * fp1 + 2.0 * fm1 - fm2) / (2.0 * h * h * h)
+
+    return (4.0 * D(eps / 2.0) - D(eps)) / 3.0
 
 
 def _sym(a: np.ndarray, naxes: int) -> np.ndarray:
@@ -851,7 +858,9 @@ def test_qr_gauge_third_order_embed_fd() -> None:
         return {**feed, f"J_{J.uid}": Jv + dJ, f"v_{v.uid}": vv + dv}
 
     fd3 = _third_central(runp, e, perturb)
-    np.testing.assert_allclose(np.ravel(got), np.ravel(fd3), rtol=8e-2, atol=4e-2)
+    # Richardson-extrapolated on both sides (the fed ∂³Q tower and this reference) ⇒ residual ~8e-6,
+    # so this is a SHARP 3rd-order check (was a loose ~4e-2 smoke test before Richardson).
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd3), rtol=1e-4, atol=1e-4)
 
 
 def test_gauss_decomposition_of_embed() -> None:
