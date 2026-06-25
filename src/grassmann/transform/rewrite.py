@@ -1239,8 +1239,11 @@ def term_key(t: Term) -> str:
 
 
 def _atom_of(mono: Term) -> Term:
-    """The atom of a monomial (strip a leading ``Scale`` coefficient)."""
-    return mono.vector if isinstance(mono, Scale) else mono
+    """The atom of a monomial — strip a leading *numeric* ``Scale`` coefficient (matching the
+    grouping key :func:`rule_collect` uses via :func:`_split_num_scale`). A *symbolic* leading
+    ``Scale`` is a genuine scalar-product factor and stays part of the atom, so ``a·a`` keys on
+    ``a·a`` (not ``a``) and a sum like ``a + a·a`` has two distinct atoms."""
+    return _split_num_scale(mono)[1]
 
 
 def rule_sort_sum(node: Term) -> Term | None:
@@ -1364,10 +1367,50 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
     return tuple(rules)
 
 
-def _is_atom_head(a: Term) -> bool:
+def _is_scalar_atom(a: Term) -> bool:
+    """A **scalar atom** of the scalar-polynomial normal form (when ``canon_scalars`` is on):
+    a Scalar-valued Term that is *never* decomposed further — a scalar ``Var``, a scalar
+    ``Eval`` contraction (a dot product), or a non-linear ``External`` application. A numeric
+    ``Lit`` is NOT an atom (it folds into the coefficient); a scalar ``Sum``/``Scale``/``Zero``
+    is not an atom (additive/multiplicative structure the outer polynomial owns)."""
+    if not isinstance(_space(a), Scalar):
+        return False
+    if isinstance(a, (Lit, Sum, Scale, Zero)):
+        return False
+    return _is_atom_head(a)
+
+
+def _is_canonical_scalar_product(a: Term) -> bool:
+    """Whether ``a`` is a **canonical scalar product** — the body of a scalar monomial after
+    its numeric coefficient is peeled (the form :func:`rule_scalar_product` emits):
+    ``Scale(s₀, Scale(s₁, … sₙ₋₁))``, right-nested, with each ``sᵢ`` a :func:`_is_scalar_atom`
+    and the factors sorted by :func:`term_key` (so commuted spellings collapse). A single
+    scalar atom is the ``n = 1`` case. There is NO numeric factor inside (it is the outer
+    coefficient) and no two factors hide a ``+``."""
+    factors: list[Term] = []
+    node = a
+    while isinstance(node, Scale) and not _is_num(node.scalar) and isinstance(_space(node), Scalar):
+        if not is_term(node.scalar) or not _is_scalar_atom(node.scalar):
+            return False
+        factors.append(node.scalar)
+        node = node.vector
+    if not _is_scalar_atom(node):  # the innermost (right-most) factor
+        return False
+    factors.append(node)
+    if len(factors) < 2:
+        return False  # a lone atom is handled by _is_atom_head directly
+    keys = [term_key(f) for f in factors]
+    return keys == sorted(keys)
+
+
+def _is_atom_head(a: Term, canon_scalars: bool = False) -> bool:
     """``a``'s *head* is a legal atom head: not additive/scalable/zero, and not a redex the
-    normal form forbids (β or ``Id·v``)."""
-    if isinstance(a, (Sum, Scale, Zero)):
+    normal form forbids (β or ``Id·v``). When ``canon_scalars`` is on, a **canonical scalar
+    product** (a sorted right-nested ``Scale`` of scalar atoms) is also a legal atom head —
+    the multiplicative monoid of opaque scalar atoms is the polynomial's variable set."""
+    if isinstance(a, Scale):
+        return canon_scalars and _is_canonical_scalar_product(a)
+    if isinstance(a, (Sum, Zero)):
         return False
     if isinstance(a, Eval) and isinstance(a.f, (LLam, Identity)):
         return False
@@ -1376,9 +1419,11 @@ def _is_atom_head(a: Term) -> bool:
     return True
 
 
-def _is_monomial(mono: Term) -> bool:
+def _is_monomial(mono: Term, canon_scalars: bool = False) -> bool:
     """``mono`` is ``atom`` or ``Scale(coeff, atom)`` with ``coeff ∉ {0, 1}`` (numeric) or a
-    sum-free scalar term (symbolic), and ``atom`` a legal atom head."""
+    sum-free scalar term (symbolic), and ``atom`` a legal atom head. With ``canon_scalars``
+    the atom may be a canonical scalar product, so ``Scale(2.0, Scale(a, b))`` (the scalar
+    monomial ``2·a·b``) is a monomial."""
     if isinstance(mono, (Sum, Zero)):
         return False
     if isinstance(mono, Scale):
@@ -1386,10 +1431,15 @@ def _is_monomial(mono: Term) -> bool:
         if _is_num(c):
             if c == 0 or c == 1:
                 return False
-        elif isinstance(c, Sum):
+            return _is_atom_head(mono.vector, canon_scalars)
+        if isinstance(c, Sum):
             return False  # a distributable scalar sum must have been pushed out
-        return _is_atom_head(mono.vector)
-    return _is_atom_head(mono)
+        # A symbolic scalar coefficient: the whole node must itself be a canonical scalar
+        # product (so its factors are sorted), else it is just a single scalar atom × atom.
+        if canon_scalars and isinstance(_space(mono), Scalar):
+            return _is_canonical_scalar_product(mono)
+        return _is_atom_head(mono.vector, canon_scalars)
+    return _is_atom_head(mono, canon_scalars)
 
 
 def _fully_reduced(t: Term, rules: tuple[Rule, ...]) -> bool:
@@ -1417,16 +1467,17 @@ def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
         return False
     if isinstance(t, Zero):
         return True
+    cs = config.canon_scalars
     if isinstance(t, Sum):
         monos = t.vectors
-        if len(monos) < 2 or not all(_is_monomial(m) for m in monos):
+        if len(monos) < 2 or not all(_is_monomial(m, cs) for m in monos):
             return False
         keys = [term_key(_atom_of(m)) for m in monos]
         if config.collect and len(set(keys)) != len(keys):  # atoms not collected
             return False
         if config.order_sum and keys != sorted(keys):  # not in canonical order
             return False
-    elif not _is_monomial(t):
+    elif not _is_monomial(t, cs):
         return False
     if config.canon_binders and _has_binder(t) and alpha_canon(t) != t:
         return False  # bound variables are not in α-canonical form
