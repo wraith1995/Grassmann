@@ -32,12 +32,12 @@ connection ``Γ`` built from ``∂g`` (see :func:`_covariant_correction`); a con
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from grassmann.core.space import (
-    OProd,
     Scalar,
     Space,
     WithInner,
@@ -238,6 +238,12 @@ def _dd_var(e: Var, ctx: _DCtx) -> Term:
                 dmap = dval
             ctx._ddval[e.uid] = Eval(dmap, (0,), (ctx.h,))
         return ctx._ddval[e.uid]
+    if e.uid in _QR_FRAME_VARS:
+        # A self-differentiating QR-frame tower element (`§qr-tower`): its derivative is the next
+        # tower var, applied to the seed — ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.  Recursing through this
+        # rule (``diff`` of ``Eval(Qₙ₊₁, h)`` hits ``Qₙ₊₁`` again) gives ARBITRARY differentiation
+        # order from a single registry.
+        return Eval(_qr_next(e, ctx), (0,), (ctx.h,))
     return Zero(e.space)  # x-independent variable
 
 
@@ -395,16 +401,39 @@ def clear_subspace_gauges() -> None:
     """Reset all registered subspace gauges to the default and drop the auto-created QR vars."""
     _SUBSPACE_GAUGE.clear()
     _QR_AUTO_VARS.clear()
+    _QR_FRAME_VARS.clear()
+    _QR_NEXT.clear()
 
 
 # --- opaque QR gauge (`§qr-auto`): the default frame is the lowered ``ProjectedBasis`` ------------
 # ``represent`` realizes a moving ``Img(J)`` in the orthonormal ``ProjectedBasis = qr_pos(Jᵀ)``.
-# The matching AD gauge frame ``Q`` (and its motion ``∂Q/∂x``) has NO closed form the substrate can
-# thread, so we supply it as opaque program-backed variables — one ``(Q, ∂Q/∂x)`` pair per defining
-# map ``J`` (keyed by ``J.uid``), auto-created on demand and seeded numerically by
-# :func:`qr_gauge_feed` (the analytic QR differential).  ``diff`` then treats ``∂Q/∂x`` like any
-# marked-variable derivative: ``dQ = Eval(∂Q/∂x, (0,), (h,))``.
-_QR_AUTO_VARS: dict[int, tuple[Var, Var]] = {}
+# The matching AD gauge frame ``Q`` (and its motion ``∂ⁿQ/∂xⁿ``) has NO closed form the substrate can
+# thread, so we supply it as opaque program-backed variables, auto-created on demand and seeded
+# numerically by :func:`qr_gauge_feed`.  The frame is a SELF-DIFFERENTIATING TOWER
+# ``Q₀ = Q, Q₁ = ∂Q/∂x, Q₂ = ∂²Q/∂x², …``: ``diff`` of any tower element yields the next one
+# (`§qr-tower`), so the opaque QR gauge supports ARBITRARY differentiation order.  Each ``Qₙ`` lives
+# in ``linear_map_space(X, Qₙ₋₁.space)`` (the flat ``(|X|,…,|X|,k,n)`` layout of the n-th derivative
+# tensor); ``diff`` treats ``Qₙ`` like a marked-variable derivative:
+# ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.
+#
+# ``_QR_AUTO_VARS``: ``J.uid -> Q₀`` (the realization frame; one per defining map).
+# ``_QR_FRAME_VARS``: the set of ALL tower-var uids (Q₀, Q₁, …) — :func:`_dd_var` reads it to make
+#   every tower element self-differentiating.
+# ``_QR_NEXT``: ``Qₙ.uid -> Qₙ₊₁`` (the derivative var of each tower element, created lazily).
+_QR_AUTO_VARS: dict[int, Var] = {}
+_QR_FRAME_VARS: set[int] = set()
+_QR_NEXT: dict[int, Var] = {}
+
+
+def _qr_next(e: Var, ctx: _DCtx) -> Var:
+    """Get-or-create ``e``'s derivative tower var ``∂e/∂x`` of space ``linear_map_space(X, e.space)``,
+    register it in ``_QR_FRAME_VARS`` (so it too is self-differentiating) and ``_QR_NEXT``, and return
+    it.  Drives the arbitrary-order QR frame tower (`§qr-tower`)."""
+    if e.uid not in _QR_NEXT:
+        nxt = Var(f"_dQqr_{e.name}_{next(_counter)}", linear_map_space(ctx.X, e.space))
+        _QR_NEXT[e.uid] = nxt
+        _QR_FRAME_VARS.add(nxt.uid)
+    return _QR_NEXT[e.uid]
 
 
 def _qr_pos(M: np.ndarray):
@@ -432,12 +461,11 @@ def _qr_dQ(Q: np.ndarray, R: np.ndarray, dJm: np.ndarray) -> np.ndarray:
     return Q @ omega + (np.eye(n) - Q @ Q.T) @ dJm @ Rinv
 
 
-def _qr_gauge_vars(J: Term, ctx: _DCtx) -> tuple[Var, Var]:
-    """Get-or-create the opaque ``(Q, ∂Q/∂x)`` variable pair for the moving subspace ``Img(J)``,
-    keyed by ``J.uid``.  ``Qvar`` lives in ``J.space`` (the grassmann frame map ``X_dom ⊸ ambient``,
-    stored ``(k, n)``); ``dQvar`` lives in ``X ⊸ J.space`` — the flat ``(|X|, k, n)`` layout of a
-    marked ``∂J/∂x``, so :func:`qr_gauge_feed` can fill it row-by-row."""
-    from grassmann.core.space import dual, oprod
+def _qr_gauge_vars(J: Term, ctx: _DCtx) -> Var:
+    """Get-or-create the opaque QR frame ``Q₀`` for the moving subspace ``Img(J)``, keyed by
+    ``J.uid``.  ``Q₀`` lives in ``J.space`` (the grassmann frame map ``X_dom ⊸ ambient``, stored
+    ``(k, n)``) and is registered in ``_QR_FRAME_VARS`` so it is self-differentiating — ``_dd(Q₀)``
+    grows the tower ``Q₁ = ∂Q/∂x, …`` on demand (`§qr-tower`)."""
     from grassmann.infer.synth import synth_space
 
     key = J.uid
@@ -446,37 +474,108 @@ def _qr_gauge_vars(J: Term, ctx: _DCtx) -> tuple[Var, Var]:
         n = next(_counter)
         name = getattr(J, "name", "J")
         Qvar = Var(f"_Qqr_{name}_{n}", jspace)
-        # ``∂Q/∂x`` must be the FLAT ``X* ⊗ (J's own factors)`` map space — the ``(|X|, k, n)`` layout
-        # of a marked ``∂J/∂x`` — so :func:`qr_gauge_feed` fills it row-by-row.  ``linear_map_space``
-        # would NEST ``jspace`` as a single fused codomain factor (lowered ``(|X|, k·n)``); splat the
-        # frame's own factors instead.
-        dq_space = oprod(dual(ctx.X), *jspace.spaces) if isinstance(jspace, OProd) else \
-            linear_map_space(ctx.X, jspace)
-        dQvar = Var(f"_dQqr_{name}_{n}", dq_space)
-        _QR_AUTO_VARS[key] = (Qvar, dQvar)
+        _QR_AUTO_VARS[key] = Qvar
+        _QR_FRAME_VARS.add(Qvar.uid)
     return _QR_AUTO_VARS[key]
 
 
-def qr_gauge_feed(J: Term, DJ: Term, feed: dict) -> dict:
-    """Numeric values for the auto-created opaque QR gauge of ``Img(J)`` (the default gauge).
+# Per-order step for the nested central difference: small enough that the O(eps²) truncation is
+# tiny, large enough that the ``order``-fold cancellation (error ~ macheps/eps^order) stays bounded.
+# Tuned so order 1 hits <1e-6 (cross-checks the analytic ``_qr_dQ``) and orders 2–3 stay ~1e-4.
+_NESTED_FD_EPS = {1: 1e-4, 2: 4e-3, 3: 8e-3}
 
-    Reads the immersion ``Jval`` (``feed[f"{J.name}_{J.uid}"]``, stored ``(k,n)``) and its marked
-    derivative ``DJval`` (``feed[f"{DJ.name}_{DJ.uid}"]``, stored ``(|X|,k,n)``), computes the
-    orthonormal ambient frame ``Q_amb = qr_pos(Jvalᵀ)`` and, per parameter ``a``, the analytic
-    ``∂Q/∂x[a]`` along ``DJval[a]``.  Returns a feed fragment ``{Qvar: Qval, dQvar: dQval}`` (grassmann
-    map layout: ``Qval = Q_ambᵀ`` ``(k,n)``; ``dQval[a] = (∂Q_amb/∂x[a])ᵀ``).  Call after ``diff`` so
-    the auto vars exist; merge the result into the program feed."""
-    Qvar, dQvar = _QR_AUTO_VARS[J.uid]
-    Jval = np.asarray(feed[f"{J.name}_{J.uid}"], dtype=float)
-    DJval = np.asarray(feed[f"{DJ.name}_{DJ.uid}"], dtype=float)
-    Jm = Jval.T  # immersion columns in the ambient, (n, k)
-    Q_amb, R = _qr_pos(Jm)
-    Qval = Q_amb.T
-    nX = DJval.shape[0]
-    dQval = np.zeros((nX, *Qval.shape))
-    for a in range(nX):
-        dQval[a] = _qr_dQ(Q_amb, R, DJval[a].T).T
-    return {f"{Qvar.name}_{Qvar.uid}": Qval, f"{dQvar.name}_{dQvar.uid}": dQval}
+
+def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -> np.ndarray:
+    """The ``order``-th derivative tensor of ``f : R^nX → array`` at ``x0`` by NESTED central
+    differences over the ``nX`` coordinate directions.  Returns an array of shape
+    ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th differentiation direction).  ``order == 0``
+    is just ``f(x0)``.  Mixed partials are symmetric, so the result is symmetric in its first
+    ``order`` axes."""
+    if order == 0:
+        return np.asarray(f(x0), dtype=float)
+    if eps is None:
+        eps = _NESTED_FD_EPS.get(order, 1e-2)
+    nX = x0.shape[0]
+    blocks = []
+    for a in range(nX):  # differentiate the (order-1) tensor once more in direction a
+        ea = np.zeros(nX)
+        ea[a] = eps
+        hi = _nth_deriv_tensor(f, x0 + ea, order - 1, eps)
+        lo = _nth_deriv_tensor(f, x0 - ea, order - 1, eps)
+        blocks.append((hi - lo) / (2.0 * eps))
+    return np.stack(blocks, axis=0)
+
+
+def qr_gauge_feed(J: Term, J_deriv_tower, feed: dict) -> dict:
+    """Numeric values for the auto-created opaque QR gauge TOWER of ``Img(J)`` (the default gauge,
+    `§qr-tower`).  Fills the ENTIRE realized frame tower ``Q₀ = Q, Q₁ = ∂Q/∂x, …`` to whatever depth
+    ``diff`` grew it — so arbitrary-order QR AD lowers.
+
+    ``J_deriv_tower`` is the list of J's derivative VARS ``[DJ, D²J, …]`` the caller marked for the
+    nested diffs (a bare ``DJ`` is accepted and treated as ``[DJ]``).  Reads the immersion ``Jval``
+    (``feed[J]``, stored ``(k,n)``) and the derivative-tower values (``feed[DⁿJ]``, stored
+    ``(|X|,…,|X|,k,n)``), reconstructs ``J(x₀+δ) = Σ_m (1/m!) ∂ᵐJ · δ^⊗m``, sets
+    ``Q(x₀+δ) = qr_pos(J(x₀+δ)ᵀ)ᵀ``, and takes each ``∂ⁿQ/∂xⁿ`` tensor at ``δ=0`` by NESTED central
+    differences.  Returns ``{Qₙ: value}`` for every realized tower var (grassmann ``(k,n)`` codomain
+    layout; ``Qₙ`` flattened to ``(|X|, |X|^(n-1)·k·n)`` to match the nested map-space lowering).
+
+    Arbitrary-order QR AD requires J's full derivative tower (the user marks ``J→DJ→D²J→…`` in the
+    nested diffs) and the matching ``ProjectedBasis`` value realization.  Call after ``diff`` so the
+    tower vars exist; merge the result into the program feed."""
+    if isinstance(J_deriv_tower, Term):
+        J_deriv_tower = [J_deriv_tower]
+    Q0 = _QR_AUTO_VARS[J.uid]
+    Jval = np.asarray(feed[f"{J.name}_{J.uid}"], dtype=float)  # (k, n) grassmann
+    k, n = Jval.shape
+    # J-tower values in grassmann (k,n) codomain layout: tower[m] has shape (|X|,)*m + (k,n).
+    Jtower = [Jval]
+    for DmJ in J_deriv_tower:
+        Jtower.append(np.asarray(feed[f"{DmJ.name}_{DmJ.uid}"], dtype=float))
+    if len(Jtower) < 2:
+        raise DiffError("qr_gauge_feed: supply at least J's first derivative DJ")
+    nX = Jtower[1].shape[0]
+
+    def J_at(delta: np.ndarray) -> np.ndarray:
+        """Reconstruct J's ambient columns (n, k) at x₀+δ from the Taylor tower."""
+        acc = np.array(Jtower[0])  # (k, n)
+        for m in range(1, len(Jtower)):
+            # ∂ᵐJ · δ^⊗m / m!  — contract the m leading |X| axes with δ.
+            term = Jtower[m]
+            for _ in range(m):
+                term = np.tensordot(delta, term, axes=([0], [0]))
+            acc = acc + term / float(math.factorial(m))
+        return acc.T  # ambient (n, k)
+
+    def Q_at(delta: np.ndarray) -> np.ndarray:
+        """The grassmann (k, n) QR frame Q₀ at x₀+δ."""
+        Q_amb, _ = _qr_pos(J_at(delta))
+        return Q_amb.T  # (k, n)
+
+    # Walk the realized tower Q₀ → Q₁ → … via _QR_NEXT; fill each to its order.
+    out: dict = {}
+    x0 = np.zeros(nX)
+    var = Q0
+    order = 0
+    while True:
+        depth = len(Jtower) - 1  # highest J-derivative available bounds reconstruction accuracy
+        if order > depth:
+            raise DiffError(
+                f"qr_gauge_feed: tower needs ∂^{order}Q but only {depth} J-derivative(s) supplied; "
+                f"mark J→DJ→…→D^{order}J in the nested diffs and pass them all"
+            )
+        Qn = _nth_deriv_tensor(Q_at, x0, order)  # shape (|X|,)*order + (k, n)
+        # Lower layout: flatten all but the first |X| axis ⇒ (|X|, |X|^(order-1)·k·n); order 0 ⇒ (k,n).
+        if order == 0:
+            val = Qn
+        else:
+            val = Qn.reshape(nX, -1)
+        out[f"{var.name}_{var.uid}"] = val
+        nxt = _QR_NEXT.get(var.uid)
+        if nxt is None:
+            break
+        var = nxt
+        order += 1
+    return out
 
 
 def _gauge_frame(J: Term, dJ: Term, ctx: _DCtx) -> tuple[Term, Term]:
@@ -498,9 +597,9 @@ def _gauge_frame(J: Term, dJ: Term, ctx: _DCtx) -> tuple[Term, Term]:
         return q, _dd(q, ctx)
     if frame is not None and frame_deriv is not None:  # explicit opaque gauge (qr / external)
         return frame, Eval(frame_deriv, (0,), (ctx.h,))  # dQ = (∂Q/∂x)·h  (program-backed)
-    if gauge == "qr":  # default opaque QR: auto-create the program-backed (Q, ∂Q/∂x) pair
-        Qvar, dQvar = _qr_gauge_vars(J, ctx)
-        return Qvar, Eval(dQvar, (0,), (ctx.h,))
+    if gauge == "qr":  # default opaque QR: auto-create the self-differentiating frame tower (Q₀,…)
+        Qvar = _qr_gauge_vars(J, ctx)
+        return Qvar, _dd(Qvar, ctx)  # dQ = Eval(Q₁, h) via the tower; higher diffs recurse
     raise DiffError(
         f"diff: gauge {gauge!r} has no closed form — supply frame= and frame_deriv= (the opaque "
         f"frame Q and ∂Q/∂x) via set_subspace_gauge"
