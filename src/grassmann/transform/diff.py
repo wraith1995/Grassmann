@@ -347,15 +347,64 @@ def _subspace_defining_map(space: Space) -> Term | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Gauge of a moving subspace (`§gauge`).  Differentiating a section of a moving subspace needs a
+# *connection* (a gauge): the realization frame ``Q`` of ``Img(J)`` is defined only up to ``O(k)``,
+# and the derivative depends on the choice.  The gauge is a property of the SPACE — keyed here by the
+# defining map's uid — read by ``diff`` to pick the frame ``(Q, dQ)``.  ``represent`` is untouched: it
+# realizes the subspace in its basis and cobs the value to any output basis, exactly as before.
+#
+# Gauge-awareness lives ENTIRELY in ``diff`` + this registry.  The default ``immersion`` gauge
+# (``Q = J``, ``dQ = ∂J``) makes the arms byte-identical to the prior behavior.  ``polar``
+# (``Q = J·G^{-1/2}``, via the SPD ``Sqrt`` primitive) is the closed-form orthonormal gauge.  An
+# opaque (e.g. QR) gauge — ``dQ`` supplied as a program-backed variable — is a later phase (P2).
+_SUBSPACE_GAUGE: dict[int, str] = {}
+_DEFAULT_GAUGE = "immersion"
+
+
+def set_subspace_gauge(defining_map: Term, gauge: str) -> None:
+    """Register the AD gauge (``"immersion"`` | ``"polar"``) for the moving subspace defined by
+    ``defining_map`` (a ``Var``).  Read by ``diff`` only; ``represent`` is unaffected."""
+    _SUBSPACE_GAUGE[defining_map.uid] = gauge
+
+
+def clear_subspace_gauges() -> None:
+    """Reset all registered subspace gauges to the default (``immersion``)."""
+    _SUBSPACE_GAUGE.clear()
+
+
+def _gauge_of(J: Term) -> str:
+    uid = getattr(J, "uid", None)
+    return _SUBSPACE_GAUGE.get(uid, _DEFAULT_GAUGE) if uid is not None else _DEFAULT_GAUGE
+
+
+def _gauge_frame(J: Term, dJ: Term, ctx: _DCtx) -> tuple[Term, Term]:
+    """The realization frame ``Q`` of ``Img(J)`` and its motion ``dQ`` for the subspace's gauge.
+
+    ``immersion`` ⇒ ``(J, ∂J)`` (the literal immersion — byte-identical to the prior arms);
+    ``polar`` ⇒ ``(J·G^{-1/2}, ∂(J·G^{-1/2}))`` with ``G = JᵀJ`` (the symmetric/polar orthonormal
+    frame, differentiated term→term through the ``Sqrt`` primitive)."""
+    gauge = _gauge_of(J)
+    if gauge == "immersion":
+        return J, dJ
+    if gauge == "polar":
+        gram = Compose(Dagger(J), (0,), (J,))         # G = JᵀJ
+        q = Compose(J, (0,), (Pinv(Sqrt(gram)),))     # Q = J·G^{-1/2}
+        return q, _dd(q, ctx)
+    raise DiffError(f"diff: unknown subspace gauge {gauge!r} (expected 'immersion' or 'polar')")
+
+
 def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
-    """``d(embed(v, big))`` — embed IS ``di`` (the differential of the embedding).  So when ``v``'s
-    home space ``Sub(J)`` has an x-dependent defining map ``J``, the derivative is
+    """``d(embed(v, big))`` — embed IS ``di`` (the differential of the embedding).  When ``v``'s home
+    space ``Sub(J)`` has an x-dependent defining map ``J`` the derivative is
 
-        d(embed(v)) = embed(dv)  +  ∂(di)·v ,
+        d(embed(v)) = embed(dv)  +  dQ·(Q⁺·embed(v)) ,
 
-    the second term being the immersion's directional derivative applied to ``v``: ``∂J`` applied to
-    ``v``'s **source coordinates** ``J⁺·embed(v)`` (recovered through the ambient, so it is
-    basis-consistent).  A constant ``J`` ⇒ the ordinary linear rule (``embed(dv)``)."""
+    where ``Q`` is the **gauge frame** of the subspace and ``dQ`` its motion — the realization is the
+    frame's directional derivative applied to ``v``'s coordinates ``Q⁺·embed(v)`` (recovered through
+    the ambient).  The gauge is read from the subspace (`§gauge`); the **default `immersion` gauge**
+    (``Q = J``, ``dQ = ∂J``) reproduces ``embed(dv) + ∂J·(J⁺·embed v)`` exactly.  A constant ``J`` ⇒
+    the ordinary linear rule (``embed(dv)``)."""
     from grassmann.infer.synth import synth_space
 
     dv = _dd(v, ctx)
@@ -364,26 +413,28 @@ def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
     if J is not None and _depends_on_x(J, ctx):
         dJ = _dd(J, ctx)
         if not isinstance(dJ, Zero):
-            # ∂(di)·v : apply the immersion direction ∂J to v's source coords J⁺·embed(v).
-            realiz = Eval(dJ, (0,), (Eval(Pinv(J), (0,), (Embed(v, big),)),))
+            q, dq = _gauge_frame(J, dJ, ctx)  # gauge frame + its motion (default: immersion Q=J)
+            realiz = Eval(dq, (0,), (Eval(Pinv(q), (0,), (Embed(v, big),)),))
             return _sum([p for p in (frozen, realiz) if p is not None], e, ctx)
     return frozen if frozen is not None else _zero(e, ctx)
 
 
 def _dd_project(z: Term, sub: Space, e: Term, ctx: _DCtx) -> Term:
-    """``d(project(z, Sub(J)))`` — project IS ``di⁺`` (the co-immersion / pseudoinverse).  So when
-    the target subspace ``Sub(J)`` has an x-dependent defining map ``J``,
+    """``d(project(z, Sub(J)))`` — project IS ``di⁺`` (the co-immersion / pseudoinverse of the gauge
+    frame ``Q``).  When the target subspace ``Sub(J)`` has an x-dependent defining map ``J``,
 
-        d(project(z)) = project(dz)  +  ∂(J⁺)·z ,
+        d(project(z)) = project(dz)  +  ∂(Q⁺)·z ,
 
-    with ``∂(J⁺)`` the bare pseudoinverse-map derivative (:func:`_pinv_map_grad`)."""
+    with ``∂(Q⁺)`` the pseudoinverse-map derivative (:func:`_pinv_map_grad`) of the **gauge frame**.
+    The **default `immersion` gauge** (``Q = J``) reproduces ``project(dz) + ∂(J⁺)·z`` exactly."""
     dz = _dd(z, ctx)
     frozen = None if isinstance(dz, Zero) else Project(dz, sub)
     J = _subspace_defining_map(sub)
     if J is not None and _depends_on_x(J, ctx):
         dJ = _dd(J, ctx)
         if not isinstance(dJ, Zero):
-            realiz = Eval(_pinv_map_grad(J, dJ), (0,), (z,))
+            q, dq = _gauge_frame(J, dJ, ctx)  # gauge frame + its motion (default: immersion Q=J)
+            realiz = Eval(_pinv_map_grad(q, dq), (0,), (z,))
             return _sum([p for p in (frozen, realiz) if p is not None], e, ctx)
     return frozen if frozen is not None else _zero(e, ctx)
 

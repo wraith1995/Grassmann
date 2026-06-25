@@ -256,6 +256,48 @@ def test_sqrt_spd_map_derivative() -> None:
     _fd_marked_map(e, x, J, DJ, base, Jv, rng.standard_normal((3, 3, 3)), rng.standard_normal(3))
 
 
+def test_polar_gauge_engages_and_is_correct() -> None:
+    # P0 gauge mechanism: the subspace gauge is read by `diff` only (`represent` untouched).
+    # (1) default `immersion` ⇒ realization has no Sqrt (byte-identical to before); registering
+    #     `polar` for J ⇒ the realization is Sqrt-bearing (Q = J·G^{-1/2}).
+    # (2) the polar realization formula dQ·(Q⁺·embed v) is FD-correct — checked through the explicit
+    #     polar frame, since `represent` has no polar frame for the structural Embed yet.
+    from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
+
+    rng = np.random.default_rng(11)
+    Rt, Re = S.base("Rt", 3), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    imgJ = S.img(J)
+    x = T.var("x", Rt)
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+    clear_subspace_gauges()
+    try:
+        assert "Sqrt" not in repr(diff(e, x, deps={v.uid: Dv, J.uid: DJ}))  # immersion default
+        set_subspace_gauge(J, "polar")
+        assert "Sqrt" in repr(diff(e, x, deps={v.uid: Dv, J.uid: DJ}))  # polar engaged
+    finally:
+        clear_subspace_gauges()
+    # (2) the polar frame Q = J·G^{-1/2}, differentiated, FD-matches (explicit form):
+    u = T.var("u", Rt)
+    gram = T.Compose(T.Dagger(J), (0,), (J,))
+    Q = T.Compose(J, (0,), (T.Pinv(T.Sqrt(gram)),))
+    ep = T.Eval(w, (0,), (T.Eval(Q, (0,), (u,)),))
+    jac = diff(ep, x, deps={J.uid: DJ})
+    seed = jac.vars[0]
+    Jv, DJv = rng.standard_normal((3, 3)), rng.standard_normal((3, 3, 3))
+    wv, uv, hv = rng.standard_normal(3), rng.standard_normal(3), rng.standard_normal(3)
+    base = {f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"w_{w.uid}": wv, f"u_{u.uid}": uv}
+    jh = _run(jac.body, {**base, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**base, f"x_{x.uid}": hv})
+    fp = _run(ep, {**base, f"J_{J.uid}": Jv + 1e-6 * dJh})
+    fm = _run(ep, {**base, f"J_{J.uid}": Jv - 1e-6 * dJh})
+    np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+
 def test_gauss_decomposition_of_embed() -> None:
     # embed IS di (the pushforward of the embedding i).  Differentiating it term→term gives the
     # second covariant derivative ∇di, which obeys the Gauss formula
