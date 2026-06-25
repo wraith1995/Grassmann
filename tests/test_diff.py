@@ -2097,6 +2097,76 @@ def test_noninj_img_gauge_second_order_embed_fd() -> None:
     np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
 
 
+def test_noninj_img_gauge_third_order_embed_fd() -> None:
+    # 3rd-order embed through a moving NON-injective Img(J), same "stable region" construction: M,N
+    # LINEAR in x ⇒ J = M·N is degree-2 ⇒ the J-derivative tower is finite & EXACT to ALL orders
+    # (D³J≡0), so ffs_gauge_feed's Taylor reconstruction is EXACTLY rank-r at every step — no drift.
+    # But the SVD frame Q(J) is NONLINEAR, so its 3rd derivative ∂³Q is real & nonzero: this exercises
+    # the tower walking to depth 3 over the rank-deficient SVD frame.  diff³ in the DEFAULT (SVD)
+    # ProjectedBasis, FD vs the Richardson _third_central whose J-perturbation uses Jval_of(±s·h) (the
+    # EXACT rank-r geometry).  Matches SHARPLY (rtol/atol=1e-4) — no rank drift even at 3rd order.
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import (
+        clear_subspace_gauges,
+        ffs_gauge_feed,
+        set_subspace_gauge,
+    )
+
+    rng = np.random.default_rng(520)
+    Rt, Re, J, sub, x, DJ, Jv, DJv, D2Jv, Jval_of, hv, Rtd, Red, r = _noninj_img_world(rng)
+    D2J = T.var("D2J", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), Re))
+    D3J = T.var("D3J", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), S.dual(Rt), Re))
+    D3Jv = np.zeros((Rtd, Rtd, Rtd, Rtd, Red))  # J is degree-2 ⇒ D³J ≡ 0 (the tower var must exist)
+    v = T.var("v", sub)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), sub))
+    D2v = T.var("D2v", S.oprod(S.dual(Rt), S.dual(Rt), sub))
+    D3v = T.var("D3v", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), sub))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+    vv = rng.standard_normal(r)
+    Dvv = rng.standard_normal((Rtd, r))
+    D2vv = _sym(rng.standard_normal((Rtd, Rtd, r)), 2)
+    D3vv = _sym(rng.standard_normal((Rtd, Rtd, Rtd, r)), 3)
+    wv = rng.standard_normal(Red)
+    dval = rng.standard_normal(Rtd)
+    feed = {
+        f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"D2J_{D2J.uid}": D2Jv, f"D3J_{D3J.uid}": D3Jv,
+        f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"D2v_{D2v.uid}": D2vv, f"D3v_{D3v.uid}": D3vv,
+        f"w_{w.uid}": wv,
+    }
+
+    def runp(t, ff):
+        return np.asarray(represent(t).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "qr")
+    deps1 = {v.uid: Dv, J.uid: DJ}
+    deps2 = {**deps1, Dv.uid: D2v, DJ.uid: D2J}
+    deps3 = {**deps2, D2v.uid: D3v, D2J.uid: D3J}
+    try:
+        H = diff(diff(diff(e, x, deps1), x, deps2), x, deps3)
+        extra = ffs_gauge_feed(sub, [DJ, D2J, D3J], feed)
+    finally:
+        clear_subspace_gauges()
+    h3, h2, h1 = H.vars[0], H.body.vars[0], H.body.body.vars[0]
+    body = H.body.body.body
+    got = runp(body, {
+        **feed, **extra,
+        f"{h3.name}_{h3.uid}": dval, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval,
+    })
+
+    def perturb(s):  # EXACT rank-r J(x₀+s·dval) via Jval_of; v Taylored to 3rd order.
+        dv = (
+            s * np.einsum("ak,a->k", Dvv, dval)
+            + 0.5 * s * s * np.einsum("abk,a,b->k", D2vv, dval, dval)
+            + (s ** 3 / 6.0) * np.einsum("abck,a,b,c->k", D3vv, dval, dval, dval)
+        )
+        return {**feed, f"J_{J.uid}": Jval_of(s * dval), f"v_{v.uid}": vv + dv}
+
+    fd3 = _third_central(runp, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd3), rtol=1e-4, atol=1e-4)
+
+
 def test_noninj_img_immersion_gauge_raises() -> None:
     # The closed-form immersion/polar gauges assume an INJECTIVE immersion (full column rank).  For a
     # non-injective Img(J) they have no valid frame (Img realizes in the SVD frame) — diff must raise a
