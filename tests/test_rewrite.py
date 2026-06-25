@@ -128,6 +128,29 @@ def test_eta_not_applied_when_f_uses_var() -> None:
     assert simplify(node) == node
 
 
+def test_lam_alpha_canon_and_eta() -> None:
+    # Complete α-canon of the non-linear Lam binder (names + SPACE/NAT refs) — so Lam-η falls out
+    # of β + α (NEval(Lam,…) β-reduces, then the rebinding is α-equal to the function).
+    from grassmann.core import kinds as K
+    from grassmann.transform.rewrite import alpha_canon
+
+    V = S.base("V", 2)
+    gb = T.var("gb", V)
+    g = T.Lam((("b", K.SpaceSort(V)),), T.OPlusV((gb, gb)), (gb,))  # λ b:V. b⊕b
+    a = T.var("a", V)
+    eta = T.Lam((("a", K.SpaceSort(V)),), T.NEval(g, (0,), (a,)), (a,))  # λ a. g(a)
+    assert alpha_canon(simplify(eta)) == alpha_canon(g)
+
+
+def test_spacefunction_alpha_equivalence() -> None:
+    from grassmann.transform.rewrite import alpha_canon
+
+    sf1 = G.spacefn(lambda al: al & al).node  # λα. α⊕α
+    sf2 = G.spacefn(lambda be: be & be).node  # same, different binder name
+    assert sf1 != sf2  # raw: binder names differ
+    assert alpha_canon(sf1) == alpha_canon(sf2)  # α-canonical
+
+
 def test_beta_eval_partial_application() -> None:
     V = S.base("V", 2)
     a, b = T.var("a", V), T.var("b", V)
