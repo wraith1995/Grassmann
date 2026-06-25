@@ -908,6 +908,38 @@ def rule_trace_identity(node: Term) -> Term | None:
     return Lit(float(d)) if d is not None else None
 
 
+def _map_arity(t: Term) -> int | None:
+    """Number of top tensor factors of ``t``'s space (1 for a non-⊗), or ``None`` if untypable."""
+    from grassmann.core.space import OProd
+
+    sp = _space(t)
+    if sp is None:
+        return None
+    return len(sp.spaces) if isinstance(sp, OProd) else 1
+
+
+def rule_trace_kron(node: Term) -> Term | None:
+    """``tr(f⊗g) → tr(f)·tr(g)`` — the full trace of a Kronecker product factors into the product
+    of the full traces. Fires only on the full trace (``{i,j} == {0,1}``) of a ``Kron`` of two
+    simple (2-factor) maps; value-exact."""
+    if not isinstance(node, Trace) or not isinstance(node.f, Kron):
+        return None
+    if {node.i, node.j} != {0, 1}:
+        return None
+    f, g = node.f.f, node.f.g
+    if _map_arity(f) != 2 or _map_arity(g) != 2:
+        return None
+    return Scale(Trace(f, 1, 0), Trace(g, 1, 0))
+
+
+def rule_invlift_noop(node: Term) -> Term | None:
+    """``InvLift(v, (i,), k) → v`` — fusing a single factor in place is a no-op (value-exact).
+    (``Lift`` of a single factor is *not* a no-op — it re-wraps the dual — so it is left alone.)"""
+    if isinstance(node, InvLift) and len(node.fused) == 1 and node.k in (None, node.fused[0]):
+        return node.vector
+    return None
+
+
 def rule_permute(node: Term) -> Term | None:
     """Collapse reshape ``Permute`` corrections: an identity permutation vanishes, and two
     nested permutations compose. Value-exact (a permutation of tensor axes). Keeps the
@@ -1214,6 +1246,8 @@ _CLEANUP_RULES: tuple[Rule, ...] = (
     rule_inverse_compose,
     rule_kron,
     rule_trace_identity,
+    rule_trace_kron,
+    rule_invlift_noop,
     rule_project_embed,
     rule_permute,
     rule_tuplepermute,
