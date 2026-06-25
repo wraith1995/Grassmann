@@ -970,6 +970,22 @@ def test_trace_of_identity_is_dimension() -> None:
     assert simplify(T.Trace(T.Identity(S.oprod(A, B)), 1, 0)) == T.Lit(6.0)  # |A⊗B| = 6
 
 
+def test_trace_of_kron_factors() -> None:
+    A, B = S.base("A", 2), S.base("B", 3)
+    f, g = T.var("f", S.linear_map_space(A, A)), T.var("g", S.linear_map_space(B, B))
+    # tr(f⊗g) → tr(f)·tr(g)
+    out = simplify(T.Trace(T.Kron(f, g), 1, 0))
+    assert out == T.Scale(T.Trace(f, 1, 0), T.Trace(g, 1, 0))
+    feed = {_key(f): np.array([[1.0, 2.0], [3.0, 4.0]]), _key(g): np.arange(9.0).reshape(3, 3)}
+    _same(T.Trace(T.Kron(f, g), 1, 0), out, feed)
+
+
+def test_invlift_single_factor_noop() -> None:
+    A, B = S.base("A", 2), S.base("B", 3)
+    v = T.var("v", S.oprod(S.dual(A), B))
+    assert simplify(T.InvLift(v, (0,))) == v  # fusing one factor in place is a no-op
+
+
 def test_normal_form_is_idempotent() -> None:
     V, W = S.base("V", 2), S.base("W", 3)
     f = T.var("f", S.linear_map_space(V, W))
