@@ -955,3 +955,180 @@ def test_normal_form_is_idempotent() -> None:
     once = normal_form(term)
     twice = normal_form(once)
     assert once == twice
+
+
+# ===========================================================================
+# Scalar-polynomial normal form (canon_scalars): a Sum of monomials c·∏atomᵢ,
+# atoms = scalar Var / scalar Eval (dot product) / non-linear External, opaque.
+# ===========================================================================
+
+
+def _scfg():
+    from grassmann.transform.rewrite import SoPConfig
+
+    return SoPConfig(canon_scalars=True)
+
+
+def _sqrt(u: T.Term) -> T.External:
+    """√u as a non-linear scalar ``External`` (the opaque-atom case)."""
+    from grassmann.lower.represent import ExternalOp
+
+    return T.External(S.Scalar(), ExternalOp("sqrt", np.sqrt), (u,))
+
+
+def test_scalar_poly_distributes_and_collects() -> None:
+    cfg = _scfg()
+    a, b, c = T.var("a", S.Scalar()), T.var("b", S.Scalar()), T.var("c", S.Scalar())
+    feed = {_key(a): np.array(2.0), _key(b): np.array(3.0), _key(c): np.array(5.0)}
+    # a·(b+c) distributes to a flat, normalized, value-exact sum of products.
+    term = T.Scale(a, T.Sum((b, c)))
+    nf = sum_of_products(term, cfg)
+    assert isinstance(nf, T.Sum) and len(nf.vectors) == 2
+    assert is_normalized_sop(nf, cfg)
+    assert sum_of_products(nf, cfg) == nf  # idempotent
+    _same(term, nf, feed)
+
+
+def test_scalar_poly_like_monomials_collect() -> None:
+    cfg = _scfg()
+    a, b = T.var("a", S.Scalar()), T.var("b", S.Scalar())
+    feed = {_key(a): np.array(2.0), _key(b): np.array(3.0)}
+    # a·b + b·a → 2·(a·b) : commuted products are the SAME monomial, collected.
+    term = T.Sum((T.Scale(a, b), T.Scale(b, a)))
+    nf = sum_of_products(term, cfg)
+    assert nf == T.Scale(2.0, T.Scale(a, b))
+    assert is_normalized_sop(nf, cfg)
+    _same(term, nf, feed)
+
+
+def test_scalar_poly_numeric_coeffs_fold() -> None:
+    cfg = _scfg()
+    a, b = T.var("a", S.Scalar()), T.var("b", S.Scalar())
+    # 2·a·3·b → 6·(a·b) ; numerics fold into one front coefficient, symbols sort.
+    nf = sum_of_products(T.Scale(2.0, T.Scale(a, T.Scale(3.0, b))), cfg)
+    assert nf == T.Scale(6.0, T.Scale(a, b))
+    assert is_normalized_sop(nf, cfg)
+
+
+def test_scalar_poly_square_cross_spelling_equal() -> None:
+    cfg = _scfg()
+    a, b = T.var("a", S.Scalar()), T.var("b", S.Scalar())
+    feed = {_key(a): np.array(2.0), _key(b): np.array(3.0)}
+    # (a+b)² and a² + 2ab + b² must reach the IDENTICAL canonical term.
+    lhs = T.Scale(T.Sum((a, b)), T.Sum((a, b)))
+    rhs = T.Sum((T.Scale(a, a), T.Scale(2.0, T.Scale(a, b)), T.Scale(b, b)))
+    n1, n2 = sum_of_products(lhs, cfg), sum_of_products(rhs, cfg)
+    assert n1 == n2
+    assert is_normalized_sop(n1, cfg)
+    assert sum_of_products(n1, cfg) == n1
+    _same(lhs, n1, feed)
+
+
+def test_scalar_poly_power_collects() -> None:
+    cfg = _scfg()
+    a = T.var("a", S.Scalar())
+    # a·a stays a product of two equal atoms (a² is NOT a new atom); a·a + a·a → 2·(a·a).
+    aa = sum_of_products(T.Scale(a, a), cfg)
+    assert aa == T.Scale(a, a)
+    assert is_normalized_sop(aa, cfg)
+    nf = sum_of_products(T.Sum((T.Scale(a, a), T.Scale(a, a))), cfg)
+    assert nf == T.Scale(2.0, T.Scale(a, a))
+    assert is_normalized_sop(nf, cfg)
+    # a + a·a : two DISTINCT atoms (a vs a·a) — both survive, neither merges into the other.
+    mixed = sum_of_products(T.Sum((a, T.Scale(a, a))), cfg)
+    assert isinstance(mixed, T.Sum) and len(mixed.vectors) == 2
+    assert is_normalized_sop(mixed, cfg)
+
+
+def test_scalar_poly_nonlinear_external_is_opaque_atom() -> None:
+    cfg = _scfg()
+    a, b = T.var("a", S.Scalar()), T.var("b", S.Scalar())
+    feed = {_key(a): np.array(2.0), _key(b): np.array(3.0)}
+    sa = _sqrt(a)  # √a : a single non-linear-External atom (reused object)
+    # √a + √a → 2·√a (√a is an atom that collects).
+    nf = sum_of_products(T.Sum((sa, sa)), cfg)
+    assert nf == T.Scale(2.0, sa)
+    assert is_normalized_sop(nf, cfg)
+    # √a · √a stays a PRODUCT of two identical atoms — NOT simplified to a.
+    prod = sum_of_products(T.Scale(sa, sa), cfg)
+    assert prod == T.Scale(sa, sa)  # opaque: no sqrt(x)·sqrt(x)→x identity
+    assert is_normalized_sop(prod, cfg)
+    _same(T.Scale(sa, sa), prod, feed)
+
+
+def test_scalar_poly_external_args_normalized() -> None:
+    cfg = _scfg()
+    a = T.var("a", S.Scalar())
+    feed = {_key(a): np.array(2.0)}
+    # The ARGUMENT of a non-linear op is normalized (a+a → 2·a) even though the op is opaque.
+    term = _sqrt(T.Sum((a, a)))
+    nf = sum_of_products(term, cfg)
+    assert nf == _sqrt(T.Scale(2.0, a))
+    assert is_normalized_sop(nf, cfg)
+    _same(term, nf, feed)
+
+
+def test_scalar_poly_dot_products_are_atoms() -> None:
+    cfg = _scfg()
+    V = S.base("V", 2)
+    x, y = T.var("x", V), T.var("y", V)
+    c, d = T.var("c", S.dual(V)), T.var("d", S.dual(V))
+    dx, dy = T.Eval(c, (0,), (x,)), T.Eval(d, (0,), (y,))  # two dot-product atoms
+    feed = {
+        _key(x): np.array([1.0, 2.0]), _key(y): np.array([5.0, 6.0]),
+        _key(c): np.array([3.0, 4.0]), _key(d): np.array([1.0, 7.0]),
+    }
+    # ⟨c,x⟩·⟨c,x⟩ stays a product of two equal atoms; the sum collects to 2·that.
+    sq = sum_of_products(T.Scale(dx, dx), cfg)
+    assert sq == T.Scale(dx, dx)
+    assert is_normalized_sop(sq, cfg)
+    coll = sum_of_products(T.Sum((T.Scale(dx, dx), T.Scale(dx, dx))), cfg)
+    assert coll == T.Scale(2.0, T.Scale(dx, dx))
+    # cross-spelling: ⟨c,x⟩·⟨d,y⟩ == ⟨d,y⟩·⟨c,x⟩.
+    assert sum_of_products(T.Scale(dx, dy), cfg) == sum_of_products(T.Scale(dy, dx), cfg)
+    _same(T.Scale(dx, dy), sum_of_products(T.Scale(dx, dy), cfg), feed)
+
+
+def test_scalar_poly_mixed_atoms_cross_spelling() -> None:
+    cfg = _scfg()
+    V = S.base("V", 2)
+    x = T.var("x", V)
+    c = T.var("c", S.dual(V))
+    dx = T.Eval(c, (0,), (x,))
+    a, b = T.var("a", S.Scalar()), T.var("b", S.Scalar())
+    feed = {
+        _key(x): np.array([1.0, 2.0]), _key(c): np.array([3.0, 4.0]),
+        _key(a): np.array(2.0), _key(b): np.array(3.0),
+    }
+    # (a+⟨c,x⟩)·(b+a) expanded two ways must agree, and stay value-exact.
+    lhs = T.Scale(T.Sum((a, dx)), T.Sum((b, a)))
+    rhs = T.Sum((T.Scale(a, b), T.Scale(a, a), T.Scale(dx, b), T.Scale(dx, a)))
+    n1, n2 = sum_of_products(lhs, cfg), sum_of_products(rhs, cfg)
+    assert n1 == n2
+    assert is_normalized_sop(n1, cfg)
+    _same(lhs, n1, feed)
+
+
+def test_scalar_poly_cube_no_runaway() -> None:
+    cfg = _scfg()
+    a, b, c = T.var("a", S.Scalar()), T.var("b", S.Scalar()), T.var("c", S.Scalar())
+    feed = {_key(a): np.array(2.0), _key(b): np.array(3.0), _key(c): np.array(5.0)}
+    s = T.Sum((a, b, c))
+    cube = T.Scale(s, T.Scale(s, s))  # (a+b+c)³ — stresses distribute/collect/sort
+    nf = sum_of_products(cube, cfg)  # must terminate (no RewriteError)
+    assert isinstance(nf, T.Sum) and len(nf.vectors) == 10  # multinomial monomials
+    assert is_normalized_sop(nf, cfg)
+    assert sum_of_products(nf, cfg) == nf
+    _same(cube, nf, feed)
+
+
+def test_scalar_poly_atom_not_recognized_without_flag() -> None:
+    # With canon_scalars OFF, a scalar PRODUCT is not a valid monomial atom — the predicate
+    # must stay conservative so DEFAULT_SOP is unchanged.
+    from grassmann.transform.rewrite import DEFAULT_SOP, _is_monomial
+
+    a, b = T.var("a", S.Scalar()), T.var("b", S.Scalar())
+    mono = T.Scale(2.0, T.Scale(a, b))
+    assert not _is_monomial(mono, False)  # default: scalar product is not an atom
+    assert _is_monomial(mono, True)  # canon_scalars: it is
+    assert not is_normalized_sop(mono, DEFAULT_SOP)
