@@ -298,6 +298,70 @@ def test_polar_gauge_engages_and_is_correct() -> None:
     np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
 
 
+def test_qr_gauge_opaque_matches_projectedbasis_fd() -> None:
+    # The OPAQUE qr gauge: supply Q (the QR frame) and ∂Q/∂x as program-backed variables; `diff`
+    # forms dQ = (∂Q/∂x)·h exactly like any marked variable.  Then diff(embed) realized in the
+    # DEFAULT ProjectedBasis (QR) FD-matches — i.e. carrying the *matching* (opaque) QR connection
+    # FIXES the basis the immersion gauge gets wrong (the 0.286-vs-1.900 case).  `represent` is
+    # untouched: the opaque dQ is a fed variable.
+    from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
+
+    def qr_pos(M):
+        q, r = np.linalg.qr(M)
+        s = np.sign(np.diag(r))
+        s[s == 0] = 1.0
+        return q * s
+
+    rng = np.random.default_rng(7)
+    Rt, Re = S.base("Rt", 3), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    imgJ = S.img(J)
+    x = T.var("x", Rt)
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    w = T.var("w", S.dual(Re))
+    Qv = T.var("Qfr", S.oprod(S.dual(Rt), Re), props=G.bij)  # opaque QR frame Q : Rt ⊸ Re
+    DQv = T.var("DQfr", S.oprod(S.dual(Rt), S.dual(Rt), Re))  # ∂Q/∂x : Rt ⊸ (Rt ⊸ Re)
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+
+    Jv = rng.standard_normal((3, 3))
+    vv, Dvv = rng.standard_normal(3), rng.standard_normal((3, 3))
+    DJv = rng.standard_normal((3, 3, 3))
+    wv, hv = rng.standard_normal(3), rng.standard_normal(3)
+    jm = Jv.T  # immersion columns in ambient
+    q_amb = qr_pos(jm)  # (Re, Rt) ambient orthonormal frame; grassmann embed(v∘) = q_amb·v∘
+    qval = q_amb.T  # grassmann map (Rt, Re):  Eval(Qv, v∘) = q_amb·v∘
+    dqval = np.zeros((3, 3, 3))  # ∂Q/∂x[a] via FD of qr along DJ[a]; stored (a, Rt, Re)
+    for a in range(3):
+        dja = DJv[a].T
+        dq_amb = (qr_pos(jm + 1e-6 * dja) - qr_pos(jm - 1e-6 * dja)) / 2e-6
+        dqval[a] = dq_amb.T
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "qr", frame=Qv, frame_deriv=DQv)
+    try:
+        jac = diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+    finally:
+        clear_subspace_gauges()
+    seed = jac.vars[0]
+    base = {
+        f"J_{J.uid}": Jv, f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"DJ_{DJ.uid}": DJv,
+        f"w_{w.uid}": wv, f"Qfr_{Qv.uid}": qval, f"DQfr_{DQv.uid}": dqval,
+    }
+    # sanity: the supplied frame Q matches grassmann's ProjectedBasis — Q⁺·embed(v) recovers v's
+    # coordinates vv (so dQ·(Q⁺·embed v) is the matching QR connection).
+    np.testing.assert_allclose(
+        _run(T.Eval(T.Pinv(Qv), (0,), (T.embed(v, Re),)), base), vv, atol=1e-9,
+    )
+    jh = _run(jac.body, {**base, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**base, f"x_{x.uid}": hv})
+    dvh = _run(T.Eval(Dv, (0,), (x,)), {**base, f"x_{x.uid}": hv})
+    fp = _run(e, {**base, f"J_{J.uid}": Jv + 1e-6 * dJh, f"v_{v.uid}": vv + 1e-6 * dvh})
+    fm = _run(e, {**base, f"J_{J.uid}": Jv - 1e-6 * dJh, f"v_{v.uid}": vv - 1e-6 * dvh})
+    np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+
 def test_gauss_decomposition_of_embed() -> None:
     # embed IS di (the pushforward of the embedding i).  Differentiating it term→term gives the
     # second covariant derivative ∇di, which obeys the Gauss formula

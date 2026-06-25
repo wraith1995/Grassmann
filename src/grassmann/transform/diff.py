@@ -358,14 +358,23 @@ def _subspace_defining_map(space: Space) -> Term | None:
 # (``Q = J``, ``dQ = ∂J``) makes the arms byte-identical to the prior behavior.  ``polar``
 # (``Q = J·G^{-1/2}``, via the SPD ``Sqrt`` primitive) is the closed-form orthonormal gauge.  An
 # opaque (e.g. QR) gauge — ``dQ`` supplied as a program-backed variable — is a later phase (P2).
-_SUBSPACE_GAUGE: dict[int, str] = {}
+# uid -> (gauge_name, frame, frame_deriv).  frame/frame_deriv are used only by OPAQUE gauges (qr/…).
+_SUBSPACE_GAUGE: dict[int, tuple[str, Term | None, Term | None]] = {}
 _DEFAULT_GAUGE = "immersion"
 
 
-def set_subspace_gauge(defining_map: Term, gauge: str) -> None:
-    """Register the AD gauge (``"immersion"`` | ``"polar"``) for the moving subspace defined by
-    ``defining_map`` (a ``Var``).  Read by ``diff`` only; ``represent`` is unaffected."""
-    _SUBSPACE_GAUGE[defining_map.uid] = gauge
+def set_subspace_gauge(
+    defining_map: Term, gauge: str, *, frame: Term | None = None, frame_deriv: Term | None = None,
+) -> None:
+    """Register the AD gauge for the moving subspace ``Img(defining_map)``.  Read by ``diff`` ONLY;
+    ``represent`` is unaffected.
+
+    * ``"immersion"`` (default), ``"polar"`` — closed-form frames (no extra args).
+    * ``"qr"`` / any OPAQUE gauge — pass ``frame`` (the realization frame ``Q`` as a term/var, e.g. a
+      program-backed variable holding the QR ``Q``) and ``frame_deriv`` (``∂Q/∂x`` as a map term/var,
+      e.g. the opaque QR/Stiefel frame derivative produced by a program).  ``diff`` forms the
+      directional ``dQ = (∂Q/∂x)·h`` exactly as it does for any marked variable."""
+    _SUBSPACE_GAUGE[defining_map.uid] = (gauge, frame, frame_deriv)
 
 
 def clear_subspace_gauges() -> None:
@@ -373,25 +382,30 @@ def clear_subspace_gauges() -> None:
     _SUBSPACE_GAUGE.clear()
 
 
-def _gauge_of(J: Term) -> str:
-    uid = getattr(J, "uid", None)
-    return _SUBSPACE_GAUGE.get(uid, _DEFAULT_GAUGE) if uid is not None else _DEFAULT_GAUGE
-
-
 def _gauge_frame(J: Term, dJ: Term, ctx: _DCtx) -> tuple[Term, Term]:
     """The realization frame ``Q`` of ``Img(J)`` and its motion ``dQ`` for the subspace's gauge.
 
     ``immersion`` ⇒ ``(J, ∂J)`` (the literal immersion — byte-identical to the prior arms);
-    ``polar`` ⇒ ``(J·G^{-1/2}, ∂(J·G^{-1/2}))`` with ``G = JᵀJ`` (the symmetric/polar orthonormal
-    frame, differentiated term→term through the ``Sqrt`` primitive)."""
-    gauge = _gauge_of(J)
+    ``polar`` ⇒ ``(J·G^{-1/2}, ∂(J·G^{-1/2}))``, ``G = JᵀJ`` (symmetric orthonormal frame, via the
+    ``Sqrt`` primitive); an OPAQUE gauge (``qr``/…) ⇒ ``(frame, (∂Q/∂x)·h)`` from the supplied
+    program-backed ``frame``/``frame_deriv`` — the directional ``dQ`` is the marked-variable rule
+    ``Eval(frame_deriv, h)``, so ``represent`` sees only ordinary terms/leaves."""
+    entry = _SUBSPACE_GAUGE.get(getattr(J, "uid", None))
+    if entry is None:
+        return J, dJ  # default: immersion
+    gauge, frame, frame_deriv = entry
     if gauge == "immersion":
         return J, dJ
     if gauge == "polar":
         gram = Compose(Dagger(J), (0,), (J,))         # G = JᵀJ
         q = Compose(J, (0,), (Pinv(Sqrt(gram)),))     # Q = J·G^{-1/2}
         return q, _dd(q, ctx)
-    raise DiffError(f"diff: unknown subspace gauge {gauge!r} (expected 'immersion' or 'polar')")
+    if frame is not None and frame_deriv is not None:  # opaque gauge (qr / external)
+        return frame, Eval(frame_deriv, (0,), (ctx.h,))  # dQ = (∂Q/∂x)·h  (program-backed)
+    raise DiffError(
+        f"diff: gauge {gauge!r} has no closed form — supply frame= and frame_deriv= (the opaque "
+        f"frame Q and ∂Q/∂x) via set_subspace_gauge"
+    )
 
 
 def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
