@@ -298,6 +298,73 @@ def test_polar_gauge_engages_and_is_correct() -> None:
     np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
 
 
+def test_polar_gauge_project_fd() -> None:
+    # 1st-order PROJECT analog of the polar embed formula check.  project into Img(J) in the polar
+    # frame Q = J·G^{-1/2} is Q⁺·z (= the polar coordinates of z's tangential part).  Differentiated
+    # term→term (polar is closed-form ⇒ chain rule, NO opaque feed), FD-matches.  Built through the
+    # EXPLICIT polar frame, since `represent` has no polar basis for the structural Project.
+    rng = np.random.default_rng(12)
+    Rt, Re = S.base("Rt", 3), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    x = T.var("x", Rt)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    z = T.var("z", Re)  # ambient value to project into Img(J)
+    wc = T.var("wc", S.dual(Rt))  # covector in the polar (Rt) coordinate frame
+    gram = T.Compose(T.Dagger(J), (0,), (J,))
+    Q = T.Compose(J, (0,), (T.Pinv(T.Sqrt(gram)),))  # the explicit polar frame Q : Rt ⊸ Re
+    ep = T.Eval(wc, (0,), (T.Eval(T.Pinv(Q), (0,), (z,)),))  # ⟨wc, Q⁺·z⟩
+    jac = diff(ep, x, deps={J.uid: DJ})
+    seed = jac.vars[0]
+    Jv, DJv = rng.standard_normal((3, 3)), rng.standard_normal((3, 3, 3))
+    wcv, zv, hv = rng.standard_normal(3), rng.standard_normal(3), rng.standard_normal(3)
+    base = {f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"wc_{wc.uid}": wcv, f"z_{z.uid}": zv}
+    jh = _run(jac.body, {**base, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**base, f"x_{x.uid}": hv})
+    fp = _run(ep, {**base, f"J_{J.uid}": Jv + 1e-6 * dJh})
+    fm = _run(ep, {**base, f"J_{J.uid}": Jv - 1e-6 * dJh})
+    np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+
+def test_polar_gauge_second_order_embed_fd() -> None:
+    # 2nd-order polar embed: diff(diff(⟨w, Q·v⟩)) through the EXPLICIT polar frame Q = J·G^{-1/2}.
+    # Polar is closed-form, so the chain rule gives ALL orders with NO opaque feed (unlike the qr/SVD
+    # towers).  FD-matches a central SECOND difference.
+    rng = np.random.default_rng(13)
+    Rt, Re = S.base("Rt", 3), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    x = T.var("x", Rt)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    D2J = T.var("D2J", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), Re))
+    v = T.var("v", Rt)  # coordinates in the polar frame
+    w = T.var("w", S.dual(Re))
+    gram = T.Compose(T.Dagger(J), (0,), (J,))
+    Q = T.Compose(J, (0,), (T.Pinv(T.Sqrt(gram)),))
+    e = T.Eval(w, (0,), (T.Eval(Q, (0,), (v,)),))  # ⟨w, Q·v⟩
+    Jv = rng.standard_normal((3, 3))
+    DJv = _sym(rng.standard_normal((3, 3, 3)), 1)
+    D2Jv = _sym(rng.standard_normal((3, 3, 3, 3)), 2)
+    vv, wv = rng.standard_normal(3), rng.standard_normal(3)
+    dval = rng.standard_normal(3)
+    feed = {
+        f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"D2J_{D2J.uid}": D2Jv,
+        f"v_{v.uid}": vv, f"w_{w.uid}": wv,
+    }
+    deps1 = {J.uid: DJ}
+    deps2 = {J.uid: DJ, DJ.uid: D2J}
+    H = diff(diff(e, x, deps1), x, deps2)
+    assert isinstance(H, T.LLam) and isinstance(H.body, T.LLam)
+    h2, h1, body = H.vars[0], H.body.vars[0], H.body.body
+    got = _run(body, {**feed, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval})
+
+    def perturb(s):
+        dJ = s * np.einsum("akn,a->kn", DJv, dval) + 0.5 * s * s * np.einsum(
+            "abkn,a,b->kn", D2Jv, dval, dval)
+        return {**feed, f"J_{J.uid}": Jv + dJ}
+
+    fd2 = _second_central(_run, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
+
+
 def test_qr_gauge_opaque_matches_projectedbasis_fd() -> None:
     # The OPAQUE qr gauge: supply Q (the QR frame) and ∂Q/∂x as program-backed variables; `diff`
     # forms dQ = (∂Q/∂x)·h exactly like any marked variable.  Then diff(embed) realized in the
@@ -1589,6 +1656,234 @@ def test_ffs_gauge_ker_second_order_embed_fd() -> None:
     np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
 
 
+# kind -> (ctor, Rt_dim, Re_dim, props, δ) for the higher-order FFS tower tests.  Full-rank J (the
+# SVD frame is smooth, NO rank drift): TALL surjective for coimg/ker (4↦2, δ=2), WIDE injective for
+# coker (2↦4, δ=cod−rank=2).  Pick generic J ⇒ well-separated singular values (stable SVD ordering).
+_FFS_TOWER_CASES = {
+    "coimg": (S.coimg, 4, 2, G.surj, 2),
+    "ker": (S.ker, 4, 2, G.surj, 2),
+    "coker": (S.coker, 2, 4, G.inj, 2),
+}
+
+
+def _ffs_tower_world(rng, kind, order):
+    """A moving FFS subspace world with J's derivative tower ``[DJ, …, D^order J]`` (FULL-rank chart
+    so the SVD frame is smooth), plus base values (J & each D^mJ symmetric in the differentiation
+    axes).  Mirrors :func:`_qr_world` but for the SVD-framed CoImg/Ker/CoKer kinds."""
+    ctor, Rtd, Red, props, delta = _FFS_TOWER_CASES[kind]
+    Rt, Re = S.base("Rt", Rtd), S.base("Re", Red)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=props)
+    sub = ctor(J)
+    x = T.var("x", Rt)
+    names = ["DJ"] + [f"D{m}J" for m in range(2, order + 1)]
+    DJtower = [
+        T.var(names[m - 1], S.oprod(*([S.dual(Rt)] * (m + 1)), Re)) for m in range(1, order + 1)
+    ]
+    Jv = rng.standard_normal((Rtd, Red))
+    DJvtower = [
+        _sym(rng.standard_normal((*([Rtd] * (m + 1)), Red)), m) for m in range(1, order + 1)
+    ]
+    return Rt, Re, J, sub, x, DJtower, Jv, DJvtower, Rtd, Red, delta
+
+
+@pytest.mark.parametrize("kind", list(_FFS_TOWER_CASES))
+def test_ffs_gauge_second_order_embed_fd(kind) -> None:
+    # 2nd-order FFS AD: diff(diff(embed)) through a MOVING CoImg/Ker/CoKer(J), value in the DEFAULT
+    # (SVD) ProjectedBasis, the self-differentiating frame tower [DJ, D2J] fed via ffs_gauge_feed —
+    # FD-matches a central SECOND difference.  Generalizes the ker-only embed case to all three SVD
+    # frames and both orders, proving the tower extends past the QR (Img) frame.
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import (
+        clear_subspace_gauges,
+        ffs_gauge_feed,
+        set_subspace_gauge,
+    )
+
+    rng = np.random.default_rng(909 + len(kind))
+    Rt, Re, J, sub, x, (DJ, D2J), Jv, (DJv, D2Jv), Rtd, Red, delta = _ffs_tower_world(rng, kind, 2)
+    amb = Rt if kind in ("coimg", "ker") else Re
+    amb_dim = Rtd if kind in ("coimg", "ker") else Red
+    v = T.var("v", sub)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), sub))
+    D2v = T.var("D2v", S.oprod(S.dual(Rt), S.dual(Rt), sub))
+    w = T.var("w", S.dual(amb))
+    e = T.Eval(w, (0,), (T.embed(v, amb),))
+    vv = rng.standard_normal(delta)
+    Dvv = rng.standard_normal((Rtd, delta))
+    D2vv = _sym(rng.standard_normal((Rtd, Rtd, delta)), 2)
+    wv = rng.standard_normal(amb_dim)
+    dval = rng.standard_normal(Rtd)
+    feed = {
+        f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"D2J_{D2J.uid}": D2Jv,
+        f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"D2v_{D2v.uid}": D2vv, f"w_{w.uid}": wv,
+    }
+
+    def runp(t, ff):
+        return np.asarray(represent(t).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "qr")
+    deps1 = {v.uid: Dv, J.uid: DJ}
+    deps2 = {v.uid: Dv, J.uid: DJ, Dv.uid: D2v, DJ.uid: D2J}
+    try:
+        H = diff(diff(e, x, deps1), x, deps2)
+        extra = ffs_gauge_feed(sub, [DJ, D2J], feed)
+    finally:
+        clear_subspace_gauges()
+    assert isinstance(H, T.LLam) and isinstance(H.body, T.LLam)
+    h2, h1, body = H.vars[0], H.body.vars[0], H.body.body
+    got = runp(body, {**feed, **extra, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval})
+
+    def perturb(s):
+        dJ = s * np.einsum("akn,a->kn", DJv, dval) + 0.5 * s * s * np.einsum(
+            "abkn,a,b->kn", D2Jv, dval, dval)
+        dv = s * np.einsum("ak,a->k", Dvv, dval) + 0.5 * s * s * np.einsum(
+            "abk,a,b->k", D2vv, dval, dval)
+        return {**feed, f"J_{J.uid}": Jv + dJ, f"v_{v.uid}": vv + dv}
+
+    fd2 = _second_central(runp, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
+
+
+@pytest.mark.parametrize("kind", list(_FFS_TOWER_CASES))
+def test_ffs_gauge_second_order_project_fd(kind) -> None:
+    # 2nd-order FFS AD for PROJECT (di⁺ of the moving SVD frame) through a MOVING CoImg/Ker/CoKer(J),
+    # value in the DEFAULT ProjectedBasis, tower [DJ, D2J] fed via ffs_gauge_feed — FD-matches a
+    # central SECOND difference.
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import (
+        clear_subspace_gauges,
+        ffs_gauge_feed,
+        set_subspace_gauge,
+    )
+
+    rng = np.random.default_rng(1009 + len(kind))
+    Rt, Re, J, sub, x, (DJ, D2J), Jv, (DJv, D2Jv), Rtd, Red, delta = _ffs_tower_world(rng, kind, 2)
+    amb = Rt if kind in ("coimg", "ker") else Re
+    amb_dim = Rtd if kind in ("coimg", "ker") else Red
+    z = T.var("z", amb)  # ambient value to project into the subspace
+    Dz = T.var("Dz", S.oprod(S.dual(Rt), amb))
+    D2z = T.var("D2z", S.oprod(S.dual(Rt), S.dual(Rt), amb))
+    wc = T.var("wc", S.dual(sub))
+    e = T.Eval(wc, (0,), (T.project(z, sub),))
+    zv = rng.standard_normal(amb_dim)
+    Dzv = rng.standard_normal((Rtd, amb_dim))
+    D2zv = _sym(rng.standard_normal((Rtd, Rtd, amb_dim)), 2)
+    wcv = rng.standard_normal(delta)
+    dval = rng.standard_normal(Rtd)
+    feed = {
+        f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"D2J_{D2J.uid}": D2Jv,
+        f"z_{z.uid}": zv, f"Dz_{Dz.uid}": Dzv, f"D2z_{D2z.uid}": D2zv, f"wc_{wc.uid}": wcv,
+    }
+
+    def runp(t, ff):
+        return np.asarray(represent(t).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "qr")
+    deps1 = {z.uid: Dz, J.uid: DJ}
+    deps2 = {z.uid: Dz, J.uid: DJ, Dz.uid: D2z, DJ.uid: D2J}
+    try:
+        H = diff(diff(e, x, deps1), x, deps2)
+        extra = ffs_gauge_feed(sub, [DJ, D2J], feed)
+    finally:
+        clear_subspace_gauges()
+    assert isinstance(H, T.LLam) and isinstance(H.body, T.LLam)
+    h2, h1, body = H.vars[0], H.body.vars[0], H.body.body
+    got = runp(body, {**feed, **extra, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval})
+
+    def perturb(s):
+        dJ = s * np.einsum("akn,a->kn", DJv, dval) + 0.5 * s * s * np.einsum(
+            "abkn,a,b->kn", D2Jv, dval, dval)
+        dz = s * np.einsum("ak,a->k", Dzv, dval) + 0.5 * s * s * np.einsum(
+            "abk,a,b->k", D2zv, dval, dval)
+        return {**feed, f"J_{J.uid}": Jv + dJ, f"z_{z.uid}": zv + dz}
+
+    fd2 = _second_central(runp, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
+
+
+@pytest.mark.parametrize("kind", ["coimg"])
+def test_ffs_gauge_third_order_embed_fd(kind) -> None:
+    # THIRD-order SVD-framed FFS AD — proves the tower extends past QR to the SVD frames at 3rd order.
+    # Mirrors test_qr_gauge_third_order_embed_fd exactly (Richardson _third_central, tight rtol/atol
+    # 1e-4).  Small subspace (surj 3↦2, δ=2) to keep the 3rd-derivative tensors cheap.
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import (
+        clear_subspace_gauges,
+        ffs_gauge_feed,
+        set_subspace_gauge,
+    )
+
+    rng = np.random.default_rng(1111)
+    Rtd, Red, delta = 3, 2, 2
+    Rt, Re = S.base("Rt", Rtd), S.base("Re", Red)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.surj)
+    sub = S.coimg(J) if kind == "coimg" else S.ker(J)
+    x = T.var("x", Rt)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    D2J = T.var("D2J", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), Re))
+    D3J = T.var("D3J", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), S.dual(Rt), Re))
+    Jv = rng.standard_normal((Rtd, Red))
+    DJv = _sym(rng.standard_normal((Rtd, Rtd, Red)), 1)
+    D2Jv = _sym(rng.standard_normal((Rtd, Rtd, Rtd, Red)), 2)
+    D3Jv = _sym(rng.standard_normal((Rtd, Rtd, Rtd, Rtd, Red)), 3)
+
+    v = T.var("v", sub)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), sub))
+    D2v = T.var("D2v", S.oprod(S.dual(Rt), S.dual(Rt), sub))
+    D3v = T.var("D3v", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), sub))
+    w = T.var("w", S.dual(Rt))
+    e = T.Eval(w, (0,), (T.embed(v, Rt),))
+    vv = rng.standard_normal(delta)
+    Dvv = rng.standard_normal((Rtd, delta))
+    D2vv = _sym(rng.standard_normal((Rtd, Rtd, delta)), 2)
+    D3vv = _sym(rng.standard_normal((Rtd, Rtd, Rtd, delta)), 3)
+    wv = rng.standard_normal(Rtd)
+    dval = rng.standard_normal(Rtd)
+    feed = {
+        f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"D2J_{D2J.uid}": D2Jv, f"D3J_{D3J.uid}": D3Jv,
+        f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"D2v_{D2v.uid}": D2vv, f"D3v_{D3v.uid}": D3vv,
+        f"w_{w.uid}": wv,
+    }
+
+    def runp(t, ff):
+        return np.asarray(represent(t).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "qr")
+    deps1 = {v.uid: Dv, J.uid: DJ}
+    deps2 = {**deps1, Dv.uid: D2v, DJ.uid: D2J}
+    deps3 = {**deps2, D2v.uid: D3v, D2J.uid: D3J}
+    try:
+        H = diff(diff(diff(e, x, deps1), x, deps2), x, deps3)
+        extra = ffs_gauge_feed(sub, [DJ, D2J, D3J], feed)
+    finally:
+        clear_subspace_gauges()
+    h3, h2, h1 = H.vars[0], H.body.vars[0], H.body.body.vars[0]
+    body = H.body.body.body
+    got = runp(body, {
+        **feed, **extra,
+        f"{h3.name}_{h3.uid}": dval, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval,
+    })
+
+    def perturb(s):
+        dJ = (
+            s * np.einsum("akn,a->kn", DJv, dval)
+            + 0.5 * s * s * np.einsum("abkn,a,b->kn", D2Jv, dval, dval)
+            + (s ** 3 / 6.0) * np.einsum("abckn,a,b,c->kn", D3Jv, dval, dval, dval)
+        )
+        dv = (
+            s * np.einsum("ak,a->k", Dvv, dval)
+            + 0.5 * s * s * np.einsum("abk,a,b->k", D2vv, dval, dval)
+            + (s ** 3 / 6.0) * np.einsum("abck,a,b,c->k", D3vv, dval, dval, dval)
+        )
+        return {**feed, f"J_{J.uid}": Jv + dJ, f"v_{v.uid}": vv + dv}
+
+    fd3 = _third_central(runp, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd3), rtol=1e-4, atol=1e-4)
+
+
 # ---------------------------------------------------------------------------
 # Non-injective ``Img(J)`` gauge × realized-basis FD (ffs-frame, the rank-deficient Img case).
 # For an INJECTIVE J the range frame is qr_pos(Jᵀ) (dim = dom); for a NON-injective J (``props=rank(r)``,
@@ -1627,8 +1922,15 @@ def _noninj_img_world(rng):
 
     Jv = Jval_of(np.zeros(Rtd))
     DJv = np.stack([(Md[a] @ N0 + M0 @ Nd[a]).T for a in range(Rtd)], axis=0)  # (a, k, n)
+    # M,N LINEAR in x ⇒ J = M·N is degree-2 ⇒ the tower is FINITE & EXACT: D²J is the symmetric
+    # product-rule second derivative ∂²(MN)[a,b] = Md[a]·Nd[b] + Md[b]·Nd[a] (M''=N''=0), and D³J≡0.
+    # So the feed's Taylor reconstruction is EXACTLY rank-r at every step (no §ffs-frame-drift).
+    D2Jv = np.stack(
+        [np.stack([(Md[a] @ Nd[b] + Md[b] @ Nd[a]).T for b in range(Rtd)], axis=0) for a in range(Rtd)],
+        axis=0,
+    )  # (a, b, k, n), symmetric in a↔b
     hv = rng.standard_normal(Rtd)
-    return Rt, Re, J, sub, x, DJ, Jv, DJv, Jval_of, hv, Rtd, Red, r
+    return Rt, Re, J, sub, x, DJ, Jv, DJv, D2Jv, Jval_of, hv, Rtd, Red, r
 
 
 def test_noninj_img_frame_is_svd() -> None:
@@ -1638,7 +1940,7 @@ def test_noninj_img_frame_is_svd() -> None:
     from grassmann.transform.diff import _ffs_frame_value
 
     rng = np.random.default_rng(515)
-    _Rt, Re, J, sub, _x, _DJ, Jv, _DJv, _Jof, _hv, _Rtd, _Red, r = _noninj_img_world(rng)
+    _Rt, Re, J, sub, _x, _DJ, Jv, _DJv, _D2Jv, _Jof, _hv, _Rtd, _Red, r = _noninj_img_world(rng)
     v = T.var("v", sub)
     cols = []
     for i in range(r):
@@ -1667,7 +1969,7 @@ def test_noninj_img_gauge_embed_fd() -> None:
     )
 
     rng = np.random.default_rng(516)
-    Rt, Re, J, sub, x, DJ, Jv, DJv, Jval_of, hv, Rtd, Red, r = _noninj_img_world(rng)
+    Rt, Re, J, sub, x, DJ, Jv, DJv, D2Jv, Jval_of, hv, Rtd, Red, r = _noninj_img_world(rng)
     v = T.var("v", sub)
     Dv = T.var("Dv", S.oprod(S.dual(Rt), sub))
     w = T.var("w", S.dual(Re))
@@ -1708,7 +2010,7 @@ def test_noninj_img_gauge_project_fd() -> None:
     )
 
     rng = np.random.default_rng(517)
-    Rt, Re, J, sub, x, DJ, Jv, DJv, Jval_of, hv, Rtd, Red, r = _noninj_img_world(rng)
+    Rt, Re, J, sub, x, DJ, Jv, DJv, D2Jv, Jval_of, hv, Rtd, Red, r = _noninj_img_world(rng)
     z = T.var("z", Re)  # ambient value to project into Img(J)
     Dz = T.var("Dz", S.oprod(S.dual(Rt), Re))
     wc = T.var("wc", S.dual(sub))  # covector in the subspace's coordinate frame
@@ -1738,6 +2040,63 @@ def test_noninj_img_gauge_project_fd() -> None:
     np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / (2 * eps)).ravel(), atol=1e-6)
 
 
+def test_noninj_img_gauge_second_order_embed_fd() -> None:
+    # 2nd-order embed through a moving NON-injective Img(J), the "stable region" construction: M,N
+    # LINEAR in x ⇒ J = M·N is degree-2 ⇒ the derivative tower [DJ, D2J] is FINITE and EXACT (D³J≡0),
+    # so ffs_gauge_feed's Taylor reconstruction is EXACTLY rank-r at every step (no drift).  diff² in
+    # the DEFAULT (SVD) ProjectedBasis, FD vs a central SECOND difference whose J-perturbation uses
+    # Jval_of(±s·h) — the EXACT rank-r geometry.  The O(δ²) drift that bit 1st-order-tower
+    # reconstructions is gone because the degree-2 tower is exact, so this matches SHARPLY.
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import (
+        clear_subspace_gauges,
+        ffs_gauge_feed,
+        set_subspace_gauge,
+    )
+
+    rng = np.random.default_rng(519)
+    Rt, Re, J, sub, x, DJ, Jv, DJv, D2Jv, Jval_of, hv, Rtd, Red, r = _noninj_img_world(rng)
+    D2J = T.var("D2J", S.oprod(S.dual(Rt), S.dual(Rt), S.dual(Rt), Re))
+    v = T.var("v", sub)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), sub))
+    D2v = T.var("D2v", S.oprod(S.dual(Rt), S.dual(Rt), sub))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+    vv = rng.standard_normal(r)
+    Dvv = rng.standard_normal((Rtd, r))
+    D2vv = _sym(rng.standard_normal((Rtd, Rtd, r)), 2)
+    wv = rng.standard_normal(Red)
+    dval = rng.standard_normal(Rtd)
+    feed = {
+        f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv, f"D2J_{D2J.uid}": D2Jv,
+        f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"D2v_{D2v.uid}": D2vv, f"w_{w.uid}": wv,
+    }
+
+    def runp(t, ff):
+        return np.asarray(represent(t).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "qr")
+    deps1 = {v.uid: Dv, J.uid: DJ}
+    deps2 = {v.uid: Dv, J.uid: DJ, Dv.uid: D2v, DJ.uid: D2J}
+    try:
+        H = diff(diff(e, x, deps1), x, deps2)
+        extra = ffs_gauge_feed(sub, [DJ, D2J], feed)
+    finally:
+        clear_subspace_gauges()
+    assert isinstance(H, T.LLam) and isinstance(H.body, T.LLam)
+    h2, h1, body = H.vars[0], H.body.vars[0], H.body.body
+    got = runp(body, {**feed, **extra, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval})
+
+    def perturb(s):  # EXACT rank-r J(x₀+s·dval) via Jval_of; v Taylored to 2nd order.
+        dv = s * np.einsum("ak,a->k", Dvv, dval) + 0.5 * s * s * np.einsum(
+            "abk,a,b->k", D2vv, dval, dval)
+        return {**feed, f"J_{J.uid}": Jval_of(s * dval), f"v_{v.uid}": vv + dv}
+
+    fd2 = _second_central(runp, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
+
+
 def test_noninj_img_immersion_gauge_raises() -> None:
     # The closed-form immersion/polar gauges assume an INJECTIVE immersion (full column rank).  For a
     # non-injective Img(J) they have no valid frame (Img realizes in the SVD frame) — diff must raise a
@@ -1745,7 +2104,7 @@ def test_noninj_img_immersion_gauge_raises() -> None:
     from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
 
     rng = np.random.default_rng(518)
-    Rt, Re, J, sub, x, DJ, _Jv, _DJv, _Jof, _hv, _Rtd, _Red, _r = _noninj_img_world(rng)
+    Rt, Re, J, sub, x, DJ, _Jv, _DJv, _D2Jv, _Jof, _hv, _Rtd, _Red, _r = _noninj_img_world(rng)
     v = T.var("v", sub)
     Dv = T.var("Dv", S.oprod(S.dual(Rt), sub))
     e = T.embed(v, Re)
