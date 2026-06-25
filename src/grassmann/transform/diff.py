@@ -388,16 +388,30 @@ def _ffs_ambient(kind: str, J: Term) -> Space:
     return dom if _FFS_AMBIENT[kind] == "dom" else cod
 
 
-def _ffs_frame_value(kind: str, Jval: np.ndarray) -> np.ndarray:
+def _ffs_frame_value(kind: str, Jval: np.ndarray, rank: int | None = None) -> np.ndarray:
     """The ambient orthonormal frame columns of the FFS ``kind`` for immersion ``Jval`` (grassmann
     ``(dom=k, cod=n)`` layout).  Returns shape ``(ambient_dim, δ)`` — Img via QR, the other three via
     a full SVD of ``Jm = Jval.T`` (cod×dom).  ``represent`` lowers exactly these frames (`§ffs-frame`,
-    probed to machine precision)."""
+    probed to machine precision).
+
+    ``rank`` PINS the slice width.  Defaults to the numeric ``matrix_rank(Jm)``, but a moving NON-full
+    rank subspace (e.g. a non-injective ``Img(J)``) must pass the DECLARED rank: the Taylor-reconstructed
+    ``Jm`` drifts off the rank-``r`` manifold at finite δ, so its numeric rank jumps (spurious small
+    singular values) and the slice width would change between FD steps — fixing ``rank`` keeps δ constant
+    (the §ffs-frame-drift subtlety)."""
     Jm = Jval.T  # ambient immersion columns, cod×dom
-    rank = np.linalg.matrix_rank(Jm)
+    if rank is None:
+        rank = np.linalg.matrix_rank(Jm)
+    dom = Jm.shape[1]
     if kind == "img":
-        Q_amb, _ = _qr_pos(Jm)  # cod × rank, range of Jm == Img(J)
-        return Q_amb
+        if rank == dom:
+            Q_amb, _ = _qr_pos(Jm)  # cod × rank (= dom), range of Jm; injective ⇒ QR (byte-identical)
+            return Q_amb
+        # Non-injective J: ``represent`` realizes Img(J) in the SVD LEFT-singular frame U[:,:rank]
+        # (cod×rank), NOT qr_pos (which would span all dom columns).  Probed == represent to machine
+        # precision; qr_pos here would be a SILENTLY WRONG (dom-dim) frame.
+        U, _s, _Vt = np.linalg.svd(Jm, full_matrices=True)  # U cod×cod
+        return U[:, :rank]  # cod × rank
     U, _s, Vt = np.linalg.svd(Jm, full_matrices=True)  # U cod×cod, V=Vt.T dom×dom
     V = Vt.T
     if kind == "coimg":
@@ -524,13 +538,17 @@ def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
     subspace ITSELF, so ``Q₀ : oprod(dual(sub), ambient)`` — the roundtrip ``Q·(Q⁺·embed) == embed``
     lowers (probed)."""
     from grassmann.core.space import dual, oprod
+    from grassmann.infer.properties import is_injective
     from grassmann.infer.synth import synth_space
 
     key = (J.uid, kind)
     if key not in _QR_AUTO_VARS:
-        if kind == "img":
-            frame_space = synth_space(J)  # Img: coords = dom(J); keep the prior Img path identical
+        if kind == "img" and is_injective(J):
+            # INJECTIVE Img: coords = dom(J), frame qr_pos(Jᵀ) (dim = dom); keep the prior path identical.
+            frame_space = synth_space(J)
         else:
+            # NON-injective Img realizes in the SVD frame U[:,:rank] (dim = rank < dom), exactly like
+            # the other three FFS kinds — route it through the same subspace-coord path (coords = sub).
             frame_space = oprod(dual(sub), _ffs_ambient(kind, J))  # coords = the moving subspace
         n = next(_counter)
         name = getattr(J, "name", "J")
@@ -606,6 +624,11 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
     if len(Jtower) < 2:
         raise DiffError("ffs_gauge_feed: supply at least J's first derivative DJ")
     nX = Jtower[1].shape[0]
+    # PIN the frame slice width at the base immersion's numeric rank.  A moving non-full-rank subspace
+    # (non-injective Img) reconstructs OFF its rank-r manifold at finite δ, so the per-δ numeric rank
+    # would jump and the slice width with it — fixing it here keeps the δ-dimension constant across the
+    # nested FD steps so the ∂ⁿQ tower has a stable shape (the §ffs-frame-drift subtlety).
+    base_rank = int(np.linalg.matrix_rank(Jval.T))
 
     def J_at(delta: np.ndarray) -> np.ndarray:
         """Reconstruct J at x₀+δ from the Taylor tower, grassmann (k, n) layout."""
@@ -620,7 +643,7 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
 
     def Q_at(delta: np.ndarray) -> np.ndarray:
         """The grassmann (δ, ambient) realization frame Q₀ at x₀+δ for this FFS case."""
-        return _ffs_frame_value(kind, J_at(delta)).T  # frame is (ambient, δ) ⇒ (δ, ambient)
+        return _ffs_frame_value(kind, J_at(delta), base_rank).T  # frame (ambient, δ) ⇒ (δ, ambient)
 
     # Walk the realized tower Q₀ → Q₁ → … via _QR_NEXT; fill each to its order.
     out: dict = {}
@@ -664,12 +687,23 @@ def _gauge_frame(J: Term, dJ: Term, sub: Space, kind: str, ctx: _DCtx) -> tuple[
     ``frame``/``frame_deriv`` ⇒ ``(frame, (∂Q/∂x)·h)``.  ``CoImg/Ker/CoKer`` have no such immersion
     closed form (the frame is an SVD slice with no substrate-threadable derivative) — they go through
     the default opaque ``qr`` tower only."""
+    from grassmann.infer.properties import is_injective
+
     entry = _SUBSPACE_GAUGE.get(getattr(J, "uid", None))
     gauge, frame, frame_deriv = entry if entry is not None else (_DEFAULT_GAUGE, None, None)
     if gauge in ("immersion", "polar") and kind != "img":
         raise DiffError(
             f"diff: the closed-form {gauge!r} gauge is defined only for Img(J); the {kind!r} "
             f"subspace realizes in an SVD frame — use the default qr gauge (ffs_gauge_feed)"
+        )
+    if gauge in ("immersion", "polar") and kind == "img" and not is_injective(J):
+        # The closed immersion/polar frames assume an INJECTIVE immersion (Q = J or J·G^{-1/2}, full
+        # column rank).  For a non-injective J, Img(J) realizes in the SVD frame U[:,:rank] — these
+        # closed forms have no valid frame there.  Use the default qr gauge (ffs_gauge_feed).
+        raise DiffError(
+            f"diff: the closed-form {gauge!r} gauge is defined only for an INJECTIVE Img(J); a "
+            f"non-injective J realizes Img(J) in the SVD frame — use the default qr gauge "
+            f"(ffs_gauge_feed)"
         )
     if gauge == "immersion":
         return J, dJ
