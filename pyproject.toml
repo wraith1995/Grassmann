@@ -23,6 +23,9 @@ dev = [
 test = [
     "pytest>=8.0",
     "chartlib",
+    # scipy.linalg.expm builds the closed-form geodesic frame Q(x)=expm((c·x)·A)·Q₀ used by
+    # tests/test_diff_analytic.py as an EXACT (non-FD) reference for the gauge-aware FFS AD.
+    "scipy>=1.10",
 ]
 # Reference doc site (tools/gen_docs.py + mkdocs). Build with `mkdocs build`, preview
 # with `mkdocs serve`. Doc-only — never a runtime dep.
