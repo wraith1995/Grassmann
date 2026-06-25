@@ -249,15 +249,37 @@ def _subst_nat_in_term(term: Term, name: str, repl: object) -> Term:
     return go(term)  # type: ignore[return-value]
 
 
-def alpha_canon(term: Term) -> Term:
-    """α-canonicalize **value-binder** bound variables (``LLam.vars`` / ``Lam.term_vars``):
-    rename each to ``%k`` with a canonical *negative* ``uid`` assigned in deterministic
-    traversal order. Free variables (non-negative ``uid``s) are untouched and never collide.
+def _rename_svar(node: object, old: str, new: str) -> object:
+    """Rename the rigid space variable ``SVar(old) → SVar(new)`` through a Term / Space / Dim."""
+    from grassmann.core.space import SVar
+    from grassmann.infer.subst import subst_space
 
-    Two α-equivalent terms map to the **identical** term, so it is the basis of an
-    α-invariant :func:`term_key` and of `is_normalized_sop`'s binder check. Idempotent.
-    (Space/nat binder *names* — ``SVar``/``DimVar`` in ``Lam`` annotations — are left for a
-    later refinement; value binders are the common case.)"""
+    repl = SVar(new)
+    if is_space(node):
+        return subst_space(node, old, repl)  # handles a top-level SVar too
+    if is_term(node):
+        return _subst_space_in_term(node, old, repl)
+    return node  # a Dim carries no SVar
+
+
+def _rename_dimvar(node: object, old: str, new: str) -> object:
+    """Rename the nat variable ``DimVar(old) → DimVar(new)`` through a Term / Space / Dim."""
+    from grassmann.core.space import DimVar
+
+    if is_term(node) or is_space(node) or is_dim(node):
+        return _subst_nat_in_term(node, old, DimVar(new))  # generic walker, handles top DimVar
+    return node
+
+
+def alpha_canon(term: Term) -> Term:
+    """α-canonicalize bound variables so two α-equivalent terms map to the **identical** term —
+    the basis of an α-invariant :func:`term_key` and of `is_normalized_sop`'s binder check.
+
+    Covers BOTH binders fully: ``LLam.vars`` and ``Lam.term_vars`` are renamed to ``%k`` (with a
+    canonical negative ``uid``); a ``Lam``'s binder **names** are canonicalized too — a value
+    (``SpaceSort``) binder's name follows its term var, and a ``SPACE``/``NAT`` binder's name is
+    renamed throughout the body's ``SVar``/``DimVar`` references. Free variables (non-negative
+    ``uid``s) are untouched and never collide. Idempotent."""
     counter = [0]
 
     def fresh(v: Var) -> Var:
@@ -277,13 +299,24 @@ def alpha_canon(term: Term) -> Term:
             return LLam(tuple(nv), go(node.body, env2))
         if isinstance(node, Lam):
             env2 = dict(env)
-            ntv = []
-            for v in node.term_vars:
-                cv = fresh(v)
-                env2[v.uid] = cv
-                ntv.append(cv)
-            body = go(node.body, env2) if is_term(node.body) else node.body
-            return Lam(node.binders, body, tuple(ntv))
+            new_binders: list[tuple[str, object]] = []
+            ntv: list[Var] = []
+            tv_iter = iter(node.term_vars)
+            body: object = node.body
+            for name, sort in node.binders:
+                counter[0] += 1
+                cname = f"%{counter[0]}"
+                new_binders.append((cname, sort))
+                if isinstance(sort, SpaceSort):
+                    v = next(tv_iter)
+                    env2[v.uid] = Var(cname, v.space, v.props, uid=-counter[0])
+                    ntv.append(env2[v.uid])
+                elif sort == SPACE:
+                    body = _rename_svar(body, name, cname)
+                elif sort == NAT:
+                    body = _rename_dimvar(body, name, cname)
+            body = go(body, env2) if is_term(body) else body  # type: ignore[arg-type]
+            return Lam(tuple(new_binders), body, tuple(ntv))  # type: ignore[arg-type]
         return _rebuild(node, lambda c: go(c, env))
 
     return go(term, {})
