@@ -36,7 +36,14 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from grassmann.core.space import Scalar, Space, WithInner, is_space, linear_map_space
+from grassmann.core.space import (
+    OProd,
+    Scalar,
+    Space,
+    WithInner,
+    is_space,
+    linear_map_space,
+)
 from grassmann.core.term import (
     Assert,
     Compose,
@@ -360,7 +367,12 @@ def _subspace_defining_map(space: Space) -> Term | None:
 # opaque (e.g. QR) gauge — ``dQ`` supplied as a program-backed variable — is a later phase (P2).
 # uid -> (gauge_name, frame, frame_deriv).  frame/frame_deriv are used only by OPAQUE gauges (qr/…).
 _SUBSPACE_GAUGE: dict[int, tuple[str, Term | None, Term | None]] = {}
-_DEFAULT_GAUGE = "immersion"
+# The DEFAULT gauge is ``qr`` — the realization frame ``Q`` of ``Img(J)`` that ``represent``
+# actually lowers (the orthonormal ``ProjectedBasis = qr_pos(Jᵀ)``).  So an unregistered moving
+# subspace differentiates in the SAME frame its value lives in, with no per-test pinning.  The
+# opaque ``dQ`` is supplied through auto-created program-backed variables (`§qr-auto`), seeded by
+# :func:`qr_gauge_feed` — ``represent`` stays untouched.
+_DEFAULT_GAUGE = "qr"
 
 
 def set_subspace_gauge(
@@ -369,39 +381,126 @@ def set_subspace_gauge(
     """Register the AD gauge for the moving subspace ``Img(defining_map)``.  Read by ``diff`` ONLY;
     ``represent`` is unaffected.
 
-    * ``"immersion"`` (default), ``"polar"`` — closed-form frames (no extra args).
-    * ``"qr"`` / any OPAQUE gauge — pass ``frame`` (the realization frame ``Q`` as a term/var, e.g. a
-      program-backed variable holding the QR ``Q``) and ``frame_deriv`` (``∂Q/∂x`` as a map term/var,
-      e.g. the opaque QR/Stiefel frame derivative produced by a program).  ``diff`` forms the
-      directional ``dQ = (∂Q/∂x)·h`` exactly as it does for any marked variable."""
+    * ``"immersion"``, ``"polar"`` — closed-form frames (no extra args).
+    * ``"qr"`` (the DEFAULT) — the orthonormal ``ProjectedBasis`` frame ``Q = qr_pos(Jᵀ)``.  With no
+      explicit ``frame``/``frame_deriv`` the opaque ``Q`` / ``∂Q/∂x`` are AUTO-created as
+      program-backed variables (see :func:`_qr_gauge_vars`); seed them with :func:`qr_gauge_feed`.
+    * any other OPAQUE gauge — pass ``frame`` (the realization frame ``Q`` as a term/var) and
+      ``frame_deriv`` (``∂Q/∂x`` as a map term/var); ``diff`` forms the directional
+      ``dQ = (∂Q/∂x)·h`` exactly as it does for any marked variable."""
     _SUBSPACE_GAUGE[defining_map.uid] = (gauge, frame, frame_deriv)
 
 
 def clear_subspace_gauges() -> None:
-    """Reset all registered subspace gauges to the default (``immersion``)."""
+    """Reset all registered subspace gauges to the default and drop the auto-created QR vars."""
     _SUBSPACE_GAUGE.clear()
+    _QR_AUTO_VARS.clear()
+
+
+# --- opaque QR gauge (`§qr-auto`): the default frame is the lowered ``ProjectedBasis`` ------------
+# ``represent`` realizes a moving ``Img(J)`` in the orthonormal ``ProjectedBasis = qr_pos(Jᵀ)``.
+# The matching AD gauge frame ``Q`` (and its motion ``∂Q/∂x``) has NO closed form the substrate can
+# thread, so we supply it as opaque program-backed variables — one ``(Q, ∂Q/∂x)`` pair per defining
+# map ``J`` (keyed by ``J.uid``), auto-created on demand and seeded numerically by
+# :func:`qr_gauge_feed` (the analytic QR differential).  ``diff`` then treats ``∂Q/∂x`` like any
+# marked-variable derivative: ``dQ = Eval(∂Q/∂x, (0,), (h,))``.
+_QR_AUTO_VARS: dict[int, tuple[Var, Var]] = {}
+
+
+def _qr_pos(M: np.ndarray):
+    """Positive-diagonal (``R``) QR of ``M`` — the unique factorization ``M = Q·R`` with
+    ``diag(R) > 0`` (so ``Q`` is a deterministic orthonormal frame, == grassmann ``ProjectedBasis``)."""
+    q, r = np.linalg.qr(M)
+    s = np.sign(np.diag(r))
+    s[s == 0] = 1.0
+    return q * s, r * s[:, None]
+
+
+def _qr_dQ(Q: np.ndarray, R: np.ndarray, dJm: np.ndarray) -> np.ndarray:
+    """The analytic QR frame differential.  For ``Q,R = _qr_pos(Jm)`` (``Jm`` of shape ``(n,k)``)
+    and a column perturbation ``dJm`` (``(n,k)``), the motion of the orthonormal factor is
+
+        M = Qᵀ·dJm·R⁻¹ ,   Ω = tril(M,−1) − tril(M,−1)ᵀ ,   dQ = Q·Ω + (I − Q·Qᵀ)·dJm·R⁻¹ .
+
+    Verified against a central finite difference of :func:`_qr_pos` (square and rectangular,
+    full-column-rank ``Jm``)."""
+    Rinv = np.linalg.inv(R)
+    Mt = Q.T @ dJm @ Rinv
+    low = np.tril(Mt, -1)
+    omega = low - low.T
+    n = Q.shape[0]
+    return Q @ omega + (np.eye(n) - Q @ Q.T) @ dJm @ Rinv
+
+
+def _qr_gauge_vars(J: Term, ctx: _DCtx) -> tuple[Var, Var]:
+    """Get-or-create the opaque ``(Q, ∂Q/∂x)`` variable pair for the moving subspace ``Img(J)``,
+    keyed by ``J.uid``.  ``Qvar`` lives in ``J.space`` (the grassmann frame map ``X_dom ⊸ ambient``,
+    stored ``(k, n)``); ``dQvar`` lives in ``X ⊸ J.space`` — the flat ``(|X|, k, n)`` layout of a
+    marked ``∂J/∂x``, so :func:`qr_gauge_feed` can fill it row-by-row."""
+    from grassmann.core.space import dual, oprod
+    from grassmann.infer.synth import synth_space
+
+    key = J.uid
+    if key not in _QR_AUTO_VARS:
+        jspace = synth_space(J)
+        n = next(_counter)
+        name = getattr(J, "name", "J")
+        Qvar = Var(f"_Qqr_{name}_{n}", jspace)
+        # ``∂Q/∂x`` must be the FLAT ``X* ⊗ (J's own factors)`` map space — the ``(|X|, k, n)`` layout
+        # of a marked ``∂J/∂x`` — so :func:`qr_gauge_feed` fills it row-by-row.  ``linear_map_space``
+        # would NEST ``jspace`` as a single fused codomain factor (lowered ``(|X|, k·n)``); splat the
+        # frame's own factors instead.
+        dq_space = oprod(dual(ctx.X), *jspace.spaces) if isinstance(jspace, OProd) else \
+            linear_map_space(ctx.X, jspace)
+        dQvar = Var(f"_dQqr_{name}_{n}", dq_space)
+        _QR_AUTO_VARS[key] = (Qvar, dQvar)
+    return _QR_AUTO_VARS[key]
+
+
+def qr_gauge_feed(J: Term, DJ: Term, feed: dict) -> dict:
+    """Numeric values for the auto-created opaque QR gauge of ``Img(J)`` (the default gauge).
+
+    Reads the immersion ``Jval`` (``feed[f"{J.name}_{J.uid}"]``, stored ``(k,n)``) and its marked
+    derivative ``DJval`` (``feed[f"{DJ.name}_{DJ.uid}"]``, stored ``(|X|,k,n)``), computes the
+    orthonormal ambient frame ``Q_amb = qr_pos(Jvalᵀ)`` and, per parameter ``a``, the analytic
+    ``∂Q/∂x[a]`` along ``DJval[a]``.  Returns a feed fragment ``{Qvar: Qval, dQvar: dQval}`` (grassmann
+    map layout: ``Qval = Q_ambᵀ`` ``(k,n)``; ``dQval[a] = (∂Q_amb/∂x[a])ᵀ``).  Call after ``diff`` so
+    the auto vars exist; merge the result into the program feed."""
+    Qvar, dQvar = _QR_AUTO_VARS[J.uid]
+    Jval = np.asarray(feed[f"{J.name}_{J.uid}"], dtype=float)
+    DJval = np.asarray(feed[f"{DJ.name}_{DJ.uid}"], dtype=float)
+    Jm = Jval.T  # immersion columns in the ambient, (n, k)
+    Q_amb, R = _qr_pos(Jm)
+    Qval = Q_amb.T
+    nX = DJval.shape[0]
+    dQval = np.zeros((nX, *Qval.shape))
+    for a in range(nX):
+        dQval[a] = _qr_dQ(Q_amb, R, DJval[a].T).T
+    return {f"{Qvar.name}_{Qvar.uid}": Qval, f"{dQvar.name}_{dQvar.uid}": dQval}
 
 
 def _gauge_frame(J: Term, dJ: Term, ctx: _DCtx) -> tuple[Term, Term]:
     """The realization frame ``Q`` of ``Img(J)`` and its motion ``dQ`` for the subspace's gauge.
 
-    ``immersion`` ⇒ ``(J, ∂J)`` (the literal immersion — byte-identical to the prior arms);
-    ``polar`` ⇒ ``(J·G^{-1/2}, ∂(J·G^{-1/2}))``, ``G = JᵀJ`` (symmetric orthonormal frame, via the
-    ``Sqrt`` primitive); an OPAQUE gauge (``qr``/…) ⇒ ``(frame, (∂Q/∂x)·h)`` from the supplied
-    program-backed ``frame``/``frame_deriv`` — the directional ``dQ`` is the marked-variable rule
-    ``Eval(frame_deriv, h)``, so ``represent`` sees only ordinary terms/leaves."""
+    The DEFAULT gauge is ``qr`` — the orthonormal ``ProjectedBasis`` frame ``represent`` actually
+    lowers — supplied via AUTO-created opaque program-backed vars (`§qr-auto`).  ``immersion`` ⇒
+    ``(J, ∂J)`` (the literal immersion); ``polar`` ⇒ ``(J·G^{-1/2}, ∂(J·G^{-1/2}))``, ``G = JᵀJ``
+    (symmetric orthonormal frame, via the ``Sqrt`` primitive); an OPAQUE gauge (``qr``/…) with an
+    explicit ``frame``/``frame_deriv`` ⇒ ``(frame, (∂Q/∂x)·h)`` — the directional ``dQ`` is the
+    marked-variable rule ``Eval(frame_deriv, h)``, so ``represent`` sees only ordinary terms/leaves."""
     entry = _SUBSPACE_GAUGE.get(getattr(J, "uid", None))
-    if entry is None:
-        return J, dJ  # default: immersion
-    gauge, frame, frame_deriv = entry
+    gauge, frame, frame_deriv = entry if entry is not None else (_DEFAULT_GAUGE, None, None)
     if gauge == "immersion":
         return J, dJ
     if gauge == "polar":
         gram = Compose(Dagger(J), (0,), (J,))         # G = JᵀJ
         q = Compose(J, (0,), (Pinv(Sqrt(gram)),))     # Q = J·G^{-1/2}
         return q, _dd(q, ctx)
-    if frame is not None and frame_deriv is not None:  # opaque gauge (qr / external)
+    if frame is not None and frame_deriv is not None:  # explicit opaque gauge (qr / external)
         return frame, Eval(frame_deriv, (0,), (ctx.h,))  # dQ = (∂Q/∂x)·h  (program-backed)
+    if gauge == "qr":  # default opaque QR: auto-create the program-backed (Q, ∂Q/∂x) pair
+        Qvar, dQvar = _qr_gauge_vars(J, ctx)
+        return Qvar, Eval(dQvar, (0,), (ctx.h,))
     raise DiffError(
         f"diff: gauge {gauge!r} has no closed form — supply frame= and frame_deriv= (the opaque "
         f"frame Q and ∂Q/∂x) via set_subspace_gauge"
@@ -440,15 +539,21 @@ def _dd_project(z: Term, sub: Space, e: Term, ctx: _DCtx) -> Term:
         d(project(z)) = project(dz)  +  ∂(Q⁺)·z ,
 
     with ``∂(Q⁺)`` the pseudoinverse-map derivative (:func:`_pinv_map_grad`) of the **gauge frame**.
-    The **default `immersion` gauge** (``Q = J``) reproduces ``project(dz) + ∂(J⁺)·z`` exactly."""
+    The **default `qr` gauge** uses the opaque ``ProjectedBasis`` frame; ``immersion`` reproduces
+    ``project(dz) + ∂(J⁺)·z`` exactly."""
     dz = _dd(z, ctx)
     frozen = None if isinstance(dz, Zero) else Project(dz, sub)
     J = _subspace_defining_map(sub)
     if J is not None and _depends_on_x(J, ctx):
         dJ = _dd(J, ctx)
         if not isinstance(dJ, Zero):
-            q, dq = _gauge_frame(J, dJ, ctx)  # gauge frame + its motion (default: immersion Q=J)
-            realiz = Eval(_pinv_map_grad(q, dq), (0,), (z,))
+            q, dq = _gauge_frame(J, dJ, ctx)  # gauge frame + its motion (default: qr ProjectedBasis)
+            # ``∂(Q⁺)·z`` lands in the frame's *coordinate* space ``dom(Q)``; the ``project(dz)`` arm
+            # lives in ``sub`` (the ``Img(J)`` tag).  Re-tag the realization into ``sub`` value-faith-
+            # fully by routing it through the frame: ``project(Q·(∂(Q⁺)·z), sub) = Q⁺ Q (∂(Q⁺)·z)``,
+            # and ``Q⁺Q = I`` for an injective frame (immersion ``J`` is inj; qr/polar are orthonormal).
+            realiz_coords = Eval(_pinv_map_grad(q, dq), (0,), (z,))  # : dom(Q)
+            realiz = Project(Eval(q, (0,), (realiz_coords,)), sub)   # re-tag into ``sub``
             return _sum([p for p in (frozen, realiz) if p is not None], e, ctx)
     return frozen if frozen is not None else _zero(e, ctx)
 
@@ -976,4 +1081,10 @@ def _children(node: object) -> tuple[object, ...]:
     return tuple(out)
 
 
-__all__ = ["diff", "DiffError"]
+__all__ = [
+    "diff",
+    "DiffError",
+    "set_subspace_gauge",
+    "clear_subspace_gauges",
+    "qr_gauge_feed",
+]

@@ -258,8 +258,8 @@ def test_sqrt_spd_map_derivative() -> None:
 
 def test_polar_gauge_engages_and_is_correct() -> None:
     # P0 gauge mechanism: the subspace gauge is read by `diff` only (`represent` untouched).
-    # (1) default `immersion` ⇒ realization has no Sqrt (byte-identical to before); registering
-    #     `polar` for J ⇒ the realization is Sqrt-bearing (Q = J·G^{-1/2}).
+    # (1) the default `qr` gauge ⇒ realization has no Sqrt (the opaque QR frame is a fed var);
+    #     registering `polar` for J ⇒ the realization IS Sqrt-bearing (Q = J·G^{-1/2}).
     # (2) the polar realization formula dQ·(Q⁺·embed v) is FD-correct — checked through the explicit
     #     polar frame, since `represent` has no polar frame for the structural Embed yet.
     from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
@@ -360,6 +360,264 @@ def test_qr_gauge_opaque_matches_projectedbasis_fd() -> None:
     fp = _run(e, {**base, f"J_{J.uid}": Jv + 1e-6 * dJh, f"v_{v.uid}": vv + 1e-6 * dvh})
     fm = _run(e, {**base, f"J_{J.uid}": Jv - 1e-6 * dJh, f"v_{v.uid}": vv - 1e-6 * dvh})
     np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Gauge × realized-basis FD matrix (task 3).  The AD gauge frame ``Q`` must match the value frame
+# `represent` lowers the moving subspace in: ``(immersion, ImageBasis)`` and the DEFAULT
+# ``(qr, ProjectedBasis)``.  Each consistent pair must FD-match; the MISMATCHED pair must NOT.
+# Both embed and project through a moving ``Img(J)`` are covered, in both LLam modes (suite-level).
+# ---------------------------------------------------------------------------
+
+
+def _moving_img_world(rng):
+    """Shared moving-``Img(J)`` setup: the chart ``J`` (inj), its motion ``DJ``, and base values."""
+    Rt, Re = S.base("Rt", 2), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    imgJ = S.img(J)
+    x = T.var("x", Rt)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    Jv = rng.standard_normal((2, 3))
+    DJv = rng.standard_normal((2, 2, 3))
+    hv = rng.standard_normal(2)
+    base = {f"J_{J.uid}": Jv, f"DJ_{DJ.uid}": DJv}
+    return Rt, Re, J, imgJ, x, DJ, Jv, DJv, hv, base
+
+
+@pytest.mark.parametrize("gauge", ["immersion", "qr"])
+def test_gauge_matches_realized_basis_embed_fd(gauge) -> None:
+    # embed through a moving Img(J): the gauge frame must match the value frame.  immersion ↔
+    # ImageBasis (pinned via basis_env); qr ↔ the DEFAULT ProjectedBasis (opaque dQ fed via
+    # qr_gauge_feed).  Both FD-match.
+    from grassmann.core import basis as B
+    from grassmann.lower.represent import default_basis, represent
+    from grassmann.transform.diff import (
+        clear_subspace_gauges,
+        qr_gauge_feed,
+        set_subspace_gauge,
+    )
+
+    rng = np.random.default_rng(101)
+    Rt, Re, J, imgJ, x, DJ, Jv, DJv, hv, base = _moving_img_world(rng)
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+    vv, Dvv, wv = rng.standard_normal(2), rng.standard_normal((2, 2)), rng.standard_normal(3)
+    feed = {**base, f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"w_{w.uid}": wv}
+
+    env, extra = None, {}
+    if gauge == "immersion":
+        ib = B.ImageBasis(J)  # the value frame matching the immersion gauge
+        env = {v.uid: ib, Dv.uid: B.basis_prod(B.dual_basis(default_basis(Rt)), ib)}
+
+    def runp(t, ff):
+        kw = {"basis_env": env} if env else {}
+        return np.asarray(represent(t, **kw).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, gauge)
+    try:
+        jd = diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+        if gauge == "qr":  # supply the opaque ProjectedBasis frame Q / ∂Q/∂x
+            extra = qr_gauge_feed(J, DJ, feed)
+    finally:
+        clear_subspace_gauges()
+    seed = jd.vars[0]
+    allfeed = {**feed, **extra}
+    jh = runp(jd.body, {**allfeed, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    dvh = runp(T.Eval(Dv, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    fp = runp(e, {**feed, f"J_{J.uid}": Jv + 1e-6 * dJh, f"v_{v.uid}": vv + 1e-6 * dvh})
+    fm = runp(e, {**feed, f"J_{J.uid}": Jv - 1e-6 * dJh, f"v_{v.uid}": vv - 1e-6 * dvh})
+    np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+
+@pytest.mark.parametrize("gauge", ["immersion", "qr"])
+def test_gauge_matches_realized_basis_project_fd(gauge) -> None:
+    # project through a moving Img(J) = di⁺ of the gauge frame.  Same matched-pair discipline as
+    # embed: immersion ↔ ImageBasis, qr ↔ the DEFAULT ProjectedBasis.  Both FD-match.
+    from grassmann.core import basis as B
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import (
+        clear_subspace_gauges,
+        qr_gauge_feed,
+        set_subspace_gauge,
+    )
+
+    rng = np.random.default_rng(202)
+    Rt, Re, J, imgJ, x, DJ, Jv, DJv, hv, base = _moving_img_world(rng)
+    z = T.var("z", Re)  # ambient value to project into Img(J)
+    Dz = T.var("Dz", S.oprod(S.dual(Rt), Re))
+    wc = T.var("wc", S.dual(imgJ))  # covector in the subspace's coordinate frame
+    e = T.Eval(wc, (0,), (T.project(z, imgJ),))
+    zv, Dzv, wcv = rng.standard_normal(3), rng.standard_normal((2, 3)), rng.standard_normal(2)
+    feed = {**base, f"z_{z.uid}": zv, f"Dz_{Dz.uid}": Dzv, f"wc_{wc.uid}": wcv}
+
+    env, extra = None, {}
+    if gauge == "immersion":
+        env = {wc.uid: B.dual_basis(B.ImageBasis(J))}  # covector in the ImageBasis (matching frame)
+
+    def runp(t, ff):
+        kw = {"basis_env": env} if env else {}
+        return np.asarray(represent(t, **kw).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, gauge)
+    try:
+        jd = diff(e, x, deps={z.uid: Dz, J.uid: DJ})
+        if gauge == "qr":
+            extra = qr_gauge_feed(J, DJ, feed)
+    finally:
+        clear_subspace_gauges()
+    seed = jd.vars[0]
+    allfeed = {**feed, **extra}
+    jh = runp(jd.body, {**allfeed, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    dzh = _run(T.Eval(Dz, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    fp = runp(e, {**feed, f"J_{J.uid}": Jv + 1e-6 * dJh, f"z_{z.uid}": zv + 1e-6 * dzh})
+    fm = runp(e, {**feed, f"J_{J.uid}": Jv - 1e-6 * dJh, f"z_{z.uid}": zv - 1e-6 * dzh})
+    np.testing.assert_allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+
+def test_mismatched_gauge_and_basis_does_not_fd_match() -> None:
+    # Documents the discipline: the immersion gauge realized in the orthonormal DEFAULT
+    # ProjectedBasis (the mismatched pair) is the WRONG derivative — it must NOT FD-match.  (The
+    # value frame the lowering uses is gauge-independent; only the matching gauge tracks its motion.)
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
+
+    rng = np.random.default_rng(303)
+    Rt, Re, J, imgJ, x, DJ, Jv, DJv, hv, base = _moving_img_world(rng)
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+    vv, Dvv, wv = rng.standard_normal(2), rng.standard_normal((2, 2)), rng.standard_normal(3)
+    feed = {**base, f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"w_{w.uid}": wv}
+
+    def runp(t, ff):
+        return np.asarray(represent(t).run(ff)["result"], float)  # DEFAULT ProjectedBasis value
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "immersion")  # gauge ≠ the realized ProjectedBasis ⇒ wrong derivative
+    try:
+        jd = diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+    finally:
+        clear_subspace_gauges()
+    seed = jd.vars[0]
+    jh = runp(jd.body, {**feed, f"{seed.name}_{seed.uid}": hv})
+    dJh = _run(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    dvh = runp(T.Eval(Dv, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
+    fp = runp(e, {**feed, f"J_{J.uid}": Jv + 1e-6 * dJh, f"v_{v.uid}": vv + 1e-6 * dvh})
+    fm = runp(e, {**feed, f"J_{J.uid}": Jv - 1e-6 * dJh, f"v_{v.uid}": vv - 1e-6 * dvh})
+    assert not np.allclose(np.ravel(jh), ((fp - fm) / 2e-6).ravel(), atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Second-order FD (task 4): ∂²(embed/project) via diff(diff(·)) vs a central SECOND difference.
+# The immersion gauge is closed-form ⇒ correct at all orders.  The opaque qr gauge's 2nd order needs
+# ∂²Q/∂x² (a further opaque variable) — the single (Q, ∂Q/∂x) pair cannot supply it, so the opaque
+# 2nd order is a documented SKIP (see test_qr_gauge_second_order_needs_d2Q below).
+# ---------------------------------------------------------------------------
+
+
+def _second_central(runp, e, perturb, eps=1e-4):
+    """``(f(+d) − 2 f(0) + f(−d)) / ε²`` — central second difference of the lowered term."""
+    f0 = runp(e, perturb(0.0))
+    fp = runp(e, perturb(+eps))
+    fm = runp(e, perturb(-eps))
+    return (fp - 2.0 * f0 + fm) / (eps * eps)
+
+
+def test_immersion_second_order_embed_fd() -> None:
+    from grassmann.core import basis as B
+    from grassmann.lower.represent import default_basis, represent
+    from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
+
+    rng = np.random.default_rng(404)
+    Rt, Re, J, imgJ, x, DJ, Jv, DJv, hv, base = _moving_img_world(rng)
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+    vv, Dvv, wv = rng.standard_normal(2), rng.standard_normal((2, 2)), rng.standard_normal(3)
+    dval = rng.standard_normal(2)
+    feed = {**base, f"v_{v.uid}": vv, f"Dv_{Dv.uid}": Dvv, f"w_{w.uid}": wv}
+    ib = B.ImageBasis(J)
+    env = {v.uid: ib, Dv.uid: B.basis_prod(B.dual_basis(default_basis(Rt)), ib)}
+
+    def runp(t, ff):
+        return np.asarray(represent(t, basis_env=env).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "immersion")
+    try:
+        deps = {v.uid: Dv, J.uid: DJ}
+        H = diff(diff(e, x, deps), x, deps)  # ∂²: LLam((h2,), LLam((h,), d²body))
+    finally:
+        clear_subspace_gauges()
+    assert isinstance(H, T.LLam) and isinstance(H.body, T.LLam)
+    h2, h1, body = H.vars[0], H.body.vars[0], H.body.body
+    got = runp(body, {**feed, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval})
+
+    dJd = runp(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": dval})
+    dvd = runp(T.Eval(Dv, (0,), (x,)), {**feed, f"x_{x.uid}": dval})
+
+    def perturb(s):
+        return {**feed, f"J_{J.uid}": Jv + s * dJd, f"v_{v.uid}": vv + s * dvd}
+
+    fd2 = _second_central(runp, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
+
+
+def test_immersion_second_order_project_fd() -> None:
+    from grassmann.core import basis as B
+    from grassmann.lower.represent import represent
+    from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
+
+    rng = np.random.default_rng(505)
+    Rt, Re, J, imgJ, x, DJ, Jv, DJv, hv, base = _moving_img_world(rng)
+    z = T.var("z", Re)
+    Dz = T.var("Dz", S.oprod(S.dual(Rt), Re))
+    wc = T.var("wc", S.dual(imgJ))
+    e = T.Eval(wc, (0,), (T.project(z, imgJ),))
+    zv, Dzv, wcv = rng.standard_normal(3), rng.standard_normal((2, 3)), rng.standard_normal(2)
+    dval = rng.standard_normal(2)
+    feed = {**base, f"z_{z.uid}": zv, f"Dz_{Dz.uid}": Dzv, f"wc_{wc.uid}": wcv}
+    env = {wc.uid: B.dual_basis(B.ImageBasis(J))}
+
+    def runp(t, ff):
+        return np.asarray(represent(t, basis_env=env).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "immersion")
+    try:
+        deps = {z.uid: Dz, J.uid: DJ}
+        H = diff(diff(e, x, deps), x, deps)
+    finally:
+        clear_subspace_gauges()
+    assert isinstance(H, T.LLam) and isinstance(H.body, T.LLam)
+    h2, h1, body = H.vars[0], H.body.vars[0], H.body.body
+    got = runp(body, {**feed, f"{h2.name}_{h2.uid}": dval, f"{h1.name}_{h1.uid}": dval})
+
+    dJd = runp(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": dval})
+    dzd = runp(T.Eval(Dz, (0,), (x,)), {**feed, f"x_{x.uid}": dval})
+
+    def perturb(s):
+        return {**feed, f"J_{J.uid}": Jv + s * dJd, f"z_{z.uid}": zv + s * dzd}
+
+    fd2 = _second_central(runp, e, perturb)
+    np.testing.assert_allclose(np.ravel(got), np.ravel(fd2), rtol=2e-2, atol=5e-3)
+
+
+@pytest.mark.skip(
+    reason="opaque qr 2nd order needs ∂²Q/∂x² (a further opaque var); the single (Q,∂Q/∂x) pair "
+    "treats ∂Q/∂x as constant, so diff² drops the ∂²Q term — a documented P2 limitation. The "
+    "immersion gauge (closed-form) covers 2nd order; qr 2nd order is future work (∂²Q feed)."
+)
+def test_qr_gauge_second_order_needs_d2Q() -> None:  # pragma: no cover
+    pass
 
 
 def test_gauss_decomposition_of_embed() -> None:
@@ -837,6 +1095,7 @@ def test_embed_through_moving_img_differentiates() -> None:
     # "bases just need to be consistent").
     from grassmann.core import basis as B
     from grassmann.lower.represent import default_basis, represent
+    from grassmann.transform.diff import clear_subspace_gauges, set_subspace_gauge
     rng = np.random.default_rng(7)
     Rt, Re = S.base("Rt", 2), S.base("Re", 3)
     J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
@@ -857,7 +1116,14 @@ def test_embed_through_moving_img_differentiates() -> None:
     def runp(t, ff):
         return np.asarray(represent(t, basis_env=env).run(ff)["result"], float)
 
-    jd = diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+    # The value frame here is the (non-orthonormal) ImageBasis — pin the AD gauge to ``immersion``
+    # so the differential's frame matches it (the default gauge is the orthonormal QR ProjectedBasis).
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "immersion")
+    try:
+        jd = diff(e, x, deps={v.uid: Dv, J.uid: DJ})
+    finally:
+        clear_subspace_gauges()
     seed = jd.vars[0]
     jh = runp(jd.body, {**feed, f"{seed.name}_{seed.uid}": hv})
     dJh = _run(T.Eval(DJ, (0,), (x,)), {**feed, f"x_{x.uid}": hv})
