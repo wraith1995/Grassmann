@@ -248,38 +248,69 @@ def _dd_var(e: Var, ctx: _DCtx) -> Term:
 
 
 def _dd_external(e: External, ctx: _DCtx) -> Term:
-    """Nonlinear scalar ops — chain / quotient rules over scalar values."""
+    """Elementwise nonlinear ops + the Hadamard product — chain / product rules.
+
+    Each unary op has an elementwise coefficient ``c = f'(u)`` (a value in ``e.space``); the
+    derivative is ``c ⊙ du`` via :func:`_prod`, which is a plain ``Scale`` for a ``Scalar``
+    operand (byte-identical to the original scalar arms) and the Hadamard pointwise product
+    for any other Euclidean space — so these ops differentiate over vectors/matrices too.
+    """
     name = getattr(e.data, "name", None)
     args = e.args
-    if name == "sqrt":
+    sp = e.space
+
+    # unary ops: coefficient c = f'(u), then c ⊙ du -----------------------------------
+    _UNARY = {
+        "sqrt": lambda u: Scale(0.5, _recip(_sqrt(u, sp), sp)),  # 1/(2√u)
+        "reciprocal": lambda u: Scale(-1.0, _recip(_prod(u, u, sp), sp)),  # −1/u²
+        "abs": lambda u: _sign(u, sp),  # sgn(u)
+        "exp": lambda u: _exp(u, sp),  # eᵘ
+        "log": lambda u: _recip(u, sp),  # 1/u
+        "square": lambda u: Scale(2.0, u),  # 2u
+        "sin": lambda u: _cos(u, sp),  # cos(u)
+        "cos": lambda u: Scale(-1.0, _sin(u, sp)),  # −sin(u)
+        "tan": lambda u: _recip(_prod(_cos(u, sp), _cos(u, sp), sp), sp),  # 1/cos²(u)
+        "sinh": lambda u: _cosh(u, sp),  # cosh(u)
+        "cosh": lambda u: _sinh(u, sp),  # sinh(u)
+        "tanh": lambda u: _recip(_prod(_cosh(u, sp), _cosh(u, sp), sp), sp),  # sech²(u)
+        # batch 2 — derivatives need the unit constant 1±g(u) (built via _ones, see above)
+        "atan": lambda u: _recip(Sum((_ones(u, sp), _prod(u, u, sp))), sp),  # 1/(1+u²)
+        "asin": lambda u: _recip(_sqrt(_one_minus_sq(u, sp), sp), sp),  # 1/√(1−u²)
+        "acos": lambda u: Scale(-1.0, _recip(_sqrt(_one_minus_sq(u, sp), sp), sp)),  # −1/√(1−u²)
+        # σ' = σ(1−σ);  softplus' = σ
+        "sigmoid": lambda u: _prod(
+            _sigmoid(u, sp), Sum((_ones(u, sp), Scale(-1.0, _sigmoid(u, sp)))), sp
+        ),
+        "softplus": lambda u: _sigmoid(u, sp),
+    }
+    if name in _UNARY:
         (u,) = args
         du = _dd(u, ctx)
         if isinstance(du, Zero):
             return _zero(e, ctx)
-        return Scale(Scale(0.5, _recip(_sqrt(u))), du)  # du / (2√u)
-    if name == "reciprocal":
-        (u,) = args
-        du = _dd(u, ctx)
-        if isinstance(du, Zero):
-            return _zero(e, ctx)
-        return Scale(Scale(-1.0, _recip(_mul(u, u))), du)  # −du / u²
+        return _prod(_UNARY[name](u), du, sp)
+    if name in ("sign", "ones"):
+        return _zero(e, ctx)
     if name == "div":
         u, w = args
         du, dw = _dd(u, ctx), _dd(w, ctx)
         parts = []
         if not isinstance(du, Zero):
-            parts.append(Scale(_recip(w), du))  # du / w
+            parts.append(_prod(_recip(w, sp), du, sp))  # du / w
         if not isinstance(dw, Zero):
-            parts.append(Scale(Scale(-1.0, _mul(u, _recip(_mul(w, w)))), dw))  # −u dw / w²
+            coeff = Scale(-1.0, _prod(u, _recip(_prod(w, w, sp), sp), sp))  # −u / w²
+            parts.append(_prod(coeff, dw, sp))
         return _sum(parts, e, ctx)
-    if name == "abs":
-        (u,) = args
-        du = _dd(u, ctx)
-        if isinstance(du, Zero):
-            return _zero(e, ctx)
-        return Scale(_sign(u), du)  # sgn(u) du
-    if name == "sign":
-        return _zero(e, ctx)
+    if name == "hadamard":
+        # The pointwise linear op (goal 02): bilinear, so d(a⊙b) = da⊙b + a⊙db.
+        a, b = args
+        da, db = _dd(a, ctx), _dd(b, ctx)
+        parts = []
+        if not isinstance(da, Zero):
+            parts.append(_prod(b, da, sp))
+        if not isinstance(db, Zero):
+            parts.append(_prod(a, db, sp))
+        return _sum(parts, e, ctx)
     raise DiffError(
         f"diff: no derivative rule for external op {name!r}; supply ∂/∂x via deps or "
         f"extend the rule table"
@@ -1207,27 +1238,81 @@ def _wrap_linear(ctor, dv: Term, e: Term, ctx: _DCtx) -> Term:
 # --- scalar op builders (the nonlinear-rule coefficients) -------------------
 
 
-def _ext(name: str, fn, *args: Term) -> External:
+def _ext(name: str, fn, space: Space, *args: Term) -> External:
     from grassmann.lower.represent import ExternalOp
 
-    return External(Scalar(), ExternalOp(name, fn), tuple(args))
+    return External(space, ExternalOp(name, fn), tuple(args))
 
 
-def _sqrt(u: Term) -> External:
-    return _ext("sqrt", np.sqrt, u)
+def _sqrt(u: Term, space: Space = Scalar()) -> External:
+    return _ext("sqrt", np.sqrt, space, u)
 
 
-def _recip(u: Term) -> External:
-    return _ext("reciprocal", lambda a: np.divide(1.0, a), u)
+def _recip(u: Term, space: Space = Scalar()) -> External:
+    return _ext("reciprocal", lambda a: np.divide(1.0, a), space, u)
 
 
-def _sign(u: Term) -> External:
-    return _ext("sign", np.sign, u)
+def _sign(u: Term, space: Space = Scalar()) -> External:
+    return _ext("sign", np.sign, space, u)
 
 
-def _mul(a: Term, b: Term) -> Scale:
-    """Scalar·scalar product (both ``Scalar``-valued) as a ``Scale``."""
-    return Scale(a, b)
+def _exp(u: Term, space: Space = Scalar()) -> External:
+    return _ext("exp", np.exp, space, u)
+
+
+def _sin(u: Term, space: Space = Scalar()) -> External:
+    return _ext("sin", np.sin, space, u)
+
+
+def _cos(u: Term, space: Space = Scalar()) -> External:
+    return _ext("cos", np.cos, space, u)
+
+
+def _sinh(u: Term, space: Space = Scalar()) -> External:
+    return _ext("sinh", np.sinh, space, u)
+
+
+def _cosh(u: Term, space: Space = Scalar()) -> External:
+    return _ext("cosh", np.cosh, space, u)
+
+
+def _sigmoid(u: Term, space: Space = Scalar()) -> External:
+    from scipy.special import expit
+
+    return _ext("sigmoid", expit, space, u)
+
+
+def _ones(u: Term, space: Space) -> External:
+    """A constant value of ``1`` in ``space``, shaped like ``u`` (elementwise ``ones_like``).
+
+    The constant-scalar leaf ``Lit`` lowers inconsistently for in-context scalars (the
+    ``ScalarBasis≅ℝ¹`` cob seam), so derivative arms that need ``1±g(u)`` build the unit
+    constant from the operand's own shape — which also broadcasts to vectors/matrices for
+    free. Its derivative is zero (the ``"ones"`` arm in :func:`_dd_external`).
+    """
+    return _ext("ones", lambda a: np.ones_like(np.asarray(a, dtype=float)), space, u)
+
+
+def _one_minus_sq(u: Term, space: Space) -> Sum:
+    """``1 − u²`` in ``space`` — the asin/acos denominator radicand."""
+    return Sum((_ones(u, space), Scale(-1.0, _prod(u, u, space))))
+
+
+def _hadamard(a: Term, b: Term, space: Space) -> External:
+    """The pointwise (Hadamard) product ``a ⊙ b`` in ``space`` (the goal-02 linear op)."""
+    return _ext("hadamard", np.multiply, space, a, b)
+
+
+def _prod(a: Term, b: Term, space: Space) -> Term:
+    """Elementwise product of two same-``space`` values.
+
+    For a ``Scalar`` it is an ordinary ``Scale`` (scalar·scalar) — byte-identical to the
+    pre-Hadamard arms; for any other (Euclidean) space it is the Hadamard product, so the
+    elementwise chain rule ``f'(u) ⊙ du`` works on vectors/matrices, not just scalars.
+    """
+    if isinstance(space, Scalar):
+        return Scale(a, b)
+    return _hadamard(a, b, space)
 
 
 # --- well-formedness guard --------------------------------------------------
