@@ -472,6 +472,27 @@ def bfn(dom: object, fn):
 
 
 # ===========================================================================
+# Surface syntax (Unicode parse / unparse).
+# ===========================================================================
+
+
+def unparse(x: object) -> str:
+    """``G.unparse(x)`` — render a term/space/basis (or ``Expr``) as round-trippable
+    Unicode mathematical text. See :func:`grassmann.syntax.unparse`."""
+    from grassmann.syntax import unparse as _u
+
+    return _u(x)
+
+
+def parse(src: str, sort: str | None = None) -> object:
+    """``G.parse(s)`` — parse Unicode surface text back into a core node (the inverse of
+    :func:`unparse`). See :func:`grassmann.syntax.parse`."""
+    from grassmann.syntax import parse as _p
+
+    return _p(src, sort)
+
+
+# ===========================================================================
 # Properties / sorts re-exports.
 # ===========================================================================
 
