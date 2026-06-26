@@ -1,0 +1,24 @@
+{
+  "codeExport": {
+    "latex": "\\documentclass[12pt]{article}\n\\begin{document}\nfunction:\n\\[\n  f = \\sin(x)^\\top \\cdot y\n\\]\n\ngradient:\n\\[\n  \\frac{\\partial f}{\\partial x} = y\\odot \\cos(x)\n\\]\nwhere\n\\begin{itemize}\n  \\item $x$ is a vector\n  \\item $y$ is a vector\n\\end{itemize}\n\\end{document}\n",
+    "python": "\"\"\"\nSample code automatically generated on 2026-06-26 18:27:44\n\nby www.matrixcalculus.org\n\nfrom input\n\nd/dx sin(x)'*y = y.*cos(x)\n\nwhere\n\nx is a vector\ny is a vector\n\nThe generated code is provided \"as is\" without warranty of any kind.\n\"\"\"\n\nfrom __future__ import division, print_function, absolute_import\n\nimport numpy as np\n\ndef fAndG(x, y):\n    assert isinstance(x, np.ndarray)\n    dim = x.shape\n    assert len(dim) == 1\n    x_rows = dim[0]\n    assert isinstance(y, np.ndarray)\n    dim = y.shape\n    assert len(dim) == 1\n    y_rows = dim[0]\n    assert x_rows == y_rows\n\n    functionValue = (np.sin(x)).dot(y)\n    gradient = (y * np.cos(x))\n\n    return functionValue, gradient\n\ndef checkGradient(x, y):\n    # numerical gradient checking\n    # f(x + t * delta) - f(x - t * delta) / (2t)\n    # should be roughly equal to inner product <g, delta>\n    t = 1E-6\n    delta = np.random.randn(3)\n    f1, _ = fAndG(x + t * delta, y)\n    f2, _ = fAndG(x - t * delta, y)\n    f, g = fAndG(x, y)\n    print('approximation error',\n          np.linalg.norm((f1 - f2) / (2*t) - np.tensordot(g, delta, axes=1)))\n\ndef generateRandomData():\n    x = np.random.randn(3)\n    y = np.random.randn(3)\n\n    return x, y\n\nif __name__ == '__main__':\n    x, y = generateRandomData()\n    functionValue, gradient = fAndG(x, y)\n    print('functionValue = ', functionValue)\n    print('gradient = ', gradient)\n\n    print('numerical gradient checking ...')\n    checkGradient(x, y)\n"
+  },
+  "csStr": "",
+  "derivative": "y\\odot \\cos(x)",
+  "derivativeCS": "y\\odot \\cos(x)",
+  "errorEnd": null,
+  "errorStart": null,
+  "errorString": "",
+  "expression": "sin(x)'*y",
+  "expressionLatex": "\\sin(x)^\\top \\cdot y",
+  "markTokens": null,
+  "varList": [
+    "x",
+    "y"
+  ],
+  "varType": [
+    "vector",
+    "vector"
+  ],
+  "wrt": "x"
+}

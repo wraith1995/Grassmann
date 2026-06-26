@@ -1,0 +1,26 @@
+{
+  "codeExport": {
+    "latex": "\\documentclass[12pt]{article}\n\\begin{document}\nfunction:\n\\[\n  f = \\|A\\cdot x-y\\|_2^{2}\n\\]\n\ngradient:\n\\[\n  \\frac{\\partial f}{\\partial x} = 2\\cdot A^\\top \\cdot (A\\cdot x-y)\n\\]\nwhere\n\\begin{itemize}\n  \\item $A$ is a matrix\n  \\item $x$ is a vector\n  \\item $y$ is a vector\n\\end{itemize}\n\\end{document}\n",
+    "python": "\"\"\"\nSample code automatically generated on 2026-06-26 18:27:45\n\nby www.matrixcalculus.org\n\nfrom input\n\nd/dx norm2(A*x-y)^2 = 2*A'*(A*x-y)\n\nwhere\n\nA is a matrix\nx is a vector\ny is a vector\n\nThe generated code is provided \"as is\" without warranty of any kind.\n\"\"\"\n\nfrom __future__ import division, print_function, absolute_import\n\nimport numpy as np\n\ndef fAndG(A, x, y):\n    assert isinstance(A, np.ndarray)\n    dim = A.shape\n    assert len(dim) == 2\n    A_rows = dim[0]\n    A_cols = dim[1]\n    assert isinstance(x, np.ndarray)\n    dim = x.shape\n    assert len(dim) == 1\n    x_rows = dim[0]\n    assert isinstance(y, np.ndarray)\n    dim = y.shape\n    assert len(dim) == 1\n    y_rows = dim[0]\n    assert A_rows == y_rows\n    assert A_cols == x_rows\n\n    t_0 = ((A).dot(x) - y)\n    functionValue = (np.linalg.norm(t_0) ** 2)\n    gradient = (2 * (A.T).dot(t_0))\n\n    return functionValue, gradient\n\ndef checkGradient(A, x, y):\n    # numerical gradient checking\n    # f(x + t * delta) - f(x - t * delta) / (2t)\n    # should be roughly equal to inner product <g, delta>\n    t = 1E-6\n    delta = np.random.randn(3)\n    f1, _ = fAndG(A, x + t * delta, y)\n    f2, _ = fAndG(A, x - t * delta, y)\n    f, g = fAndG(A, x, y)\n    print('approximation error',\n          np.linalg.norm((f1 - f2) / (2*t) - np.tensordot(g, delta, axes=1)))\n\ndef generateRandomData():\n    A = np.random.randn(3, 3)\n    x = np.random.randn(3)\n    y = np.random.randn(3)\n\n    return A, x, y\n\nif __name__ == '__main__':\n    A, x, y = generateRandomData()\n    functionValue, gradient = fAndG(A, x, y)\n    print('functionValue = ', functionValue)\n    print('gradient = ', gradient)\n\n    print('numerical gradient checking ...')\n    checkGradient(A, x, y)\n"
+  },
+  "csStr": "",
+  "derivative": "2\\cdot A^\\top \\cdot (A\\cdot x-y)",
+  "derivativeCS": "2\\cdot A^\\top \\cdot (A\\cdot x-y)",
+  "errorEnd": null,
+  "errorStart": null,
+  "errorString": "",
+  "expression": "norm2(A*x-y)^2",
+  "expressionLatex": "\\|A\\cdot x-y\\|_2^{2}",
+  "markTokens": null,
+  "varList": [
+    "A",
+    "x",
+    "y"
+  ],
+  "varType": [
+    "matrix",
+    "vector",
+    "vector"
+  ],
+  "wrt": "x"
+}
