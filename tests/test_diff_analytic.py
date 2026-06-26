@@ -422,3 +422,351 @@ def test_complement_frame_basis_is_svd_arbitrary() -> None:
         "Ker frame basis unexpectedly tracked expm(A)·Q₀ — if this holds, a geodesic embed/project "
         "reference for Ker/CoKer is achievable and should be added"
     )
+
+
+# ===========================================================================
+# PART 1 — gauge-invariant PROJECTOR reference (Ker / CoKer, + Img / CoImg bonus)
+# ---------------------------------------------------------------------------
+# The geodesic embed/project reference above is BASIS-dependent, so it can't reach Ker/CoKer (whose
+# complement frame is SVD-arbitrary — see ``test_complement_frame_basis_is_svd_arbitrary``).  But the
+# orthogonal PROJECTOR ``P_sub = embed∘project`` (``embed(project(z, sub)) = P·z``) is GAUGE-INVARIANT:
+# under the geodesic ``Q(x)=expm((c·x)A)·Q₀`` the projector evolves as a CONJUGATION
+# ``P(x)=Q(x)Q(x)ᵀ=expm((c·x)A)·P₀·expm(−(c·x)A)``, so
+#     ∂ⁿP·h^⊗ⁿ = (c·h)ⁿ·adₐⁿ(P₀) ,    adₐ(M)=[A,M]=A·M−M·A ,
+# and for a CONSTANT ambient ``z``
+#     ∂ⁿ(embed(project(z, sub)))·h^⊗ⁿ = (c·h)ⁿ·adₐⁿ(P₀)·z   (EXACT, no finite differences).
+# This holds for EVERY FFS kind (P is invariant even where the basis isn't), so it covers Ker/CoKer
+# (which the geodesic frame reference cannot) and re-covers Img/CoImg as a cross-check.
+# ===========================================================================
+
+
+def _ker_world(seed: int = 31):
+    """A geodesic moving ``Ker(J)`` (frame ``V[:,r:]`` of a surjective ``J``).  Rotating the right-
+    singular frame ``V(x)=expm((c·x)A)·V₀`` moves the kernel SUBSPACE rigidly, so its projector
+    ``P(x)=expm·P₀·expmᵀ`` is exact (the basis within is SVD-arbitrary, but ``P`` is gauge-invariant).
+    ``J(x)`` (grassmann ``(dom,cod)``) ``= expm((c·x)A)·B`` with ``B = J(0)``, so the J-derivative tower
+    is the same U-side closed form as ``_jval_tower`` reads (``Jᵀ`` rotates on the left)."""
+    Rtd, Red, rank, delta = 4, 2, 2, 2  # ker dim = Rtd − rank = 2
+    rng = np.random.default_rng(seed)
+    Rt, Re = S.base("Rt", Rtd), S.base("Re", Red)
+    A = rng.standard_normal((Rtd, Rtd))
+    A = (A - A.T) * _GEN_SCALE
+    U0 = _qr_pos(rng.standard_normal((Red, Red)))
+    V0 = _qr_pos(rng.standard_normal((Rtd, Rtd)))
+    sig = np.linspace(3.0, 1.5, rank)
+    c = rng.standard_normal(Rtd)
+
+    def Jval(xv):
+        Sig = np.zeros((Red, Rtd))
+        for i in range(rank):
+            Sig[i, i] = sig[i]
+        return (U0 @ Sig @ (expm((c @ xv) * A) @ V0).T).T  # (dom,cod); Jᵀ = expm·V0·Σᵀ·U0ᵀ
+
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.surj)
+    return dict(kind="ker", Rt=Rt, Re=Re, J=J, sub=S.ker(J), amb=Rt, amb_dim=Rtd,
+                delta=delta, Rtd=Rtd, Red=Red, A=A, c=c, Q0=None, Jval=Jval)
+
+
+def _coker_world(seed: int = 0):
+    """A geodesic moving ``CoKer(J)`` (frame ``U[:,r:]`` of a rank-r ``J``).  Rotating the left-singular
+    frame ``U(x)=expm((c·x)A)·U₀`` (ambient = cod) moves the cokernel rigidly; ``J(x)=expm((c·x)A)·B``
+    in grassmann ``(dom,cod)`` ⇒ the SAME U-side tower ``_jval_tower`` reads."""
+    Rtd, Red, rank = 2, 4, 2
+    delta = Red - rank  # = 2
+    rng = np.random.default_rng(seed)
+    Rt, Re = S.base("Rt", Rtd), S.base("Re", Red)
+    A = rng.standard_normal((Red, Red))
+    A = (A - A.T) * _GEN_SCALE
+    U0 = _qr_pos(rng.standard_normal((Red, Red)))
+    V0 = _qr_pos(rng.standard_normal((Rtd, Rtd)))
+    sig = np.linspace(3.0, 1.5, rank)
+    c = rng.standard_normal(Rtd)
+
+    def Jval(xv):
+        Sig = np.zeros((Red, Rtd))
+        for i in range(rank):
+            Sig[i, i] = sig[i]
+        return (expm((c @ xv) * A) @ U0 @ Sig @ V0.T).T  # (dom,cod); Jᵀ = expm·U0·Σ·V0ᵀ
+
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.rank(rank))
+    return dict(kind="coker", Rt=Rt, Re=Re, J=J, sub=S.coker(J), amb=Re, amb_dim=Red,
+                delta=delta, Rtd=Rtd, Red=Red, A=A, c=c, Q0=None, Jval=Jval)
+
+
+# Projector worlds: Ker/CoKer (the basis-arbitrary complements the geodesic frame ref can't reach)
+# plus the three geodesic-frame cases re-used as a cross-check (P is gauge-invariant for ALL kinds).
+_PROJECTOR_WORLDS = {
+    "ker": (_ker_world, 31),
+    "coker": (_coker_world, 0),
+    "img_inj": (_geodesic_world, _CASE_SEED["img_inj"]),
+    "img_rankr": (_geodesic_world, _CASE_SEED["img_rankr"]),
+    "coimg": (_geodesic_world, _CASE_SEED["coimg"]),
+}
+# Tolerances bound the MEASURED worst-case residual (over all five worlds at the test seeds) of
+# ``ffs_gauge_feed``'s nested-FD tower applied to the gauge-invariant projector: order 1 the feed's ∂P
+# IS the analytic adₐ(P₀) ⇒ machine-tight (measured ≲9e-12); orders 2–3 carry the feed's nested-
+# Richardson-FD error (measured ≲1.5e-10 / ≲1.5e-7, the SVD-complement cases Ker/CoKer/CoImg worst).
+# A snug margin above the measured worst case keeps each a real check of the feed's accuracy.
+_PROJ_TOL = {1: 5e-11, 2: 1e-9, 3: 1e-6}
+
+
+def _projector_world(name: str):
+    # _geodesic_world takes (kind, seed); the Ker/CoKer builders take (seed) and set their own kind.
+    builder, seed = _PROJECTOR_WORLDS[name]
+    return builder(name, seed) if builder is _geodesic_world else builder(seed)
+
+
+def _probe_P0(world) -> np.ndarray:
+    """The orthogonal projector ``P₀ = embed∘project`` at ``x₀=0`` via ``represent`` (the gauge-invariant
+    realization), as an ``(amb_dim, amb_dim)`` matrix probed column-by-column exactly like the FFS
+    frame probe.  Asserts ``P₀`` is a symmetric idempotent of the expected rank (a real projector)."""
+    from grassmann.lower.represent import represent
+
+    J, sub, amb, amb_dim = world["J"], world["sub"], world["amb"], world["amb_dim"]
+    Jv0 = world["Jval"](np.zeros(world["Rtd"]))
+    zc = T.var("zc", amb)
+    wc = T.var("wc", S.dual(amb))
+    ep = T.Eval(wc, (0,), (T.embed(T.project(zc, sub), amb),))
+    P0 = np.zeros((amb_dim, amb_dim))
+    eye = np.eye(amb_dim)
+    for i in range(amb_dim):
+        for j in range(amb_dim):
+            r = represent(ep).run(
+                {f"J_{J.uid}": Jv0, f"zc_{zc.uid}": eye[i], f"wc_{wc.uid}": eye[j]}
+            )["result"]
+            P0[j, i] = float(np.ravel(r)[0])
+    assert np.allclose(P0, P0.T, atol=1e-10), "P₀ not symmetric (embed∘project is not orthogonal?)"
+    assert np.allclose(P0 @ P0, P0, atol=1e-10), "P₀ not idempotent (not a projector?)"
+    assert abs(np.trace(P0) - world["delta"]) < 1e-8, "P₀ rank != subspace dim"
+    return P0
+
+
+def _coker_jval_tower(world, order):
+    """``CoKer`` J-derivative tower.  ``J(x)=expm((c·x)A)·B`` (``A`` on the COD side) ⇒ ``Jᵀ`` rotates on
+    the left exactly as the U-side ``_jval_tower`` assumes (``∂ᵐ(Jᵀ)=(c⊗ᵐ)·Aᵐ·B``).  Built directly so
+    the leading ``|X|`` axes are the differentiation axes, ``(dom, cod)`` trailing."""
+    A, c, Rtd = world["A"], world["c"], world["Rtd"]
+    base = world["Jval"](np.zeros(Rtd)).T  # cod × dom (the fixed factor)
+    out, Am = [], np.eye(A.shape[0])
+    for deg in range(order + 1):
+        Jm_deg = Am @ base  # cod × dom
+        cprod = np.array(1.0)
+        for _ in range(deg):
+            cprod = np.multiply.outer(cprod, c)
+        out.append(np.multiply.outer(cprod, Jm_deg.T))  # (|X|,)*deg + (dom, cod)
+        Am = Am @ A
+    return out
+
+
+def _projector_ad_and_ref(world, order, rng):
+    """AD of ``∂ⁿ⟨w, embed(project(z, sub))⟩·h^⊗ⁿ`` (constant ambient ``z``) through the geodesic moving
+    subspace via the numerical :func:`ffs_gauge_feed` tower, and the EXACT projector reference
+    ``⟨w, (c·h)ⁿ·adₐⁿ(P₀)·z⟩`` (``P₀`` probed from ``represent``)."""
+    from grassmann.lower.represent import represent
+
+    Rt, Re, J, sub = world["Rt"], world["Re"], world["J"], world["sub"]
+    amb, amb_dim, Rtd = world["amb"], world["amb_dim"], world["Rtd"]
+    tower = _coker_jval_tower(world, order) if world["kind"] == "coker" else _jval_tower(world, order)
+
+    DJ_names = ["DJ"] + [f"D{m}J" for m in range(2, order + 1)]
+    DJ_vars = [
+        T.var(DJ_names[m - 1], S.oprod(*([S.dual(Rt)] * (m + 1)), Re)) for m in range(1, order + 1)
+    ]
+    x = T.var("x", Rt)
+    z = T.var("z", amb)
+    w = T.var("w", S.dual(amb))
+    e = T.Eval(w, (0,), (T.embed(T.project(z, sub), amb),))
+    zv = rng.standard_normal(amb_dim)
+    wv = rng.standard_normal(amb_dim)
+    feed = {f"J_{J.uid}": tower[0], f"z_{z.uid}": zv, f"w_{w.uid}": wv}
+    for m, dv in enumerate(DJ_vars, start=1):
+        feed[f"{dv.name}_{dv.uid}"] = tower[m]
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "qr")
+    try:
+        cur = e
+        for d in range(order):
+            deps = {J.uid: DJ_vars[0]}
+            for k in range(1, d + 1):
+                deps[DJ_vars[k - 1].uid] = DJ_vars[k]
+            cur = diff(cur, x, deps)
+        extra = ffs_gauge_feed(sub, DJ_vars, feed)
+    finally:
+        clear_subspace_gauges()
+
+    h = rng.standard_normal(Rtd)
+    node, seeds = cur, []
+    for _ in range(order):
+        seeds.append(node.vars[0])
+        node = node.body
+    run_feed = {**feed, **extra}
+    for sd in seeds:
+        run_feed[f"{sd.name}_{sd.uid}"] = h
+    ad = float(np.ravel(np.asarray(represent(node).run(run_feed)["result"], float))[0])
+
+    P0 = _probe_P0(world)
+    ch = world["c"] @ h
+    A = world["A"]
+    M = P0.copy()
+    for _ in range(order):  # adₐⁿ(P₀)
+        M = A @ M - M @ A
+    ref = float(wv @ ((ch ** order) * (M @ zv)))
+    return ad, ref
+
+
+@pytest.mark.parametrize("name", list(_PROJECTOR_WORLDS))
+@pytest.mark.parametrize("order", [1, 2, 3])
+def test_geodesic_projector_ad_matches_analytic(name, order) -> None:
+    # PART 1: the GAUGE-INVARIANT projector ``embed∘project`` under a geodesic moving FFS subspace has the
+    # EXACT closed form ``∂ⁿ(embed(project(z)))·h^⊗ⁿ = (c·h)ⁿ·adₐⁿ(P₀)·z`` (conjugation evolution of P).
+    # This reference holds where the basis-dependent geodesic frame ref CANNOT — Ker/CoKer (SVD-arbitrary
+    # complement basis) — AND re-covers Img/CoImg as a cross-check.  No finite differences on the
+    # reference side; residual tracks the numerical feed's nested-FD depth (machine-tight at order 1).
+    world = _projector_world(name)
+    rng = np.random.default_rng(4242 + order * 17 + len(name) * 3)
+    ad, ref = _projector_ad_and_ref(world, order, rng)
+    assert abs(ad - ref) < _PROJ_TOL[order], (
+        f"{name} projector order {order}: AD {ad:.12g} vs analytic {ref:.12g}, "
+        f"resid {abs(ad - ref):.3e} > tol {_PROJ_TOL[order]:.0e}"
+    )
+
+
+# ===========================================================================
+# PART 2 — analytic COVARIANT DERIVATIVE via Christoffel symbols (the Gauss formula)
+# ---------------------------------------------------------------------------
+# For a known analytic immersion ``i(u): Rᵏ → Rⁿ`` (``u`` = the diff variable ``x``), the tangent-frame
+# map is ``J(u)=di(u)`` (grassmann ``(k,n)``: ``J[a,p]=∂iₚ/∂uₐ``) and ``DJ=∂²i``.  Using the IMMERSION
+# gauge (``Q=J``, ``∂Q=∂²i``) and realizing ``v:Img(J)`` in the ImageBasis (the literal ``di`` columns,
+# so ``embed(v)=di·v``), the gauge AD of ``embed`` of a CONSTANT coordinate ``v`` is the closed-form
+# Gauss formula (NO opaque feed — the immersion gauge is exact at all orders):
+#     ∂(embed v)·h = ∂²i·h·v = (di·Γ + II)·v ,
+# tangential ``di·Γ`` (Levi-Civita ``Γᶜ_{ab}=½ gᶜᵈ(∂ₐg_{bd}+∂_b g_{ad}−∂_d g_{ab})``, ``g=diᵀdi``) +
+# normal ``II_{ab}=(I−P)·∂²i_{ab}`` (``P=di·di⁺``).  This is the "covariant derivative via Christoffel
+# symbols": ``project(∂(embed v)) == Γ·v`` (the covariant derivative ``∇v``) and ``(I−P)·∂(embed v) ==
+# II·v`` (the second fundamental form).  Cross-checks ``test_gauss_decomposition_of_embed`` in
+# ``test_diff.py`` (same connection + II objects) with CLOSED-FORM analytic references on concrete
+# manifolds.  Two immersions (sphere patch, polynomial Monge patch) show "many situations".
+# ===========================================================================
+
+
+def _sphere_immersion(u):
+    """2-sphere patch ``i(u₁,u₂)=(sin u₁ cos u₂, sin u₁ sin u₂, cos u₁)`` and its closed-form ``di``
+    (grassmann ``(k=2, n=3)``: ``di[a,p]=∂iₚ/∂uₐ``) and Hessian ``d²i[b,a,p]``."""
+    u1, u2 = u
+    s1, c1, s2, c2 = np.sin(u1), np.cos(u1), np.sin(u2), np.cos(u2)
+    di = np.array([
+        [c1 * c2, c1 * s2, -s1],   # ∂/∂u₁
+        [-s1 * s2, s1 * c2, 0.0],  # ∂/∂u₂
+    ])
+    d2i = np.zeros((2, 2, 3))
+    d2i[0, 0] = [-s1 * c2, -s1 * s2, -c1]   # ∂²/∂u₁²
+    d2i[0, 1] = [-c1 * s2, c1 * c2, 0.0]    # ∂²/∂u₁∂u₂
+    d2i[1, 0] = d2i[0, 1]
+    d2i[1, 1] = [-s1 * c2, -s1 * s2, 0.0]   # ∂²/∂u₂²
+    return di, d2i
+
+
+def _monge_immersion(u):
+    """Polynomial Monge patch ``i(u)=(u₁, u₂, f(u))`` with quadratic+cubic
+    ``f = ½u₁² + 0.7u₁u₂ − 0.3u₂² + 0.2u₁³ − 0.1u₂³ + 0.15u₁²u₂`` (curvature varies with ``u``)."""
+    u1, u2 = u
+    fu1 = u1 + 0.7 * u2 + 0.6 * u1 * u1 + 0.3 * u1 * u2
+    fu2 = 0.7 * u1 - 0.6 * u2 - 0.3 * u2 * u2 + 0.15 * u1 * u1
+    di = np.array([[1.0, 0.0, fu1], [0.0, 1.0, fu2]])
+    d2i = np.zeros((2, 2, 3))
+    d2i[0, 0, 2] = 1.0 + 1.2 * u1 + 0.3 * u2  # f_{u₁u₁}
+    d2i[0, 1, 2] = 0.7 + 0.3 * u1             # f_{u₁u₂}
+    d2i[1, 0, 2] = d2i[0, 1, 2]
+    d2i[1, 1, 2] = -0.6 - 0.6 * u2            # f_{u₂u₂}
+    return di, d2i
+
+
+def _gauss_pieces(di, d2i):
+    """Closed-form Levi-Civita Christoffel ``Γ[c,a,b]`` (``g=di·diᵀ``), orthogonal projector ``P`` onto
+    the tangent ``Img(di)``, and second fundamental form ``II[a,b]=(I−P)·d²i[a,b]`` — the analytic Gauss
+    decomposition ``d²i = di·Γ + II`` references."""
+    k, n = di.shape
+    g = di @ di.T                       # gₐᵦ = diₐ·di_b
+    ginv = np.linalg.inv(g)
+    dg = np.einsum("abp,dp->abd", d2i, di) + np.einsum("bp,adp->abd", di, d2i)  # ∂ₐg_{bd}
+    Gamma = 0.5 * np.einsum(
+        "cd,abd->cab", ginv, dg + dg.transpose(1, 0, 2) - dg.transpose(2, 1, 0)
+    )  # Γᶜ_{ab} = ½ gᶜᵈ(∂ₐg_{bd}+∂_b g_{ad}−∂_d g_{ab})
+    P = di.T @ ginv @ di                # orthogonal projector onto the tangent (row space of di)
+    II = np.einsum("pq,abq->abp", np.eye(n) - P, d2i)
+    return g, ginv, Gamma, P, II
+
+
+@pytest.mark.parametrize(
+    "name, imm, u0",
+    [
+        ("sphere", _sphere_immersion, np.array([0.9, 0.5])),   # away from poles (sin u₁ ≠ 0)
+        ("monge", _monge_immersion, np.array([0.3, -0.4])),    # generic interior point
+    ],
+)
+def test_covariant_derivative_via_christoffel(name, imm, u0) -> None:
+    # PART 2: the covariant derivative via Christoffel symbols (the Gauss formula).  For an analytic
+    # immersion i(u), the IMMERSION-gauge AD of embed(v) (v constant, ImageBasis ⇒ embed(v)=di·v) equals
+    # the CLOSED-FORM ∂²i·v = (di·Γ + II)·v.  Asserts (machine precision, no opaque feed):
+    #   (1) gauge AD ∂(embed v) == ∂²i·v;
+    #   (2) the Gauss decomposition ∂²i = di·Γ + II holds, the tangential part project(∂(embed v)) == Γ·v
+    #       (the covariant derivative ∇v) and the normal part (I−P)·∂(embed v) == II·v (the 2nd fund form).
+    from grassmann.core import basis as B
+    from grassmann.lower.represent import default_basis, represent
+
+    di, d2i = imm(u0)                              # grassmann (k=2, n=3) immersion + Hessian
+    g, ginv, Gamma, P, II = _gauss_pieces(di, d2i)
+
+    # The analytic Gauss decomposition itself: ∂²i_{ab} == Σ_c di[c]·Γ[c,a,b] + II[a,b].
+    recon = np.einsum("cab,cp->abp", Gamma, di) + II
+    np.testing.assert_allclose(recon, d2i, atol=1e-12)
+
+    Rt, Re = S.base("Rt", 2), S.base("Re", 3)
+    J = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)
+    imgJ = S.img(J)
+    x = T.var("x", Rt)
+    DJ = T.var("DJ", S.oprod(S.dual(Rt), S.dual(Rt), Re))
+    v = T.var("v", imgJ)
+    Dv = T.var("Dv", S.oprod(S.dual(Rt), imgJ))    # CONSTANT section ⇒ Dv = 0
+    w = T.var("w", S.dual(Re))
+    e = T.Eval(w, (0,), (T.embed(v, Re),))
+
+    rng = np.random.default_rng(2718 + len(name))
+    vv = rng.standard_normal(2)                    # constant coordinate v
+    feed = {f"J_{J.uid}": di, f"DJ_{DJ.uid}": d2i, f"v_{v.uid}": vv,
+            f"Dv_{Dv.uid}": np.zeros((2, 2))}
+    ib = B.ImageBasis(J)                           # the value frame matching the immersion gauge
+    env = {v.uid: ib, Dv.uid: B.basis_prod(B.dual_basis(default_basis(Rt)), ib)}
+
+    def runp(t, ff):
+        return np.asarray(represent(t, basis_env=env).run(ff)["result"], float)
+
+    clear_subspace_gauges()
+    set_subspace_gauge(J, "immersion")
+    try:
+        jd = diff(e, x, deps={v.uid: Dv, J.uid: DJ})  # immersion gauge ⇒ closed form (no feed)
+    finally:
+        clear_subspace_gauges()
+    seed = jd.vars[0]
+
+    # AD[a,p] = ⟨e_p, ∂(embed v)·e_a⟩ — the full directional-derivative matrix.
+    AD = np.zeros((2, 3))
+    for a in range(2):
+        for p in range(3):
+            AD[a, p] = runp(
+                jd.body, {**feed, f"w_{w.uid}": np.eye(3)[p], f"{seed.name}_{seed.uid}": np.eye(2)[a]}
+            )
+
+    # (1) gauge AD == ∂²i·v  (machine precision — the immersion gauge is closed-form).
+    np.testing.assert_allclose(AD, np.einsum("abp,b->ap", d2i, vv), atol=1e-12)
+
+    # (2a) tangential part project(∂(embed v)) == Γ·v (the covariant derivative ∇v).
+    #      tangential coords for direction a: ginv·di·AD[a]; compare to Γ·v ⇒ (Γ·v)[c,a].
+    tang_coords = np.einsum("cd,dp,ap->ac", ginv, di, AD)     # (a, c)
+    np.testing.assert_allclose(tang_coords, np.einsum("cab,b->ca", Gamma, vv).T, atol=1e-12)
+
+    # (2b) normal part (I−P)·∂(embed v) == II·v (the second fundamental form).
+    np.testing.assert_allclose(
+        np.einsum("pq,aq->ap", np.eye(3) - P, AD), np.einsum("abp,b->ap", II, vv), atol=1e-12
+    )
