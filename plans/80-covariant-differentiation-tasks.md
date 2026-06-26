@@ -49,10 +49,14 @@ land. Tests: `∇(g⁻¹)=0`, `∇(S⊗T)=∇S⊗T+S⊗∇T`.
 2. **Higher-rank tensor sections.** General `(p,q)`-tensor field: one `+Γ` per contravariant
    slot, one `−Γ` per covariant slot (covariant Leibniz over slots). Today only rank-1.
    *Test:* `∇g = 0` (metric compatibility) and `∇(S⊗T) = ∇S⊗T + S⊗∇T`.
-3. **Connection from a frame / chart Jacobian (the FEM case).** Define `∇` by a moving frame
-   `e_a(x)` (e.g. a chart immersion `J(x)`); `Γ` from `∂e`. This is the tangent-space case
-   that matters most in practice (FEMOracle `baseExt/forms.py` tangent/cotangent frames).
-   Likely subsumes the metric route via `g = JᵀJ` (task 4).
+3. **Connection from a frame / chart Jacobian (the FEM case). — DONE (`diff.py`).** ∇ from a moving
+   frame / chart immersion `J(x):M⊸A`, `Γ(h) = J⁺·(∂J·h) = Compose(Pinv(J),(0,),(Eval(DJ,(0,),h),))`
+   — built from the bare pseudo-inverse + the **rank-2** directional derivative, NO rank-3 `∂(JᵀJ)`
+   (sidesteps the nested-⊗ gap). API: `diff(Remetric(sec, JᵀJ), x, deps={J.uid: DJ})` with
+   `JᵀJ = Compose(Dagger(J),(0,),(J,))`. Verified == the marked-(g,Dg) metric connection for
+   vector/covector/(1,1) sections, square + rectangular (codim-1). Also lifts task 4 for the chart
+   metric. Remaining: pure-contravariant `(p,0)` slots (nested-⊗ gap); auto-detect a section *in*
+   `Img(J)` (a thin adapter for pointwise's value model).
 4. **Composite x-dependent metrics.** Lift the "metric must be a marked Var" restriction:
    differentiate `g(x) = Jᵀ G J` (a pullback metric) by recursively computing `∂g` from `∂J`,
    reusing the metric-gradient hook. Removes the need to hand-supply `Dg`.
@@ -103,9 +107,10 @@ seed) is **coded but gated** (`_connection_term` raises): the correction's basis
     *and* a full map codomain); needs substrate task 15/16.
 13. **Full Moore–Penrose derivative.** Only the leading `−f†(df)f†` term is implemented; add
     the rank-deficient Golub–Pereyra terms (`(I−ff†)`, `(I−f†f)`), gated on `inj`/`surj`.
-14. **Value-`Lam` chain rule.** A value-producing `Lam` (a `Π`, not a function over spaces)
-    could be differentiated through its body; today all `NEval`/`Lam` are rejected as
-    higher-order. (SpaceFunctions/`Frame` stay rejected — those are genuinely higher-order.)
+14. **Value-`Lam` chain rule. — DONE (`diff.py` `_dd_neval_lam`).** `diff` now differentiates a
+    value-producing `NEval(Lam([yₖ],body),pos,args)` = `body[yₖ:=args]` via
+    `d = NEval(Lam([yₖ], _dd(body)), pos, args)` with each bound var carrying `_dd(arg_k)`.
+    SpaceFunctions/`Frame`/space-or-nat binders+args stay rejected (genuinely higher-order).
 
 ## Substrate enablers (prerequisites for 5, 12)
 15. **Free-label threading through bulk ops** (`SolveOp`/`PinvOp`/`InvOp`): batched RHS so a

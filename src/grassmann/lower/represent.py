@@ -482,6 +482,8 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_solve(e, f, ctx, target)
         case T.Pinv(f):
             return _rep_pinv(e, f, ctx, target)
+        case T.Sqrt(f):
+            return _rep_sqrt(e, f, ctx, target)
         case T.SolveApply(f, v):
             return _rep_solve_apply(e, f, v, ctx, target)
         case T.PinvApply(f, v):
@@ -2067,6 +2069,14 @@ def _rep_eval(
         note=f"eval:contract@{sorted(contracted)}",
     )
     rep = Rep(out, basis, space, free_labels=out_free)
+    # Un-fuse a surviving map-space slot.  When ``f``'s surviving slot is itself a *fused*
+    # map space (its f-array axis is a single product-dim — e.g. the cod of a ``Kron``/``Pinv``
+    # map-space operator, where ``_shape_of_space`` flattens a sub-``OProd`` factor to one
+    # ``_static_dim`` axis), the einsum hands that slot back as one fused axis, but the result
+    # ``space``/``basis`` describe it as several factors.  Reshape the result's *space* axes to
+    # ``_shape_of_space(space)`` so the array, its basis, and its space agree and the value
+    # composes downstream as a genuine multi-factor map (`41 §3`, mirrors ``_fuse_arg_to_slot``).
+    rep = _unfuse_eval_result(ctx, rep)
     if steered:
         return rep  # f was steered so the surviving slots are already `want` — no result cob
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
@@ -2113,6 +2123,47 @@ def _fuse_arg_to_slot(
         [pa.OutSpec("fuse-arg", new_shape)], note=f"eval:fuse-arg-axes@{pos}",
     )
     return Rep(fused, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
+
+
+def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
+    """Reshape an ``Eval`` result whose surviving slot is a *fused* map-space axis.
+
+    When ``f`` is a map-space operator (e.g. ``Pinv``/``Kron`` of ``(V⊸V)⊸(V⊸V)``) one
+    surviving slot is itself a map space ``OProd(Dual(V), V)``: ``_shape_of_space`` flattens
+    that top-level factor to a single ``_static_dim`` axis (dim ``9``), so the einsum returns it
+    as one fused axis even though the result ``space``/``basis`` carry it as several factors
+    (here ``(3, 3)``).  Reshape the result's *space* axes to ``_shape_of_space(rep.space)`` so
+    the array, its basis (``_result_basis_from_factors`` already 2-factor) and its space all
+    agree — the value then composes downstream as a genuine multi-factor map.
+
+    No-op (byte-identical) when the array's space axes already match ``_shape_of_space`` — the
+    ordinary ``Eval`` path is untouched.  Bails on any dynamic/FFS axis (non-``int`` dims) or a
+    total-size mismatch, so only a genuine static fused↔unfused reshape is performed.
+    """
+    want_space_shape = _shape_of_space(rep.space)
+    if not all(isinstance(d, int) for d in want_space_shape):
+        return rep
+    ashape = _shape_of(rep.array)
+    n_free = len(rep.free_labels)
+    n_space = len(ashape) - n_free
+    cur_space_dims = ashape[:n_space]
+    if tuple(cur_space_dims) == tuple(want_space_shape):
+        return rep  # already in the unfused layout — no-op
+    if not all(isinstance(d, int) for d in cur_space_dims):
+        return rep
+    cur_prod, want_prod = 1, 1
+    for d in cur_space_dims:
+        cur_prod *= d
+    for d in want_space_shape:
+        want_prod *= d
+    if cur_prod != want_prod:
+        return rep  # not a pure reshape of the space axes — leave untouched
+    new_shape = tuple(want_space_shape) + tuple(ashape[n_space:])
+    [unfused] = ctx.prog.emit_stmt(
+        _ReshapeOp(new_shape), [rep.array],
+        [pa.OutSpec("eval-unfuse", new_shape)], note="eval:unfuse-result-slot",
+    )
+    return Rep(unfused, rep.basis, rep.space, free_labels=rep.free_labels)
 
 
 def _rep_compose(
@@ -2403,17 +2454,27 @@ def _build_lam_subprogram(
 
 
 def _free_term_vars(node: object) -> list[T.Var]:
-    """The term ``Var``s occurring (free) in ``node``, de-duplicated by uid, in order."""
+    """The term ``Var``s occurring **free** in ``node``, de-duplicated by uid, in order.
+
+    Vars bound by a binder on the path — a ``Lam`` (``term_vars``) or an ``LLam`` (``vars``) — are
+    NOT free in that binder's body and are excluded.  This matters for nested binders: e.g. a
+    ``NEval(Lam([y], …))`` sitting inside another ``Lam``'s body must not report ``y`` as a free var
+    of the outer body (else the outer sub-Program would declare ``y`` as an un-fed input)."""
     seen: dict[int, T.Var] = {}
 
-    def walk(n: object) -> None:
+    def walk(n: object, bound: frozenset[int]) -> None:
         if isinstance(n, T.Var):
-            seen.setdefault(n.uid, n)
+            if n.uid not in bound:
+                seen.setdefault(n.uid, n)
             return
+        if isinstance(n, T.Lam):
+            bound = bound | {v.uid for v in n.term_vars}
+        elif isinstance(n, T.LLam):
+            bound = bound | {v.uid for v in n.vars}
         for child in T._children(n):
-            walk(child)
+            walk(child, bound)
 
-    walk(node)
+    walk(node, frozenset())
     return list(seen.values())
 
 
@@ -2449,6 +2510,40 @@ def _basis_term_vars(basis: B.Basis) -> list[T.Var]:
 # ---------------------------------------------------------------------------
 # Inverses & adjoint (`41 §3`). ⟨min-sym⟩ numeric Stmts — symbolics never enter them.
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SqrtSpdOp:
+    """The symmetric-positive-definite operator square root ``S`` with ``S·S = G`` — via
+    eigendecomposition of the symmetrized matrix.  **Fails loudly** if ``G`` is not SPD."""
+
+    def __call__(self, G: np.ndarray) -> np.ndarray:  # noqa: N803
+        A = 0.5 * (np.asarray(G, dtype=float) + np.asarray(G, dtype=float).T)
+        w, V = np.linalg.eigh(A)
+        if w.min() <= 0:
+            raise ValueError(f"Sqrt: operator is not SPD (min eigenvalue {w.min():.3e})")
+        return (V * np.sqrt(w)) @ V.T
+
+
+def _rep_sqrt(
+    e: T.Sqrt, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``Sqrt(f)`` — the SPD operator square root.  Computed in the standard (symmetric) rep of the
+    operand, so the result is honestly ``default_basis``; the STD/AUTO/MATCH epilogue cobs as usual."""
+    f_rep = _rep(f, ctx, target=B.STD)
+    space = _synth(e)
+    [out] = ctx.prog.emit_stmt(
+        _SqrtSpdOp(), [f_rep.array],
+        [pa.OutSpec("sqrt", _shape_of_space(space))], note="sqrt:SqrtSpdOp",
+    )
+    rep = Rep(out, default_basis(space), space)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
 
 
 def _rep_solve(
@@ -2565,8 +2660,8 @@ def _rep_solve_apply(
     #   ``XApply(f, v) ≡ Eval(X(f), (0,), (v,))`` — apply the inverse MAP via Eval (the canonical
     # contraction-view), i.e. ``Eval(Solve(f),(0,),(v,)) = solve(fᵀ, v)``.  This makes it
     # consistent with ``PinvApply`` and with how ``diff`` already differentiates it, and inherits
-    # Eval/Solve's honest per-axis basis handling.  (Was ``SolveOp = solve(f, v) = f⁻¹·v``, the
-    # OPPOSITE — cod-axis — orientation, which was not cleanly basis-covariant.)
+    # Eval/Solve's honest per-axis basis handling (incl. threading a free LLam-seed axis — which the
+    # old bulk ``SolveOp = solve(f,v) = f⁻¹·v`` could not, the OPPOSITE cod-axis orientation).
     return _rep(T.Eval(T.Solve(f), (0,), (v,)), ctx, target)
 
 
@@ -2576,6 +2671,15 @@ def _rep_pinv_apply(
 ) -> Rep:
     space = _synth(e)
     v_rep = _rep(v, ctx)
+    if v_rep.free_labels:
+        # As with ``SolveApply``: the ``f⁺ v`` matvec cannot carry a free (LLam-seed) basis-index
+        # axis on ``v`` (the einsum subscript has no slot for it).  Lowering the Jacobian ``LLam``
+        # of ``PinvApply(f, x)`` in ``eye`` mode hits this; raise loudly (the default ``vmap`` mode
+        # handles it with a concrete seed per slice).
+        raise RepresentError(
+            "represent: PinvApply cannot thread a free (LLam-seed) index through the f⁺ matvec; "
+            "differentiate in the default vmap mode (free-label threading is task 15 — `41 §7`)."
+        )
     metric = _map_metrics(f)
     if metric is not None:
         # GSVD/metric branch — build ``fp = f⁺`` with its metric in f's per-slot bases (consistent
