@@ -119,6 +119,7 @@ from .stdlib import (
     div,
     exp,
     exterior_power,
+    hadamard,
     least_squares,
     log,
     norm_sq,
@@ -280,4 +281,5 @@ __all__ = [
     "acos",
     "sigmoid",
     "softplus",
+    "hadamard",
 ]

@@ -30,6 +30,7 @@ from .scalar import (
     cosh,
     div,
     exp,
+    hadamard,
     log,
     reciprocal,
     sigmoid,
@@ -74,4 +75,5 @@ __all__ = [
     "acos",
     "sigmoid",
     "softplus",
+    "hadamard",
 ]

@@ -117,6 +117,22 @@ def test_elementwise_on_matrix_matches_numpy() -> None:
     assert out.shape == (3, 2)
 
 
+def test_hadamard_forward_vector_and_matrix() -> None:
+    """The pointwise (Hadamard) product runs elementwise over Euclidean vectors and matrices."""
+    V = S.base("V", 3)
+    a, b = G.var("a", V), G.var("b", V)
+    av, bv = np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0])
+    out = G.run(L.hadamard(a, b), {_key(a): av, _key(b): bv})["result"]
+    np.testing.assert_allclose(out, av * bv)
+    # matrix (⊗) operands
+    W = S.base("W", 2)
+    p, q = G.var("p", S.oprod(S.dual(V), W)), G.var("q", S.oprod(S.dual(V), W))
+    pv = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    qv = np.array([[6.0, 5.0], [4.0, 3.0], [2.0, 1.0]])
+    outm = G.run(L.hadamard(p, q), {_key(p): pv, _key(q): qv})["result"]
+    np.testing.assert_allclose(outm, pv * qv)
+
+
 def test_euclidean_predicate() -> None:
     V = S.base("V", 3)
     assert _is_euclidean(S.Scalar())

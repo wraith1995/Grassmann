@@ -248,22 +248,16 @@ def _dd_var(e: Var, ctx: _DCtx) -> Term:
 
 
 def _dd_external(e: External, ctx: _DCtx) -> Term:
-    """Elementwise nonlinear ops — chain / quotient rules over scalar values.
+    """Elementwise nonlinear ops + the Hadamard product — chain / product rules.
 
-    Each unary op has an elementwise coefficient ``c = f'(u)``; the derivative is ``c·du`` via
-    :func:`_prod` (a ``Scale`` for a ``Scalar`` operand). For a non-scalar operand the
-    derivative is ``diag(f'(u))·du`` — an elementwise (Hadamard) product, which is the external
-    pointwise linear op of goal 02; we reject it here rather than emit a malformed ``Scale``.
+    Each unary op has an elementwise coefficient ``c = f'(u)`` (a value in ``e.space``); the
+    derivative is ``c ⊙ du`` via :func:`_prod`, which is a plain ``Scale`` for a ``Scalar``
+    operand (byte-identical to the original scalar arms) and the Hadamard pointwise product
+    for any other Euclidean space — so these ops differentiate over vectors/matrices too.
     """
     name = getattr(e.data, "name", None)
     args = e.args
     sp = e.space
-    if not isinstance(sp, Scalar):
-        raise DiffError(
-            f"diff: elementwise '{name}' over a non-scalar space {sp!r} needs the Hadamard/"
-            f"pointwise derivative (goal 02 — external linear op). Scalar-operand derivatives "
-            f"are supported."
-        )
 
     # unary ops: coefficient c = f'(u), then c ⊙ du -----------------------------------
     _UNARY = {
@@ -306,6 +300,16 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
         if not isinstance(dw, Zero):
             coeff = Scale(-1.0, _prod(u, _recip(_prod(w, w, sp), sp), sp))  # −u / w²
             parts.append(_prod(coeff, dw, sp))
+        return _sum(parts, e, ctx)
+    if name == "hadamard":
+        # The pointwise linear op (goal 02): bilinear, so d(a⊙b) = da⊙b + a⊙db.
+        a, b = args
+        da, db = _dd(a, ctx), _dd(b, ctx)
+        parts = []
+        if not isinstance(da, Zero):
+            parts.append(_prod(b, da, sp))
+        if not isinstance(db, Zero):
+            parts.append(_prod(a, db, sp))
         return _sum(parts, e, ctx)
     raise DiffError(
         f"diff: no derivative rule for external op {name!r}; supply ∂/∂x via deps or "
@@ -1294,17 +1298,21 @@ def _one_minus_sq(u: Term, space: Space) -> Sum:
     return Sum((_ones(u, space), Scale(-1.0, _prod(u, u, space))))
 
 
-def _prod(a: Term, b: Term, space: Space) -> Term:
-    """Elementwise product of two same-``space`` values — a ``Scale`` for a ``Scalar``.
+def _hadamard(a: Term, b: Term, space: Space) -> External:
+    """The pointwise (Hadamard) product ``a ⊙ b`` in ``space`` (the goal-02 linear op)."""
+    return _ext("hadamard", np.multiply, space, a, b)
 
-    Only ever called for scalar operands here (``_dd_external`` rejects non-scalar spaces);
-    the vector/matrix (Hadamard) case is goal 02.
+
+def _prod(a: Term, b: Term, space: Space) -> Term:
+    """Elementwise product of two same-``space`` values.
+
+    For a ``Scalar`` it is an ordinary ``Scale`` (scalar·scalar) — byte-identical to the
+    pre-Hadamard arms; for any other (Euclidean) space it is the Hadamard product, so the
+    elementwise chain rule ``f'(u) ⊙ du`` works on vectors/matrices, not just scalars.
     """
     if isinstance(space, Scalar):
         return Scale(a, b)
-    raise DiffError(
-        "elementwise vector product needs the Hadamard pointwise op (goal 02)"
-    )
+    return _hadamard(a, b, space)
 
 
 # --- well-formedness guard --------------------------------------------------

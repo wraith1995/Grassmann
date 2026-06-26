@@ -8,6 +8,8 @@ case — a hand-computed Levi-Civita connection.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -17,6 +19,16 @@ from grassmann.core import space as S
 from grassmann.core import term as T
 from grassmann.infer.linearity import check_linearity
 from grassmann.transform.diff import DiffError, diff
+
+# Elementwise (Hadamard) derivatives over a VECTOR materialize the seed as a Jacobian; eye
+# mode cannot thread that seed through the Hadamard external (a (n,)⊙(n,n) shape clash) — the
+# same documented seed-threading gap as the SolveOp/PinvApply eye-mode cases. The feature is
+# correct in the default vmap mode, so these checks are vmap-only.
+_vmap_only = pytest.mark.skipif(
+    os.environ.get("GRASSMANN_LLAM_INDEX", "vmap") == "eye",
+    reason="elementwise vector AD threads the seed through a Hadamard external; eye mode "
+    "cannot (use default vmap) — same class as the SolveOp eye-mode gap",
+)
 
 
 def _xkey(x: T.Var) -> str:
@@ -144,6 +156,43 @@ def test_scalar_chain_rules_vs_fd(op) -> None:
     np.testing.assert_allclose(_run(J, feed).ravel(), _fd_jacobian(e, x, feed, 2).ravel(), atol=1e-4)
 
 
+def _sig(u):
+    return 1.0 / (1.0 + np.exp(-u))
+
+
+@pytest.mark.parametrize(
+    ("op", "fprime"),
+    [
+        (L.exp, np.exp),
+        (L.sin, np.cos),
+        (L.cos, lambda u: -np.sin(u)),
+        (L.tan, lambda u: 1.0 / np.cos(u) ** 2),
+        (L.sinh, np.cosh),
+        (L.tanh, lambda u: 1.0 / np.cosh(u) ** 2),
+        (L.square, lambda u: 2.0 * u),
+        # batch 2 (xv below has |components| < 1, in-domain for asin/acos)
+        (L.atan, lambda u: 1.0 / (1.0 + u**2)),
+        (L.asin, lambda u: 1.0 / np.sqrt(1.0 - u**2)),
+        (L.acos, lambda u: -1.0 / np.sqrt(1.0 - u**2)),
+        (L.sigmoid, lambda u: _sig(u) * (1.0 - _sig(u))),
+        (L.softplus, _sig),
+    ],
+)
+@_vmap_only
+def test_elementwise_vector_derivative_vs_fd(op, fprime) -> None:
+    """diff of an elementwise op over a VECTOR is the Jacobian ``diag(f'(u))`` — via the
+    Hadamard pointwise op (goal 02). Checked vs the closed diagonal and central FD."""
+    V = S.base("V", 3)
+    x = T.var("x", V)
+    e = op(G.wrap(x)).node
+    J = diff(e, x)
+    xv = np.array([0.2, -0.4, 0.5])
+    feed = {_xkey(x): xv}
+    Jv = _run(J, feed)
+    np.testing.assert_allclose(Jv, np.diag(fprime(xv)), atol=1e-6)
+    np.testing.assert_allclose(Jv, _fd_jacobian(e, x, feed, 3), atol=1e-4)
+
+
 @pytest.mark.parametrize("op", [L.atan, L.asin, L.acos, L.sigmoid, L.softplus])
 def test_batch2_scalar_derivative_vs_fd(op) -> None:
     """Batch-2 scalar derivatives (built with the unit-constant ``_ones``) vs central FD.
@@ -158,14 +207,19 @@ def test_batch2_scalar_derivative_vs_fd(op) -> None:
     np.testing.assert_allclose(_run(J, feed).ravel(), _fd_jacobian(e, x, feed, 2).ravel(), atol=1e-4)
 
 
-def test_elementwise_vector_derivative_rejected() -> None:
-    """diff of an elementwise op over a NON-scalar value needs the Hadamard/pointwise
-    derivative (goal 02) — it is refused with a clear message, not silently malformed."""
+@_vmap_only
+def test_hadamard_bilinear_derivative_vs_fd() -> None:
+    """The Hadamard product is bilinear: d(a⊙b)=da⊙b+a⊙db. With a=x and b fixed, d(x⊙b)/dx
+    = diag(b). FD-checked."""
     V = S.base("V", 3)
     x = T.var("x", V)
-    e = L.exp(G.wrap(x)).node  # exp of a vector — elementwise, non-scalar
-    with pytest.raises(DiffError, match="Hadamard"):
-        diff(e, x)
+    b = T.var("b", V)  # x-independent
+    e = L.hadamard(G.wrap(x), G.wrap(b)).node  # x ⊙ b
+    J = diff(e, x)
+    xv, bv = np.array([1.0, -2.0, 0.5]), np.array([3.0, 0.7, -1.0])
+    feed = {_xkey(x): xv, f"b_{b.uid}": bv}
+    np.testing.assert_allclose(_run(J, feed), np.diag(bv), atol=1e-6)
+    np.testing.assert_allclose(_run(J, feed), _fd_jacobian(e, x, feed, 3), atol=1e-4)
 
 
 # NOTE: second-order AD through these ops (differentiating an already-differentiated
