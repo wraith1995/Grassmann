@@ -32,6 +32,7 @@ from .scalar import (
     exp,
     hadamard,
     log,
+    ones,
     reciprocal,
     sigmoid,
     sign,
@@ -76,4 +77,5 @@ __all__ = [
     "sigmoid",
     "softplus",
     "hadamard",
+    "ones",
 ]

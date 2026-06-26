@@ -266,3 +266,36 @@ EXTERIOR = [
 @pytest.mark.parametrize("t", EXTERIOR, ids=["alt", "extpow", "tenpow", "normsq"])
 def test_exterior_corpus_roundtrip(t):
     _roundtrip(t)
+
+
+# ===========================================================================
+# Derivative-output round-trips (regression).
+#
+# diff's derivative maps inject INTERNAL externals — the `ones` unit constant
+# (1±g(u)) and a coefficient·du combine that can right-nest `Scale`. These were
+# the gap that surfaced (a) `UnparseError: opaque External` for sigmoid/atan/
+# asin/acos, and (b) a non-idempotent flat `r · s · t` for vector-nested Scale.
+# (Round-trip is symbolic, so asin/acos domain is irrelevant here.)
+# ===========================================================================
+
+_DIFF_OPS = [
+    L.exp, L.log, L.sqrt, L.square, L.sin, L.cos, L.tan, L.sinh, L.cosh,
+    L.tanh, L.atan, L.asin, L.acos, L.sigmoid, L.softplus,
+]
+
+
+@pytest.mark.parametrize("op", _DIFF_OPS, ids=[o.__name__ for o in _DIFF_OPS])
+def test_diff_scalar_output_roundtrips(op):
+    s = G.var("s", G.R)
+    _roundtrip(G.diff(op(s), s))
+
+
+@pytest.mark.parametrize("op", [L.exp, L.sin, L.tanh, L.sigmoid, L.atan], ids=lambda o: o.__name__)
+def test_diff_vector_output_roundtrips(op):
+    # vector elementwise derivative = Hadamard of the coefficient with du (carries `ones`).
+    _roundtrip(G.diff(op(x), x))
+
+
+def test_ones_and_nested_scale_roundtrip():
+    _roundtrip(L.ones(x))                                   # the unit constant op
+    _roundtrip(G.scale(-1.0, G.scale(G.var("a", G.R), G.var("b", G.R))))  # r · (s · v)
