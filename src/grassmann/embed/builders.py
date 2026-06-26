@@ -334,6 +334,16 @@ def normal_form(e: object, config: object = None) -> Expr:
 sum_of_products = normal_form
 
 
+def latex(e: object) -> str:
+    """``G.latex(e)`` — render a term/space (or its ``diff``) as a LaTeX string.
+
+    Accepts an embed :class:`Expr` handle or a raw core node. See
+    :func:`grassmann.printer.latex.latex`."""
+    from grassmann.printer.latex import latex as _latex
+
+    return _latex(_node(e))
+
+
 # ===========================================================================
 # Binders (HOAS, 25 §F2).
 # ===========================================================================
