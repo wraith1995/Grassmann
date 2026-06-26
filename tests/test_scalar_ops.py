@@ -13,10 +13,13 @@ the numpy normalization.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import grassmann as G
+import grassmann.core.space as S
 import grassmann.stdlib as L
 import grassmann.stdlib.linalg as LA
+from grassmann.stdlib.scalar import _is_euclidean
 
 
 def _key(v: G.Expr) -> str:
@@ -55,6 +58,84 @@ def test_reciprocal_matches_numpy() -> None:
     x = G.var("x", G.R)
     out = G.run(L.reciprocal(x), {_key(x): np.asarray(8.0)})["result"]
     np.testing.assert_allclose(out, np.reciprocal(8.0))
+
+
+@pytest.mark.parametrize(
+    ("op", "ref", "val"),
+    [
+        (L.exp, np.exp, 1.4),
+        (L.log, np.log, 3.0),
+        (L.square, np.square, -2.5),
+        (L.sin, np.sin, 0.9),
+        (L.cos, np.cos, 0.9),
+        (L.tan, np.tan, 0.9),
+        (L.sinh, np.sinh, 0.7),
+        (L.cosh, np.cosh, 0.7),
+        (L.tanh, np.tanh, 0.7),
+        (L.atan, np.arctan, 0.7),
+        (L.asin, np.arcsin, 0.4),
+        (L.acos, np.arccos, 0.4),
+        (L.sigmoid, lambda a: 1.0 / (1.0 + np.exp(-a)), 0.6),
+        (L.softplus, lambda a: np.logaddexp(0.0, a), 0.6),
+    ],
+)
+def test_extended_scalar_ops_match_numpy(op, ref, val) -> None:
+    x = G.var("x", G.R)
+    out = G.run(op(x), {_key(x): np.asarray(val)})["result"]
+    np.testing.assert_allclose(out, ref(val))
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["exp", "log", "square", "sin", "cos", "tan", "sinh", "cosh", "tanh",
+     "atan", "asin", "acos", "sigmoid", "softplus"],
+)
+def test_extended_op_provenance(name) -> None:
+    x = G.var("x", G.R)
+    prog = G.compile(getattr(L, name)(x))
+    notes = [s.note for s in prog.statements]
+    assert any(n == f"external:{name}" for n in notes), notes
+
+
+def test_elementwise_on_vector_matches_numpy() -> None:
+    """Scalar ops run elementwise on a Euclidean VECTOR value (not just on ``Scalar``)."""
+    V = S.base("V", 3)
+    x = G.var("x", V)
+    xv = np.array([0.1, 0.4, -0.6])
+    for op, ref in [(L.exp, np.exp), (L.sin, np.sin), (L.tanh, np.tanh), (L.square, np.square)]:
+        out = G.run(op(x), {_key(x): xv})["result"]
+        np.testing.assert_allclose(out, ref(xv))
+
+
+def test_elementwise_on_matrix_matches_numpy() -> None:
+    """And on a rank-2 (⊗) Euclidean value — elementwise, shape-preserving."""
+    V, W = S.base("V", 3), S.base("W", 2)
+    m = G.var("m", S.oprod(S.dual(V), W))
+    mat = np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
+    out = G.run(L.cosh(m), {_key(m): mat})["result"]
+    np.testing.assert_allclose(out, np.cosh(mat))
+    assert out.shape == (3, 2)
+
+
+def test_euclidean_predicate() -> None:
+    V = S.base("V", 3)
+    assert _is_euclidean(S.Scalar())
+    assert _is_euclidean(V)
+    assert _is_euclidean(S.dual(V))
+    assert _is_euclidean(S.oprod(S.dual(V), V))
+    assert _is_euclidean(S.oplus(V, V))
+    # NOT Euclidean: a re-metricized space.
+    g = G.var("g", S.oprod(S.dual(V), S.dual(V))).node
+    assert not _is_euclidean(S.with_inner(V, g))
+
+
+def test_noneuclidean_operand_rejected() -> None:
+    """A value in a re-metricized (non-Euclidean) space is refused, not silently applied."""
+    V = S.base("V", 3)
+    g = G.var("g", S.oprod(S.dual(V), S.dual(V))).node
+    xm = G.var("xm", S.with_inner(V, g))
+    with pytest.raises(ValueError, match="not Euclidean"):
+        L.exp(xm)
 
 
 def test_external_provenance_note() -> None:
