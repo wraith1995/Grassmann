@@ -32,11 +32,18 @@ connection ``Γ`` built from ``∂g`` (see :func:`_covariant_correction`); a con
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
 
-from grassmann.core.space import Scalar, Space, WithInner, is_space, linear_map_space
+from grassmann.core.space import (
+    Scalar,
+    Space,
+    WithInner,
+    is_space,
+    linear_map_space,
+)
 from grassmann.core.term import (
     Assert,
     Compose,
@@ -231,6 +238,12 @@ def _dd_var(e: Var, ctx: _DCtx) -> Term:
                 dmap = dval
             ctx._ddval[e.uid] = Eval(dmap, (0,), (ctx.h,))
         return ctx._ddval[e.uid]
+    if e.uid in _QR_FRAME_VARS:
+        # A self-differentiating QR-frame tower element (`§qr-tower`): its derivative is the next
+        # tower var, applied to the seed — ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.  Recursing through this
+        # rule (``diff`` of ``Eval(Qₙ₊₁, h)`` hits ``Qₙ₊₁`` again) gives ARBITRARY differentiation
+        # order from a single registry.
+        return Eval(_qr_next(e, ctx), (0,), (ctx.h,))
     return Zero(e.space)  # x-independent variable
 
 
@@ -347,43 +360,418 @@ def _subspace_defining_map(space: Space) -> Term | None:
     return None
 
 
+# The four fundamental subspaces (FFS) of a linear map ``J : dom ⊸ cod`` and the AMBIENT space each
+# embeds into.  ``represent`` realizes each in a deterministic orthonormal frame (`§ffs-frame`):
+#   Img(J)   ⊂ cod, range frame qr_pos(Jᵀ)        — δ = rank
+#   CoImg(J) ⊂ dom, range frame SVD V[:,:δ]       — δ = rank
+#   Ker(J)   ⊂ dom, complement frame SVD V[:,δ:]  — δ = dom−rank
+#   CoKer(J) ⊂ cod, complement frame SVD U[:,δ:]  — δ = cod−rank
+# where U,_,Vt = svd(Jᵀ = Jval.T, full_matrices=True); V = Vt.T.  ``_ffs_kind`` reads the FFS kind +
+# ambient off the subspace node so the gauge machinery picks the matching frame.
+_FFS_AMBIENT = {"img": "cod", "coimg": "dom", "ker": "dom", "coker": "cod"}
+
+
+def _ffs_kind(sub: Space) -> str | None:
+    """The FFS kind string (``"img"/"coimg"/"ker"/"coker"``) of a moving-subspace node, else ``None``."""
+    from grassmann.core.space import CoImg, CoKer, Img, Ker
+
+    return {Img: "img", CoImg: "coimg", Ker: "ker", CoKer: "coker"}.get(type(sub))
+
+
+def _ffs_ambient(kind: str, J: Term) -> Space:
+    """The ambient space (``dom`` or ``cod`` of ``J``) the FFS ``kind`` embeds into."""
+    from grassmann.infer.synth import synth_space
+
+    dom, cod = _map_dom_cod(synth_space(J))
+    if dom is None:
+        raise DiffError(f"diff: FFS gauge needs a simple linear-map defining map; got {synth_space(J)!r}")
+    return dom if _FFS_AMBIENT[kind] == "dom" else cod
+
+
+def _ffs_frame_value(kind: str, Jval: np.ndarray, rank: int | None = None) -> np.ndarray:
+    """The ambient orthonormal frame columns of the FFS ``kind`` for immersion ``Jval`` (grassmann
+    ``(dom=k, cod=n)`` layout).  Returns shape ``(ambient_dim, δ)`` — Img via QR, the other three via
+    a full SVD of ``Jm = Jval.T`` (cod×dom).  ``represent`` lowers exactly these frames (`§ffs-frame`,
+    probed to machine precision).
+
+    ``rank`` PINS the slice width.  Defaults to the numeric ``matrix_rank(Jm)``, but a moving NON-full
+    rank subspace (e.g. a non-injective ``Img(J)``) must pass the DECLARED rank: the Taylor-reconstructed
+    ``Jm`` drifts off the rank-``r`` manifold at finite δ, so its numeric rank jumps (spurious small
+    singular values) and the slice width would change between FD steps — fixing ``rank`` keeps δ constant
+    (the §ffs-frame-drift subtlety)."""
+    Jm = Jval.T  # ambient immersion columns, cod×dom
+    if rank is None:
+        rank = np.linalg.matrix_rank(Jm)
+    dom = Jm.shape[1]
+    if kind == "img":
+        if rank == dom:
+            Q_amb, _ = _qr_pos(Jm)  # cod × rank (= dom), range of Jm; injective ⇒ QR (byte-identical)
+            return Q_amb
+        # Non-injective J: ``represent`` realizes Img(J) in the SVD LEFT-singular frame U[:,:rank]
+        # (cod×rank), NOT qr_pos (which would span all dom columns).  Probed == represent to machine
+        # precision; qr_pos here would be a SILENTLY WRONG (dom-dim) frame.
+        U, _s, _Vt = np.linalg.svd(Jm, full_matrices=True)  # U cod×cod
+        return U[:, :rank]  # cod × rank
+    U, _s, Vt = np.linalg.svd(Jm, full_matrices=True)  # U cod×cod, V=Vt.T dom×dom
+    V = Vt.T
+    if kind == "coimg":
+        return V[:, :rank]      # dom × rank   (row space)
+    if kind == "ker":
+        return V[:, rank:]      # dom × (dom−rank)  (null space)
+    if kind == "coker":
+        return U[:, rank:]      # cod × (cod−rank)  (left null space)
+    raise DiffError(f"diff: unknown FFS kind {kind!r}")
+
+
+# ---------------------------------------------------------------------------
+# Gauge of a moving subspace (`§gauge`).  Differentiating a section of a moving subspace needs a
+# *connection* (a gauge): the realization frame ``Q`` of ``Img(J)`` is defined only up to ``O(k)``,
+# and the derivative depends on the choice.  The gauge is a property of the SPACE — keyed here by the
+# defining map's uid — read by ``diff`` to pick the frame ``(Q, dQ)``.  ``represent`` is untouched: it
+# realizes the subspace in its basis and cobs the value to any output basis, exactly as before.
+#
+# Gauge-awareness lives ENTIRELY in ``diff`` + this registry.  The default ``immersion`` gauge
+# (``Q = J``, ``dQ = ∂J``) makes the arms byte-identical to the prior behavior.  ``polar``
+# (``Q = J·G^{-1/2}``, via the SPD ``Sqrt`` primitive) is the closed-form orthonormal gauge.  An
+# opaque (e.g. QR) gauge — ``dQ`` supplied as a program-backed variable — is a later phase (P2).
+# uid -> (gauge_name, frame, frame_deriv).  frame/frame_deriv are used only by OPAQUE gauges (qr/…).
+_SUBSPACE_GAUGE: dict[int, tuple[str, Term | None, Term | None]] = {}
+# The DEFAULT gauge is ``qr`` — the realization frame ``Q`` of ``Img(J)`` that ``represent``
+# actually lowers (the orthonormal ``ProjectedBasis = qr_pos(Jᵀ)``).  So an unregistered moving
+# subspace differentiates in the SAME frame its value lives in, with no per-test pinning.  The
+# opaque ``dQ`` is supplied through auto-created program-backed variables (`§qr-auto`), seeded by
+# :func:`qr_gauge_feed` — ``represent`` stays untouched.
+_DEFAULT_GAUGE = "qr"
+
+
+def set_subspace_gauge(
+    defining_map: Term, gauge: str, *, frame: Term | None = None, frame_deriv: Term | None = None,
+) -> None:
+    """Register the AD gauge for the moving subspace ``Img(defining_map)``.  Read by ``diff`` ONLY;
+    ``represent`` is unaffected.
+
+    * ``"immersion"``, ``"polar"`` — closed-form frames (no extra args).
+    * ``"qr"`` (the DEFAULT) — the orthonormal ``ProjectedBasis`` frame ``Q = qr_pos(Jᵀ)``.  With no
+      explicit ``frame``/``frame_deriv`` the opaque ``Q`` / ``∂Q/∂x`` are AUTO-created as
+      program-backed variables (see :func:`_qr_gauge_vars`); seed them with :func:`qr_gauge_feed`.
+    * any other OPAQUE gauge — pass ``frame`` (the realization frame ``Q`` as a term/var) and
+      ``frame_deriv`` (``∂Q/∂x`` as a map term/var); ``diff`` forms the directional
+      ``dQ = (∂Q/∂x)·h`` exactly as it does for any marked variable."""
+    _SUBSPACE_GAUGE[defining_map.uid] = (gauge, frame, frame_deriv)
+
+
+def clear_subspace_gauges() -> None:
+    """Reset all registered subspace gauges to the default and drop the auto-created QR vars."""
+    _SUBSPACE_GAUGE.clear()
+    _QR_AUTO_VARS.clear()
+    _QR_FRAME_VARS.clear()
+    _QR_NEXT.clear()
+
+
+# --- opaque QR gauge (`§qr-auto`): the default frame is the lowered ``ProjectedBasis`` ------------
+# ``represent`` realizes a moving ``Img(J)`` in the orthonormal ``ProjectedBasis = qr_pos(Jᵀ)``.
+# The matching AD gauge frame ``Q`` (and its motion ``∂ⁿQ/∂xⁿ``) has NO closed form the substrate can
+# thread, so we supply it as opaque program-backed variables, auto-created on demand and seeded
+# numerically by :func:`qr_gauge_feed`.  The frame is a SELF-DIFFERENTIATING TOWER
+# ``Q₀ = Q, Q₁ = ∂Q/∂x, Q₂ = ∂²Q/∂x², …``: ``diff`` of any tower element yields the next one
+# (`§qr-tower`), so the opaque QR gauge supports ARBITRARY differentiation order.  Each ``Qₙ`` lives
+# in ``linear_map_space(X, Qₙ₋₁.space)`` (the flat ``(|X|,…,|X|,k,n)`` layout of the n-th derivative
+# tensor); ``diff`` treats ``Qₙ`` like a marked-variable derivative:
+# ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.
+#
+# ``_QR_AUTO_VARS``: ``(J.uid, kind) -> Q₀`` (the realization frame; one per (defining map, FFS kind)
+#   — ``Img(J)`` and ``Ker(J)`` of the SAME ``J`` need DIFFERENT frames, so the kind is part of the
+#   key).
+# ``_QR_FRAME_VARS``: the set of ALL tower-var uids (Q₀, Q₁, …) — :func:`_dd_var` reads it to make
+#   every tower element self-differentiating.
+# ``_QR_NEXT``: ``Qₙ.uid -> Qₙ₊₁`` (the derivative var of each tower element, created lazily).
+_QR_AUTO_VARS: dict[tuple[int, str], Var] = {}
+_QR_FRAME_VARS: set[int] = set()
+_QR_NEXT: dict[int, Var] = {}
+
+
+def _qr_next(e: Var, ctx: _DCtx) -> Var:
+    """Get-or-create ``e``'s derivative tower var ``∂e/∂x`` of space ``linear_map_space(X, e.space)``,
+    register it in ``_QR_FRAME_VARS`` (so it too is self-differentiating) and ``_QR_NEXT``, and return
+    it.  Drives the arbitrary-order QR frame tower (`§qr-tower`)."""
+    if e.uid not in _QR_NEXT:
+        nxt = Var(f"_dQqr_{e.name}_{next(_counter)}", linear_map_space(ctx.X, e.space))
+        _QR_NEXT[e.uid] = nxt
+        _QR_FRAME_VARS.add(nxt.uid)
+    return _QR_NEXT[e.uid]
+
+
+def _qr_pos(M: np.ndarray):
+    """Positive-diagonal (``R``) QR of ``M`` — the unique factorization ``M = Q·R`` with
+    ``diag(R) > 0`` (so ``Q`` is a deterministic orthonormal frame, == grassmann ``ProjectedBasis``)."""
+    q, r = np.linalg.qr(M)
+    s = np.sign(np.diag(r))
+    s[s == 0] = 1.0
+    return q * s, r * s[:, None]
+
+
+def _qr_dQ(Q: np.ndarray, R: np.ndarray, dJm: np.ndarray) -> np.ndarray:
+    """The analytic QR frame differential.  For ``Q,R = _qr_pos(Jm)`` (``Jm`` of shape ``(n,k)``)
+    and a column perturbation ``dJm`` (``(n,k)``), the motion of the orthonormal factor is
+
+        M = Qᵀ·dJm·R⁻¹ ,   Ω = tril(M,−1) − tril(M,−1)ᵀ ,   dQ = Q·Ω + (I − Q·Qᵀ)·dJm·R⁻¹ .
+
+    Verified against a central finite difference of :func:`_qr_pos` (square and rectangular,
+    full-column-rank ``Jm``)."""
+    Rinv = np.linalg.inv(R)
+    Mt = Q.T @ dJm @ Rinv
+    low = np.tril(Mt, -1)
+    omega = low - low.T
+    n = Q.shape[0]
+    return Q @ omega + (np.eye(n) - Q @ Q.T) @ dJm @ Rinv
+
+
+def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
+    """Get-or-create the opaque realization frame ``Q₀`` for the moving FFS subspace ``sub`` of
+    defining map ``J``, keyed by ``(J.uid, kind)`` — ``Img(J)`` and ``Ker(J)`` of the SAME ``J`` get
+    SEPARATE frames.  ``Q₀`` lives in the grassmann frame-map space ``coords ⊸ ambient`` (stored
+    ``(δ, ambient_dim)``); it is registered in ``_QR_FRAME_VARS`` so it is self-differentiating —
+    ``_dd(Q₀)`` grows the tower ``Q₁ = ∂Q/∂x, …`` on demand (`§qr-tower`).
+
+    For ``Img`` the coordinate space IS ``J``'s domain, so ``Q₀ : J.space`` exactly reproduces the
+    prior Img path (byte-identical).  For ``CoImg/Ker/CoKer`` the coordinate space is the moving
+    subspace ITSELF, so ``Q₀ : oprod(dual(sub), ambient)`` — the roundtrip ``Q·(Q⁺·embed) == embed``
+    lowers (probed)."""
+    from grassmann.core.space import dual, oprod
+    from grassmann.infer.properties import is_injective
+    from grassmann.infer.synth import synth_space
+
+    key = (J.uid, kind)
+    if key not in _QR_AUTO_VARS:
+        if kind == "img" and is_injective(J):
+            # INJECTIVE Img: coords = dom(J), frame qr_pos(Jᵀ) (dim = dom); keep the prior path identical.
+            frame_space = synth_space(J)
+        else:
+            # NON-injective Img realizes in the SVD frame U[:,:rank] (dim = rank < dom), exactly like
+            # the other three FFS kinds — route it through the same subspace-coord path (coords = sub).
+            frame_space = oprod(dual(sub), _ffs_ambient(kind, J))  # coords = the moving subspace
+        n = next(_counter)
+        name = getattr(J, "name", "J")
+        Qvar = Var(f"_Q{kind}_{name}_{n}", frame_space)
+        _QR_AUTO_VARS[key] = Qvar
+        _QR_FRAME_VARS.add(Qvar.uid)
+    return _QR_AUTO_VARS[key]
+
+
+# Per-order step for the nested Richardson-extrapolated central difference (:func:`_nth_deriv_tensor`,
+# O(eps⁴) per level): large enough that the ``order``-fold cancellation (error ~ macheps/eps^order)
+# stays bounded.  With Richardson, order 1 cross-checks the analytic ``_qr_dQ`` to <1e-7 and orders
+# 2–3 reach ~1e-6 (a sharp 3rd-order FD check, not a smoke test).
+_NESTED_FD_EPS = {1: 1e-4, 2: 4e-3, 3: 8e-3}
+
+
+def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -> np.ndarray:
+    """The ``order``-th derivative tensor of ``f : R^nX → array`` at ``x0`` by NESTED,
+    **Richardson-extrapolated** central differences over the ``nX`` coordinate directions.  Each
+    level uses ``(4·D(h/2) − D(h))/3`` (``D`` the central difference), cancelling the ``O(eps²)``
+    truncation ⇒ ``O(eps⁴)`` per level — sharp enough that the fed ``∂ⁿQ`` tower is accurate, not
+    smoke-accurate.  Returns shape ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th direction);
+    mixed partials are symmetric, so it is symmetric in its first ``order`` axes."""
+    if order == 0:
+        return np.asarray(f(x0), dtype=float)
+    if eps is None:
+        eps = _NESTED_FD_EPS.get(order, 1e-2)
+    nX = x0.shape[0]
+
+    def g(x):  # the (order-1) tensor — itself Richardson-extrapolated
+        return _nth_deriv_tensor(f, x, order - 1, eps)
+
+    blocks = []
+    for a in range(nX):  # differentiate the (order-1) tensor once more in direction a (Richardson)
+        ea = np.zeros(nX)
+        ea[a] = 1.0
+        d_h = (g(x0 + eps * ea) - g(x0 - eps * ea)) / (2.0 * eps)
+        d_h2 = (g(x0 + (eps / 2.0) * ea) - g(x0 - (eps / 2.0) * ea)) / eps  # = /(2·eps/2)
+        blocks.append((4.0 * d_h2 - d_h) / 3.0)
+    return np.stack(blocks, axis=0)
+
+
+def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
+    """Numeric values for the auto-created opaque gauge TOWER of a moving FFS subspace (the default
+    ``qr`` gauge, `§qr-tower`).  Fills the ENTIRE realized frame tower ``Q₀ = Q, Q₁ = ∂Q/∂x, …`` to
+    whatever depth ``diff`` grew it — so arbitrary-order FFS AD lowers.
+
+    ``sub_or_J`` selects the case: pass the moving-subspace NODE (``Img(J)/CoImg(J)/Ker(J)/CoKer(J)``)
+    to feed that exact frame; passing the bare defining map ``J`` is the back-compat ``Img`` alias
+    (:func:`qr_gauge_feed`).  ``J_deriv_tower`` is the list of J's derivative VARS ``[DJ, D²J, …]`` the
+    caller marked for the nested diffs (a bare ``DJ`` is accepted).
+
+    Reads the immersion ``Jval`` (``feed[J]``, grassmann ``(k,n)``) and the derivative-tower values
+    (``feed[DⁿJ]``, ``(|X|,…,|X|,k,n)``), reconstructs ``J(x₀+δ) = Σ_m (1/m!) ∂ᵐJ · δ^⊗m``, sets
+    ``Q(x₀+δ) = _ffs_frame_value(kind, J(x₀+δ))ᵀ`` (QR for ``img``, the SVD U/V slice for the others),
+    and takes each ``∂ⁿQ/∂xⁿ`` tensor at ``δ=0`` by NESTED Richardson central differences.  Returns
+    ``{Qₙ: value}`` for every realized tower var, grassmann ``(δ, ambient)`` codomain layout (``Qₙ``
+    flattened to ``(|X|, |X|^(n-1)·δ·ambient)`` to match the nested map-space lowering).
+
+    SVD ordering must be consistent across the tiny FD steps — pick a generic ``J`` with well-separated
+    singular values (degenerate spectra rotate the frame discontinuously).  Call after ``diff`` so the
+    tower vars exist; merge the result into the program feed."""
+    if isinstance(J_deriv_tower, Term):
+        J_deriv_tower = [J_deriv_tower]
+    J = _subspace_defining_map(sub_or_J) if _ffs_kind(sub_or_J) is not None else sub_or_J
+    kind = _ffs_kind(sub_or_J) or "img"
+    Q0 = _QR_AUTO_VARS[(J.uid, kind)]
+    Jval = np.asarray(feed[f"{J.name}_{J.uid}"], dtype=float)  # (k, n) grassmann
+    # J-tower values in grassmann (k,n) codomain layout: tower[m] has shape (|X|,)*m + (k,n).
+    Jtower = [Jval]
+    for DmJ in J_deriv_tower:
+        Jtower.append(np.asarray(feed[f"{DmJ.name}_{DmJ.uid}"], dtype=float))
+    if len(Jtower) < 2:
+        raise DiffError("ffs_gauge_feed: supply at least J's first derivative DJ")
+    nX = Jtower[1].shape[0]
+    # PIN the frame slice width at the base immersion's numeric rank.  A moving non-full-rank subspace
+    # (non-injective Img) reconstructs OFF its rank-r manifold at finite δ, so the per-δ numeric rank
+    # would jump and the slice width with it — fixing it here keeps the δ-dimension constant across the
+    # nested FD steps so the ∂ⁿQ tower has a stable shape (the §ffs-frame-drift subtlety).
+    base_rank = int(np.linalg.matrix_rank(Jval.T))
+
+    def J_at(delta: np.ndarray) -> np.ndarray:
+        """Reconstruct J at x₀+δ from the Taylor tower, grassmann (k, n) layout."""
+        acc = np.array(Jtower[0])  # (k, n)
+        for m in range(1, len(Jtower)):
+            # ∂ᵐJ · δ^⊗m / m!  — contract the m leading |X| axes with δ.
+            term = Jtower[m]
+            for _ in range(m):
+                term = np.tensordot(delta, term, axes=([0], [0]))
+            acc = acc + term / float(math.factorial(m))
+        return acc  # (k, n)
+
+    def Q_at(delta: np.ndarray) -> np.ndarray:
+        """The grassmann (δ, ambient) realization frame Q₀ at x₀+δ for this FFS case."""
+        return _ffs_frame_value(kind, J_at(delta), base_rank).T  # frame (ambient, δ) ⇒ (δ, ambient)
+
+    # Walk the realized tower Q₀ → Q₁ → … via _QR_NEXT; fill each to its order.
+    out: dict = {}
+    x0 = np.zeros(nX)
+    var = Q0
+    order = 0
+    while True:
+        depth = len(Jtower) - 1  # highest J-derivative available bounds reconstruction accuracy
+        if order > depth:
+            raise DiffError(
+                f"ffs_gauge_feed: tower needs ∂^{order}Q but only {depth} J-derivative(s) supplied; "
+                f"mark J→DJ→…→D^{order}J in the nested diffs and pass them all"
+            )
+        Qn = _nth_deriv_tensor(Q_at, x0, order)  # shape (|X|,)*order + (δ, ambient)
+        # Lower layout: flatten all but the first |X| axis ⇒ (|X|, …); order 0 ⇒ (δ, ambient).
+        val = Qn if order == 0 else Qn.reshape(nX, -1)
+        out[f"{var.name}_{var.uid}"] = val
+        nxt = _QR_NEXT.get(var.uid)
+        if nxt is None:
+            break
+        var = nxt
+        order += 1
+    return out
+
+
+def qr_gauge_feed(J: Term, J_deriv_tower, feed: dict) -> dict:
+    """Back-compat ``Img`` alias of :func:`ffs_gauge_feed` — fills the opaque ``ProjectedBasis`` (QR)
+    frame tower of ``Img(J)`` (the default gauge).  ``J`` is the bare defining map; see
+    :func:`ffs_gauge_feed` for the general FFS cases (pass the subspace node)."""
+    return ffs_gauge_feed(J, J_deriv_tower, feed)
+
+
+def _gauge_frame(J: Term, dJ: Term, sub: Space, kind: str, ctx: _DCtx) -> tuple[Term, Term]:
+    """The realization frame ``Q`` of the moving FFS subspace ``sub`` (kind ``"img"/"coimg"/"ker"/
+    "coker"``) and its motion ``dQ`` for the subspace's gauge.
+
+    The DEFAULT gauge is ``qr`` — the orthonormal frame ``represent`` actually lowers — supplied via
+    AUTO-created opaque program-backed vars (`§qr-auto`).  For ``Img`` two closed-form gauges also
+    exist: ``immersion`` ⇒ ``(J, ∂J)`` (the literal immersion); ``polar`` ⇒ ``(J·G^{-1/2},
+    ∂(J·G^{-1/2}))``, ``G = JᵀJ`` (the ``Sqrt`` primitive).  An OPAQUE gauge with an explicit
+    ``frame``/``frame_deriv`` ⇒ ``(frame, (∂Q/∂x)·h)``.  ``CoImg/Ker/CoKer`` have no such immersion
+    closed form (the frame is an SVD slice with no substrate-threadable derivative) — they go through
+    the default opaque ``qr`` tower only."""
+    from grassmann.infer.properties import is_injective
+
+    entry = _SUBSPACE_GAUGE.get(getattr(J, "uid", None))
+    gauge, frame, frame_deriv = entry if entry is not None else (_DEFAULT_GAUGE, None, None)
+    if gauge in ("immersion", "polar") and kind != "img":
+        raise DiffError(
+            f"diff: the closed-form {gauge!r} gauge is defined only for Img(J); the {kind!r} "
+            f"subspace realizes in an SVD frame — use the default qr gauge (ffs_gauge_feed)"
+        )
+    if gauge in ("immersion", "polar") and kind == "img" and not is_injective(J):
+        # The closed immersion/polar frames assume an INJECTIVE immersion (Q = J or J·G^{-1/2}, full
+        # column rank).  For a non-injective J, Img(J) realizes in the SVD frame U[:,:rank] — these
+        # closed forms have no valid frame there.  Use the default qr gauge (ffs_gauge_feed).
+        raise DiffError(
+            f"diff: the closed-form {gauge!r} gauge is defined only for an INJECTIVE Img(J); a "
+            f"non-injective J realizes Img(J) in the SVD frame — use the default qr gauge "
+            f"(ffs_gauge_feed)"
+        )
+    if gauge == "immersion":
+        return J, dJ
+    if gauge == "polar":
+        gram = Compose(Dagger(J), (0,), (J,))         # G = JᵀJ
+        q = Compose(J, (0,), (Pinv(Sqrt(gram)),))     # Q = J·G^{-1/2}
+        return q, _dd(q, ctx)
+    if frame is not None and frame_deriv is not None:  # explicit opaque gauge (qr / external)
+        return frame, Eval(frame_deriv, (0,), (ctx.h,))  # dQ = (∂Q/∂x)·h  (program-backed)
+    if gauge == "qr":  # default opaque QR/SVD: auto-create the self-differentiating frame tower (Q₀,…)
+        Qvar = _qr_gauge_vars(J, sub, kind, ctx)
+        return Qvar, _dd(Qvar, ctx)  # dQ = Eval(Q₁, h) via the tower; higher diffs recurse
+    raise DiffError(
+        f"diff: gauge {gauge!r} has no closed form — supply frame= and frame_deriv= (the opaque "
+        f"frame Q and ∂Q/∂x) via set_subspace_gauge"
+    )
+
+
 def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
-    """``d(embed(v, big))`` — embed IS ``di`` (the differential of the embedding).  So when ``v``'s
-    home space ``Sub(J)`` has an x-dependent defining map ``J``, the derivative is
+    """``d(embed(v, big))`` — embed IS ``di`` (the differential of the embedding).  When ``v``'s home
+    space ``Sub(J)`` has an x-dependent defining map ``J`` the derivative is
 
-        d(embed(v)) = embed(dv)  +  ∂(di)·v ,
+        d(embed(v)) = embed(dv)  +  dQ·(Q⁺·embed(v)) ,
 
-    the second term being the immersion's directional derivative applied to ``v``: ``∂J`` applied to
-    ``v``'s **source coordinates** ``J⁺·embed(v)`` (recovered through the ambient, so it is
-    basis-consistent).  A constant ``J`` ⇒ the ordinary linear rule (``embed(dv)``)."""
+    where ``Q`` is the **gauge frame** of the subspace and ``dQ`` its motion — the realization is the
+    frame's directional derivative applied to ``v``'s coordinates ``Q⁺·embed(v)`` (recovered through
+    the ambient).  The gauge is read from the subspace (`§gauge`); the **default `immersion` gauge**
+    (``Q = J``, ``dQ = ∂J``) reproduces ``embed(dv) + ∂J·(J⁺·embed v)`` exactly.  A constant ``J`` ⇒
+    the ordinary linear rule (``embed(dv)``)."""
     from grassmann.infer.synth import synth_space
 
     dv = _dd(v, ctx)
     frozen = None if isinstance(dv, Zero) else Embed(dv, big)
-    J = _subspace_defining_map(synth_space(v))
+    sub = synth_space(v)
+    J = _subspace_defining_map(sub)
     if J is not None and _depends_on_x(J, ctx):
         dJ = _dd(J, ctx)
         if not isinstance(dJ, Zero):
-            # ∂(di)·v : apply the immersion direction ∂J to v's source coords J⁺·embed(v).
-            realiz = Eval(dJ, (0,), (Eval(Pinv(J), (0,), (Embed(v, big),)),))
+            kind = _ffs_kind(sub)
+            q, dq = _gauge_frame(J, dJ, sub, kind, ctx)  # gauge frame + its motion
+            realiz = Eval(dq, (0,), (Eval(Pinv(q), (0,), (Embed(v, big),)),))
             return _sum([p for p in (frozen, realiz) if p is not None], e, ctx)
     return frozen if frozen is not None else _zero(e, ctx)
 
 
 def _dd_project(z: Term, sub: Space, e: Term, ctx: _DCtx) -> Term:
-    """``d(project(z, Sub(J)))`` — project IS ``di⁺`` (the co-immersion / pseudoinverse).  So when
-    the target subspace ``Sub(J)`` has an x-dependent defining map ``J``,
+    """``d(project(z, Sub(J)))`` — project IS ``di⁺`` (the co-immersion / pseudoinverse of the gauge
+    frame ``Q``).  When the target subspace ``Sub(J)`` has an x-dependent defining map ``J``,
 
-        d(project(z)) = project(dz)  +  ∂(J⁺)·z ,
+        d(project(z)) = project(dz)  +  ∂(Q⁺)·z ,
 
-    with ``∂(J⁺)`` the bare pseudoinverse-map derivative (:func:`_pinv_map_grad`)."""
+    with ``∂(Q⁺)`` the pseudoinverse-map derivative (:func:`_pinv_map_grad`) of the **gauge frame**.
+    The **default `qr` gauge** uses the opaque ``ProjectedBasis`` frame; ``immersion`` reproduces
+    ``project(dz) + ∂(J⁺)·z`` exactly."""
     dz = _dd(z, ctx)
     frozen = None if isinstance(dz, Zero) else Project(dz, sub)
     J = _subspace_defining_map(sub)
     if J is not None and _depends_on_x(J, ctx):
         dJ = _dd(J, ctx)
         if not isinstance(dJ, Zero):
-            realiz = Eval(_pinv_map_grad(J, dJ), (0,), (z,))
+            kind = _ffs_kind(sub)
+            q, dq = _gauge_frame(J, dJ, sub, kind, ctx)  # gauge frame + its motion (default: qr/SVD)
+            # ``∂(Q⁺)·z`` lands in the frame's *coordinate* space ``dom(Q)``; the ``project(dz)`` arm
+            # lives in ``sub`` (the ``Img(J)`` tag).  Re-tag the realization into ``sub`` value-faith-
+            # fully by routing it through the frame: ``project(Q·(∂(Q⁺)·z), sub) = Q⁺ Q (∂(Q⁺)·z)``,
+            # and ``Q⁺Q = I`` for an injective frame (immersion ``J`` is inj; qr/polar are orthonormal).
+            realiz_coords = Eval(_pinv_map_grad(q, dq), (0,), (z,))  # : dom(Q)
+            realiz = Project(Eval(q, (0,), (realiz_coords,)), sub)   # re-tag into ``sub``
             return _sum([p for p in (frozen, realiz) if p is not None], e, ctx)
     return frozen if frozen is not None else _zero(e, ctx)
 
@@ -911,4 +1299,11 @@ def _children(node: object) -> tuple[object, ...]:
     return tuple(out)
 
 
-__all__ = ["diff", "DiffError"]
+__all__ = [
+    "diff",
+    "DiffError",
+    "set_subspace_gauge",
+    "clear_subspace_gauges",
+    "ffs_gauge_feed",
+    "qr_gauge_feed",
+]
