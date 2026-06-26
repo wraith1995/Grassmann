@@ -308,6 +308,34 @@ class Trace:
         return f"Trace({self.f!r}, {self.i}, {self.j})"
 
 
+@dataclass(frozen=True)
+class Det:
+    """``Det(f)`` — the determinant of a square endomorphism ``f : V ⊸ V`` (a ``Scalar``)."""
+
+    f: Term
+
+    def __post_init__(self) -> None:
+        _require_term(self.f, "Det.f")
+
+    def __repr__(self) -> str:
+        return f"Det({self.f!r})"
+
+
+@dataclass(frozen=True)
+class LogDet:
+    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``
+    (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
+    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`."""
+
+    f: Term
+
+    def __post_init__(self) -> None:
+        _require_term(self.f, "LogDet.f")
+
+    def __repr__(self) -> str:
+        return f"LogDet({self.f!r})"
+
+
 # ===========================================================================
 # Inverses & adjoint.
 # ===========================================================================
@@ -737,7 +765,7 @@ class Frame:
 
 
 # A Term is any of the node types above.
-Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Solve | Pinv | Sqrt | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | TuplePermute | Kron | LLam | Lam | Frame
+Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Det | LogDet | Solve | Pinv | Sqrt | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | TuplePermute | Kron | LLam | Lam | Frame
 
 _TERM_TYPES = (
     Var,
@@ -753,6 +781,8 @@ _TERM_TYPES = (
     NEval,
     Compose,
     Trace,
+    Det,
+    LogDet,
     Solve,
     Pinv,
     SolveApply,
@@ -992,6 +1022,14 @@ def trace(f: Term, i: int, j: int) -> Trace:
     return Trace(f, i, j)
 
 
+def det(f: Term) -> Det:
+    return Det(f)
+
+
+def logdet(f: Term) -> LogDet:
+    return LogDet(f)
+
+
 def solve(f: Term) -> Solve:
     return Solve(f)
 
@@ -1106,6 +1144,8 @@ __all__ = [
     "NEval",
     "Compose",
     "Trace",
+    "Det",
+    "LogDet",
     "Solve",
     "Pinv",
     "sqrt",
@@ -1146,6 +1186,8 @@ __all__ = [
     "compose",
     "chain",
     "trace",
+    "det",
+    "logdet",
     "solve",
     "pinv",
     "solve_apply",

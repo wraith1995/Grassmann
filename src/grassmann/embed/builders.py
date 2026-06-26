@@ -194,6 +194,16 @@ def tr(f: object, i: int, j: int) -> Expr:
     return wrap(_t.trace(_term(f), i, j))
 
 
+def det(f: object) -> Expr:
+    """``det f`` — determinant of a square endomorphism ``f : V ⊸ V`` (a ``Scalar``)."""
+    return wrap(_t.det(_term(f)))
+
+
+def logdet(f: object) -> Expr:
+    """``log det f`` — log-determinant of a square endomorphism ``f : V ⊸ V`` (a ``Scalar``)."""
+    return wrap(_t.logdet(_term(f)))
+
+
 # ===========================================================================
 # Inverses & adjoint.
 # ===========================================================================

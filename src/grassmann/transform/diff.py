@@ -48,6 +48,7 @@ from grassmann.core.term import (
     Assert,
     Compose,
     Dagger,
+    Det,
     Embed,
     Eval,
     External,
@@ -61,6 +62,7 @@ from grassmann.core.term import (
     Lift,
     Lit,
     LLam,
+    LogDet,
     NEval,
     OPlusV,
     OProdV,
@@ -183,6 +185,10 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             return _dd_compose(e, ctx)
         case Trace(f, i, j):
             return _wrap_linear(lambda d: Trace(d, i, j), _dd(f, ctx), e, ctx)
+        case Det():
+            return _dd_det(e, ctx)
+        case LogDet():
+            return _dd_logdet(e, ctx)
         case Solve():
             return _dd_solve(e, ctx)
         case Pinv():
@@ -815,6 +821,34 @@ def _dd_kron(e: Kron, ctx: _DCtx) -> Term:
     if not isinstance(dg, Zero):
         parts.append(Kron(e.f, dg))
     return _sum(parts, e, ctx)
+
+
+def _dd_logdet_kernel(f: Term, ctx: _DCtx) -> Term | None:
+    """``tr(f⁻¹·df)`` — the shared scalar core of ``d det`` and ``d logdet`` (``f`` square).
+
+    Returns ``None`` when ``f`` is x-independent (``df = 0``).  ``f⁻¹·df`` is the map ``Solve(f)``
+    composed with the directional ``df`` (a value in ``V ⊸ V``); ``Trace(·, 1, 0)`` contracts its
+    primal/dual slots — the standard ``trace`` convention for an endomorphism (`§50`)."""
+    df = _dd(f, ctx)
+    if isinstance(df, Zero):
+        return None
+    return Trace(Compose(Solve(f), (0,), (df,)), 1, 0)  # tr(f⁻¹·df), a Scalar
+
+
+def _dd_det(e: Det, ctx: _DCtx) -> Term:
+    """``d det(X)[dX] = det(X)·tr(X⁻¹·dX)`` (Jacobi's formula; ``X`` square + bij)."""
+    tr = _dd_logdet_kernel(e.f, ctx)
+    if tr is None:
+        return _zero(e, ctx)
+    return Scale(Det(e.f), tr)  # det(X) · tr(X⁻¹·dX), a Scalar
+
+
+def _dd_logdet(e: LogDet, ctx: _DCtx) -> Term:
+    """``d logdet(X)[dX] = tr(X⁻¹·dX)`` — the clean form (no ``det`` factor; ``X`` square + bij)."""
+    tr = _dd_logdet_kernel(e.f, ctx)
+    if tr is None:
+        return _zero(e, ctx)
+    return tr
 
 
 def _dd_solve(e: Solve, ctx: _DCtx) -> Term:

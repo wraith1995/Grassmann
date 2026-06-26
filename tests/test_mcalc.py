@@ -116,7 +116,43 @@ def test_conflicting_named_dims_raise():
 
 # --- known gaps fail loudly, not silently ----------------------------------
 
-@pytest.mark.parametrize("expr", ["det(X)", "logdet(X)", "vector(1)", "relu(x)"])
+@pytest.mark.parametrize("expr", ["adj(X)"])
 def test_known_gaps_raise_clearly(expr):
     with pytest.raises(McalcBuildError):
-        mcbuild(expr, {"X": "matrix", "x": "vector"})
+        mcbuild(expr, {"X": "matrix"})
+
+
+def test_log_det_inv_builds_diffs_runs():
+    # gold example 9: log(det(inv(X)))  ==  -log(det(X))
+    r = build_problem("log(det(inv(X)))", wrt="X", decls={"X": "matrix(n,n)"})
+    assert r.derivative is not None
+    rng = np.random.default_rng(9)
+    X = rng.standard_normal((4, 4)) + 4 * np.eye(4)        # well-conditioned, det > 0
+    val = r.value({"X": X}, {"n": 4})
+    assert np.allclose(val, np.log(np.linalg.det(np.linalg.inv(X))))
+    # d/dX log(det(inv(X))) = -X^{-T}, shaped (output, input) like numpy
+    g = np.asarray(r.grad({"X": X}, {"n": 4}))
+    assert g.shape == (4, 4)
+    assert np.allclose(g, -np.linalg.inv(X).T)
+
+
+# --- constants + relu (gold example 7: logistic loss) ----------------------
+
+def test_logistic_loss_builds_and_runs():
+    # gold example 7: vector(1) constant + elementwise + matvec, named dims m=samples, n=features
+    expr = "sum(log(exp(-y.*(X*w)) + vector(1)))"
+    r = build_problem(expr, wrt="w",
+                      decls={"X": "matrix(m,n)", "w": "vector(n)", "y": "vector(m)"})
+    rng = np.random.default_rng(7)
+    m, n = 5, 3
+    X = rng.standard_normal((m, n)); w = rng.standard_normal(n)
+    y = rng.choice([-1.0, 1.0], size=m)
+    ref = float(np.sum(np.log(np.exp(-y * (X @ w)) + 1.0)))
+    assert np.allclose(r.value({"X": X, "w": w, "y": y}, {"m": m, "n": n}), ref)
+
+
+def test_relu_matches_numpy():
+    r = build_problem("relu(x)", decls={"x": "vector"})
+    rng = np.random.default_rng(8)
+    x = rng.standard_normal(6)
+    assert np.allclose(r.value({"x": x}, {d: 6 for d in r.dim_names}), np.maximum(0.0, x))

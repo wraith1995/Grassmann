@@ -163,15 +163,16 @@ def test_matrix_apply_orientation():
 
 
 # ---------------------------------------------------------------------------
-# Known engine gap — ``det``/``logdet`` are not yet implemented in mcalc, so
-# ``log(det(inv(X)))`` cannot be built. (``tr(A*X'*B*X*C)`` *does* build + run now — it is
-# no longer a gap — so it is intentionally not asserted here; its matrix-wrt correctness is
-# left for a deliberate convention pass.)
+# ``det``/``logdet`` now build, diff, and run (gold example 9). Value vs numpy here; full
+# oracle gradient comparison for matrix-wrt derivatives is covered in tests/test_mcalc.py.
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(raises=McalcBuildError, strict=True,
-                   reason="det/logdet not yet implemented in mcalc")
-def test_logdet_build_gap():
-    build_problem("log(det(inv(X)))", wrt="X", decls={"X": "matrix"})
+def test_log_det_inv_runs():
+    r = build_problem("log(det(inv(X)))", wrt="X", decls={"X": "matrix(n,n)"})
+    assert r.derivative is not None
+    rng = np.random.default_rng(9)
+    X = rng.standard_normal((4, 4)) + 4 * np.eye(4)
+    assert np.allclose(r.value({"X": X}, {"n": 4}),
+                       np.log(np.linalg.det(np.linalg.inv(X))))
 
 
 # ---------------------------------------------------------------------------

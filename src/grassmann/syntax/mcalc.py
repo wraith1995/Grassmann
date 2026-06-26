@@ -252,6 +252,7 @@ def parse_ast(src: str) -> object:
 # coordinate-free reading that is the whole point of the tool.
 
 import grassmann as _G  # the public builder surface (G.var, G.dot, G.scale, ...)
+from grassmann.core import props as _P  # MapProps (bij) for invertible matrices
 from grassmann.core import space as _S  # for symbolic Nat dims (DimVar)
 from grassmann.core import term as _T  # for the inverse MAP (Solve) and Identity
 from grassmann.stdlib import scalar as _sc
@@ -363,6 +364,7 @@ class _TN:
     tgt: int = -1                   # mat: codomain slot
     usp: int = -1                   # cov: the Riesz vector's own slot
     pmap: object = None             # cov: () -> map Expr P  (None == identity)
+    var_name: str | None = None     # set on a bare variable leaf (for bij marking)
 
 
 class _Builder:
@@ -374,6 +376,7 @@ class _Builder:
         self.space_cache: dict[int, object] = {}
         self.dim_label: dict[int, str] = {}   # rep -> the Nat dim name used for that space
         self.slot_of_dimname: dict[str, int] = {}   # user dim name -> its slot
+        self.bij_vars: set[str] = set()       # matrix vars asserted invertible (inv/det/logdet)
 
     # -- space materialisation ----------------------------------------------
 
@@ -410,6 +413,14 @@ class _Builder:
         """Apply a covector's pending map ``P`` to ``w`` (identity when ``pmap is None``)."""
         return w_expr if cov.pmap is None else cov.pmap()(w_expr)
 
+    def _mark_bij(self, m: _TN) -> None:
+        """Assert a matrix operand of inv/det/logdet is invertible (``bij``) when it is a bare
+        variable. A composite operand (e.g. ``inv(X)`` inside ``det(...)``) is left alone — it
+        is bijective by construction when built from bij pieces (Solve/Dagger of a bijection);
+        if it isn't, the engine raises a clear error at diff time."""
+        if m.var_name is not None:
+            self.bij_vars.add(m.var_name)
+
     # -- variable leaves -----------------------------------------------------
 
     def _var(self, name: str) -> _TN:
@@ -433,10 +444,11 @@ class _Builder:
             else:
                 s, t = self.uf.fresh(), self.uf.fresh()
             def mkm(self=self, name=name, s=s, t=t):
-                return _G.var(name, self.space_of(s) >> self.space_of(t))
+                props = _P.MapProps(bij=True) if name in self.bij_vars else None
+                return _G.var(name, self.space_of(s) >> self.space_of(t), props)
             cache = {}
             tn = _TN("mat", (lambda mkm=mkm, cache=cache: cache.setdefault("v", mkm())),
-                     src=s, tgt=t)
+                     src=s, tgt=t, var_name=name)
         else:
             raise self.err(f"unknown declared type {head!r} for {name!r}")
         self.var_meta[name] = tn
@@ -609,6 +621,35 @@ class _Builder:
                 return _TN("scalar",
                            lambda x=x: self._inner(x.sp, _sc.ones(x.emit()), x.emit()))
             raise self.err("sum takes a scalar or vector")
+        if h == "relu":
+            (x,) = args                      # relu(x) = ½(x + |x|), elementwise
+            if x.kind == "scalar":
+                return _TN("scalar",
+                           lambda x=x: _G.scale(0.5, _G.sum(x.emit(), _sc.absval(x.emit()))))
+            if x.kind == "vec":
+                return _TN("vec",
+                           (lambda x=x: _G.scale(0.5, _G.sum(x.emit(), _sc.absval(x.emit())))),
+                           sp=x.sp)
+            raise self.err("relu takes a scalar or vector")
+        if h == "vector":
+            (c,) = args                      # vector(c): constant c-vector (ones·c), dim by use
+            if c.kind != "scalar":
+                raise self.err("vector(c) needs a scalar constant")
+            sp = self.uf.fresh()
+            return _TN("vec",
+                       (lambda c=c, sp=sp: _G.scale(
+                           c.emit(), _sc.ones(_G.zero(self.space_of(sp))))),
+                       sp=sp)
+        if h == "matrix":
+            (c,) = args                      # matrix(c): constant c-matrix
+            if c.kind != "scalar":
+                raise self.err("matrix(c) needs a scalar constant")
+            s, t = self.uf.fresh(), self.uf.fresh()
+            return _TN("mat",
+                       (lambda c=c, s=s, t=t: _G.scale(
+                           c.emit(),
+                           _sc.ones(_G.zero(self.space_of(s) >> self.space_of(t))))),
+                       src=s, tgt=t)
         if h == "tr":
             (m,) = args
             if m.kind != "mat":
@@ -620,10 +661,19 @@ class _Builder:
             if m.kind != "mat":
                 raise self.err("inv takes a matrix")
             self.uf.union(m.src, m.tgt)
+            self._mark_bij(m)            # matrixcalculus inv ⇒ invertible
             return _TN("mat", (lambda m=m: _wrap(_T.solve(_node(m.emit())))),
                        src=m.tgt, tgt=m.src)
-        if h in ("det", "logdet", "adj", "relu", "vector", "matrix"):
-            raise self.err(f"{h}(...) is a known gap — not yet implemented")
+        if h in ("det", "logdet"):
+            (m,) = args
+            if m.kind != "mat":
+                raise self.err(f"{h} takes a (square) matrix")
+            self.uf.union(m.src, m.tgt)
+            self._mark_bij(m)            # det/logdet derivative uses X⁻¹ ⇒ invertible
+            fn = _G.det if h == "det" else _G.logdet
+            return _TN("scalar", lambda m=m, fn=fn: fn(m.emit()))
+        if h == "adj":
+            raise self.err("adj(...) is a known gap — not yet implemented")
         raise self.err(f"unknown function {h!r}")
 
 
@@ -721,11 +771,24 @@ class McalcResult:
         """Numeric value of the primal at ``values`` (matrixcalculus numpy convention)."""
         return self.run_node(self.primal, values, dims)
 
+    def _slot_dim(self, slot: int, dims: dict[str, int]) -> int:
+        rep = self.builder.uf.find(slot)
+        return int(dims[self.builder.dim_label[rep]])
+
     def grad(self, values: dict[str, object], dims: dict[str, int]):
-        """Numeric derivative (gradient / Jacobian) of the primal w.r.t. ``wrt``."""
+        """Numeric derivative of the primal w.r.t. ``wrt`` under the matrixcalculus numpy
+        convention. Scalar-f → gradient (vector, or matrix when ``wrt`` is a matrix);
+        vector-f → Jacobian. Matrix-shaped results come out (output, input) like numpy."""
+        import numpy as np
         if self.derivative is None:
             raise McalcBuildError("no derivative — build_problem was called without wrt")
-        return self.run_node(self.derivative, values, dims)
+        raw = np.asarray(_G.run(self.instantiate(self.derivative, dims),
+                                self._inputs(values))["result"])
+        wt = self.builder.var_meta[self.wrt]
+        if wt.kind == "mat" and raw.ndim == 1:
+            # gradient w.r.t. a matrix comes back flat; reshape to engine (input, output)
+            raw = raw.reshape(self._slot_dim(wt.src, dims), self._slot_dim(wt.tgt, dims))
+        return raw.swapaxes(-1, -2) if raw.ndim == 2 else raw
 
 
 def _build(expr: str, decls: dict[str, str] | None, wrt: str | None) -> McalcResult:
