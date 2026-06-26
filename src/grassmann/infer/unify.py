@@ -206,6 +206,19 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             if a.g != b.g or a.positions != b.positions or a.args != b.args:
                 raise UnifyError(f"SpaceFunction application mismatch: {a!r} ~ {b!r}")
             return
+        # Involution ``s** ≡ s`` (`20 §5`).  Tried only AFTER the structural cases (so
+        # ``Dual(Dual(V)) ~ Dual(?α)`` still solves ``?α := Dual(V)`` via the ``(Dual,
+        # Dual)`` rule above, never collapsing prematurely).  When ONE side is a bare
+        # double dual and the other is NOT a ``Dual`` (e.g. a contraction against an
+        # already-dual factor — what differentiating through a ``Dagger`` produces:
+        # ``⊕ⁿ ℝ ~ Dual(Dual(⊕ⁿ ℝ))``), peel the outer pair and retry.  For these
+        # finite-dim Euclidean spaces the double dual is an identity, not just an iso.
+        case (Dual(), _) if isinstance(store.walk(a.space), Dual):
+            unify(store.walk(a.space).space, b, store)
+            return
+        case (_, Dual()) if isinstance(store.walk(b.space), Dual):
+            unify(a, store.walk(b.space).space, store)
+            return
         case _:
             raise UnifyError(f"cannot unify {a!r} ~ {b!r}")
 
