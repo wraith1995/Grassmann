@@ -59,6 +59,7 @@ from grassmann.core.term import (
     Sharp,
     Solve,
     SolveApply,
+    Sqrt,
     Sum,
     Term,
     Trace,
@@ -197,6 +198,8 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
             return _synth_solve_apply(e, ctx)
         case PinvApply():
             return _synth_pinv_apply(e, ctx)
+        case Sqrt():
+            return _synth_sqrt(e, ctx)
         case Dagger():
             return _synth_dagger(e, ctx)
         case Inner():
@@ -526,6 +529,14 @@ def _synth_pinv(e: Pinv, ctx: Ctx) -> Space:
     # inj/surj sharpen the realization (lowering); the space is cod ⊸ dom regardless.
     _ = (is_injective(e.f), is_surjective(e.f))
     return linear_map_space(cod, dom)
+
+
+def _synth_sqrt(e: Sqrt, ctx: Ctx) -> Space:
+    # The operator square root is an endomorphism of the SAME (square) space (V ⊸ V).
+    dom, cod = _map_dom_cod_resolved(e.f, ctx)
+    if dom != cod:
+        raise InferError("Sqrt requires a square endomorphism (V ⊸ V)")
+    return linear_map_space(dom, cod)
 
 
 def _synth_solve_apply(e: SolveApply, ctx: Ctx) -> Space:

@@ -184,6 +184,23 @@ def test_pinv_map_matches_numpy_pinv() -> None:
     np.testing.assert_allclose(res, np.linalg.pinv(Gm), atol=1e-9)
 
 
+def test_sqrt_spd_value_and_fails_loud() -> None:
+    # Sqrt(f) — the SPD operator square root: S·S = f, symmetric, computed by eigendecomposition.
+    # A non-SPD operand must FAIL LOUDLY (never a silent wrong answer).
+    import pytest
+
+    V = C.base("V", 3)
+    Gm = C.var("G", C.linear_map_space(V, V))
+    rng = np.random.default_rng(11)
+    A = rng.standard_normal((3, 3))
+    Gv = A @ A.T + 3 * np.eye(3)  # SPD
+    res = np.asarray(represent(C.sqrt(Gm)).run({_var_key(Gm): Gv})["result"], float)
+    np.testing.assert_allclose(res @ res, Gv, atol=1e-9)  # S·S = G
+    np.testing.assert_allclose(res, res.T, atol=1e-12)  # symmetric
+    with pytest.raises(Exception):  # noqa: B017 - non-SPD must raise, never silently proceed
+        represent(C.sqrt(Gm)).run({_var_key(Gm): -Gv})  # negative-definite ⇒ not SPD
+
+
 def test_solve_emits_invop_and_full_rank_assert() -> None:
     V = C.base("V", 3)
     f = C.var("f", C.linear_map_space(V, V), props=P.bij)
@@ -348,6 +365,24 @@ def test_neval_lowers_via_subprogram_and_runs() -> None:
     av = np.array([2.0, -1.0])
     res = prog.run({_var_key(f): fv, _var_key(a): av})["result"]
     np.testing.assert_allclose(res, fv.T @ av)
+
+
+def test_nested_neval_lam_inside_lam_body_runs() -> None:
+    # A nested NEval(Lam([y], …)) sitting INSIDE another Lam's body: the inner binder ``y`` must not
+    # leak as a free var (and thus an un-fed input) of the outer sub-Program.  Regression for the
+    # _free_term_vars binder-scoping fix (surfaced by differentiating f(g(x)) through value-Lams).
+    V = C.base("V", 3)
+    x = C.var("x", V)
+    y = C.var("y", V)
+    s = C.var("s", C.Scalar())
+    inner = C.neval(C.lam(((y.name, SpaceSort(V)),), C.eval_(C.inner(V), (0, 1), y, y), (y,)), (0,), x)
+    c = C.var("c", C.Scalar())
+    outer = C.neval(
+        C.lam(((s.name, SpaceSort(C.Scalar())),), C.sum_(s, inner), (s,)), (0,), c
+    )  # NEval(λs. s + NEval(λy.⟨y,y⟩, x), c) = c + |x|²
+    xv, cv = np.array([1.0, 2, 3]), np.array(5.0)
+    res = represent(outer).run({_var_key(x): xv, _var_key(c): cv})["result"]
+    np.testing.assert_allclose(res, cv + xv @ xv)
 
 
 def test_reused_dependent_function_shares_one_subprogram() -> None:
