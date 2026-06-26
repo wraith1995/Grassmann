@@ -70,6 +70,7 @@ from .embed import (
     ker,
     kron,
     lam,
+    latex,
     lift,
     list_basis,
     lit,
@@ -232,6 +233,7 @@ __all__ = [
     "simplify",
     "normal_form",
     "sum_of_products",
+    "latex",
     # binders
     "llam",
     "lam",
