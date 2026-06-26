@@ -57,6 +57,7 @@ from .builders import (
     ostack,
     osum,
     osum_n,
+    parse,
     pinv,
     proj,
     project,
@@ -79,6 +80,7 @@ from .builders import (
     tr,
     typefn,
     unlift,
+    unparse,
     var,
     with_inner,
     with_inner_basis,
@@ -148,6 +150,9 @@ __all__ = [
     "simplify",
     "normal_form",
     "sum_of_products",
+    # surface syntax
+    "parse",
+    "unparse",
     # binders
     "llam",
     "lam",
