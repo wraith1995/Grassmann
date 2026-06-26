@@ -51,6 +51,8 @@ __all__ = [
     # activations
     "sigmoid",
     "softplus",
+    # pointwise (Hadamard) — the external linear op
+    "hadamard",
 ]
 
 
@@ -227,3 +229,16 @@ def _softplus_fn(a: object) -> object:
 def softplus(x: Expr) -> Expr:
     """``softplus(x) = log(1+eˣ)`` — a ``Scalar`` (stable ``np.logaddexp(0, x)``)."""
     return _external("softplus", _softplus_fn, x)
+
+
+# --- pointwise (Hadamard) product — the external linear op ------------------
+
+
+def hadamard(x: Expr, y: Expr) -> Expr:
+    """``x ⊙ y`` — the elementwise (Hadamard) product (``np.multiply``).
+
+    ``x`` and ``y`` live in the same Euclidean space; the result is in that space. This is
+    the pointwise *linear* op (linear in each operand) the matrix-calculus front end needs —
+    e.g. the elementwise chain rule ``d f(u) = f'(u) ⊙ du`` differentiates through it.
+    """
+    return _external("hadamard", np.multiply, x, y)
