@@ -706,6 +706,19 @@ def _rep_external(
             arg_reps = [_rep(a, ctx) for a in e.args]
             out_basis = arg_reps[0].basis if arg_reps else default_basis(space)
         arrays = [r.array for r in arg_reps]
+    # An LLam-seed free (basis-index) axis carried by only SOME operands — the eye-mode AD of an
+    # elementwise external, e.g. the chain-rule arm ``f'(u) ⊙ du`` where ``du`` is the identity-seed
+    # of a Jacobian ``LLam`` (it carries the seed's free axis, ``u`` does not).  A single elementwise
+    # kernel cannot broadcast a free axis present on one operand but not the other.  Raise the SAME
+    # clean ``RepresentError`` the other eye-mode bulk seams use (the default vmap mode threads this,
+    # `41 §7`) instead of emitting a runtime ``shape_eq`` assertion that crashes inside the kernel.
+    if len({r.free_labels for r in arg_reps}) > 1:
+        raise RepresentError(
+            "represent: an elementwise External cannot thread a free (LLam-seed) basis-index axis "
+            f"carried by only some operands (free_labels={[r.free_labels for r in arg_reps]}); "
+            "lower the Jacobian map in the default vmap mode (free-label threading through externals "
+            "is future work — `41 §7`)."
+        )
     # Elementwise over matching-shaped operands (scalar args ⇒ scalar result).
     out_shape = _shape_of(arrays[0]) if arrays else _shape_of_space(space)
     for a in arrays[1:]:
@@ -3695,8 +3708,17 @@ def _rep_llam_vmap(
     bound_names = {_var_name(v) for v in vars_}
     eyes: list[pa.SymArray] = []
     for v in vars_:
-        n_i = _static_dim(_synth(v))
-        eyes.append(_const(ctx, np.eye(n_i), note=f"llam:vmap:eye({v.name})"))
+        vsp = _synth(v)
+        n_i = _static_dim(vsp)
+        # Each basis direction eⱼ must reach the body sub-input in the bound var's NATURAL
+        # (possibly multi-axis) coordinate shape — the sub-input was declared with that shape by
+        # ``_rep_var``.  Reshape the identity's rows from flat ``(n_i,)`` to ``(n_i, *natural)``:
+        # row ``j`` is basis element ``j`` laid out in the var's coordinate shape.  A single-axis
+        # space (vector/⊕) reshapes to the unchanged ``np.eye(n_i)``; a matrix/⊗ (≥2 axes) or a
+        # scalar (0 axes) binder would otherwise feed a flat row into a shaped input and crash — so
+        # this is what makes the Jacobian MAP of an arbitrary-input-space ``diff`` lower (Goal 3).
+        nat = _shape_of_space(vsp)
+        eyes.append(_const(ctx, np.eye(n_i).reshape((n_i, *nat)), note=f"llam:vmap:eye({v.name})"))
     # Non-bound sub-inputs, in sub-input declaration order (so operands line up positionally).
     shared_arrays: list[pa.SymArray] = []
     for spec in sub.inputs:
