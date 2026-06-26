@@ -81,3 +81,21 @@ def test_scalar_division_composite() -> None:
     expr = L.div(a, L.sqrt(b))
     out = G.run(expr, {_key(a): np.asarray(10.0), _key(b): np.asarray(4.0)})["result"]
     np.testing.assert_allclose(out, 10.0 / np.sqrt(4.0))
+
+
+def test_lit_is_a_rank0_scalar() -> None:
+    """``Lit`` lowers to a rank-0 scalar (``()``), matching genuine scalars — so it can be
+    summed/combined with them. Regression for the ``np.ascontiguousarray`` 0-d→1-d promotion
+    bug in ``_const`` that made constants ``(1,)`` instead of ``()``."""
+    from grassmann.core import space as S
+    from grassmann.core import term as T
+
+    out = G.run(G.wrap(T.lit(2.0)), {})["result"]
+    assert np.asarray(out).shape == ()
+    # 1 + ⟨x,x⟩ : a Lit summed with a genuine (rank-0) scalar must agree on shape
+    V = S.base("V", 2)
+    x = T.var("x", V)
+    dotxx = T.Eval(T.inner(V), (0, 1), (x, x))
+    expr = T.sum_(T.lit(1.0), dotxx)
+    val = G.run(G.wrap(expr), {f"x_{x.uid}": np.array([1.0, 2.0])})["result"]
+    np.testing.assert_allclose(val, 1.0 + 5.0)
