@@ -38,6 +38,7 @@ nav:
   - Testing: testing.md
   - Auditing: auditing.md
   - Design problems: design-problems.md
+  - Unicode syntax: unicode-syntax.md
   - Spaces:
     - Overview: spaces/index.md
     - scalar: spaces/scalar.md

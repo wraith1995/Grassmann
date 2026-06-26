@@ -53,6 +53,8 @@ __all__ = [
     "softplus",
     # pointwise (Hadamard) — the external linear op
     "hadamard",
+    # constants
+    "ones",
 ]
 
 
@@ -242,3 +244,21 @@ def hadamard(x: Expr, y: Expr) -> Expr:
     e.g. the elementwise chain rule ``d f(u) = f'(u) ⊙ du`` differentiates through it.
     """
     return _external("hadamard", np.multiply, x, y)
+
+
+# --- constants -------------------------------------------------------------
+
+
+def _ones_fn(a: object) -> object:
+    return np.ones_like(np.asarray(a, dtype=float))
+
+
+def ones(x: Expr) -> Expr:
+    """``𝟙`` — a constant value of ``1`` in ``x``'s (Euclidean) space, shaped like ``x``.
+
+    The unit constant the derivative arms use for ``1 ± g(u)`` (e.g. ``atan'`` / ``sigmoid'``;
+    see :mod:`grassmann.transform.diff`). Built elementwise (``np.ones_like``), so it
+    broadcasts to any Euclidean shape; its derivative is zero. Public so the surface syntax
+    (:mod:`grassmann.syntax`) can round-trip a derivative term that contains it.
+    """
+    return _external("ones", _ones_fn, x)

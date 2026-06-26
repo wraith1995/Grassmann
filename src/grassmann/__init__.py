@@ -126,6 +126,7 @@ from .stdlib import (
     least_squares,
     log,
     norm_sq,
+    ones,
     orthogonal_projection,
     reciprocal,
     sigmoid,
@@ -288,4 +289,5 @@ __all__ = [
     "sigmoid",
     "softplus",
     "hadamard",
+    "ones",
 ]

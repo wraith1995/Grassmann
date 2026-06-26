@@ -357,8 +357,12 @@ def _t(node: object) -> tuple[str, int]:
         case T.External():
             return _external(node), G.P_APP
         case T.Scale(scalar=r, vector=v):
-            rs = _num(r) if isinstance(r, (int, float)) else _wrap_t(r, G.P_SCALE + 1)
-            return f"{rs} {G.SCALE} {_wrap_t(v, G.P_SCALE)}", G.P_SCALE
+            # ``·`` parses left-associative, so the LEFT operand (scalar) prints at P_SCALE
+            # (no wrap for a same-precedence child) and the RIGHT operand (vector) at
+            # P_SCALE+1 — parenthesizing a vector-nested Scale like ``r · (s · v)`` so it
+            # re-parses to the same tree instead of left-associating to ``(r · s) · v``.
+            rs = _num(r) if isinstance(r, (int, float)) else _wrap_t(r, G.P_SCALE)
+            return f"{rs} {G.SCALE} {_wrap_t(v, G.P_SCALE + 1)}", G.P_SCALE
         case T.Sum(vectors=vs):
             return f" {G.SUM} ".join(_wrap_t(v, G.P_SUM + 1) for v in vs), G.P_SUM
         case T.OPlusV(vectors=vs):

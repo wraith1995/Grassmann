@@ -135,6 +135,7 @@ EXTERNAL_OPS: dict[str, str] = {
     "sin": "sin", "cos": "cos", "tan": "tan", "sinh": "sinh", "cosh": "cosh",
     "tanh": "tanh", "atan": "atan", "asin": "asin", "acos": "acos",
     "sigmoid": "sigmoid", "softplus": "softplus", "hadamard": "hadamard",
+    "ones": "ones",  # the diff unit-constant (1±g(u)); reconstructs via stdlib.scalar.ones
 }
 #: reverse: ExternalOp.name -> surface head (mostly identity; "abs" stays "abs").
 EXTERNAL_NAME_TO_HEAD: dict[str, str] = {k: k for k in EXTERNAL_OPS}
