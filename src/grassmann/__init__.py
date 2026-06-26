@@ -52,6 +52,7 @@ from .embed import (
     complete,
     compose,
     dagger,
+    det,
     diff,
     dim_img,
     dim_ker,
@@ -75,6 +76,7 @@ from .embed import (
     list_basis,
     lit,
     llam,
+    logdet,
     normal_form,
     ostack,
     osum,
@@ -211,6 +213,8 @@ __all__ = [
     # application / composition / trace
     "compose",
     "tr",
+    "det",
+    "logdet",
     # inverses & adjoint
     "solve",
     "pinv",

@@ -176,8 +176,17 @@ matrixcalculus uses **symbolic dims + inference**. Faithful coordinate-free mapp
   mcalc_oracle.py`, `tests/test_mcalc.py`/`test_mcalc_oracle.py`/`test_mcalc_dagger_diff.py`,
   `tests/fixtures/`, `plans/100-…`; in `../polyarray`: `M __init__.py`, new `numpy_source.py`
   + test.
-- REMAINING: (a) op gaps `det`/`logdet`/`adj`/`relu` + `vector(c)`/`matrix(c)` constants →
-  unblocks gold examples 7 (logistic) & 9 (log det inv); (b) advanced space-expr decl tier
+- COMMITTED: grassmann `feat/mcalc-frontend` @ ccf7d60; polyarray `feat/numpy-source-codegen`
+  @ 3aa574d.
+- OP GAPS DONE — **ALL 9 GOLD EXAMPLES build, diff, AND run == numpy.**
+  - `vector(c)`/`matrix(c)` constants (`c·ones(zero(S))`) + `relu` (`½(x+|x|)`) inline.
+  - `det`/`logdet` added to the engine (agent): `Det`/`LogDet` core nodes + infer + lower→
+    polyarray `DetOp` + diff (`d logdet = tr(X⁻¹dX)`, `d det = det·tr(X⁻¹dX)`) + `G.det`/
+    `G.logdet`; `is_bijective` extended for Solve/Pinv/Dagger of a bijection. `tests/test_det.py`
+    (7 pass). Wired `det(...)`/`logdet(...)` into mcalc; matrix vars under inv/det/logdet auto-
+    marked `bij`. Gold example 9 `log(det(inv(X)))` runs == `-log det X`, grad == `-X⁻ᵀ`.
+  - matrix-wrt gradients now reshaped to (output,input) numpy shape in `McalcResult.grad`.
+- REMAINING: (a) `adj`; (b) advanced space-expr decl tier (`R^n`, `R^n->R^m`)
   (`R^n`, `R^n->R^m`); (c) wire mcalc `value/grad` through the oracle harness to drop its manual
   transposes; (d) website S6 (two inputs + var rows + tangent/cotangent helpers + download
   Python via polyarray `to_numpy_source`); (e) optional engine: dynamic-shape lowering for

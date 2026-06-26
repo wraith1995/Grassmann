@@ -478,6 +478,8 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_compose(e, f, positions, gs, ctx, target)
         case T.Trace(f, i, j):
             return _rep_trace(e, f, i, j, ctx, target)
+        case T.Det(_) | T.LogDet(_):
+            return _rep_det(e, ctx, target)
         case T.Solve(f):
             return _rep_solve(e, f, ctx, target)
         case T.Pinv(f):
@@ -2329,6 +2331,32 @@ def _rep_trace(
             return rep
         case _:
             return _match_result(ctx, rep, target)
+
+
+def _rep_det(
+    e: T.Det | T.LogDet, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``Det(f)``/``LogDet(f)`` — determinant (or log-det) of a square endomorphism ``f : V ⊸ V``.
+
+    The determinant is a similarity invariant (``det(P⁻¹AP) = det(A)``), so we realize ``f`` in
+    *standard* coordinates on both (square) slots and apply polyarray's ``DetOp``; ``LogDet``
+    follows with an elementwise ``log`` of that scalar.  The result is a basis-free ``Scalar``
+    (``_rep``'s safety net cob's it to ``target``, a no-op for a scalar)."""
+    space = _synth(e)  # Scalar
+    f_rep = _rep(e.f, ctx)
+    f_arr = _coerce_basis(ctx, f_rep, default_basis(f_rep.space), note="det:cob-std")
+    _assert_axes_equal(ctx, f_arr, 0, 1, note="assert:det-square")
+    [det_out] = ctx.prog.emit_stmt(
+        pa.DetOp(), [f_arr],
+        [pa.OutSpec("det", _shape_of_space(space))], note="det:DetOp",
+    )
+    out = det_out
+    if isinstance(e, T.LogDet):
+        [out] = ctx.prog.emit_stmt(
+            _ExternalOp(name="log", fn=np.log), [det_out],
+            [pa.OutSpec("logdet", _shape_of_space(space))], note="external:log",
+        )
+    return Rep(out, default_basis(space), space)
 
 
 def _rep_neval(

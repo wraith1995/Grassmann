@@ -34,6 +34,7 @@ from grassmann.core.term import (
     Assert,
     Compose,
     Dagger,
+    Det,
     Embed,
     Eval,
     External,
@@ -47,6 +48,7 @@ from grassmann.core.term import (
     Lift,
     Lit,
     LLam,
+    LogDet,
     NEval,
     OPlusV,
     OProdV,
@@ -190,6 +192,10 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
             return _synth_compose(e, ctx)
         case Trace():
             return _synth_trace(e, ctx)
+        case Det():
+            return _synth_det(e, ctx)
+        case LogDet():
+            return _synth_det(e, ctx)
         case Solve():
             return _synth_solve(e, ctx)
         case Pinv():
@@ -461,6 +467,18 @@ def _synth_trace(e: Trace, ctx: Ctx) -> Space:
     if len(remaining) == 1:
         return remaining[0]
     return oprod(*remaining)
+
+
+def _synth_det(e: Det | LogDet, ctx: Ctx) -> Space:
+    """``Det(f)``/``LogDet(f)`` — scalar determinant of a *square* endomorphism ``f : V ⊸ V``.
+
+    Requires ``f``'s source space to equal its target space (mirrors :func:`_synth_sqrt`)."""
+    dom, cod = _map_dom_cod_resolved(e.f, ctx)
+    if dom != cod:
+        raise InferError(
+            f"{type(e).__name__} requires a square endomorphism (V ⊸ V); got {dom!r} ⊸ {cod!r}"
+        )
+    return Scalar()
 
 
 # ===========================================================================

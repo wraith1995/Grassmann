@@ -18,7 +18,7 @@ from typing import assert_never
 from grassmann.core.props import MapProps
 from grassmann.core.space import CoImg, Dim, Img, Ker, Space
 from grassmann.core.space import CoKer as _CoKer
-from grassmann.core.term import Var
+from grassmann.core.term import Dagger, Pinv, Solve, Var
 
 from .dims import dim_diff, dim_of, rank_of
 
@@ -34,7 +34,14 @@ def map_props(f: object) -> MapProps | None:
 
 def is_bijective(f: object) -> bool:
     p = map_props(f)
-    return p is not None and p.bij
+    if p is not None and p.bij:
+        return True
+    # The inverse / metric-adjoint of a bijection is itself a bijection — so a re-inverted
+    # bijection (e.g. ``Solve(Solve(X))``, which the ``d det``/``d logdet`` rules build when
+    # differentiating a determinant of an inverse) type-checks without a fresh ``bij`` assertion.
+    if isinstance(f, (Solve, Pinv, Dagger)):
+        return is_bijective(f.f)
+    return False
 
 
 def is_injective(f: object) -> bool:
