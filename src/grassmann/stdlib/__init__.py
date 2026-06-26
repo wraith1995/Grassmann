@@ -21,7 +21,27 @@ from __future__ import annotations
 
 from .exterior import alt, exterior_power, tensor_power, wedge
 from .linalg import dot, least_squares, norm_sq, orthogonal_projection
-from .scalar import absval, div, reciprocal, sign, sqrt
+from .scalar import (
+    absval,
+    acos,
+    asin,
+    atan,
+    cos,
+    cosh,
+    div,
+    exp,
+    log,
+    reciprocal,
+    sigmoid,
+    sign,
+    sin,
+    sinh,
+    softplus,
+    sqrt,
+    square,
+    tan,
+    tanh,
+)
 
 __all__ = [
     # exterior algebra
@@ -40,4 +60,18 @@ __all__ = [
     "sign",
     "div",
     "reciprocal",
+    "exp",
+    "log",
+    "square",
+    "sin",
+    "cos",
+    "tan",
+    "sinh",
+    "cosh",
+    "tanh",
+    "atan",
+    "asin",
+    "acos",
+    "sigmoid",
+    "softplus",
 ]

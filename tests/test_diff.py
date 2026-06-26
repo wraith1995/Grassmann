@@ -116,8 +116,24 @@ def test_marked_none_dep_becomes_input() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("op", [L.sqrt, L.reciprocal])
+@pytest.mark.parametrize(
+    "op",
+    [
+        L.sqrt,
+        L.reciprocal,
+        L.exp,
+        L.log,
+        L.square,
+        L.sin,
+        L.cos,
+        L.tan,
+        L.sinh,
+        L.cosh,
+        L.tanh,
+    ],
+)
 def test_scalar_chain_rules_vs_fd(op) -> None:
+    # op applied to ⟨x,x⟩ (a positive scalar — in-domain for sqrt/log) then FD-checked.
     V = S.base("V", 2)
     x = T.var("x", V)
     dotxx = T.Eval(T.inner(V), (0, 1), (x, x))
@@ -126,6 +142,38 @@ def test_scalar_chain_rules_vs_fd(op) -> None:
     xval = np.array([1.3, -0.7])
     feed = {_xkey(x): xval}
     np.testing.assert_allclose(_run(J, feed).ravel(), _fd_jacobian(e, x, feed, 2).ravel(), atol=1e-4)
+
+
+@pytest.mark.parametrize("op", [L.atan, L.asin, L.acos, L.sigmoid, L.softplus])
+def test_batch2_scalar_derivative_vs_fd(op) -> None:
+    """Batch-2 scalar derivatives (built with the unit-constant ``_ones``) vs central FD.
+    Operand ⟨x,x⟩ is small (≈0.13) so asin/acos stay in domain."""
+    V = S.base("V", 2)
+    x = T.var("x", V)
+    dotxx = T.Eval(T.inner(V), (0, 1), (x, x))
+    e = op(G.wrap(dotxx)).node
+    J = diff(e, x)
+    xval = np.array([0.3, 0.2])
+    feed = {_xkey(x): xval}
+    np.testing.assert_allclose(_run(J, feed).ravel(), _fd_jacobian(e, x, feed, 2).ravel(), atol=1e-4)
+
+
+def test_elementwise_vector_derivative_rejected() -> None:
+    """diff of an elementwise op over a NON-scalar value needs the Hadamard/pointwise
+    derivative (goal 02) — it is refused with a clear message, not silently malformed."""
+    V = S.base("V", 3)
+    x = T.var("x", V)
+    e = L.exp(G.wrap(x)).node  # exp of a vector — elementwise, non-scalar
+    with pytest.raises(DiffError, match="Hadamard"):
+        diff(e, x)
+
+
+# NOTE: second-order AD through these ops (differentiating an already-differentiated
+# LLam map) trips a higher-order `represent` limitation (Scalar≅ℝ¹ cob / a free-var
+# 'b' KeyError), independent of the derivative arms — that is goal-03 (arbitrary/higher-
+# order AD) territory, not op registration. The first-order chain rule above covers all
+# nine ops; each arm composes from primitives, so it is higher-order-safe by construction
+# once the engine supports it.
 
 
 # ---------------------------------------------------------------------------
