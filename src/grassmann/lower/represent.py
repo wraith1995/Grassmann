@@ -5424,12 +5424,20 @@ def _make_input(
 
 
 def _const(ctx: _Ctx, data: np.ndarray, *, note: str) -> pa.SymArray:
-    """Emit a numeric constant array as a Stmt (so it carries provenance + ordering)."""
-    data = np.ascontiguousarray(np.asarray(data, dtype=float))
-    op = _ConstOp(key=note, data_bytes=data.tobytes(), shape=tuple(data.shape),
-                  dtype=str(data.dtype))
-    [arr] = ctx.prog.emit_stmt(op, [], [pa.OutSpec("const", tuple(data.shape))], note=note)
-    return arr
+    """Emit a numeric constant array as a Stmt (so it carries provenance + ordering).
+
+    The shape is read from ``np.asarray`` BEFORE ``np.ascontiguousarray`` because the latter
+    promotes a 0-d array to 1-d — which would make a ``Scalar`` constant (e.g. :class:`~grassmann
+    .core.term.Lit`) lower to shape ``(1,)`` instead of the rank-0 ``()`` every other scalar
+    uses, breaking ``Sum``/``External`` shape checks against genuine scalars.  ``_ConstOp`` then
+    ``reshape``s the contiguous bytes back to this true shape (rank-0 for a scalar).
+    """
+    arr = np.asarray(data, dtype=float)
+    shape = tuple(arr.shape)
+    op = _ConstOp(key=note, data_bytes=np.ascontiguousarray(arr).tobytes(), shape=shape,
+                  dtype=str(arr.dtype))
+    [out] = ctx.prog.emit_stmt(op, [], [pa.OutSpec("const", shape)], note=note)
+    return out
 
 
 # ===========================================================================
