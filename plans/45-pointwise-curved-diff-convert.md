@@ -235,6 +235,31 @@ occur in this space?" traversal if pointwise needs detection (no built-in today;
 `infer/subspace.py:29-75`). **Acceptance:** a test substituting `SVar("T") → Img(J)` through a representative
 pointwise value space (e.g. `dual(T) ⊗ T`, `⊕` of tangent blocks, `Λᵏ(T)`).
 
+### RESOLVED (2026-06-27) — extended subst into FFS `f`/`App`; added a detection helper.
+
+**Confirmed:** `subst_space` already closes `SVar("T")` through `Dual/WithInner/OPlus/OProd/OPlusRep`
+and the FFS source/target. Gap CONFIRMED for `Λᵏ(T) = Img(alt(T, k))`: the placeholder lives inside
+the FFS defining map `f` (the `alt` antisymmetrizer binds vars of space `T`), and the old code kept
+`f` unchanged — so `subst_space(Λ²(T), "T", Img(J))` left a dangling `T`.
+
+**Extended (`infer/subst.py`):** `subst_space`'s FFS case now descends into `f` and the `App` case
+into `g`/args, via a local `_subst_space_in_term` (kept in `infer` to avoid an `infer → transform`
+import cycle; mirrors `transform.rewrite._subst_space_in_term`). Safe — the value binders inside `f`
+never shadow a rigid *space* variable. Now `Λᵏ(T) → Img(J)` fully closes (no dangling `T`) and the
+result lowers/runs as a real `Λᵏ(Img(J))` value.
+
+**Added detection:** `space_occurs(needle, haystack)` (exported from `grassmann.infer.subst`) — "does a
+tangent `Img(J)` occur in this space?", descending into FFS maps / `App` like `subst_space`.
+
+Note: the substituted `Λᵏ(T)→Img(J)` is ALPHA-equivalent (not byte-identical) to a freshly built
+`exterior_power(Img(J), k)` — different binder uids, and the fresh build is canonicalized (Task 4). A
+caller should not mix a substituted space with a freshly built one and expect FFS-unify; build the
+value space ONE way. (Documented, not a blocker for the placeholder→realize flow.)
+
+**Added:** `tests/test_tangent_subst.py` — `SVar("T") → Img(J)` through `dual(T)⊗T`, `⊕` of
+tangent/cotangent/(2,0) blocks, and `Λᵏ(T)` (descends into the FFS map; value lowers + runs), plus
+`space_occurs` detection. Full suite green (2245 passed / 6 skipped).
+
 ---
 
 ## Working notes
