@@ -198,6 +198,28 @@ specifically** with a curved/injective `J`.
 (Cauchy–Binet was tried and rejected, `pointwise/plans/39` UPDATE). **Acceptance:** `inner` on a 2-form
 over `Img(J)` matches `det[⟨αᵢ,βⱼ⟩]` (after the pointwise `1/k!`), on affine and curved J.
 
+### RESOLVED (2026-06-27) — realization works; fixed a unify gap for DISTINCT k-forms.
+
+**Realization (no change needed):** `inner(Λᵏ(Img(J)))` lowers basis-agnostically over the immersed
+basis — the §2c structured-basis audit holds for the source/image case. Verified: `⟨α₁∧α₂, β₁∧β₂⟩`
+over `Λ²(Img(J))` equals `2!·det[⟨αᵢ,βⱼ⟩]` (the pairwise `⟨αᵢ,βⱼ⟩` is the *immersed* inner, metric
+riding free) on curved/injective `J`, for both scalar `Λ²` (Img dim 2) and non-scalar `Λ²` (Img dim 3,
+`C(3,2)=3`). The old "cannot decode map space: Img(alt(V,k))" block is gone. `k!·det` tensor convention
+preserved (no change to `∧`/`inner`).
+
+**Gap found + fixed:** `dot` of two **distinct** k-form values — the FEEC mass/moment DOF
+`⟨αᵢ, αⱼ⟩`, `i≠j` — raised `UnifyError: FFS map mismatch` (for BOTH static `Λᵏ(Rⁿ)` and immersed
+`Λᵏ(Img(J))`). Cause: each `exterior_power`/`wedge` built a FRESH `alt` `LLam` (fresh binder uids), so
+two `Λᵏ(V)` spaces were only alpha-equivalent, and FFS unification compares the defining map by
+structural identity. Fix (`stdlib/exterior.py`): **memoize `exterior_power` on `(V, k, rank)`** so
+`Λᵏ(V)` is one CANONICAL space node — two independently built k-forms (incl. two `wedge` results) now
+share the identical space and unify. NO static dim law, NO hand-rolled `exterior_inner`; the realization
+seam is untouched.
+
+**Added:** `tests/test_exterior_immersed_inner.py` — immersed `Λ²` determinant match (scalar + non-scalar,
+curved J), the `k!·det` same-value convention, distinct-k-form unify (static + immersed), and the
+canonical-space identity. Full suite green (2240 passed / 6 skipped).
+
 ---
 
 ## Task 5 — space substitution for the tangent placeholder

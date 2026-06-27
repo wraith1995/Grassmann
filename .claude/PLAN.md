@@ -15,7 +15,10 @@ leave a RESOLVED note per task). Tests: `.venv/bin/python -m pytest` (scipy now 
       ADDED enumeration API `enumerate_derivative_inputs`/`DerivInput`/`clear_deriv_inputs` (transform/diff.py,
       re-exported from grassmann.transform) with structured (source, order) provenance + dedup by
       (source.uid, x.uid). `tests/test_tracer_requirements.py` (5 tests). Full suite 2234 pass.
-- [ ] **Task 4** — exterior inner over immersed bases (k-form det metric) on curved/injective J.
+- [x] **Task 4** — exterior inner over immersed bases. RESOLVED: inner(Λᵏ(Img(J))) lowers + matches
+      k!·det[⟨αᵢ,βⱼ⟩] on curved J (scalar + non-scalar Λ²). Fixed a real gap: dot of DISTINCT k-forms
+      raised UnifyError (fresh alt nodes per wedge) — memoized exterior_power on (V,k,rank) → canonical
+      space. `tests/test_exterior_immersed_inner.py` (6 tests). Full suite 2240 pass.
 - [ ] **Task 5** — space substitution for tangent placeholder (subst_space descends FFS/App?).
 
 Baseline suite: test_diff.py + test_diff_analytic.py + new = 141 passed.
