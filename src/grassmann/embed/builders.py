@@ -528,6 +528,18 @@ def _space_of(node: object) -> object:
     sp = getattr(node, "space", None)
     if sp is not None and _s.is_space(sp):
         return sp
+    # A DERIVED operand (a ``Scale``/``Project``/``Eval`` result — e.g. a wedge value in
+    # ``Λᵏ(V) = Img(alt(V,k))``) carries no explicit ``.space``; synthesize it so ``dot`` keys
+    # ``Inner`` on the operand's OWN space.  Deriving from the operand means the metric shares the
+    # very ``alt`` node of ``w`` (no alpha-mismatch on unify, no global memoization needed).
+    try:
+        from grassmann.infer import synth_space
+
+        s = synth_space(node)
+        if _s.is_space(s):
+            return s
+    except Exception:
+        pass
     raise EmbedError(
         "G.dot could not infer the operand's space; use G.inner(s) and apply it"
     )
