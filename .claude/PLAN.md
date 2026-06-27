@@ -1,4 +1,26 @@
-# PLAN — Grassmann rewriting prototype (branch: rewriting, worktree grassmann-rw)
+# ACTIVE — Plan 45: pointwise curved diff/convert support
+
+Branch: `transform-pullback-covariant-diff` (rebased onto origin/main 4fe25b3 + the `_space_of`
+exterior-dot commit). Source: `plans/45-pointwise-curved-diff-convert.md` (investigate-then-implement;
+leave a RESOLVED note per task). Tests: `.venv/bin/python -m pytest` (scipy now installed in .venv).
+
+- [x] **Task 1 (CRITICAL)** — diff through x-dependent immersion metric. RESOLVED: mechanism already
+      complete (frame connection Γ=J⁺∂J; immersed inner rides free as identity-in-frame). No diff.py
+      change. Added `tests/test_curved_immersed_inner.py` (3 tests pass). Findings in plan doc §Task 1.
+- [x] **Task 2** — convert. RESOLVED: frame convert (Img(J)↔Rᵉ) = pullback Embed/Project, round-trips +
+      inner preserved; coordinate convert (Rᵗ↔Img(J)) = explicit Eval(J)/Eval(Pinv(J)), correct on curved
+      (linear per-point). Footgun documented: pullback(Rᵗ,Img(J)) is a dim-equal Assert relabel, NOT J·w.
+      Added `tests/test_curved_convert.py` (3 tests pass). No code change. Findings in plan doc §Task 2.
+- [ ] **Task 3** — unlimited-derivative tracers + requirements enumeration (deps=None; enumerate
+      derivative-map inputs by (source var, order)).
+- [ ] **Task 4** — exterior inner over immersed bases (k-form det metric) on curved/injective J.
+- [ ] **Task 5** — space substitution for tangent placeholder (subst_space descends FFS/App?).
+
+Baseline suite: test_diff.py + test_diff_analytic.py + new = 141 passed.
+
+---
+
+# PLAN — Grassmann rewriting prototype (branch: rewriting, worktree grassmann-rw)  [STALE — prior effort]
 
 Goal: prototype Term→Term rewriting + a sum-of-products normal form. Start with
 β-reduction and linear-algebra simplification.

@@ -108,6 +108,33 @@ the inverse-cols / `PinvOp` seam (`represent.py:1719-1771`). Verify both convers
 `Img(J)` is identity on the subspace; the immersed inner is preserved through a frame convert; a coordinate
 pullback on a curved map is correct (or the precise gap is documented for the pointwise/chartlib side).
 
+### RESOLVED (2026-06-27) — both converts verified on a curved chart; no code change.
+
+**Frame convert (Img(J) ↔ Rᵉ) — works.** `pullback(v:Img(J), Rᵉ)` builds an `Embed`; `pullback(·,Img(J))`
+a `Project`. Verified on an arbitrary (curved-sample) `J`: `embed∘project` is identity on the subspace,
+and the immersed inner is preserved — `⟨embed u, embed v⟩_{Rᵉ} == ⟨u,v⟩_{Img(J)}` (the realization frame
+is orthonormal, so embed is an isometry; the metric rides free, cf. Task 1). The realized maps are the FFS
+embed/project, NOT "apply J".
+
+**Coordinate convert (Rᵗ ↔ Img(J) along the chart) — is a DIFFERENT, explicit op, and is correct.**
+It is `Eval(J, ·)` (ref → ambient pushforward `J·w`, which lands in `Img(J)`) and `Eval(Pinv(J), ·)`
+(world → ref). Verified curved: `J⁺(J·w) == w` (J injective ⇒ `J⁺J=I`), and the two pictures agree
+(`embed(project(J·w)) == J·w`). There is **no non-affine gap at the value level**: `J(x)` is a linear
+map at each sampled point, so applying it is exact; curvature only matters when *differentiating* `J(x)`
+(Task 1). pointwise samples `J`/`∂J` and applies them directly.
+
+**DESIGN BOUNDARY (the one footgun, documented not fixed).** `pullback(w:Rᵗ, Img(J))` does NOT apply `J`
+— `Rᵗ` and `Img(J)` are unrelated but dim-equal, so it falls to the dim-equal `Assert` pass-through (an
+honest coordinate *relabel*, a deliberate feature — `test_pullback.py::test_dim_equal_unrelated_passes_through`).
+This silently differs from the pushforward `J·w`. So pointwise must build the coordinate convert explicitly
+with `J`/`J⁺` and must NOT route it through `pullback`. Hardening `pullback` to raise here was rejected: it
+would break the legitimate dim-equal relabel and require fragile `Img(·)`-special-casing. The boundary is
+pinned by a test instead.
+
+**Added:** `tests/test_curved_convert.py` — frame round-trip + inner preservation, coordinate convert
+round-trip + two-picture agreement, and the design-boundary pin. (`Embed`/`Project` lowering at
+`represent.py:_rep_embed`/`_rep_project`; J⁺ via the `_inverse_cols`/`PinvOp` seam, both exercised.)
+
 ---
 
 ## Task 3 — unlimited-derivative tracers + requirements enumeration
