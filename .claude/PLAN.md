@@ -11,8 +11,10 @@ leave a RESOLVED note per task). Tests: `.venv/bin/python -m pytest` (scipy now 
       inner preserved; coordinate convert (Rᵗ↔Img(J)) = explicit Eval(J)/Eval(Pinv(J)), correct on curved
       (linear per-point). Footgun documented: pullback(Rᵗ,Img(J)) is a dim-equal Assert relabel, NOT J·w.
       Added `tests/test_curved_convert.py` (3 tests pass). No code change. Findings in plan doc §Task 2.
-- [ ] **Task 3** — unlimited-derivative tracers + requirements enumeration (deps=None; enumerate
-      derivative-map inputs by (source var, order)).
+- [x] **Task 3** — tracers + requirements enumeration. RESOLVED: deps=None mechanism confirmed;
+      ADDED enumeration API `enumerate_derivative_inputs`/`DerivInput`/`clear_deriv_inputs` (transform/diff.py,
+      re-exported from grassmann.transform) with structured (source, order) provenance + dedup by
+      (source.uid, x.uid). `tests/test_tracer_requirements.py` (5 tests). Full suite 2234 pass.
 - [ ] **Task 4** — exterior inner over immersed bases (k-form det metric) on curved/injective J.
 - [ ] **Task 5** — space substitution for tangent placeholder (subst_space descends FFS/App?).
 

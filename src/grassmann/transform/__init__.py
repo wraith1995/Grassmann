@@ -13,7 +13,13 @@ Unlike :mod:`grassmann.infer` (which *types* a term) and :mod:`grassmann.lower`
 
 from __future__ import annotations
 
-from .diff import DiffError, diff
+from .diff import (
+    DerivInput,
+    DiffError,
+    clear_deriv_inputs,
+    diff,
+    enumerate_derivative_inputs,
+)
 from .pullback import PullbackError, pullback, transport_map
 from .rewrite import (
     AGGRESSIVE_SOP,
@@ -40,6 +46,9 @@ __all__ = [
     "PullbackError",
     "diff",
     "DiffError",
+    "enumerate_derivative_inputs",
+    "DerivInput",
+    "clear_deriv_inputs",
     # rewriting
     "rewrite",
     "subst",

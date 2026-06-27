@@ -151,6 +151,33 @@ pointwise inserts tracers and differentiates *before* knowing the orders, then e
 lower, and enumerate the derivative inputs — the set matches the orders actually referenced (and pruning
 unreferenced tracers leaves the program valid).
 
+### RESOLVED (2026-06-27) — mechanism confirmed; added the enumeration API.
+
+**Confirmed (no change needed):** `deps[uid] = None` allocates a symbolic derivative-map input
+`∂source/∂x : X ⊸ space(source)` (`_dd_var`, `diff.py:233`), composable to arbitrary order via nested
+`diff` (the order-`n` input is `d_d_…`), and lands among the lowered Program inputs.
+
+**Added (the gap):** the program-input metadata exposed derivative inputs by NAME string only
+(`d_u_…`) — no structured provenance. Now there is a clean enumeration API in `transform/diff.py`
+(re-exported from `grassmann.transform`):
+- `DerivInput(var, source, order)` — provenance of one derivative-map input.
+- `enumerate_derivative_inputs(term) -> list[DerivInput]` — the derivative inputs referenced in
+  `term`, by VAR IDENTITY (not name parsing), each tagged with its base tracer `source` and
+  derivative `order`. Deterministic ordering.
+- `clear_deriv_inputs()` — drop provenance/dedup state (test hygiene; optional, keys are unique uids).
+
+Allocation is now **deduped** by `(source.uid, x.uid)` (`_alloc_deriv_input`), so the derivative of a
+given source w.r.t. a given `x` is one input reused across repeated/nested `diff` — the enumerated
+requirements are a true set (no duplicate per `(source, order)`). The chart-`J` (`_chart_frame_of`)
+and metric-`g` (`_metric_gradient`) `None`-dep allocations route through the same helper, so the
+covariant-path derivative inputs are enumerable too. NESTED order chains correctly: a 2nd diff of a
+marked order-1 input reports `order=2` under the original base tracer.
+
+**Added:** `tests/test_tracer_requirements.py` — provenance + map space, arbitrary-order/composable
+enumeration `{(u,1),(u,2),(v,1),(v,2)}`, cross-call dedup, the single Jacobian evaluated at two seed
+directions feeding only enumerated inputs, and pruning an unreferenced tracer leaving a valid program.
+Full suite green (2234 passed / 6 skipped).
+
 ---
 
 ## Task 4 — exterior inner over immersed bases (k-form metric, pointwise WS6)
