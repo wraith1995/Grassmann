@@ -19,9 +19,12 @@ leave a RESOLVED note per task). Tests: `.venv/bin/python -m pytest` (scipy now 
       k!·det[⟨αᵢ,βⱼ⟩] on curved J (scalar + non-scalar Λ²). Fixed a real gap: dot of DISTINCT k-forms
       raised UnifyError (fresh alt nodes per wedge) — memoized exterior_power on (V,k,rank) → canonical
       space. `tests/test_exterior_immersed_inner.py` (6 tests). Full suite 2240 pass.
-- [ ] **Task 5** — space substitution for tangent placeholder (subst_space descends FFS/App?).
+- [x] **Task 5** — tangent-placeholder substitution. RESOLVED: extended subst_space to descend into
+      FFS defining map f + App (closes Λᵏ(T)=Img(alt(T,k)), was dangling); added space_occurs detection.
+      `tests/test_tangent_subst.py` (5 tests). Full suite 2245 pass.
 
-Baseline suite: test_diff.py + test_diff_analytic.py + new = 141 passed.
+ALL 5 TASKS RESOLVED. Suite 2245 passed / 6 skipped. ruff clean. Commits b92e0ce..(task5) on
+branch transform-pullback-covariant-diff (not pushed — user pushes manually).
 
 ---
 
