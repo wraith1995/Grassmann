@@ -63,6 +63,47 @@
   - Map: arcsin→asin, arccos→acos, arctan→atan; `norm2(v)`→`sqrt(⟨v,v⟩)`;
     `norm1`→`sum(abs)`; `tr`→`Trace`; `inv`→`Solve`. GAPS: det, logdet, adj, relu, sum-reduction.
 
+## Engine gaps & known limitations (register, 2026-06-29)
+
+Priority: **P1** blocks the website MVP · **P2** blocks advanced/geometry features · **P3** polish.
+
+### Rendering / round-trip
+- **G1 (P1)** `Det`/`LogDet` not handled by the LaTeX printer — falls back to a raw
+  `\mathtt{Det(Solve(Var(...)))}` dump (everything else renders fine), and `G.unparse` raises
+  `UnparseError` on them. Needed so the website renders `log(det(inv(X)))` properly + round-trips.
+  Files: `printer/latex.py`, `printer/precedence.py`, `syntax/{glyphs,unparse,parse}.py`.
+- **G2 (P3)** `Det`/`LogDet` not special-cased in `transform/rewrite.py` (normal-form passes).
+  Not exercised yet.
+
+### Frontend (mcalc)
+- **G3 (P2)** `adj` (adjugate) not implemented (raises clear gap error).
+- **G4 (P2)** Advanced space-expression decl tier (`R^n`, `R^n->R^m`, duals `(R^n)*`, tensors
+  `(x)`, sums `(+)`) — only scalar/vector/matrix + `vector(n)`/`matrix(m,n)` suffix dims exist.
+- **G5 (P2)** outer product `vec * cov` (rank-1 maps) raises "not yet supported".
+- **G6 (P2)** `inv`/`det`/`logdet` of a non-variable composite that isn't bij-by-construction
+  (e.g. `inv(A+B)`) — can't attach `bij`; clear error. Bare vars + bij-built composites work.
+- **G7 (P2)** matrixcalculus `symmetric matrix` varType not modeled (matrix treated generically;
+  symmetry not asserted, so a few gradients differ from the oracle's symmetrized form).
+- **G8 (P3)** `^` is right-assoc here; matrixcalculus/MATLAB is left-assoc (no gold example
+  chains powers). **G9 (P3)** `a^b` via `exp(b·log a)` (a>0 domain); `^2` not folded to `square`.
+
+### Lowering / runtime
+- **G10 (P2)** dynamic-shape lowering for symbolic-dim Euclidean vars not wired (`represent`
+  raises on a plain symbolic-dim Base var). Sidestepped by `instantiate` (substitute concrete
+  dims pre-run). A real fix would bind dims from input shapes at run time (dynamic SymInput).
+- **G11 (P3)** `LogDet` primal lowers as `log(det)` → NaN for non-positive det (matrixcalculus
+  assumes det>0; the derivative path is sign-robust regardless).
+
+### polyarray codegen
+- **G12 (P2/P3)** `to_numpy_source` can't emit `SvdOp`/`GSvdOp`/`CallOp`/`WhileOp`/sub-Program
+  (raise NotImplementedError). det/inv/solve/einsum ARE covered, so MVP "download Python" works;
+  this only bites if SVD/pinv-of-rectangular ops appear in a lowered program.
+
+### Test harness
+- **G13 (P3)** oracle harness `A*exp(x)` left xfail — it uses its own gradient extraction, not
+  the new `McalcResult.grad` convention adapter. Wiring `r.value/r.grad` in would un-xfail it
+  and drop the manual transposes.
+
 ## Default space = ℝ^N symbolic (DECIDED 2026-06-26)
 
 - The default Euclidean space for a vector is **ℝ^N with N a fresh symbolic Nat** (per slot;
