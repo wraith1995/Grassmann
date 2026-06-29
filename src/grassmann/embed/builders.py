@@ -289,6 +289,51 @@ def pullback(v: object, target: object) -> Expr:
     return wrap(_pb(_term(v), _space(target)))
 
 
+def pushforward(v: object, f: object) -> Expr:
+    """``G.pushforward(v, f)`` — carry the value ``v : dom(f)`` along the map ``f`` into
+    ``Img(f)`` (apply ``f``, corestrict to its image).  The map-driven dual of
+    :func:`pullback`; the rational "transport" primitive (domain → image), distinct from
+    the within-ambient ``embed``/``project``. See
+    :func:`grassmann.transform.transport.pushforward`."""
+    from grassmann.transform.transport import pushforward as _pf
+
+    return wrap(_pf(_term(v), _term(f)))
+
+
+def pull_along(v: object, f: object) -> Expr:
+    """``G.pull_along(v, f)`` — carry ``v : cod(f)`` back to ``dom(f)`` via ``f†`` (the
+    ``Rᵗ`` side of the coordinate convert). See
+    :func:`grassmann.transform.transport.pull_along`."""
+    from grassmann.transform.transport import pull_along as _pa
+
+    return wrap(_pa(_term(v), _term(f)))
+
+
+def transport_basis(b: object, f: object, target: object = None) -> Expr:
+    """``G.transport_basis(b, f)`` — the reference basis ``b`` of ``dom(f)`` transported
+    along ``f`` into ``Img(f)`` (the literal pushforward ``f(bᵢ)``, not orthonormalized,
+    hence rational).  ``b=None`` uses the standard basis. See
+    :func:`grassmann.transform.transport.transport_basis`."""
+    from grassmann.transform.transport import transport_basis as _tb
+
+    return wrap(_tb(
+        None if b is None else _node(b), _term(f),
+        target=None if target is None else _node(target),
+    ))
+
+
+def transport_cobasis(b: object, f: object, target: object = None) -> Expr:
+    """``G.transport_cobasis(b, f)`` — the ``T^{-⋆}`` dual / functional side of
+    :func:`transport_basis`. See
+    :func:`grassmann.transform.transport.transport_cobasis`."""
+    from grassmann.transform.transport import transport_cobasis as _tcb
+
+    return wrap(_tcb(
+        None if b is None else _node(b), _term(f),
+        target=None if target is None else _node(target),
+    ))
+
+
 def diff(e: object, x: object, deps: dict | None = None) -> Expr:
     """``G.diff(e, x, deps=None)`` — total covariant derivative of ``e`` w.r.t. the value
     variable ``x`` (a map ``X ⊸ space(e)``). ``deps`` maps a marked var's ``uid`` to its
