@@ -387,6 +387,10 @@ def _t(node: object) -> tuple[str, int]:
             return _app_like("Compose", f, pos, gs, _t0), G.P_APP
         case T.Trace(f=f, i=i, j=j):
             return f"Trace({_t(f)[0]}, {i}, {j})", G.P_APP
+        case T.Det(f=f):
+            return f"det({_t(f)[0]})", G.P_APP
+        case T.LogDet(f=f):
+            return f"logdet({_t(f)[0]})", G.P_APP
         case T.Solve(f=f):
             return f"{_wrap_t(f, G.P_POSTFIX)}{G.INVERSE}", G.P_POSTFIX
         case T.Pinv(f=f):
