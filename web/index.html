@@ -122,7 +122,8 @@
         <div class="decl-section">
           <div class="decl-head"><h2>Bases</h2><button class="add" id="addbase" type="button">+ add</button></div>
           <div id="bases"></div>
-          <div class="note">e.g. <code>ImageBasis(phi)</code> — (display-only for now; not sent to the engine yet).</div>
+          <div class="note">e.g. <code>ImageBasis(phi)</code>, <code>OrthonormalBasis(b)</code>,
+            <code>DualBasis(b)</code> — validated against your declarations on Compute.</div>
         </div>
 
         <div class="decl-section">
@@ -236,7 +237,7 @@ function typeOptions() {
   const o = ["scalar", "vector", "matrix"];
   spacesList.forEach(s => { if (s.name) o.push(s.name); });
   functionsList.forEach(f => {
-    if (f.kind === "param" && f.name) { o.push(`tangent(${f.name})`); o.push(`cotangent(${f.name})`); }
+    if (f.kind === "param" && f.name) { o.push(`T(${f.name})`); o.push(`CT(${f.name})`); }
   });
   return o;
 }
@@ -331,6 +332,7 @@ function renderRequired(list) {
 // ===================== SERIALIZERS (-> contract shapes) =====================
 function declsObj()   { const o = {}; varsList.forEach(v => { if (v.name) o[v.name] = v.type; }); return o; }
 function spacesObj()  { const o = {}; spacesList.forEach(s => { if (s.name && s.expr) o[s.name] = s.expr; }); return o; }
+function basesArr()   { return basesList.filter(b => b.name && b.expr).map(b => ({ name: b.name, expr: b.expr })); }
 function functionsArr() {
   return functionsList.filter(f => f.name).map(f => ({
     name: f.name, kind: f.kind, dom: f.dom || "", cod: f.cod || "",
@@ -359,9 +361,11 @@ async function runDerivative() {
   const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
   if (!expr) return;
   const res = await post("/api/derivative",
-    { expression: expr, wrt: wrt || null, decls: declsObj(), spaces: spacesObj(), functions: functionsArr() });
+    { expression: expr, wrt: wrt || null, decls: declsObj(), spaces: spacesObj(),
+      functions: functionsArr(), bases: basesArr() });
   if (res.error) { showError(res.error); $("out").style.display = "none"; return; }
-  showError("");
+  const berrs = Object.entries(res.basis_errors || {});
+  showError(berrs.length ? "Basis: " + berrs.map(([k, v]) => `${k}: ${v}`).join("; ") : "");
   $("out").style.display = "block";
   LAST_PRIMAL = res.primal_latex || ""; LAST_DERIV = res.derivative_latex || "";
   $("primal").innerHTML = `$$${res.primal_latex}$$`;
@@ -382,7 +386,7 @@ async function runDerivative() {
 async function genCode() {
   const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
   const body = { expression: expr, wrt: wrt || null, decls: declsObj(),
-                 spaces: spacesObj(), functions: functionsArr() };
+                 spaces: spacesObj(), functions: functionsArr(), bases: basesArr() };
   const pf = paramFnsAsParams();
   if (pf.length) body.params = pf;   // additive: lets the geometry codegen path receive the immersion
   const res = await post("/api/code", body);
@@ -453,7 +457,7 @@ const EXAMPLES = [
     functions: [{ name: "sphere", kind: "param", dom: "", cod: "",
                   params: ["u1", "u2"],
                   components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] }],
-    vars: [{ name: "v", type: "tangent(sphere)" }, { name: "w", type: "tangent(sphere)" }] },
+    vars: [{ name: "v", type: "T(sphere)" }, { name: "w", type: "T(sphere)" }] },
   { label: "opaque f", expr: "f(x)'*y", wrt: "x",
     spaces: [{ name: "V", expr: "R^4" }],
     functions: [{ name: "f", kind: "opaque", dom: "V", cod: "V",
