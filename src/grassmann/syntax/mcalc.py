@@ -894,6 +894,40 @@ class McalcResult:
         feed[f"{seed.name}_{seed.uid}"] = np.asarray(direction, float)
         return np.asarray(represent(self.derivative.node.body, basis_env=env).run(feed)["result"])
 
+    def _geom_basis_env(self) -> dict:
+        """The symbolic basis env realizing geometry values in ``ImageBasis(J)`` (and the
+        derivative sections in ``dφ⊗ImageBasis``) — used for both running and codegen."""
+        from grassmann.core import basis as _B
+        from grassmann.lower.represent import default_basis
+        env: dict = {}
+        for name, (par, head) in self.builder.geom_vars.items():
+            env[self.vars[name].node.uid] = _B.ImageBasis(par.J)
+        if self.geom_param is not None and self.sections:
+            par = self.geom_param
+            dpb = _B.basis_prod(_B.dual_basis(default_basis(par.param)), _B.ImageBasis(par.J))
+            for dv in self.sections.values():
+                env[dv.uid] = dpb
+        return env
+
+    def geometry_source(self) -> dict:
+        """Standalone numpy source for a geometry/parameterization problem — the primal and (if
+        present) the derivative, realized via ``ImageBasis(J)``. The emitted functions take the
+        immersion ``dφ`` (and ``d²φ`` / sections / direction for the derivative) + tangent
+        coordinates. Returns ``{"primal_py": ..., "derivative_py": ...}`` (raw source)."""
+        import polyarray as pa
+
+        from grassmann.lower.numpy_renderers import op_renderers
+        from grassmann.lower.represent import represent
+        rnd = op_renderers()
+        env = self._geom_basis_env()
+        out = {"primal_py": pa.to_numpy_source(
+            represent(_node(self.primal), basis_env=env), func_name="f", op_renderers=rnd)}
+        if self.derivative is not None:
+            out["derivative_py"] = pa.to_numpy_source(
+                represent(self.derivative.node.body, basis_env=env),
+                func_name="df", op_renderers=rnd)
+        return out
+
     def grad(self, values: dict[str, object], dims: dict[str, int]):
         """Numeric derivative of the primal w.r.t. ``wrt`` under the matrixcalculus numpy
         convention. Scalar-f → gradient (vector, or matrix when ``wrt`` is a matrix);

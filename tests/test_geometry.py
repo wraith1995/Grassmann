@@ -189,3 +189,34 @@ def test_mcalc_covariant_product_rule():
         got = r.covariant_run({"phi": u0}, {"v": vc, "w": wc},
                               direction=np.eye(2)[a], sections={"v": Dvc})
         assert np.allclose(got, Dvc[a] @ g @ wc)
+
+
+def test_geometry_numpy_codegen_runs_and_matches():
+    # "Generate Python" for a geometry problem: the emitted numpy execs and matches the engine.
+    import inspect
+
+    from grassmann.syntax.mcalc import build_problem
+    par = Parameterization("phi", 2, 3, immersion=_sphere_point)
+    u0 = np.array([0.9, 0.5])
+    g = par.jacobian_at(u0) @ par.jacobian_at(u0).T
+    vc, wc = np.array([0.7, -0.3]), np.array([0.2, 0.5])
+
+    r = build_problem("v'*w", wrt="phi",
+                      decls={"v": "tangent(phi)", "w": "tangent(phi)"}, params={"phi": par})
+    src = r.geometry_source()
+
+    # primal f(v, w, dphi) == ⟨v,w⟩ = v_cᵀ g w_c
+    ns = {}; exec(src["primal_py"], ns)  # noqa: S102
+    fp = list(inspect.signature(ns["f"]).parameters)
+    feed = {r.input_key("v"): vc, r.input_key("w"): wc, **par.feed_at(u0)}
+    assert np.allclose(ns["f"](*[np.asarray(feed[p], float) for p in fp]), vc @ g @ wc)
+
+    # derivative df(...) — covariant; constant sections ⇒ ∇⟨v,w⟩ = 0
+    ns2 = {}; exec(src["derivative_py"], ns2)  # noqa: S102
+    dp = list(inspect.signature(ns2["df"]).parameters)
+    seed = r.derivative.node.vars[0]
+    dfeed = dict(feed)
+    for dv in r.sections.values():
+        dfeed[f"{dv.name}_{dv.uid}"] = np.zeros((2, 2))
+    dfeed[f"{seed.name}_{seed.uid}"] = np.array([1.0, 0.0])
+    assert np.allclose(ns2["df"](*[np.asarray(dfeed[p], float) for p in dp]), 0.0, atol=1e-9)
