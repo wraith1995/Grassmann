@@ -114,12 +114,12 @@ supports chart-metric covariant AD (`transform/diff.py`), so this is mostly surf
   `/api/derivative`, `/api/code`. `lower/numpy_renderers.py` supplies grassmann's op
   renderers for `to_numpy_source`. Run: `python web/server.py` → http://127.0.0.1:8000.
 - All 9 gold examples: variable auto-detection, coordinate-free derivative rendered in LaTeX,
-  examples gallery. **Primal numpy download works** (verified == numpy). **Derivative download
-  blocked on G12** (CallOp/sub-program emission) — agent fixing in polyarray; `/api/code` is
-  resilient (emits primal, notes the derivative gap).
-- Commits on `feat/mcalc-frontend`: G1 render fix, web MVP, op renderers + download.
-- NEXT after G12: verify derivative download end-to-end; then Phase B (advanced decls) or
-  Phase C (parameterizations) per user priority. Polish: prettier dim-input UI, A7 numeric.
+  examples gallery. **Primal AND derivative numpy download work** (verified == `Program.run`);
+  G12 (CallOp/sub-program/vmap emission) FIXED in polyarray.
+- **Phase A is COMPLETE (A1–A6).** Commits on `feat/mcalc-frontend`: G1 render fix, web MVP,
+  op renderers + download, G12 renderers; polyarray `feat/numpy-source-codegen`: CallOp emit.
+- NEXT: Phase B (advanced `R^n`/`R^n->R^m` decls, adj, symmetric) or Phase C (parameterizations
+  → tangent/cotangent geometry) per user priority. Polish: dim-input UI, A7 numeric "try it".
 
 ## Suggested first sprint
 
