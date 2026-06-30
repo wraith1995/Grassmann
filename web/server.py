@@ -237,8 +237,24 @@ def api_code(req: dict) -> dict:
         return _err(e)
 
 
+def api_run(req: dict) -> dict:
+    """End-to-end numeric run: concrete dims + input values → value + gradient. Opaque ∂f is
+    finite-differenced from the function's numeric kernel; chosen bases are realized."""
+    try:
+        wrt = req.get("wrt") or None
+        decls = req.get("decls") or None
+        spaces, params, functions, bases = _declarations(req)
+        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls,
+                                params=params or None, spaces=spaces or None,
+                                functions=functions or None, bases=bases or None)
+        dims = {k: int(v) for k, v in (req.get("dims") or {}).items()}
+        return r.numeric(dims, req.get("values") or {}, req.get("realize") or None)
+    except Exception as e:  # noqa: BLE001
+        return _err(e)
+
+
 _ROUTES = {"/api/vars": api_vars, "/api/derivative": api_derivative, "/api/code": api_code,
-           "/api/grammar": api_grammar}
+           "/api/grammar": api_grammar, "/api/run": api_run}
 
 
 # ===========================================================================
