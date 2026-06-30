@@ -68,10 +68,9 @@
 Priority: **P1** blocks the website MVP · **P2** blocks advanced/geometry features · **P3** polish.
 
 ### Rendering / round-trip
-- **G1 (P1)** `Det`/`LogDet` not handled by the LaTeX printer — falls back to a raw
-  `\mathtt{Det(Solve(Var(...)))}` dump (everything else renders fine), and `G.unparse` raises
-  `UnparseError` on them. Needed so the website renders `log(det(inv(X)))` properly + round-trips.
-  Files: `printer/latex.py`, `printer/precedence.py`, `syntax/{glyphs,unparse,parse}.py`.
+- **G1 (P1) — FIXED** (commit on `feat/mcalc-frontend`): `Det`→`\det(...)`, `LogDet`→
+  `\log\det(...)` in the LaTeX printer; `det(f)`/`logdet(f)` call forms in unparse/parse
+  (round-trips α-equal). `log(det(inv(X)))` now renders cleanly in the web tool.
 - **G2 (P3)** `Det`/`LogDet` not special-cased in `transform/rewrite.py` (normal-form passes).
   Not exercised yet.
 
@@ -95,9 +94,10 @@ Priority: **P1** blocks the website MVP · **P2** blocks advanced/geometry featu
   assumes det>0; the derivative path is sign-robust regardless).
 
 ### polyarray codegen
-- **G12 (P2/P3)** `to_numpy_source` can't emit `SvdOp`/`GSvdOp`/`CallOp`/`WhileOp`/sub-Program
-  (raise NotImplementedError). det/inv/solve/einsum ARE covered, so MVP "download Python" works;
-  this only bites if SVD/pinv-of-rectangular ops appear in a lowered program.
+- **G12 (P2) — IN PROGRESS** (agent, polyarray): `to_numpy_source` can't emit `CallOp`/
+  sub-Program — which the full-Jacobian **derivative** lowering uses (vmap-style). Primal numpy
+  emits fine; derivative download blocked until this lands. (`SvdOp`/`GSvdOp`/`WhileOp` still
+  open after — only bite if SVD/pinv-of-rectangular appear.)
 
 ### Test harness
 - **G13 (P3)** oracle harness `A*exp(x)` left xfail — it uses its own gradient extraction, not
