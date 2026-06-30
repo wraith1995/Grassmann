@@ -163,8 +163,8 @@
             from the dropdown (built from your declarations), or choose <code>custom…</code> to type any
             space expression (e.g. <code>R^m -&gt; R^n</code>, <code>(R^3)* (x) R^3</code>).</div>
           <div class="note">Every input is realized in a basis — the default is spelled out
-            (<code>StandardBasis(R^n)</code>, or <code>{e₁,e₂,e₃}</code> when the size is bound);
-            pick a declared basis to change it.</div>
+            (<code>StandardEuclideanBasis(R^n)</code>, or <code>{e₁,e₂,e₃}</code> when the size is
+            bound); pick a declared basis to change it.</div>
         </div>
       </section>
 
@@ -416,7 +416,7 @@ function standardLabel(type) {
     const vs = []; for (let i = 1; i <= Math.min(n, 6); i++) vs.push(e(i));
     return "{" + vs.join(",") + (n > 6 ? ",…" : "") + "}";
   }
-  return "StandardBasis(" + (type || "R^n") + ")";
+  return "StandardEuclideanBasis(" + (type || "R^n") + ")";
 }
 
 // a basis <select> whose "standard" option is spelled out for `type`; value stays "standard".

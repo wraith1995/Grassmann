@@ -619,7 +619,7 @@ class _Builder:
             raise self.err(f"unknown basis {node.text!r}")
         if isinstance(node, App) and isinstance(node.fn, Name):
             h, a = node.fn.text, node.args
-            if h in ("StandardBasis", "standard", "euclidean"):
+            if h in ("StandardEuclideanBasis", "StandardBasis", "standard", "euclidean"):
                 from grassmann.lower.represent import default_basis
                 arg = a[0]
                 if isinstance(arg, Name) and arg.text in self.space_env:

@@ -221,7 +221,7 @@ def api_grammar(req: dict) -> dict:
                    "T(phi)", "CT(phi)", "Img(f)", "Ker(f)"],
         "types": ["scalar", "vector", "matrix", "vector(n)", "matrix(m,n)",
                   "<space name>", "T(phi)", "CT(phi)"],
-        "bases": ["standard (Euclidean)", "StandardBasis(V)", "ImageBasis(f)",
+        "bases": ["StandardEuclideanBasis(V)", "ImageBasis(f)",
                   "OrthonormalBasis(b)", "DualBasis(b)", "ListBasis(v1,v2)",
                   "WithInnerBasis(b,g)"],
     }
