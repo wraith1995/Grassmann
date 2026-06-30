@@ -130,11 +130,10 @@
         <div class="decl-section">
           <div class="decl-head"><h2>Dimensions</h2><button class="add" id="adddim" type="button">+ add</button></div>
           <div id="dims"></div>
-          <div class="note">Declare dimension variables, then use them in spaces and
-            variable types — e.g. <code>R^n</code>, <code>R^m -&gt; R^n</code>,
-            <code>V = R^n</code>.</div>
-          <div class="note">Dimensions are opaque (symbolic) by default — leave the size blank.
-            Give a number to bind a specific size (used when you Generate Python).</div>
+          <div class="note">Symbolic dimension variables — use them in spaces and variable
+            types, e.g. <code>R^n</code>, <code>R^m -&gt; R^n</code>, <code>V = R^n</code>.
+            For a <i>specific</i> size, just write the literal (<code>R^3</code>) in the type —
+            symbolic dims default to a size when you Generate Python.</div>
         </div>
 
         <div class="decl-section">
@@ -163,8 +162,9 @@
           <div class="note">Free variables of the expression are detected automatically; set each type
             from the dropdown (built from your declarations), or choose <code>custom…</code> to type any
             space expression (e.g. <code>R^m -&gt; R^n</code>, <code>(R^3)* (x) R^3</code>).</div>
-          <div class="note">Every input is realized in a basis — default is the standard (Euclidean)
-            basis; pick a declared basis to change it.</div>
+          <div class="note">Every input is realized in a basis — the default is spelled out
+            (<code>StandardBasis(R^n)</code>, or <code>{e₁,e₂,e₃}</code> when the size is bound);
+            pick a declared basis to change it.</div>
         </div>
       </section>
 
@@ -280,12 +280,9 @@ function renderDims2() {
   dimsList.forEach((d, i) => {
     const row = document.createElement("div"); row.className = "drow";
     const name = inp("d-name", "n", d.name);
-    const val = document.createElement("input");
-    val.type = "number"; val.min = "1"; val.className = "d-num"; val.placeholder = "opaque";
-    val.value = d.value || "";
     name.oninput = e => { d.name = e.target.value.trim(); renderVars(); };
-    val.oninput = e => { d.value = e.target.value.trim(); };
-    row.append(name, span("="), val, delBtn(() => { dimsList.splice(i, 1); renderDims2(); renderVars(); }));
+    row.append(name, span("symbolic"),
+               delBtn(() => { dimsList.splice(i, 1); renderDims2(); renderVars(); }));
     box.appendChild(row);
   });
 }
@@ -333,13 +330,8 @@ function renderFunctions() {
     if (f.kind === "opaque") {
       if (!f.inBasis) f.inBasis = "standard";
       if (!f.outBasis) f.outBasis = "standard";
-      const bopts = basisOptions();
-      const inOpts = bopts.slice(); if (!inOpts.includes(f.inBasis)) inOpts.push(f.inBasis);
-      const outOpts = bopts.slice(); if (!outOpts.includes(f.outBasis)) outOpts.push(f.outBasis);
-      const inSel = selectFrom(inOpts, f.inBasis); inSel.className = "d-basis";
-      const outSel = selectFrom(outOpts, f.outBasis); outSel.className = "d-basis";
-      inSel.onchange = e => { f.inBasis = e.target.value; };
-      outSel.onchange = e => { f.outBasis = e.target.value; };
+      const inSel = basisSelect(f.inBasis, f.dom, val => { f.inBasis = val; });
+      const outSel = basisSelect(f.outBasis, f.cod, val => { f.outBasis = val; });
       const l4 = document.createElement("div"); l4.className = "drow sub2";
       l4.append(span("input basis", "flabel"), inSel, span("output basis", "flabel"), outSel);
       row.append(l4);
@@ -384,12 +376,9 @@ function renderVars() {
         tin.style.display = "none"; v.type = e.target.value;
       }
     };
-    // realization basis: default "standard" (Euclidean), or any declared basis
+    // realization basis: default spelled out (StandardBasis / {e₁…}), or any declared basis
     if (!v.basis) v.basis = "standard";
-    const bopts = basisOptions();
-    if (v.basis && !bopts.includes(v.basis)) bopts.push(v.basis);   // keep a stale basis visible
-    const bsel = selectFrom(bopts, v.basis); bsel.className = "d-basis";
-    bsel.onchange = e => { v.basis = e.target.value; };
+    const bsel = basisSelect(v.basis, v.type, val => { v.basis = val; });
     row.append(name, span(":"), tsel, tin, span("in", "mut"), bsel,
                delBtn(() => { varsList.splice(i, 1); renderVars(); }));
     box.appendChild(row);
@@ -417,17 +406,38 @@ function basisOptions() {
   return o;
 }
 
+// Spell out the standard (default) basis for a given type: {e1,e2,e3} when the dimension is
+// bound (a literal R^k), else the symbolic StandardBasis(<space>). Defaults are never opaque.
+function standardLabel(type) {
+  const m = /^R\^(\d+)$/.exec((type || "").trim());
+  if (m) {
+    const n = +m[1], sub = "₀₁₂₃₄₅₆₇₈₉";
+    const e = i => "e" + String(i).split("").map(c => sub[+c]).join("");
+    const vs = []; for (let i = 1; i <= Math.min(n, 6); i++) vs.push(e(i));
+    return "{" + vs.join(",") + (n > 6 ? ",…" : "") + "}";
+  }
+  return "StandardBasis(" + (type || "R^n") + ")";
+}
+
+// a basis <select> whose "standard" option is spelled out for `type`; value stays "standard".
+function basisSelect(current, type, onpick) {
+  const s = document.createElement("select"); s.className = "d-basis";
+  const opts = [{ value: "standard", label: standardLabel(type) }];
+  basesList.forEach(b => { if (b.name) opts.push({ value: b.name, label: b.name }); });
+  if (current && !opts.some(o => o.value === current)) opts.push({ value: current, label: current });
+  opts.forEach(o => {
+    const op = document.createElement("option"); op.value = o.value; op.textContent = o.label;
+    if (o.value === current) op.selected = true; s.appendChild(op);
+  });
+  s.onchange = e => onpick(e.target.value);
+  return s;
+}
+
 // ===================== SERIALIZERS (-> contract shapes) =====================
 // bound dimension sizes: { name: int } for entries with a name AND a valid integer value
-function dimsObj() {
-  const o = {};
-  dimsList.forEach(d => {
-    if (!d.name) return;
-    const v = parseInt(d.value, 10);
-    if (!isNaN(v)) o[d.name] = v;
-  });
-  return o;
-}
+// Dimensions are symbolic-only — never bound here. A specific size is written as a literal
+// (R^3) in the type; symbolic dims default to a size server-side on download.
+function dimsObj() { return {}; }
 function declsObj()   { const o = {}; varsList.forEach(v => { if (v.name) o[v.name] = v.type; }); return o; }
 // chosen non-standard realization bases per variable: { varname: basisName } (standard omitted)
 function realizeObj() {
