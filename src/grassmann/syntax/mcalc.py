@@ -406,6 +406,19 @@ def _resolve_space(s: str, env: dict, params: dict | None = None):
     return sp
 
 
+def _num_jacobian(fn, x, h: float = 1e-5):
+    """Central-difference Jacobian of a numeric kernel ``fn`` at ``x`` — shape (cod, dom)."""
+    import numpy as np
+    x = np.asarray(x, float)
+    n = x.size
+    cols = []
+    for j in range(n):
+        e = np.zeros(n); e.flat[j] = h
+        cols.append((np.asarray(fn(x + e.reshape(x.shape)), float).ravel()
+                     - np.asarray(fn(x - e.reshape(x.shape)), float).ravel()) / (2 * h))
+    return np.stack(cols, axis=1)
+
+
 def _collect_dim_vars(node, seen: set | None = None) -> set:
     """All symbolic ``DimVar`` names appearing anywhere in ``node`` (a term/space tree)."""
     seen = seen if seen is not None else set()
@@ -576,11 +589,13 @@ class _Builder:
         self.space_env: dict[str, object] = {}
         for nm, sexpr in (spaces or {}).items():
             self.space_env[nm] = _resolve_space(sexpr, self.space_env, self.params)
-        self.func_env: dict[str, tuple] = {}   # name -> (opaque handle, dom Expr, cod Expr)
+        self.func_env: dict[str, tuple] = {}   # name -> (handle, dom Expr, cod Expr, kernel)
         for nm, spec in (functions or {}).items():
             dom = _resolve_space(spec["dom"], self.space_env, self.params)
             cod = _resolve_space(spec["cod"], self.space_env, self.params)
-            self.func_env[nm] = (_G.opaque(nm, dom, cod, spec.get("numeric")), dom, cod)
+            self.func_env[nm] = (_G.opaque(nm, dom, cod, spec.get("numeric")), dom, cod,
+                                 spec.get("numeric"))
+        self.opaque_apps: dict[str, _TN] = {}   # opaque func name -> the _TN it was applied to
         self.bases_src: dict[str, str] = dict(bases or {})   # name -> ASCII basis expr (lazy)
 
     # -- bases (resolved lazily, after vars are built) ----------------------
@@ -910,10 +925,11 @@ class _Builder:
         h = node.fn.text
         args = [self.infer(a) for a in node.args]
         if h in self.func_env:                       # a declared opaque function  f(x)
-            op, dom, cod = self.func_env[h]
+            op, dom, cod, _kernel = self.func_env[h]
             if len(args) != 1:
                 raise self.err(f"opaque function {h} takes one argument")
             (a,) = args
+            self.opaque_apps[h] = a                   # remember the argument (for ∂f at run time)
             sp = self.uf.fresh()
             self.uf.set_fixed(sp, cod, f"cod({h})")
             return _TN("vec", (lambda op=op, a=a: op(a.emit())), sp=sp)
@@ -1118,6 +1134,69 @@ class McalcResult:
         feed.update(raw_feed or {})
         term = self.instantiate(node, dims) if dims else node
         return np.asarray(represent(_node(term), basis_env=env).run(feed)["result"])
+
+    def numeric(self, dims: dict, values: dict, realize: dict | None = None) -> dict:
+        """The full end-to-end numeric run: instantiate symbolic dims, feed variable values
+        (matrixcalculus numpy convention), **finite-difference each opaque ∂f from its kernel**,
+        realize chosen bases, and return ``{"value", "gradient"}`` (gradient for a scalar primal
+        differentiated w.r.t. a vector/matrix ``wrt``). The wiring behind step ④."""
+        import numpy as np
+
+        from grassmann.lower.represent import represent
+        kinds = self.var_kinds
+
+        def base_feed():
+            f = {}
+            for name, val in values.items():
+                arr = np.asarray(val, float)
+                if kinds.get(name) == "matrix":
+                    arr = arr.T
+                f[self.input_key(name)] = arr
+            return f
+
+        env = {}
+        for vname, bname in (realize or {}).items():
+            if bname not in ("standard", "euclidean", ""):
+                env[self.vars[vname].node.uid] = self.builder.resolve_basis(bname)
+
+        def run(node, extra=None):
+            f = base_feed()
+            f.update(opaque_feed)
+            if extra:
+                f.update(extra)
+            return np.asarray(represent(_node(self.instantiate(node, dims)),
+                                        basis_env=env).run(f)["result"])
+
+        # finite-difference each required opaque ∂f at its argument's value
+        opaque_feed: dict = {}
+        for req in self.required_derivatives:
+            f = req["name"]
+            arg_tn = self.builder.opaque_apps.get(f)
+            kernel = self.builder.func_env.get(f, (None,) * 4)[3]
+            if arg_tn is None or kernel is None:
+                continue
+            argv = run(arg_tn.emit())                       # the argument's numeric value
+            opaque_feed[req["key"]] = _num_jacobian(kernel, argv).T   # ∂f : dom ⊸ cod  (= Jᵀ)
+
+        pv = run(self.primal)
+        value = pv.swapaxes(-1, -2) if pv.ndim == 2 else pv
+        gradient = None
+        if self.derivative is not None and self.wrt in self.vars:
+            dterm = self.instantiate(self.derivative, dims)
+            seed = dterm.node.vars[0]
+            skey = f"{seed.name}_{seed.uid}"
+            wv = np.asarray(values[self.wrt], float)
+            wflat = wv.size
+            g = np.zeros(wflat)
+            body = _wrap(dterm.node.body)
+            for i in range(wflat):
+                e = np.zeros(wflat); e[i] = 1.0
+                g[i] = np.asarray(run(body, {skey: e.reshape(wv.shape)})).item() \
+                    if pv.ndim == 0 else float("nan")
+            gradient = g.reshape(wv.shape)
+            if kinds.get(self.wrt) == "matrix":
+                gradient = gradient.swapaxes(-1, -2)
+        return {"value": value.tolist(), "gradient": None if gradient is None else gradient.tolist()}
 
     @property
     def required_derivatives(self) -> list[dict]:
