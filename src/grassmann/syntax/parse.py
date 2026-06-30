@@ -656,6 +656,10 @@ class _Resolver:
                              tuple(self.term(a, env) for a in args[2:]))
         if h == "Trace":
             return T.Trace(self.term(args[0], env), self.int_(args[1]), self.int_(args[2]))
+        if h == "det":
+            return T.Det(self.term(args[0], env))
+        if h == "logdet":
+            return T.LogDet(self.term(args[0], env))
         if h == "inner":
             return T.Inner(self.space(args[0], env))
         if h == "flat":

@@ -164,6 +164,10 @@ def _render_term(e: _t.Term) -> tuple[str, int]:  # noqa: C901,PLR0911,PLR0912 -
             return _render_compose(f, pos, gs)
         case _t.Trace(f=f, i=i, j=j):
             return rf"\operatorname{{tr}}_{{{i},{j}}}({_sub(f, 0)})", Prec.APP
+        case _t.Det(f=f):
+            return rf"\det\!\left({_sub(f, 0)}\right)", Prec.APP
+        case _t.LogDet(f=f):
+            return rf"\log\det\!\left({_sub(f, 0)}\right)", Prec.APP
         case _t.Solve(f=f):
             return f"{_sub(f, _PFX_BASE)}^{{-1}}", Prec.POSTFIX
         case _t.Pinv(f=f):
