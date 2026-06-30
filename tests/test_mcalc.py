@@ -114,12 +114,21 @@ def test_conflicting_named_dims_raise():
         build_problem("x'*y", wrt="x", decls={"x": "vector(n)", "y": "vector(k)"})
 
 
-# --- known gaps fail loudly, not silently ----------------------------------
+# --- unknown functions still fail loudly, not silently ---------------------
 
-@pytest.mark.parametrize("expr", ["adj(X)"])
-def test_known_gaps_raise_clearly(expr):
+@pytest.mark.parametrize("expr", ["bogusfn(X)"])
+def test_unknown_function_raises_clearly(expr):
     with pytest.raises(McalcBuildError):
         mcbuild(expr, {"X": "matrix"})
+
+
+def test_adj_builds_diffs_runs():
+    # adj(X) = det(X)·X⁻¹ (adjugate);  tr(adj(X)) == det(X)·tr(X⁻¹)
+    r = build_problem("tr(adj(X))", wrt="X", decls={"X": "matrix(n,n)"})
+    assert r.derivative is not None
+    X = np.array([[2.0, 1.0, 0.0], [0.0, 3.0, 1.0], [1.0, 0.0, 2.0]])
+    got = r.value({"X": X}, {"n": 3})
+    assert np.allclose(got, np.linalg.det(X) * np.trace(np.linalg.inv(X)))
 
 
 def test_log_det_inv_builds_diffs_runs():

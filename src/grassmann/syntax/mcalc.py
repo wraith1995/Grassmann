@@ -716,19 +716,20 @@ class _Builder:
                     return _G.var(name, self.space_of(sp))
                 cache0: dict = {}
                 tn = _TN("vec", (lambda mks=mks, cache0=cache0: cache0.setdefault("v", mks())),
-                         sp=sp)
+                         sp=sp, var_name=name)
             self.var_meta[name] = tn
             return tn
         head, dimnames = _parse_type(ty_raw, name)
         if head == "scalar":
             expr = _G.var(name, _G.R)
-            tn = _TN("scalar", (lambda e=expr: e))
+            tn = _TN("scalar", (lambda e=expr: e), var_name=name)
         elif head == "vector":
             sp = self.named_slot(dimnames[0]) if dimnames else self.uf.fresh()
             def mk(self=self, name=name, sp=sp):
                 return _G.var(name, self.space_of(sp))   # built lazily, after unification
             cache: dict = {}
-            tn = _TN("vec", (lambda mk=mk, cache=cache: cache.setdefault("v", mk())), sp=sp)
+            tn = _TN("vec", (lambda mk=mk, cache=cache: cache.setdefault("v", mk())), sp=sp,
+                     var_name=name)
         elif head == "matrix":
             # matrixcalculus matrix(m, n) = m rows (output) × n cols (input) ⇒ map ℝ^n ⊸ ℝ^m.
             if dimnames:
@@ -759,7 +760,8 @@ class _Builder:
             def mkg(self=self, name=name, sp=sp):
                 return _G.var(name, self.space_of(sp))
             cache = {}
-            tn = _TN("vec", (lambda mkg=mkg, cache=cache: cache.setdefault("v", mkg())), sp=sp)
+            tn = _TN("vec", (lambda mkg=mkg, cache=cache: cache.setdefault("v", mkg())), sp=sp,
+                     var_name=name)
         else:
             raise self.err(f"unknown declared type {head!r} for {name!r}")
         self.var_meta[name] = tn
@@ -1044,8 +1046,14 @@ class _Builder:
             self._mark_bij(m)            # det/logdet derivative uses X⁻¹ ⇒ invertible
             fn = _G.det if h == "det" else _G.logdet
             return _TN("scalar", lambda m=m, fn=fn: fn(m.emit()))
-        if h == "adj":
-            raise self.err("adj(...) is a known gap — not yet implemented")
+        if h == "adj":                 # adjugate: adj(X) = det(X) · X⁻¹  (X invertible)
+            (m,) = args
+            if m.kind != "mat":
+                raise self.err("adj takes a (square) matrix")
+            self.uf.union(m.src, m.tgt)
+            self._mark_bij(m)
+            return _TN("mat", (lambda m=m: _G.scale(
+                _G.det(m.emit()), _wrap(_T.solve(_node(m.emit()))))), src=m.tgt, tgt=m.src)
         raise self.err(f"unknown function {h!r}")
 
 
@@ -1208,8 +1216,10 @@ class McalcResult:
         from grassmann.transform.diff import enumerate_derivative_inputs
         out = []
         for r in enumerate_derivative_inputs(self.derivative.node):
+            arg = self.builder.opaque_apps.get(r.source.name)
             out.append({"name": r.source.name, "order": r.order,
-                        "key": f"{r.var.name}_{r.var.uid}"})
+                        "key": f"{r.var.name}_{r.var.uid}",
+                        "arg": arg.var_name if arg is not None else None})
         return out
 
     @property
