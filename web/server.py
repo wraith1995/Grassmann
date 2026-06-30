@@ -54,15 +54,17 @@ def _params_from_specs(specs) -> dict:
     return {s["name"]: _parameterization(s) for s in (specs or [])}
 
 
-def _declarations(req: dict) -> tuple[dict, dict, dict]:
-    """Unified declaration model → ``(spaces, params, functions)`` for ``build_problem``.
+def _declarations(req: dict) -> tuple[dict, dict, dict, dict]:
+    """Unified declaration model → ``(spaces, params, functions, bases)`` for ``build_problem``.
     ``req['spaces']`` is ``{name: ascii-space}``; ``req['functions']`` is a list of
-    ``{name, kind: 'opaque'|'param', params, components, dom?, cod?}`` (a parameterization is a
-    function with geometry); ``req['params']`` is the legacy parameterization-panel list."""
+    ``{name, kind: 'opaque'|'param', params, components, dom?, cod?}``; ``req['bases']`` is a
+    list of ``{name, expr}``; ``req['params']`` is the legacy parameterization-panel list."""
     spaces = dict(req.get("spaces") or {})
     params = _params_from_specs(req.get("params"))
     functions: dict = {}
     for f in (req.get("functions") or []):
+        if not f.get("name"):
+            continue
         if f.get("kind") == "param":
             params[f["name"]] = _parameterization(f)
         else:  # opaque
@@ -73,7 +75,9 @@ def _declarations(req: dict) -> tuple[dict, dict, dict]:
                 "kind": "opaque",
                 "numeric": _make_immersion(pn, comps) if comps else None,
             }
-    return spaces, params, functions
+    bases = {b["name"]: b["expr"] for b in (req.get("bases") or [])
+             if b.get("name") and b.get("expr")}
+    return spaces, params, functions, bases
 
 
 # ===========================================================================
@@ -101,15 +105,23 @@ def api_derivative(req: dict) -> dict:
     try:
         wrt = req.get("wrt") or None
         decls = req.get("decls") or None
-        spaces, params, functions = _declarations(req)
+        spaces, params, functions, bases = _declarations(req)
         r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls,
                                 params=params or None, spaces=spaces or None,
-                                functions=functions or None)
+                                functions=functions or None, bases=bases or None)
         out = {
             "primal_latex": G.latex(r.primal),
             "dim_names": r.dim_names,
             "var_kinds": r.var_kinds,
         }
+        if bases:                              # validate declared bases (resolve each)
+            errs = {}
+            for nm in bases:
+                try:
+                    r.builder.resolve_basis(nm)
+                except Exception as e:  # noqa: BLE001
+                    errs[nm] = f"{type(e).__name__}: {e}"
+            out["basis_errors"] = errs
         if r.derivative is not None:
             out["derivative_latex"] = G.latex(r.derivative)
             out["wrt"] = wrt
@@ -135,7 +147,7 @@ def api_grammar(req: dict) -> dict:
         "spaces": ["R^n", "(R^n)*", "A -> B", "A (x) B", "A (+) B",
                    "T(phi)", "CT(phi)", "Img(f)", "Ker(f)"],
         "types": ["scalar", "vector", "matrix", "vector(n)", "matrix(m,n)",
-                  "<space name>", "tangent(phi)", "cotangent(phi)"],
+                  "<space name>", "T(phi)", "CT(phi)"],
         "bases": ["ImageBasis(f)", "OrthonormalBasis(b)", "DualBasis(b)",
                   "ListBasis(v1,v2)", "WithInnerBasis(b,g)"],
     }
@@ -171,8 +183,14 @@ def api_code(req: dict) -> dict:
     try:
         wrt = req.get("wrt") or None
         decls = req.get("decls") or None
-        params = _params_from_specs(req.get("params"))
-        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls, params=params or None)
+        spaces, params, functions, bases = _declarations(req)
+        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls,
+                                params=params or None, spaces=spaces or None,
+                                functions=functions or None, bases=bases or None)
+        if r.builder.func_env:
+            return {"unsupported": ("Python download is not yet available for opaque-function "
+                                    "problems (the ④ derivative inputs aren't wired to codegen "
+                                    "yet).")}
         key_to_name = {r.input_key(n): n for n in r.vars}
         if r.builder.geom_vars:
             # geometry/parameterization problems lower via ImageBasis(J); the emitted functions
