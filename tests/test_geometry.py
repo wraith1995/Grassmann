@@ -95,3 +95,27 @@ def test_covariant_derivative_matches_christoffel(name, imm, u0):
     # (2) the tangential part == Γ·v  (the covariant derivative ∇v)
     tang = np.einsum("cd,dp,ap->ac", ginv, di, AD)
     np.testing.assert_allclose(tang, np.einsum("cab,b->ca", gamma, vv).T, atol=1e-10)
+
+
+# --- C4: φ as a callable — J=dφ / DJ=d²φ auto-derived ----------------------
+
+def _sphere_point(u):
+    u1, u2 = u
+    return np.array([np.sin(u1) * np.cos(u2), np.sin(u1) * np.sin(u2), np.cos(u1)])
+
+
+def test_callable_parameterization_auto_derives_covariant_derivative():
+    # The user supplies φ as a numeric callable; J=dφ and DJ=d²φ are differentiated for them,
+    # and the covariant derivative matches the analytic Christoffel reference.
+    u0 = np.array([0.9, 0.5])
+    di, d2i = _sphere(u0)
+    ginv, gamma = _gauss(di, d2i)
+    vv = np.array([0.7, -0.3])
+
+    par = Parameterization("sphfn", 2, 3, immersion=_sphere_point)
+    # auto-derived Jacobian/Hessian match the analytic ones (finite-difference accuracy)
+    np.testing.assert_allclose(par.jacobian_at(u0), di, atol=1e-6)
+    np.testing.assert_allclose(par.hessian_at(u0), d2i, atol=1e-4)
+
+    grad_v = par.covariant_derivative(u0, vv)                 # ∇v[a,c], auto-derived
+    np.testing.assert_allclose(grad_v, np.einsum("cab,b->ca", gamma, vv).T, atol=1e-4)
