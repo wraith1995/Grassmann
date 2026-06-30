@@ -46,6 +46,16 @@
   .dl { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
   pre.code { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow-x:auto;
              font: 12px ui-monospace, monospace; display:none; }
+  .params { margin:16px 0; background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 14px; }
+  .params summary { cursor:pointer; color:var(--fg); font-size:14px; }
+  .hint { color:var(--mut); font-size:12px; margin-top:8px; }
+  .hint code { background:#f3f4f6; padding:1px 4px; border-radius:4px; }
+  .prow { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  .prow input { font: 13px ui-monospace, monospace; }
+  .prow .pn { width:70px; } .prow .pp { width:120px; } .prow .pc { flex:1 1 280px; min-width:200px; }
+  .prow .del { background:#fff; color:var(--err); border:1px solid var(--line); padding:5px 9px; }
+  .badge { display:inline-block; font-size:11px; background:#eef2ff; color:var(--acc);
+           border:1px solid #c7d2fe; border-radius:6px; padding:1px 7px; margin-left:8px; }
 </style>
 </head>
 <body>
@@ -60,6 +70,15 @@
     <input id="wrt" type="text" spellcheck="false" placeholder="x" value="x">
     <button id="go">Compute</button>
   </div>
+
+  <details class="params" id="parampanel">
+    <summary>Parameterizations (optional) — manifolds φ: ℝᵏ → ℝⁿ for tangent-space variables</summary>
+    <div id="paramrows"></div>
+    <button class="ghost" id="addparam" type="button">+ add parameterization</button>
+    <div class="hint">A variable can then be typed <code>tangent(name)</code> / <code>normal(name)</code> /
+      <code>cotangent(name)</code> / <code>conormal(name)</code>; differentiating <code>w.r.t.</code>
+      the parameterization name gives the <b>covariant</b> derivative.</div>
+  </details>
 
   <div class="vars" id="vars"></div>
   <div id="error"></div>
@@ -88,6 +107,40 @@ const EXAMPLES = [
 ];
 const $ = id => document.getElementById(id);
 let CURRENT_VARS = {};   // name -> selected type
+let PARAMS = [];         // [{name, params:[..], components:[..]}]
+
+function paramSpecs() {
+  return PARAMS.filter(p => p.name && p.components.length)
+               .map(p => ({name: p.name, params: p.params, components: p.components}));
+}
+function paramNames() { return paramSpecs().map(p => p.name); }
+
+function geometryOptions() {
+  const opts = [];
+  for (const n of paramNames())
+    for (const h of ["tangent", "cotangent", "normal", "conormal"]) opts.push(`${h}(${n})`);
+  return opts;
+}
+
+function renderParams() {
+  const box = $("paramrows"); box.innerHTML = "";
+  PARAMS.forEach((p, i) => {
+    const row = document.createElement("div"); row.className = "prow";
+    row.innerHTML = `
+      <input class="pn" placeholder="name" value="${p.name}">
+      <span>:</span>
+      <input class="pp" placeholder="u1, u2" value="${p.params.join(', ')}">
+      <span>↦</span>
+      <input class="pc" placeholder="sin(u1)*cos(u2), sin(u1)*sin(u2), cos(u1)" value="${p.components.join(', ')}">
+      <button class="del" type="button">✕</button>`;
+    const [pn, pp, pc] = row.querySelectorAll("input");
+    pn.oninput = e => { p.name = e.target.value.trim(); refreshVars(); };
+    pp.oninput = e => { p.params = e.target.value.split(',').map(s => s.trim()).filter(Boolean); };
+    pc.oninput = e => { p.components = e.target.value.split(',').map(s => s.trim()).filter(Boolean); refreshVars(); };
+    row.querySelector(".del").onclick = () => { PARAMS.splice(i, 1); renderParams(); refreshVars(); };
+    box.appendChild(row);
+  });
+}
 
 async function post(path, body) {
   const r = await fetch(path, { method: "POST", headers: {"Content-Type":"application/json"},
@@ -107,15 +160,15 @@ async function refreshVars() {
   showError("");
   const prev = CURRENT_VARS; CURRENT_VARS = {};
   $("vars").innerHTML = "";
+  const types = ["scalar", "vector", "matrix", ...geometryOptions()];
   for (const v of res.vars) {
-    const t = prev[v.name] || v.type;
+    const t = types.includes(prev[v.name]) ? prev[v.name] : v.type;
     CURRENT_VARS[v.name] = t;
     const row = document.createElement("div");
     row.className = "vrow";
     row.innerHTML = `<code>${v.name}</code> is a
       <select data-name="${v.name}">
-        ${["scalar","vector","matrix"].map(k =>
-            `<option value="${k}" ${k===t?"selected":""}>${k}</option>`).join("")}
+        ${types.map(k => `<option value="${k}" ${k===t?"selected":""}>${k}</option>`).join("")}
       </select>`;
     row.querySelector("select").onchange = e => CURRENT_VARS[v.name] = e.target.value;
     $("vars").appendChild(row);
@@ -125,13 +178,16 @@ async function refreshVars() {
 async function compute() {
   const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
   if (!expr) return;
-  const res = await post("/api/derivative", { expression: expr, wrt: wrt || null, decls: CURRENT_VARS });
+  const res = await post("/api/derivative",
+    { expression: expr, wrt: wrt || null, decls: CURRENT_VARS, params: paramSpecs() });
   if (res.error) { showError(res.error); $("out").style.display = "none"; return; }
   showError("");
   $("out").style.display = "block";
   $("primal").innerHTML = `$$${res.primal_latex}$$`;
   if (res.derivative_latex) {
-    $("dlabel").textContent = `Derivative  ∂/∂${wrt}`;
+    const cov = res.covariant;
+    $("dlabel").innerHTML = (cov ? `Covariant derivative  ∇<sub>∂${wrt}</sub>` : `Derivative  ∂/∂${wrt}`)
+      + (cov ? `<span class="badge">covariant · along ${wrt}</span>` : "");
     $("deriv").innerHTML = `$$${res.derivative_latex}$$`;
     $("deriv").parentElement.style.display = "block";
   } else {
@@ -165,6 +221,30 @@ for (const [e, w] of EXAMPLES) {
   const s = document.createElement("span");
   s.className = "ex"; s.textContent = e;
   s.onclick = () => loadExample(e, w);
+  $("exlist").appendChild(s);
+}
+
+$("addparam").onclick = () => {
+  PARAMS.push({ name: PARAMS.length ? "" : "sphere", params: ["u1", "u2"],
+                components: PARAMS.length ? [] : ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] });
+  renderParams(); refreshVars();
+};
+renderParams();
+
+// a geometry example: covariant derivative of the tangent inner product on a sphere
+function loadGeometryExample() {
+  PARAMS = [{ name: "sphere", params: ["u1", "u2"],
+              components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] }];
+  renderParams();
+  $("parampanel").open = true;
+  $("expr").value = "v'*w"; $("wrt").value = "sphere";
+  CURRENT_VARS = { v: "tangent(sphere)", w: "tangent(sphere)" };
+  refreshVars().then(compute);
+}
+{
+  const s = document.createElement("span");
+  s.className = "ex"; s.textContent = "∇ covariant on a sphere";
+  s.onclick = loadGeometryExample;
   $("exlist").appendChild(s);
 }
 
