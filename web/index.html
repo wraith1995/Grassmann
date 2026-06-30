@@ -459,6 +459,9 @@ function renderBasis(type, depth, up) {
   const sp = spacesList.find(s => s.name === t);
   if (sp && sp.expr) return renderBasis(sp.expr, depth, up);
   if (t === "scalar" || t === "R") return "{1}";
+  let g;
+  if ((g = /^T\((.+)\)$/.exec(t))) return "ImageBasis(" + g[1] + ")";       // tangent frame ∂φ
+  if ((g = /^CT\((.+)\)$/.exec(t))) return "DualBasis(ImageBasis(" + g[1] + "))";  // cotangent
   while (t[0] === "(" && _matchParen(t) === t.length - 1) t = t.slice(1, -1).trim();
   let p;
   if ((p = _splitTop(t, "->"))) {
