@@ -480,6 +480,8 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_trace(e, f, i, j, ctx, target)
         case T.Det(_) | T.LogDet(_):
             return _rep_det(e, ctx, target)
+        case T.OpaqueApply():
+            return _rep_opaque(e, ctx, target)
         case T.Solve(f):
             return _rep_solve(e, f, ctx, target)
         case T.Pinv(f):
@@ -2357,6 +2359,36 @@ def _rep_det(
             [pa.OutSpec("logdet", _shape_of_space(space))], note="external:log",
         )
     return Rep(out, default_basis(space), space)
+
+
+def _rep_opaque(
+    e: T.OpaqueApply, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``OpaqueApply(op, arg)`` — apply an opaque map ``op : dom → cod`` to ``arg``.
+
+    The argument is lowered in *standard* coordinates on ``op.dom`` (the kernel's basis
+    contract — like :func:`_rep_external`/:func:`_rep_det`'s ``cob-std``) and the numeric
+    kernel ``op.fn`` is applied as a single runtime op.  Unlike ``_ExternalOp``, the output
+    shape is *decoupled* from the operand: it is the codomain's shape (the map need not be
+    shape-preserving).  The result is born in ``default_basis(op.cod)``; ``_rep``'s safety
+    net cob's it to ``target``.
+    """
+    op = e.op
+    if op.fn is None:
+        raise RepresentError(
+            f"opaque op {op.name!r} has no numeric kernel; supply one (fn=…) to run it"
+        )
+    cod = _synth(e)  # op.cod
+    arg_rep = _rep(e.arg, ctx)
+    arg_arr = _coerce_basis(
+        ctx, arg_rep, default_basis(op.dom), note=f"opaque:{op.name}:cob-std"
+    )
+    out_shape = _shape_of_space(cod)
+    [out] = ctx.prog.emit_stmt(
+        _OpaqueOp(name=op.name, fn=op.fn), [arg_arr],
+        [pa.OutSpec("opaque", out_shape)], note=f"opaque:{op.name}",
+    )
+    return Rep(out, default_basis(cod), cod)
 
 
 def _rep_neval(
@@ -5663,6 +5695,23 @@ class _ExternalOp:
 
     def __call__(self, *xs: np.ndarray) -> np.ndarray:
         return np.asarray(self.fn(*[np.asarray(x, dtype=float) for x in xs]), dtype=float)
+
+
+@dataclass(frozen=True)
+class _OpaqueOp:
+    """Apply an opaque map's numpy kernel to its (standard-coord) operand array.
+
+    Lowers an :class:`~grassmann.core.term.OpaqueApply`: the kernel ``fn`` is a black-box
+    ``dom``-array → ``cod``-array callable.  Unlike :class:`_ExternalOp` (elementwise, shape-
+    preserving), the kernel may change shape — the out-shape is fixed by the codomain in
+    :func:`_rep_opaque`.  A numpy_renderer rule will be needed to codegen this op later.
+    """
+
+    name: str
+    fn: object
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        return np.asarray(self.fn(np.asarray(x, dtype=float)), dtype=float)
 
 
 # ===========================================================================

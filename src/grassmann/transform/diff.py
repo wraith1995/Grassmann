@@ -64,6 +64,7 @@ from grassmann.core.term import (
     LLam,
     LogDet,
     NEval,
+    OpaqueApply,
     OPlusV,
     OProdV,
     Permute,
@@ -122,6 +123,7 @@ class _DCtx:
 # enumerated requirement set is a true set (no duplicate input per (source, order)).
 _DERIV_INPUTS: dict[int, DerivInput] = {}            # deriv-var.uid -> provenance record
 _DERIV_INPUT_BY_KEY: dict[tuple[int, int], Var] = {}  # (immediate-source.uid, x.uid) -> deriv var
+_OPAQUE_JAC_BY_KEY: dict[tuple[str, Term], Var] = {}  # (op.name, arg) -> Jacobian Df input var
 
 
 @dataclass(frozen=True)
@@ -178,6 +180,7 @@ def clear_deriv_inputs() -> None:
     session).  Safe to omit — keys are globally unique Var uids, so stale reuse cannot occur."""
     _DERIV_INPUTS.clear()
     _DERIV_INPUT_BY_KEY.clear()
+    _OPAQUE_JAC_BY_KEY.clear()
 
 
 def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
@@ -259,6 +262,8 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             return _dd_det(e, ctx)
         case LogDet():
             return _dd_logdet(e, ctx)
+        case OpaqueApply():
+            return _dd_opaque(e, ctx)
         case Solve():
             return _dd_solve(e, ctx)
         case Pinv():
@@ -920,6 +925,38 @@ def _dd_logdet(e: LogDet, ctx: _DCtx) -> Term:
     if tr is None:
         return _zero(e, ctx)
     return tr
+
+
+def _dd_opaque(e: OpaqueApply, ctx: _DCtx) -> Term:
+    """``d f(arg)[h] = Df(arg) · d arg[h]`` — the chain rule for an opaque map ``f : dom → cod``.
+
+    ``Df(arg)`` is the Jacobian of ``f`` *at* ``arg`` — a linear map ``dom ⊸ cod`` the engine
+    auto-allocates as a symbolic tracer input (the user never declares it).  It is fed numerically
+    later; :func:`enumerate_derivative_inputs` surfaces it with ``source.name == op.name``."""
+    darg = _dd(e.arg, ctx)  # directional derivative of the argument, a value in op.dom
+    if isinstance(darg, Zero):
+        return _zero(e, ctx)
+    dF = _alloc_opaque_jacobian(e.op, e.arg, ctx)  # the Jacobian Df at arg: a map op.dom ⊸ op.cod
+    return Eval(dF, (0,), (darg,))  # Df(arg) · d arg  ∈ op.cod
+
+
+def _alloc_opaque_jacobian(op: object, arg: Term, ctx: _DCtx) -> Var:
+    """Get-or-create the opaque map's Jacobian input ``Df`` at ``arg`` — a symbolic linear map
+    ``op.dom ⊸ op.cod`` (NOT ``X ⊸ cod``; the Jacobian lives in the op's own spaces and is then
+    composed with ``d arg`` by the chain rule).  Deduped by ``(op.name, arg)`` so repeated
+    ``f(arg)`` shares one Jacobian input.  Provenance: a synthetic source ``Var(op.name, …)`` (the
+    opaque function symbol) so :func:`enumerate_derivative_inputs` reports ``source.name == op.name``,
+    order 1."""
+    key = (op.name, arg)
+    existing = _OPAQUE_JAC_BY_KEY.get(key)
+    if existing is not None:
+        return existing
+    jspace = linear_map_space(op.dom, op.cod)
+    source = Var(op.name, jspace)  # the opaque function symbol f
+    dF = Var(f"D{op.name}_{next(_counter)}", jspace)
+    _DERIV_INPUTS[dF.uid] = DerivInput(var=dF, source=source, order=1)
+    _OPAQUE_JAC_BY_KEY[key] = dF
+    return dF
 
 
 def _dd_solve(e: Solve, ctx: _DCtx) -> Term:
