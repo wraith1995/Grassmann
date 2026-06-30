@@ -112,6 +112,16 @@ def alt(V: Expr, k: int) -> Expr:
 # ===========================================================================
 
 
+# CANONICAL exterior-power spaces (`§canon-extpow`). Each call to :func:`exterior_power` would
+# otherwise build a FRESH ``alt`` ``LLam`` (fresh binder uids) / rank-``Var``, so two independently
+# constructed ``Λᵏ(V)`` — e.g. the spaces of two distinct ``wedge`` results, or two k-form fields —
+# are only ALPHA-equivalent, not identical. FFS unification compares the defining map by structural
+# identity, so ``inner``/``dot`` of two such values (a FEEC k-form mass/moment DOF ``⟨αᵢ,αⱼ⟩``)
+# raised ``UnifyError: FFS map mismatch``. Memoizing on ``(V-space, k, rank)`` makes ``Λᵏ(V)`` one
+# canonical space — so the SAME ``V`` and ``k`` always yield the identical ``Img`` node and unify.
+_EXTPOW_CACHE: dict[object, Expr] = {}
+
+
 def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
     """``Λᵏ(V) = Img(alt(V, k))`` — the ``k``-th exterior power (`26 §2`).
 
@@ -120,7 +130,19 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
     instead an explicitly rank-asserted ``Var`` of space ``V⊗ᵏ >> V⊗ᵏ`` so the dimension
     resolves *statically* to the asserted ``C(n,k)`` (since ``infer.rank_of`` reads
     ``props`` only off a ``Var``).
+
+    The result is CANONICAL: the same ``(V, k, rank)`` returns the identical space node (memoized,
+    `§canon-extpow`), so ``inner``/``dot`` of two independently built ``Λᵏ(V)`` values unifies.
     """
+    Vspace = V.node if isinstance(V, Expr) else V
+    try:
+        key: object = (Vspace, k, rank)
+        cached = _EXTPOW_CACHE.get(key)
+    except TypeError:  # an unhashable V/rank — skip the cache, build fresh
+        key, cached = None, None
+    if cached is not None:
+        return cached
+
     if rank is None:
         result = G.img(alt(V, k))
     else:
@@ -130,7 +152,10 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
     # F1: record the base space V as an OPTIONAL side note so derived ops (``wedge``) can
     # read it directly instead of structurally re-deriving it from the Img/Alt term. The
     # note never affects the term's identity (see ``Expr.with_note``).
-    return result.with_note(base_space=V, exterior_k=k)
+    result = result.with_note(base_space=V, exterior_k=k)
+    if key is not None:
+        _EXTPOW_CACHE[key] = result
+    return result
 
 
 # ===========================================================================

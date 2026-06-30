@@ -1,4 +1,34 @@
-# PLAN — Grassmann rewriting prototype (branch: rewriting, worktree grassmann-rw)
+# ACTIVE — Plan 45: pointwise curved diff/convert support
+
+Branch: `transform-pullback-covariant-diff` (rebased onto origin/main 4fe25b3 + the `_space_of`
+exterior-dot commit). Source: `plans/45-pointwise-curved-diff-convert.md` (investigate-then-implement;
+leave a RESOLVED note per task). Tests: `.venv/bin/python -m pytest` (scipy now installed in .venv).
+
+- [x] **Task 1 (CRITICAL)** — diff through x-dependent immersion metric. RESOLVED: mechanism already
+      complete (frame connection Γ=J⁺∂J; immersed inner rides free as identity-in-frame). No diff.py
+      change. Added `tests/test_curved_immersed_inner.py` (3 tests pass). Findings in plan doc §Task 1.
+- [x] **Task 2** — convert. RESOLVED: frame convert (Img(J)↔Rᵉ) = pullback Embed/Project, round-trips +
+      inner preserved; coordinate convert (Rᵗ↔Img(J)) = explicit Eval(J)/Eval(Pinv(J)), correct on curved
+      (linear per-point). Footgun documented: pullback(Rᵗ,Img(J)) is a dim-equal Assert relabel, NOT J·w.
+      Added `tests/test_curved_convert.py` (3 tests pass). No code change. Findings in plan doc §Task 2.
+- [x] **Task 3** — tracers + requirements enumeration. RESOLVED: deps=None mechanism confirmed;
+      ADDED enumeration API `enumerate_derivative_inputs`/`DerivInput`/`clear_deriv_inputs` (transform/diff.py,
+      re-exported from grassmann.transform) with structured (source, order) provenance + dedup by
+      (source.uid, x.uid). `tests/test_tracer_requirements.py` (5 tests). Full suite 2234 pass.
+- [x] **Task 4** — exterior inner over immersed bases. RESOLVED: inner(Λᵏ(Img(J))) lowers + matches
+      k!·det[⟨αᵢ,βⱼ⟩] on curved J (scalar + non-scalar Λ²). Fixed a real gap: dot of DISTINCT k-forms
+      raised UnifyError (fresh alt nodes per wedge) — memoized exterior_power on (V,k,rank) → canonical
+      space. `tests/test_exterior_immersed_inner.py` (6 tests). Full suite 2240 pass.
+- [x] **Task 5** — tangent-placeholder substitution. RESOLVED: extended subst_space to descend into
+      FFS defining map f + App (closes Λᵏ(T)=Img(alt(T,k)), was dangling); added space_occurs detection.
+      `tests/test_tangent_subst.py` (5 tests). Full suite 2245 pass.
+
+ALL 5 TASKS RESOLVED. Suite 2245 passed / 6 skipped. ruff clean. Commits b92e0ce..(task5) on
+branch transform-pullback-covariant-diff (not pushed — user pushes manually).
+
+---
+
+# PLAN — Grassmann rewriting prototype (branch: rewriting, worktree grassmann-rw)  [STALE — prior effort]
 
 Goal: prototype Term→Term rewriting + a sum-of-products normal form. Start with
 β-reduction and linear-algebra simplification.

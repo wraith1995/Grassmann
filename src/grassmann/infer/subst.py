@@ -10,6 +10,8 @@ not substituted here (they are concrete per the locked decision).
 
 from __future__ import annotations
 
+from dataclasses import fields, replace
+
 from grassmann.core.space import (
     App,
     CoImg,
@@ -23,11 +25,18 @@ from grassmann.core.space import (
     Space,
     SVar,
     WithInner,
+    is_space,
 )
 
 
 def subst_space(s: Space, name: str, repl: Space) -> Space:
-    """``s[name := repl]`` over an ``SVar(name)`` rigid space variable."""
+    """``s[name := repl]`` over an ``SVar(name)`` rigid space variable.
+
+    Descends into a four-fundamental-subspace defining map ``f`` (a Term) and an ``App``'s
+    SpaceFunction / args, so a placeholder threaded *inside* a term — e.g. the tangent ``SVar("T")``
+    in ``Λᵏ(T) = Img(alt(T, k))`` (the ``alt`` antisymmetrizer binds vars of space ``T``) — is closed
+    too. Safe: the value binders inside ``f`` never shadow a rigid *space* variable.
+    """
     match s:
         case SVar():
             return repl if s.name == name else s
@@ -42,14 +51,92 @@ def subst_space(s: Space, name: str, repl: Space) -> Space:
         case OPlusRep():
             return OPlusRep(s.count, subst_space(s.space, name, repl))
         case Ker() | Img() | CoKer() | CoImg():
+            f = _subst_space_in_term(s.f, name, repl)
             src = subst_space(s.source, name, repl) if s.source is not None else None
             tgt = subst_space(s.target, name, repl) if s.target is not None else None
-            return type(s)(s.f, src, tgt)
+            return type(s)(f, src, tgt)
         case App():
-            return s
+            g = _subst_space_in_term(s.g, name, repl)
+            args = tuple(_subst_in_app_arg(a, name, repl) for a in s.args)
+            return App(g, s.positions, args)
         case _:
             # Scalar / Base / SVar(other) / metavars: unchanged.
             return s
+
+
+def _subst_in_app_arg(a: object, name: str, repl: Space) -> object:
+    from grassmann.core.term import is_term
+
+    if is_space(a):
+        return subst_space(a, name, repl)
+    if is_term(a):
+        return _subst_space_in_term(a, name, repl)
+    return a  # a Dim — not substituted (nats/ints are concrete)
+
+
+def _subst_space_in_term(term: object, name: str, repl: Space) -> object:
+    """Substitute ``SVar(name) := repl`` through every Space embedded in a Term (the spaces of
+    binder vars, asserted spaces, nested FFS maps, …).  Local to :mod:`grassmann.infer` to avoid an
+    ``infer → transform`` import cycle; mirrors ``transform.rewrite._subst_space_in_term``."""
+    from grassmann.core.term import is_term
+
+    if not is_term(term):
+        return term
+
+    def go(node: object) -> object:
+        new_fields: dict[str, object] = {}
+        changed = False
+        for fld in fields(node):
+            val = getattr(node, fld.name)
+            if isinstance(val, tuple):
+                new = tuple(
+                    go(c) if is_term(c) else (subst_space(c, name, repl) if is_space(c) else c)
+                    for c in val
+                )
+                if any(a is not b for a, b in zip(new, val, strict=True)):
+                    changed = True
+                new_fields[fld.name] = new
+            elif is_term(val):
+                nv = go(val)
+                if nv is not val:
+                    changed = True
+                new_fields[fld.name] = nv
+            elif is_space(val):
+                nv = subst_space(val, name, repl)
+                if nv is not val:
+                    changed = True
+                new_fields[fld.name] = nv
+            else:
+                new_fields[fld.name] = val
+        return replace(node, **new_fields) if changed else node
+
+    return go(term)
+
+
+def space_occurs(needle: Space, haystack: Space) -> bool:
+    """Does the space ``needle`` occur anywhere in ``haystack`` — descending into FFS defining maps
+    and ``App`` like :func:`subst_space`?  The "does a tangent ``Img(J)`` occur in this space?"
+    traversal pointwise needs (e.g. to detect whether a value space still mentions the chart)."""
+    from grassmann.core.term import is_term
+
+    if not is_space(haystack):
+        return False
+    if haystack == needle:
+        return True
+
+    def in_node(node: object) -> bool:
+        for fld in fields(node):
+            val = getattr(node, fld.name)
+            for c in (val if isinstance(val, tuple) else (val,)):
+                if is_space(c) and space_occurs(needle, c):
+                    return True
+                if is_term(c) and in_node(c):
+                    return True
+        return False
+
+    from dataclasses import is_dataclass
+
+    return is_dataclass(haystack) and in_node(haystack)
 
 
 def subst_type_space(t: object, name: str, repl: Space) -> object:
@@ -90,4 +177,4 @@ def subst_term(t: object, name: str, repl: object) -> object:
     return t
 
 
-__all__ = ["subst_space", "subst_type_space", "subst_term"]
+__all__ = ["subst_space", "subst_type_space", "subst_term", "space_occurs"]
