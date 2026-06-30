@@ -35,10 +35,15 @@ class Parameterization:
     and ``covariant_diff`` (the immersion-gauge covariant derivative). Realize + evaluate with
     ``basis_env`` + ``run`` against a numeric immersion (Jacobian ``dφ`` / Hessian ``d²φ``)."""
 
-    def __init__(self, name: str, param_dim: int, ambient_dim: int) -> None:
+    def __init__(self, name: str, param_dim: int, ambient_dim: int,
+                 immersion=None, fd_step: float = 1e-4) -> None:
         self.name = name
         self.param_dim = param_dim
         self.ambient_dim = ambient_dim
+        # φ itself (a numeric callable ℝᵏ→ℝⁿ) — when given, J=dφ / DJ=d²φ are auto-derived
+        # (numerically) at any point, so the user supplies φ, not the Jacobian/Hessian.
+        self.immersion = immersion
+        self.fd_step = fd_step
         self.param = _S.base(f"{name}_u", param_dim)        # ℝᵏ — the parameter domain (== X)
         self.ambient = _S.base(f"{name}_amb", ambient_dim)  # ℝⁿ — the ambient
         dm = _S.dual(self.param)
@@ -120,6 +125,69 @@ class Parameterization:
     def key(self, var: _T.Var) -> str:
         """The run-feed key for a variable (``f"{name}_{uid}"``)."""
         return f"{var.name}_{var.uid}"
+
+    # -- φ as a callable: auto-derive J=dφ / DJ=d²φ -------------------------
+
+    def jacobian_at(self, u):
+        """``dφ|_u`` (grassmann ``(k, n)``: ``di[a,p]=∂iₚ/∂uₐ``) by central differences of φ."""
+        import numpy as np
+        if self.immersion is None:
+            raise ValueError(f"parameterization {self.name!r} has no immersion φ")
+        u = np.asarray(u, float)
+        h, k, n = self.fd_step, self.param_dim, self.ambient_dim
+        di = np.zeros((k, n))
+        for a in range(k):
+            e = np.zeros(k); e[a] = h
+            di[a] = (np.asarray(self.immersion(u + e), float)
+                     - np.asarray(self.immersion(u - e), float)) / (2 * h)
+        return di
+
+    def hessian_at(self, u):
+        """``d²φ|_u`` (grassmann ``(k, k, n)``: ``d2i[a,b,p]=∂ₐ∂_b iₚ``) by central differences."""
+        import numpy as np
+        if self.immersion is None:
+            raise ValueError(f"parameterization {self.name!r} has no immersion φ")
+        u = np.asarray(u, float)
+        h, k, n = self.fd_step, self.param_dim, self.ambient_dim
+        d2i = np.zeros((k, k, n))
+        for a in range(k):
+            ea = np.zeros(k); ea[a] = h
+            for b in range(k):
+                eb = np.zeros(k); eb[b] = h
+                d2i[a, b] = (np.asarray(self.immersion(u + ea + eb), float)
+                             - np.asarray(self.immersion(u + ea - eb), float)
+                             - np.asarray(self.immersion(u - ea + eb), float)
+                             + np.asarray(self.immersion(u - ea - eb), float)) / (4 * h * h)
+        return d2i
+
+    def feed_at(self, u) -> dict:
+        """The auto-derived ``{J: dφ|_u, DJ: d²φ|_u}`` run-feed at point ``u`` — the user gives
+        φ, the immersion Jacobian/Hessian are differentiated for them."""
+        return {self.key(self.J): self.jacobian_at(u), self.key(self.DJ): self.hessian_at(u)}
+
+    def covariant_derivative(self, u, v_coords):
+        """The covariant derivative ``∇v`` of a constant tangent vector with ambient coords
+        ``embed(v)=dφ·v_coords``, at point ``u``, in tangent coordinates — ``∇v[a,c]`` for
+        direction ``a``. φ's Jacobian/Hessian are auto-derived; returns an ``(k, k)`` array."""
+        import numpy as np
+        v, dv = self.tangent_vector("v")
+        w = _T.var("w", _S.dual(self.ambient))
+        e = _T.Eval(w, (0,), (self.embed(v),))
+        jd = self.covariant_diff(e, self.point("x"), marks={v: dv})
+        seed = jd.vars[0]
+        env = self.basis_env(v, dv)
+        di = self.jacobian_at(u)
+        base = {**self.feed_at(u), self.key(v): np.asarray(v_coords, float),
+                self.key(dv): np.zeros((self.param_dim, self.param_dim))}
+        k, n = self.param_dim, self.ambient_dim
+        ad = np.zeros((k, n))
+        for a in range(k):
+            for p in range(n):
+                ad[a, p] = self.run(jd.body, env,
+                                    {**base, f"w_{w.uid}": np.eye(n)[p],
+                                     f"{seed.name}_{seed.uid}": np.eye(k)[a]})
+        ginv = np.linalg.inv(di @ di.T)
+        return np.einsum("cd,dp,ap->ac", ginv, di, ad)   # ∇v[a,c] in tangent coords
 
 
 def _is_section(v: _T.Var) -> bool:
