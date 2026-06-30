@@ -17,9 +17,13 @@
   h1 { font-size: 22px; margin: 0 0 2px; }
   .sub { color: var(--mut); font-size: 14px; margin-bottom: 22px; }
 
-  /* two-column layout: main + persistent grammar sidebar */
-  .layout { display: grid; grid-template-columns: 1fr 300px; gap: 26px; align-items: start; }
-  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .col-side { order: 2; } }
+  /* three-column layout: examples rail + main + persistent grammar sidebar */
+  .layout { display: grid; grid-template-columns: 160px 1fr 300px; gap: 26px; align-items: start; }
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; }
+    .col-examples { order: 3; }
+    .col-side { order: 2; }
+  }
 
   /* declarations */
   .decl { display: grid; gap: 14px; margin-bottom: 22px; }
@@ -37,6 +41,7 @@
         padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background:#fff; }
   .d-name { width: 96px; }
   .d-sm { width: 150px; }
+  .d-basis { max-width: 140px; }
   .d-grow { flex: 1 1 240px; min-width: 180px; }
   select { font: 14px inherit; padding: 5px 8px; border:1px solid var(--line); border-radius:7px; background:#fff; }
   .del { background:#fff; color:var(--err); border:1px solid var(--line); border-radius:7px;
@@ -74,12 +79,17 @@
   .badge { display:inline-block; font-size:11px; background:#eef2ff; color:var(--acc);
            border:1px solid #c7d2fe; border-radius:6px; padding:1px 7px; margin-left:8px; }
 
-  /* examples */
-  .examples { margin-top: 26px; }
-  .examples h3 { font-size:13px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
-  .ex { display:inline-block; margin:4px 6px 0 0; padding:5px 9px; font: 13px ui-monospace, monospace;
-        background:#fff; border:1px solid var(--line); border-radius:7px; cursor:pointer; }
+  /* examples rail (left, sticky vertical list) */
+  .col-examples { position: sticky; top: 18px; }
+  #exlist { display:flex; flex-direction:column; gap:6px; }
+  .ex { display:block; padding:6px 9px; font: 12px ui-monospace, monospace;
+        background:#fff; border:1px solid var(--line); border-radius:7px; cursor:pointer;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ex:hover { border-color: var(--acc); color: var(--acc); }
+  @media (max-width: 1100px) {
+    #exlist { flex-direction:row; flex-wrap:wrap; }
+    .ex { white-space:normal; }
+  }
 
   /* grammar sidebar */
   .col-side { position: sticky; top: 18px; }
@@ -102,6 +112,12 @@
     <b>coordinate-free</b> derivative.</div>
 
   <div class="layout">
+    <!-- ===================== EXAMPLES RAIL ===================== -->
+    <aside class="col-examples">
+      <h3 class="side-title">Examples</h3>
+      <div id="exlist"></div>
+    </aside>
+
     <main class="col-main">
 
       <!-- ===================== DECLARATIONS ===================== -->
@@ -130,6 +146,8 @@
           <div class="decl-head"><h2>Variables</h2><button class="add" id="addvar" type="button">+ add</button></div>
           <div id="vars"></div>
           <div class="note">Free variables of the expression are detected automatically; set each type.</div>
+          <div class="note">Every input is realized in a basis — default is the standard (Euclidean)
+            basis; pick a declared basis to change it.</div>
         </div>
       </section>
 
@@ -165,11 +183,6 @@
         <pre class="code" id="derivcode"></pre>
       </div>
 
-      <!-- ===================== EXAMPLES ===================== -->
-      <div class="examples">
-        <h3>Examples</h3>
-        <div id="exlist"></div>
-      </div>
     </main>
 
     <!-- ===================== GRAMMAR SIDEBAR ===================== -->
@@ -282,6 +295,21 @@ function renderFunctions() {
     const l3 = document.createElement("div"); l3.className = "drow sub2";
     l3.append(span("params", "flabel"), params);
     row.append(l1, l2, l3);
+    // opaque functions are realized in input/output bases (default "standard")
+    if (f.kind === "opaque") {
+      if (!f.inBasis) f.inBasis = "standard";
+      if (!f.outBasis) f.outBasis = "standard";
+      const bopts = basisOptions();
+      const inOpts = bopts.slice(); if (!inOpts.includes(f.inBasis)) inOpts.push(f.inBasis);
+      const outOpts = bopts.slice(); if (!outOpts.includes(f.outBasis)) outOpts.push(f.outBasis);
+      const inSel = selectFrom(inOpts, f.inBasis); inSel.className = "d-basis";
+      const outSel = selectFrom(outOpts, f.outBasis); outSel.className = "d-basis";
+      inSel.onchange = e => { f.inBasis = e.target.value; };
+      outSel.onchange = e => { f.outBasis = e.target.value; };
+      const l4 = document.createElement("div"); l4.className = "drow sub2";
+      l4.append(span("input basis", "flabel"), inSel, span("output basis", "flabel"), outSel);
+      row.append(l4);
+    }
     box.appendChild(row);
   });
 }
@@ -291,9 +319,10 @@ function renderBases() {
   basesList.forEach((b, i) => {
     const row = document.createElement("div"); row.className = "drow";
     const name = inp("d-name", "b", b.name), expr = inp("d-grow", "ImageBasis(phi)", b.expr);
-    name.oninput = e => { b.name = e.target.value.trim(); };
+    name.oninput = e => { b.name = e.target.value.trim(); renderVars(); renderFunctions(); };
     expr.oninput = e => { b.expr = e.target.value.trim(); };
-    row.append(name, span("="), expr, delBtn(() => { basesList.splice(i, 1); renderBases(); }));
+    row.append(name, span("="), expr,
+               delBtn(() => { basesList.splice(i, 1); renderBases(); renderVars(); renderFunctions(); }));
     box.appendChild(row);
   });
 }
@@ -310,7 +339,14 @@ function renderVars() {
     const sel = selectFrom(list, v.type);
     name.oninput = e => { v.name = e.target.value.trim(); };
     sel.onchange = e => { v.type = e.target.value; };
-    row.append(name, span(":"), sel, delBtn(() => { varsList.splice(i, 1); renderVars(); }));
+    // realization basis: default "standard" (Euclidean), or any declared basis
+    if (!v.basis) v.basis = "standard";
+    const bopts = basisOptions();
+    if (v.basis && !bopts.includes(v.basis)) bopts.push(v.basis);   // keep a stale basis visible
+    const bsel = selectFrom(bopts, v.basis); bsel.className = "d-basis";
+    bsel.onchange = e => { v.basis = e.target.value; };
+    row.append(name, span(":"), sel, span("in", "mut"), bsel,
+               delBtn(() => { varsList.splice(i, 1); renderVars(); }));
     box.appendChild(row);
   });
 }
@@ -329,8 +365,21 @@ function renderRequired(list) {
   });
 }
 
+// ----- basis options for the realization selects (standard = Euclidean) -----
+function basisOptions() {
+  const o = ["standard"];
+  basesList.forEach(b => { if (b.name) o.push(b.name); });
+  return o;
+}
+
 // ===================== SERIALIZERS (-> contract shapes) =====================
 function declsObj()   { const o = {}; varsList.forEach(v => { if (v.name) o[v.name] = v.type; }); return o; }
+// chosen non-standard realization bases per variable: { varname: basisName } (standard omitted)
+function realizeObj() {
+  const o = {};
+  varsList.forEach(v => { if (v.name && v.basis && v.basis !== "standard") o[v.name] = v.basis; });
+  return o;
+}
 function spacesObj()  { const o = {}; spacesList.forEach(s => { if (s.name && s.expr) o[s.name] = s.expr; }); return o; }
 function basesArr()   { return basesList.filter(b => b.name && b.expr).map(b => ({ name: b.name, expr: b.expr })); }
 function functionsArr() {
@@ -362,7 +411,7 @@ async function runDerivative() {
   if (!expr) return;
   const res = await post("/api/derivative",
     { expression: expr, wrt: wrt || null, decls: declsObj(), spaces: spacesObj(),
-      functions: functionsArr(), bases: basesArr() });
+      functions: functionsArr(), bases: basesArr(), realize: realizeObj() });
   if (res.error) { showError(res.error); $("out").style.display = "none"; return; }
   const berrs = Object.entries(res.basis_errors || {});
   showError(berrs.length ? "Basis: " + berrs.map(([k, v]) => `${k}: ${v}`).join("; ") : "");
@@ -386,7 +435,8 @@ async function runDerivative() {
 async function genCode() {
   const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
   const body = { expression: expr, wrt: wrt || null, decls: declsObj(),
-                 spaces: spacesObj(), functions: functionsArr(), bases: basesArr() };
+                 spaces: spacesObj(), functions: functionsArr(), bases: basesArr(),
+                 realize: realizeObj() };
   const pf = paramFnsAsParams();
   if (pf.length) body.params = pf;   // additive: lets the geometry codegen path receive the immersion
   const res = await post("/api/code", body);
@@ -446,12 +496,28 @@ async function loadGrammar() {
 
 // ===================== EXAMPLES =====================
 const EXAMPLES = [
-  { label: "0.5*x'*A*x", expr: "0.5*x'*A*x", wrt: "x",
+  { label: "0.5*x'*A*x", expr: "0.5*x'*A*x", wrt: "x", spaces: [], functions: [], bases: [],
     vars: [{ name: "x", type: "vector" }, { name: "A", type: "matrix" }] },
-  { label: "tr(A*X'*B*X*C)", expr: "tr(A*X'*B*X*C)", wrt: "X",
+  { label: "A*exp(x)", expr: "A*exp(x)", wrt: "x", spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "matrix" }, { name: "x", type: "vector" }] },
+  { label: "sin(x)'*y", expr: "sin(x)'*y", wrt: "x", spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "vector" }, { name: "y", type: "vector" }] },
+  { label: "(y.*v)'*x", expr: "(y.*v)'*x", wrt: "x", spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "vector" }, { name: "y", type: "vector" },
+           { name: "v", type: "vector" }] },
+  { label: "a^b", expr: "a^b", wrt: "a", spaces: [], functions: [], bases: [],
+    vars: [{ name: "a", type: "scalar" }, { name: "b", type: "scalar" }] },
+  { label: "norm2(A*x-y)^2", expr: "norm2(A*x-y)^2", wrt: "x", spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "matrix" }, { name: "x", type: "vector" },
+           { name: "y", type: "vector" }] },
+  { label: "logistic loss", expr: "sum(log(exp(-y.*(X*w)) + vector(1)))", wrt: "w",
+    spaces: [], functions: [], bases: [],
+    vars: [{ name: "X", type: "matrix" }, { name: "w", type: "vector" },
+           { name: "y", type: "vector" }] },
+  { label: "tr(A*X'*B*X*C)", expr: "tr(A*X'*B*X*C)", wrt: "X", spaces: [], functions: [], bases: [],
     vars: [{ name: "A", type: "matrix" }, { name: "B", type: "matrix" },
            { name: "C", type: "matrix" }, { name: "X", type: "matrix" }] },
-  { label: "log(det(inv(X)))", expr: "log(det(inv(X)))", wrt: "X",
+  { label: "log(det(inv(X)))", expr: "log(det(inv(X)))", wrt: "X", spaces: [], functions: [], bases: [],
     vars: [{ name: "X", type: "matrix" }] },
   { label: "∇ on a sphere", expr: "v'*w", wrt: "sphere",
     functions: [{ name: "sphere", kind: "param", dom: "", cod: "",
@@ -464,6 +530,12 @@ const EXAMPLES = [
                   params: ["u1", "u2", "u3", "u4"],
                   components: ["sin(u1)", "sin(u2)", "sin(u3)", "sin(u4)"] }],
     vars: [{ name: "x", type: "V" }, { name: "y", type: "V" }] },
+  { label: "opaque chart ∂φ", expr: "phi(u)", wrt: "u",
+    spaces: [{ name: "U", expr: "R^2" }],
+    functions: [{ name: "phi", kind: "opaque", dom: "U", cod: "R^3",
+                  params: ["u1", "u2"],
+                  components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] }],
+    vars: [{ name: "u", type: "U" }] },
 ];
 
 function applyExample(ex) {
@@ -477,7 +549,7 @@ function applyExample(ex) {
 // ===================== WIRING =====================
 $("addspace").onclick = () => { spacesList.push({ name: "", expr: "" }); renderSpaces(); };
 $("addfn").onclick = () => { functionsList.push({ name: "", kind: "opaque", dom: "", cod: "", params: [], components: [] }); renderFunctions(); renderVars(); };
-$("addbase").onclick = () => { basesList.push({ name: "", expr: "" }); renderBases(); };
+$("addbase").onclick = () => { basesList.push({ name: "", expr: "" }); renderBases(); renderVars(); renderFunctions(); };
 $("addvar").onclick = () => { varsList.push({ name: "", type: "vector" }); renderVars(); };
 
 const exbox = $("exlist");
@@ -497,7 +569,7 @@ $("texbtn").onclick = exportTex;
 
 // ===================== INIT =====================
 loadGrammar();
-const _byHash = { "#geometry": "∇ on a sphere", "#opaque": "opaque f" };
+const _byHash = { "#geometry": "∇ on a sphere", "#opaque": "opaque f", "#chart": "opaque chart ∂φ" };
 const _hashEx = EXAMPLES.find(e => e.label === _byHash[location.hash]);
 applyExample(_hashEx || EXAMPLES[0]);
 </script>
