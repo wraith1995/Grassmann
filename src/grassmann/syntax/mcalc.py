@@ -770,6 +770,9 @@ class McalcResult:
     primal: object                       # grassmann Expr
     wrt: str | None = None
     derivative: object | None = None     # grassmann Expr (the derivative map) or None
+    geom_param: object = None            # set when `wrt` is a parameterization (covariant diff)
+    point: object = None                 # the manifold point var (core) for the covariant diff
+    sections: dict | None = None         # tangent-var name -> its derivative section Dv (core)
 
     @property
     def vars(self) -> dict[str, object]:
@@ -836,31 +839,60 @@ class McalcResult:
         rep = self.builder.uf.find(slot)
         return int(dims[self.builder.dim_label[rep]])
 
-    def run_geometry(self, points: dict[str, object], coords: dict[str, object]):
-        """Run a primal that contains **geometry** variables (declared on `tangent(phi)` etc.).
-        Realizes each geometry value in its parameterization's `ImageBasis` and auto-feeds the
-        immersion `J=dφ`/`DJ=d²φ` at the given point. ``points`` maps parameterization name ->
-        the point `u` (an ℝᵏ array); ``coords`` maps geometry-var name -> its coordinate array
-        in the tangent frame. Tangent vars only (normal/cotangent realization is future work)."""
+    def _geom_env_feed(self, points: dict[str, object], coords: dict[str, object]):
+        """Build the (basis_env, feed) for the geometry vars: realize each tangent value in
+        ``ImageBasis(J)`` and auto-feed the immersion ``dφ``/``d²φ`` at its point."""
         import numpy as np
 
         from grassmann.core import basis as _B
-        from grassmann.lower.represent import represent
         b = self.builder
         env: dict = {}
         feed: dict = {}
-        fed_params: set = set()
+        fed: set = set()
         for name, (par, head) in b.geom_vars.items():
             if head != "tangent":
                 raise McalcBuildError(
                     f"geometry run supports tangent(...) values; {head}({par.name}) not yet")
-            var = self.vars[name]
-            env[var.node.uid] = _B.ImageBasis(par.J)
+            env[self.vars[name].node.uid] = _B.ImageBasis(par.J)
             feed[self.input_key(name)] = np.asarray(coords[name], float)
-            if par.name not in fed_params:
+            if par.name not in fed:
                 feed.update(par.feed_at(points[par.name]))
-                fed_params.add(par.name)
+                fed.add(par.name)
+        return env, feed
+
+    def run_geometry(self, points: dict[str, object], coords: dict[str, object]):
+        """Run a primal that contains **geometry** variables (declared on `tangent(phi)` etc.).
+        ``points`` maps parameterization name -> the point `u` (ℝᵏ); ``coords`` maps geometry-
+        var name -> its coordinate array in the tangent frame."""
+        import numpy as np
+
+        from grassmann.lower.represent import represent
+        env, feed = self._geom_env_feed(points, coords)
         return np.asarray(represent(_node(self.primal), basis_env=env).run(feed)["result"])
+
+    def covariant_run(self, points: dict[str, object], coords: dict[str, object],
+                      direction, sections: dict | None = None):
+        """Evaluate the **covariant derivative** (built with ``wrt`` = a parameterization) in a
+        given ``direction`` (ℝᵏ tangent direction at the point). ``sections`` maps a tangent-var
+        name -> its derivative-section coords (default the zero/constant section). Returns the
+        directional covariant derivative as an array."""
+        import numpy as np
+
+        from grassmann.core import basis as _B
+        from grassmann.lower.represent import default_basis, represent
+        if self.geom_param is None:
+            raise McalcBuildError("covariant_run needs wrt = a parameterization name")
+        par = self.geom_param
+        env, feed = self._geom_env_feed(points, coords)
+        dpb = _B.basis_prod(_B.dual_basis(default_basis(par.param)), _B.ImageBasis(par.J))
+        for name, dv in (self.sections or {}).items():
+            env[dv.uid] = dpb
+            sec = (sections or {}).get(name)
+            feed[f"{dv.name}_{dv.uid}"] = (np.zeros((par.param_dim, par.param_dim))
+                                          if sec is None else np.asarray(sec, float))
+        seed = self.derivative.node.vars[0]
+        feed[f"{seed.name}_{seed.uid}"] = np.asarray(direction, float)
+        return np.asarray(represent(self.derivative.node.body, basis_env=env).run(feed)["result"])
 
     def grad(self, values: dict[str, object], dims: dict[str, int]):
         """Numeric derivative of the primal w.r.t. ``wrt`` under the matrixcalculus numpy
@@ -883,6 +915,20 @@ def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
     b = _Builder(decls or {}, expr, params)
     tn = b.infer(parse_ast(expr))
     primal = tn.emit()
+    if wrt is not None and params and wrt in params:
+        # covariant derivative ALONG the manifold: wrt is a parameterization (its point).
+        par = params[wrt]
+        x = par.point("x")
+        marks: dict = {}
+        sections: dict = {}
+        for name, (p, head) in b.geom_vars.items():
+            if p is par and head == "tangent":
+                vnode = b.var_meta[name].emit().node
+                dv = _T.var(f"d{name}", _S.oprod(_S.dual(par.param), par.tangent))
+                marks[vnode] = dv
+                sections[name] = dv
+        deriv = _wrap(par.covariant_diff(_node(primal), x, marks=marks))
+        return McalcResult(b, primal, wrt, deriv, geom_param=par, point=x, sections=sections)
     deriv = None
     if wrt is not None:
         if wrt not in b.var_meta:
