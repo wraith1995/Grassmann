@@ -29,7 +29,7 @@ import math
 import grassmann.embed as G
 from grassmann.embed.ops import Expr
 
-__all__ = ["alt", "exterior_power", "tensor_power", "wedge", "perms", "sign"]
+__all__ = ["alt", "exterior_power", "tensor_power", "wedge", "hodge_star", "perms", "sign"]
 
 
 # ===========================================================================
@@ -198,6 +198,62 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
     # operand is this very result, e.g. the ``wedge_all`` fold) recovers V from the note
     # instead of re-deriving it structurally. Identity-transparent (see ``Expr.with_note``).
     return result.with_note(base_space=V, exterior_k=k + l)
+
+
+def _ambient_dim(V: Expr) -> int:
+    """The (static) dimension ``n`` of the ambient space ``V = ℝⁿ``."""
+    from grassmann.lower._dims import dim_of
+    return dim_of(V.node if isinstance(V, Expr) else V)
+
+
+def _std_basis_vector(V: Expr, i: int, n: int) -> Expr:
+    """The ``i``-th standard basis vector ``eᵢ ∈ V = ℝⁿ`` as a constant (an ``External`` with no
+    arguments).  The volume form tensors these and projects the whole ``V⊗ⁿ`` onto ``Λⁿ``."""
+    import numpy as np
+
+    from grassmann.lower.represent import ExternalOp
+    vec = np.zeros(n); vec[i] = 1.0
+    return G.external(V, ExternalOp(f"e{i}", (lambda vec=vec: vec)))
+
+
+def hodge_star(omega: Expr, k: int) -> Expr:
+    """The **Hodge star** ``⋆ : Λᵏ(V) → Λⁿ⁻ᵏ(V)`` for the standard Euclidean metric and the
+    standard orientation of ``V = ℝⁿ`` (`Hodge`).
+
+    Characterised by ``α ∧ ⋆ω = ⟨α, ω⟩ · vol`` for every ``α ∈ Λᵏ(V)``, where ``vol`` is the
+    **unit volume form** ``e₁∧…∧eₙ`` of the standard oriented basis.  Built coordinate-free as
+
+        ``⋆ = M⁻¹ ∘ ♭``,   ``M : Λⁿ⁻ᵏ → (Λᵏ)*``,  ``M(γ) = (α ↦ ⟨α ∧ γ, vol⟩)``,
+
+    where ``♭ = flat`` is the metric lower on ``Λᵏ`` and ``M`` is the wedge-into-volume pairing.
+    The metric on ``Λᵏ`` is the one INDUCED by the embedding ``Λᵏ ⊑ V⊗ᵏ`` (so no metric need be
+    supplied — change ``V``'s metric and ``⋆`` follows), and ``pinv`` realises ``M⁻¹`` (``M`` is a
+    square isomorphism).  Valid for ``1 ≤ k ≤ n−1``.
+
+    NOTE on normalization: the induced ``Λᵏ`` metric is ``k!``-scaled vs. the textbook orthonormal
+    one (``⟨a∧b, a∧b⟩ = 2|a×b|²``).  ``⋆`` satisfies the defining property exactly for THAT metric;
+    consequently ``⋆⋆ = (-1)^{k(n-k)} / C(n,k) · id`` (the sign is the standard Euclidean one).
+    """
+    V = _base_space_of_exterior(omega, k)
+    n = _ambient_dim(V)
+    if not (1 <= k <= n - 1):
+        raise ValueError(f"hodge_star: need 1 ≤ k ≤ n−1 (n={n}), got k={k}")
+    Lk = exterior_power(V, k)
+    Lnk = exterior_power(V, n - k)
+    Ln = exterior_power(V, n)
+
+    from grassmann.stdlib.scalar import reciprocal, sqrt
+
+    def _pair(s: Expr, a: Expr, b: Expr) -> Expr:
+        return G.inner(s).at([0, 1])(a, b)
+
+    # unit volume form: antisymmetric-project the standard basis tensor onto Λⁿ, then normalise.
+    vol = G.project(G.tensor(*[_std_basis_vector(V, i, n) for i in range(n)]), Ln)
+    vol_unit = G.scale(reciprocal(sqrt(_pair(Ln, vol, vol))), vol)
+    # the wedge-into-volume pairing M : Λⁿ⁻ᵏ → (Λᵏ)*  (curried so pinv sees Λⁿ⁻ᵏ ⊸ Dual(Λᵏ)).
+    pairing = G.llam(Lnk, lambda g: G.llam(
+        Lk, lambda a: _pair(Ln, wedge(a, g, k, n - k), vol_unit)))
+    return G.pinv(pairing)(G.flat(Lk)(omega)).with_note(base_space=V, exterior_k=n - k)
 
 
 def _base_space_of_exterior(a: Expr, k: int) -> Expr:

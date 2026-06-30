@@ -1318,7 +1318,17 @@ def _same_space(ctx: _Ctx, a: B.Basis, b: B.Basis) -> bool:
         # Undeterminable (abstract, or a subspace-spanning term basis) — fall back to the weaker
         # variance parity so we at least never mix a vector basis with a covector one.
         return _basis_variance(ctx, a) == _basis_variance(ctx, b)
-    return _norm_space(sa) == _norm_space(sb)
+    if _norm_space(sa) == _norm_space(sb):
+        return True
+    # α-equivalent / ⊗-unit FFS spaces — e.g. two independently-built Λᵏ(V) — are the SAME space.
+    # Defer to unify (which carries the α-equivalence + Scalar-⊗-unit rules); both sides are
+    # concrete here, so it binds no metavariables and just decides structural sameness.
+    try:
+        from grassmann.infer.unify import MetaStore, unify
+        unify(sa, sb, MetaStore())
+        return True
+    except Exception:  # noqa: BLE001 - any unify failure ⇒ genuinely different spaces
+        return False
 
 
 def _src_or_std(ctx: _Ctx, source: B.Basis | None, f: object) -> B.Basis:
@@ -2031,7 +2041,7 @@ def _rep_eval(
     dim_of_label: dict[str, int] = {}
     fshape = _shape_of(f_rep.array)
     for k, lab in enumerate(f_labels):
-        if k < len(fshape) and isinstance(fshape[k], int):
+        if k < len(fshape):  # record static AND symbolic (δ) dims — out_shape may carry either
             dim_of_label[lab] = fshape[k]
     # The map ``f`` may itself carry free (basis-index / seed) labels — e.g. a
     # *differentiated* connection map applied to a slot. They trail f's space axes and ride
@@ -2039,7 +2049,7 @@ def _rep_eval(
     f_free = f_rep.free_labels
     for off, lab in enumerate(f_free):
         ax = len(f_factors) + off
-        if ax < len(fshape) and isinstance(fshape[ax], int):
+        if ax < len(fshape):
             dim_of_label[lab] = fshape[ax]
 
     operands = [f_rep.array]
@@ -2069,7 +2079,7 @@ def _rep_eval(
         out_free_labels += arg_rep.free_labels
         ashape = _shape_of(arg_rep.array)
         for off, lab in enumerate(arg_rep.free_labels):
-            if 1 + off < len(ashape) and isinstance(ashape[1 + off], int):
+            if 1 + off < len(ashape):
                 dim_of_label[lab] = ashape[1 + off]
         contracted.add(pos)
 
@@ -2157,7 +2167,10 @@ def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     ordinary ``Eval`` path is untouched.  Bails on any dynamic/FFS axis (non-``int`` dims) or a
     total-size mismatch, so only a genuine static fused↔unfused reshape is performed.
     """
-    want_space_shape = _shape_of_space(rep.space)
+    try:
+        want_space_shape = _shape_of_space(rep.space)
+    except RepresentError:
+        return rep  # dynamic/FFS axis ⇒ single-axis, nothing to un-fuse (the intended bail)
     if not all(isinstance(d, int) for d in want_space_shape):
         return rep
     ashape = _shape_of(rep.array)
@@ -2705,9 +2718,18 @@ def _rep_pinv(
         f_rep = _rep(f, ctx)  # inverse is covariant — operand basis OK (honest operand-derived tag)
     else:
         f_rep = _rep(f, ctx, target=B.STD)  # rectangular ⇒ PinvOp only honest in an orthonormal basis
+    try:
+        pinv_shape = _shape_of_space(space)
+    except RepresentError:
+        # dynamic-rank (FFS) map ⇒ the pinv of a 2-D matrix transposes its (dom,cod) axes, so the
+        # result shape is the runtime operand shape reversed (FFS⊸FFS maps are 2-D).
+        in_shape = _shape_of(f_rep.array)
+        if len(in_shape) != 2:
+            raise
+        pinv_shape = in_shape[::-1]
     [out] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
-        [pa.OutSpec("pinv", _shape_of_space(space))], note="pinv:PinvOp",
+        [pa.OutSpec("pinv", pinv_shape)], note="pinv:PinvOp",
     )
     # Honest tag: the pseudo-inverse ``f⁺`` (cod⊸dom) lives in the operand's dual-swapped slot
     # bases — the numeric PinvOp acts in whatever basis ``f`` arrived in.
@@ -3769,7 +3791,16 @@ def _rep_llam_vmap(
     eyes: list[pa.SymArray] = []
     for v in vars_:
         vsp = _synth(v)
-        n_i = _static_dim(vsp)
+        try:
+            n_i = _static_dim(vsp)
+        except RepresentError:
+            # Runtime-rank binder (a dynamic FFS space, e.g. an exterior power Λᵏ whose rank is a
+            # runtime SVD δ): sweep its basis with a δ×δ identity sized from the var's realized
+            # basis ``cols`` (`51 §FFS-δ`).  An FFS space is single-axis, so the (δ,δ) identity
+            # already has the binder's natural coordinate shape — no reshape needed.
+            basis = sub_basis_by_uid.get(v.uid) or default_basis(vsp)
+            eyes.append(_identity_like(ctx, basis))
+            continue
         # Each basis direction eⱼ must reach the body sub-input in the bound var's NATURAL
         # (possibly multi-axis) coordinate shape — the sub-input was declared with that shape by
         # ``_rep_var``.  Reshape the identity's rows from flat ``(n_i,)`` to ``(n_i, *natural)``:
@@ -3809,10 +3840,17 @@ def _rep_llam_vmap(
     # FIRST, then one var (basis-index) axis per bound var.  This is the TRANSPOSE of the space's
     # ``(dom…, cod…)`` factor order — but it is exactly what the eye path emits, so the value is
     # byte-identical for a default body (and the honest tag below describes THIS physical order).
-    cod_shape = _shape_of_space(body_rep.space)
+    try:
+        cod_shape = _shape_of_space(body_rep.space)
+    except RepresentError:
+        # dynamic-rank (FFS) body codomain ⇒ read the actual lowered array's shape (the per-slice
+        # body carries no batch axis, so its shape IS the codomain shape, δ axes and all).
+        cod_shape = _shape_of(body_rep.array)
     n_cod_axes = len(cod_shape)          # ARRAY axes of the body (0 for a scalar body)
     fn = _nested_vmap(sub, n_vars, n_shared, n_cod_axes)
-    dom_shape = tuple(_static_dim(_synth(v)) for v in vars_)
+    # Each bound var's domain axis is the basis-index axis of its eye (``eye.shape[0]``) — a plain
+    # int for a static binder, the runtime δ for a dynamic FFS one.
+    dom_shape = tuple(_shape_of(e)[0] for e in eyes)
     out_shape = cod_shape + dom_shape
     [out] = ctx.prog.emit_stmt(
         pa.CallOp(fn), [*eyes, *shared_arrays],
