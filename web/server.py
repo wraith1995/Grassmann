@@ -81,6 +81,45 @@ def _opaque_kernel_defs(req: dict) -> tuple[str, dict]:
     return "\n\n".join(defs), renderers
 
 
+_JAC_HELPER = '''def _jac(_fn, _x, _h=1e-6):
+    """Central-difference Jacobian (cod x dom) of an opaque kernel _fn at _x."""
+    _x = np.asarray(_x, dtype=float); _n = _x.size
+    _cols = []
+    for _j in range(_n):
+        _e = np.zeros(_n); _e.flat[_j] = _h
+        _cols.append((np.asarray(_fn(_x + _e.reshape(_x.shape)), dtype=float).ravel()
+                      - np.asarray(_fn(_x - _e.reshape(_x.shape)), dtype=float).ravel()) / (2 * _h))
+    return np.stack(_cols, axis=1)'''
+
+
+def _selfcontained_deriv(src: str, reqs: list) -> str | None:
+    """Wrap the generated derivative so each opaque ∂f is finite-differenced from its kernel
+    internally — fully self-contained, no Jacobian parameter. Only when every opaque argument is
+    a simple variable (else keep ∂f as a parameter)."""
+    import re
+    if not reqs or not all(rq.get("arg") for rq in reqs):
+        return None
+    m = re.search(r"def df\(([^)]*)\):", src)
+    if not m:
+        return None
+    params = [p.strip() for p in m.group(1).split(",") if p.strip()]
+    dF = {rq["name"]: re.sub(r"_\d+$", "", rq["key"]) for rq in reqs}   # f -> "Df_0"
+    if not set(dF.values()).issubset(params):
+        return None
+    # wrapper signature = the opaque arguments (to finite-difference at) + the raw params that
+    # aren't ∂f Jacobians; the ∂f's are computed in the body, not passed.
+    keep = [p for p in params if p not in set(dF.values())]
+    arg_vars = [rq["arg"] for rq in reqs if rq["arg"] not in keep]
+    wrapper_params = list(dict.fromkeys(arg_vars + keep))
+    src = src.replace("def df(", "def _df_raw(", 1)
+    lines = ["", _JAC_HELPER, "", f"def df({', '.join(wrapper_params)}):",
+             '    """Self-contained: each opaque ∂f is finite-differenced from its kernel."""']
+    for rq in reqs:
+        lines.append(f"    {dF[rq['name']]} = _jac(_op_{rq['name']}, {rq['arg']}).T")
+    lines.append(f"    return _df_raw({', '.join(params)})")
+    return src + "\n".join(lines)
+
+
 def _declarations(req: dict) -> tuple[dict, dict, dict, dict]:
     """Unified declaration model → ``(spaces, params, functions, bases)`` for ``build_problem``.
     ``req['spaces']`` is ``{name: ascii-space}``; ``req['functions']`` is a list of
@@ -256,7 +295,11 @@ def api_code(req: dict) -> dict:
             out["primal_error"] = f"{type(e).__name__}: {e}"
         if r.derivative is not None:
             try:
-                out["derivative_py"] = emit(r.derivative, "df")
+                dsrc = emit(r.derivative, "df")
+                if opaque_defs:                      # make opaque ∂f self-contained if possible
+                    sc = _selfcontained_deriv(dsrc, r.required_derivatives)
+                    dsrc = sc if sc is not None else dsrc
+                out["derivative_py"] = dsrc
             except Exception as e:  # noqa: BLE001
                 out["derivative_error"] = f"{type(e).__name__}: {e}"
         return out
