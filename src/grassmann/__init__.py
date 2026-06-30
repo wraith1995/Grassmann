@@ -78,6 +78,7 @@ from .embed import (
     llam,
     logdet,
     normal_form,
+    opaque,
     ostack,
     osum,
     osum_n,
@@ -219,6 +220,7 @@ __all__ = [
     "tr",
     "det",
     "logdet",
+    "opaque",
     # inverses & adjoint
     "solve",
     "pinv",

@@ -50,6 +50,7 @@ from grassmann.core.term import (
     LLam,
     LogDet,
     NEval,
+    OpaqueApply,
     OPlusV,
     OProdV,
     Permute,
@@ -76,7 +77,7 @@ from grassmann.core.types import Pi, SpaceAsType, Type, is_type, space_as_type
 
 from .properties import is_bijective, is_injective, is_surjective
 from .subst import subst_type_space
-from .unify import MetaStore, fresh_meta, unify
+from .unify import MetaStore, UnifyError, fresh_meta, unify
 
 
 class InferError(Exception):
@@ -196,6 +197,8 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
             return _synth_det(e, ctx)
         case LogDet():
             return _synth_det(e, ctx)
+        case OpaqueApply():
+            return _synth_opaque(e, ctx)
         case Solve():
             return _synth_solve(e, ctx)
         case Pinv():
@@ -479,6 +482,20 @@ def _synth_det(e: Det | LogDet, ctx: Ctx) -> Space:
             f"{type(e).__name__} requires a square endomorphism (V ⊸ V); got {dom!r} ⊸ {cod!r}"
         )
     return Scalar()
+
+
+def _synth_opaque(e: OpaqueApply, ctx: Ctx) -> Space:
+    """``OpaqueApply(op, arg)`` — apply opaque ``op : dom → cod`` to ``arg``.
+
+    The argument's synthesized space must unify with ``op.dom``; the result is ``op.cod``."""
+    arg_space = _synth_value(e.arg, ctx)
+    try:
+        unify(arg_space, e.op.dom, ctx.store)
+    except UnifyError as exc:
+        raise InferError(
+            f"opaque op {e.op.name!r} expects domain {e.op.dom!r}, got argument in {arg_space!r}"
+        ) from exc
+    return e.op.cod
 
 
 # ===========================================================================

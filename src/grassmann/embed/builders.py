@@ -204,6 +204,35 @@ def logdet(f: object) -> Expr:
     return wrap(_t.logdet(_term(f)))
 
 
+class _OpaqueHandle:
+    """A callable handle for an opaque map ``f : dom → cod``.  ``f(x)`` builds an
+    ``OpaqueApply(op, x)`` wrapped as an :class:`Expr`."""
+
+    def __init__(self, op: object) -> None:
+        self.op = op
+
+    @property
+    def name(self) -> str:
+        return self.op.name
+
+    def __call__(self, x: object) -> Expr:
+        return wrap(_t.opaque_apply(self.op, _term(x)))
+
+    def __repr__(self) -> str:
+        return f"opaque({self.op.name!r}: {self.op.dom!r} → {self.op.cod!r})"
+
+
+def opaque(name: str, dom: object, cod: object, fn: object = None) -> _OpaqueHandle:
+    """Declare an **opaque map** ``name : dom → cod`` — a black box with no body.
+
+    ``fn`` is an optional numpy kernel (a ``dom``-array → ``cod``-array callable) used to *run*
+    the op; omit it to build/differentiate symbolically only.  Returns a callable handle: apply
+    it to an argument ``Expr`` to build ``f(x)``.  Differentiating ``f(x)`` allocates a required
+    Jacobian tracer input ``Df`` (surfaced by ``enumerate_derivative_inputs``, fed numerically)."""
+    op = _t.OpaqueOp(name, _space(dom), _space(cod), fn)
+    return _OpaqueHandle(op)
+
+
 # ===========================================================================
 # Inverses & adjoint.
 # ===========================================================================
