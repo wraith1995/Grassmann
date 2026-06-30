@@ -690,6 +690,12 @@ const EXAMPLES = [
                   params: ["u1", "u2"],
                   components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] }],
     vars: [{ name: "u", type: "U" }] },
+  { label: "wedge / area", expr: "norm2(wedge(a, b))^2", wrt: "a",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "a", type: "Lambda(R^3, 1)" }, { name: "b", type: "Lambda(R^3, 1)" }] },
+  { label: "hodge = cross", expr: "hodge(wedge(a, b))", wrt: "a",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "a", type: "Lambda(R^3, 1)" }, { name: "b", type: "Lambda(R^3, 1)" }] },
 ];
 
 function applyExample(ex) {

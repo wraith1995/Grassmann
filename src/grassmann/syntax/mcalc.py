@@ -387,6 +387,10 @@ class _SpaceParser:
             if par is None:
                 raise McalcBuildError(f"unknown parameterization {arg!r} in space {self.src!r}")
             return _wrap(par.tangent if t == "T" else par.cotangent)
+        if t in ("Lambda", "Λ") and self.peek() == "(":   # Λᵏ(V) — the k-th exterior power
+            self.eat("("); base = self.arrow(); self.eat(","); kk = self.eat(); self.eat(")")
+            from grassmann.stdlib.exterior import exterior_power
+            return exterior_power(base, int(kk))
         if t in self.env:
             return self.env[t]
         raise McalcBuildError(f"unknown space {t!r} in {self.src!r}")
@@ -569,6 +573,8 @@ class _TN:
     usp: int = -1                   # cov: the Riesz vector's own slot
     pmap: object = None             # cov: () -> map Expr P  (None == identity)
     var_name: str | None = None     # set on a bare variable leaf (for bij marking)
+    grade: int = 0                  # k for a Λᵏ(V) value (the exterior degree; 0 = not graded)
+    ext_base: object = None         # the base space V (Expr) for a Λᵏ(V) value
 
 
 class _Builder:
@@ -733,8 +739,11 @@ class _Builder:
                 def mks(self=self, name=name, sp=sp):
                     return _G.var(name, self.space_of(sp))
                 cache0: dict = {}
+                # a Λᵏ(V)-typed variable carries its exterior degree + base space for wedge/hodge.
+                gr = space.get_note("exterior_k") if hasattr(space, "get_note") else None
                 tn = _TN("vec", (lambda mks=mks, cache0=cache0: cache0.setdefault("v", mks())),
-                         sp=sp, var_name=name)
+                         sp=sp, var_name=name, grade=gr or 0,
+                         ext_base=(space.get_note("base_space") if gr else None))
             self.var_meta[name] = tn
             return tn
         head, dimnames = _parse_type(ty_raw, name)
@@ -1056,6 +1065,30 @@ class _Builder:
                 raise self.err(f"{h}(x, y) needs two vectors")
             return _TN("vec", (lambda x=x, y=y: _G.tensor(x.emit(), y.emit())),
                        sp=self.uf.fresh())
+        if h == "wedge":                 # a ∧ b : Λᵏ × Λˡ → Λ^{k+l}
+            (a, b) = args if len(args) == 2 else (None, None)
+            if a is None or not a.grade or not b.grade:
+                raise self.err("wedge(a, b) needs two exterior-power values — declare e.g. "
+                               "x : Lambda(R^3, 1)")
+            from grassmann.stdlib.exterior import exterior_power
+            from grassmann.stdlib.exterior import wedge as _wedge
+            ka, kb, base = a.grade, b.grade, a.ext_base
+            s = self.uf.fresh()
+            self.uf.set_fixed(s, exterior_power(base, ka + kb), f"Lambda(.,{ka + kb})")
+            return _TN("vec", (lambda a=a, b=b, ka=ka, kb=kb: _wedge(a.emit(), b.emit(), ka, kb)),
+                       sp=s, grade=ka + kb, ext_base=base)
+        if h in ("hodge", "star"):       # ⋆ : Λᵏ(V) → Λⁿ⁻ᵏ(V)
+            (x,) = args
+            if not x.grade:
+                raise self.err("hodge(x) needs an exterior-power value Λᵏ(V)")
+            from grassmann.lower._dims import dim_of
+            from grassmann.stdlib.exterior import exterior_power, hodge_star
+            k, base = x.grade, x.ext_base
+            nn = dim_of(_node(base))
+            s = self.uf.fresh()
+            self.uf.set_fixed(s, exterior_power(base, nn - k), f"Lambda(.,{nn - k})")
+            return _TN("vec", (lambda x=x, k=k: hodge_star(x.emit(), k)),
+                       sp=s, grade=nn - k, ext_base=base)
         if h in ("det", "logdet"):
             (m,) = args
             if m.kind != "mat":

@@ -341,6 +341,11 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
     args = e.args
     sp = e.space
 
+    # an argument-less External is a CONSTANT (e.g. a basis/volume-form vector inside a Hodge
+    # star) ⇒ its derivative is zero.
+    if not args:
+        return Zero(sp)
+
     # unary ops: coefficient c = f'(u), then c ⊙ du -----------------------------------
     _UNARY = {
         "sqrt": lambda u: Scale(0.5, _recip(_sqrt(u, sp), sp)),  # 1/(2√u)

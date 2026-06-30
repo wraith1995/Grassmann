@@ -213,14 +213,14 @@ def api_grammar(req: dict) -> dict:
            "(+)": "direct sum / stack", "+": "add", "-": "subtract"}
     fns = sorted(set(_m._MC_ELEMENTWISE) | {
         "tr", "det", "logdet", "inv", "pinv", "solve", "kron", "dot", "outer",
-        "norm1", "norm2", "sum", "relu", "vector", "matrix"})
+        "wedge", "hodge", "norm1", "norm2", "sum", "relu", "vector", "matrix"})
     return {
         "operators": [{"op": k, "meaning": v} for k, v in ops.items()],
         "functions": fns,
         "spaces": ["R^n", "(R^n)*", "A -> B", "A (x) B", "A (+) B",
-                   "T(phi)", "CT(phi)", "Img(f)", "Ker(f)"],
+                   "T(phi)", "CT(phi)", "Lambda(V,k)", "Img(f)", "Ker(f)"],
         "types": ["scalar", "vector", "matrix", "vector(n)", "matrix(m,n)",
-                  "<space name>", "T(phi)", "CT(phi)"],
+                  "<space name>", "T(phi)", "CT(phi)", "Lambda(V,k)"],
         "bases": ["StandardEuclideanBasis(V)", "ImageBasis(f)",
                   "OrthonormalBasis(b)", "DualBasis(b)", "ListBasis(v1,v2)",
                   "WithInnerBasis(b,g)"],
