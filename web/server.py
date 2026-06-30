@@ -127,11 +127,22 @@ def api_code(req: dict) -> dict:
         decls = req.get("decls") or None
         params = _params_from_specs(req.get("params"))
         r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls, params=params or None)
+        key_to_name = {r.input_key(n): n for n in r.vars}
         if r.builder.geom_vars:
-            # geometry/parameterization problems lower via ImageBasis + an immersion feed,
-            # not the standard compile→numpy path — no standalone numpy module (yet).
-            return {"unsupported": ("Python download is not yet available for "
-                                    "parameterization / tangent-space problems.")}
+            # geometry/parameterization problems lower via ImageBasis(J); the emitted functions
+            # take the immersion dφ (+ d²φ/sections/direction for the derivative) + tangent coords.
+            src = r.geometry_source()
+            out = {"geometry": True}
+            try:
+                out["primal_py"] = _prettify(src["primal_py"], key_to_name)
+            except Exception as e:  # noqa: BLE001
+                out["primal_error"] = f"{type(e).__name__}: {e}"
+            if "derivative_py" in src:
+                try:
+                    out["derivative_py"] = _prettify(src["derivative_py"], key_to_name)
+                except Exception as e:  # noqa: BLE001
+                    out["derivative_error"] = f"{type(e).__name__}: {e}"
+            return out
         dims = req.get("dims") or {d: 3 for d in r.dim_names}
         dims = {k: int(v) for k, v in dims.items()}
         key_to_name = {r.input_key(n): n for n in r.vars}

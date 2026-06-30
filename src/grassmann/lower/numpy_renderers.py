@@ -69,6 +69,38 @@ def _external_op(op, a):
     raise NotImplementedError(f"numpy_renderers: no rendering for _ExternalOp {op.name!r}")
 
 
+# -- FFS / geometry realization ops (subspace frames, project/embed) ---------
+
+def _passthrough(op, a):       # _IdentityMatrixOp / _IdentityArrOp — value passthrough
+    return f"np.asarray({a[0]}, dtype=float)"
+
+
+def _qr_cols(op, a):           # orthonormal columns, positive-R-diagonal sign convention
+    return ("(lambda _A: (lambda _q, _r: _q * np.where(np.sign(np.diag(_r)) == 0, 1.0, "
+            f"np.sign(np.diag(_r))))(*np.linalg.qr(_A)))(np.asarray({a[0]}, dtype=float))")
+
+
+def _project_op(op, a):        # Pᵀ @ v  (ambient coords -> sub-basis coords)
+    return f"(np.asarray({a[0]}, dtype=float).T @ np.asarray({a[1]}, dtype=float).reshape(-1))"
+
+
+def _embed_op(op, a):          # P @ vsub  (sub-coords -> ambient), reshaped
+    base = f"(np.asarray({a[0]}, dtype=float) @ np.asarray({a[1]}, dtype=float))"
+    return base + (f".reshape({tuple(op.shape)})" if getattr(op, "shape", ()) else "")
+
+
+def _dyn_eye(op, a):           # runtime identity sized by a ref array's column axis
+    return f"np.eye(int(np.asarray({a[0]}).shape[1]))"
+
+
+def _identity_mat(op, a):      # _IdentityMatOp(n) — a fixed n×n identity (no args)
+    return f"np.eye({op.n})"
+
+
+def _reshape_op(op, a):
+    return f"np.asarray({a[0]}, dtype=float).reshape({tuple(op.shape)})"
+
+
 def op_renderers() -> dict:
     """The ``{op_class_name: (op, arg_exprs) -> python_expr}`` map for grassmann's Stmt ops,
     to pass as ``polyarray.to_numpy_source(..., op_renderers=op_renderers())``."""
@@ -81,4 +113,13 @@ def op_renderers() -> dict:
         "_ConcatOp": _concat_op,
         "_TransposeOp": _transpose_op,
         "_ExternalOp": _external_op,
+        # FFS / geometry realization
+        "_IdentityMatrixOp": _passthrough,
+        "_IdentityArrOp": _passthrough,
+        "_QrColsOp": _qr_cols,
+        "_ProjectOp": _project_op,
+        "_EmbedOp": _embed_op,
+        "_DynEyeOp": _dyn_eye,
+        "_IdentityMatOp": _identity_mat,
+        "_ReshapeOp": _reshape_op,
     }
