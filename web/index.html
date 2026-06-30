@@ -338,6 +338,17 @@ function renderFunctions() {
       l4.append(span("input basis", "flabel"), inSel, span("output basis", "flabel"), outSel);
       row.append(l4);
     }
+    // a parameterization induces a domain (R^k) basis and a tangent basis (the immersion gauge)
+    if (f.kind === "param") {
+      if (!f.domBasis) f.domBasis = "standard";
+      if (!f.tanBasis) f.tanBasis = "imagebasis";
+      const k = f.params.length || 2;
+      const domSel = basisSelect(f.domBasis, `R^${k}`, val => { f.domBasis = val; });
+      const tanSel = tangentBasisSelect(f, val => { f.tanBasis = val; });
+      const l4 = document.createElement("div"); l4.className = "drow sub2";
+      l4.append(span("domain basis", "flabel"), domSel, span("tangent basis", "flabel"), tanSel);
+      row.append(l4);
+    }
     box.appendChild(row);
   });
 }
@@ -419,6 +430,22 @@ function standardLabel(type) {
     return "{" + vs.join(",") + (n > 6 ? ",…" : "") + "}";
   }
   return "StandardEuclideanBasis(" + (type || "R^n") + ")";
+}
+
+// the tangent-basis select for a parameterization: default is the immersion gauge
+// ImageBasis(φ) (what the covariant derivative actually uses), or any declared basis.
+function tangentBasisSelect(f, onpick) {
+  const s = document.createElement("select"); s.className = "d-basis";
+  const cur = f.tanBasis || "imagebasis";
+  const opts = [{ value: "imagebasis", label: `ImageBasis(${f.name || "φ"})` }];
+  basesList.forEach(b => { if (b.name) opts.push({ value: b.name, label: b.name }); });
+  if (cur !== "imagebasis" && !opts.some(o => o.value === cur)) opts.push({ value: cur, label: cur });
+  opts.forEach(o => {
+    const op = document.createElement("option"); op.value = o.value; op.textContent = o.label;
+    if (o.value === cur) op.selected = true; s.appendChild(op);
+  });
+  s.onchange = e => onpick(e.target.value);
+  return s;
 }
 
 // a basis <select> whose "standard" option is spelled out for `type`; value stays "standard".
