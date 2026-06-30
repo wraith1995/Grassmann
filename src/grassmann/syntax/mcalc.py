@@ -593,6 +593,13 @@ class _Builder:
         for nm, spec in (functions or {}).items():
             dom = _resolve_space(spec["dom"], self.space_env, self.params)
             cod = _resolve_space(spec["cod"], self.space_env, self.params)
+            # an opaque kernel has a fixed number of components ⇒ its dimension is concrete;
+            # require a bound (literal) dimension, not a symbolic R^n.
+            free = _collect_dim_vars(_node(dom)) | _collect_dim_vars(_node(cod))
+            if free:
+                raise McalcBuildError(
+                    f"opaque function {nm!r} needs a bound dimension — use a literal like R^3 "
+                    f"(not a symbolic {', '.join(sorted(free))}).")
             self.func_env[nm] = (_G.opaque(nm, dom, cod, spec.get("numeric")), dom, cod,
                                  spec.get("numeric"))
         self.opaque_apps: dict[str, _TN] = {}   # opaque func name -> the _TN it was applied to
