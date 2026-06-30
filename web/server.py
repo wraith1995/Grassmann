@@ -54,6 +54,28 @@ def _params_from_specs(specs) -> dict:
     return {s["name"]: _parameterization(s) for s in (specs or [])}
 
 
+def _declarations(req: dict) -> tuple[dict, dict, dict]:
+    """Unified declaration model → ``(spaces, params, functions)`` for ``build_problem``.
+    ``req['spaces']`` is ``{name: ascii-space}``; ``req['functions']`` is a list of
+    ``{name, kind: 'opaque'|'param', params, components, dom?, cod?}`` (a parameterization is a
+    function with geometry); ``req['params']`` is the legacy parameterization-panel list."""
+    spaces = dict(req.get("spaces") or {})
+    params = _params_from_specs(req.get("params"))
+    functions: dict = {}
+    for f in (req.get("functions") or []):
+        if f.get("kind") == "param":
+            params[f["name"]] = _parameterization(f)
+        else:  # opaque
+            pn, comps = f.get("params", []), f.get("components", [])
+            functions[f["name"]] = {
+                "dom": f.get("dom") or f"R^{len(pn)}",
+                "cod": f.get("cod") or f"R^{len(comps)}",
+                "kind": "opaque",
+                "numeric": _make_immersion(pn, comps) if comps else None,
+            }
+    return spaces, params, functions
+
+
 # ===========================================================================
 # Engine glue — each returns a JSON-able dict, never raises.
 # ===========================================================================
@@ -79,8 +101,10 @@ def api_derivative(req: dict) -> dict:
     try:
         wrt = req.get("wrt") or None
         decls = req.get("decls") or None
-        params = _params_from_specs(req.get("params"))
-        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls, params=params or None)
+        spaces, params, functions = _declarations(req)
+        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls,
+                                params=params or None, spaces=spaces or None,
+                                functions=functions or None)
         out = {
             "primal_latex": G.latex(r.primal),
             "dim_names": r.dim_names,
@@ -90,9 +114,31 @@ def api_derivative(req: dict) -> dict:
             out["derivative_latex"] = G.latex(r.derivative)
             out["wrt"] = wrt
             out["covariant"] = r.geom_param is not None
+            out["required_derivatives"] = r.required_derivatives
         return out
     except Exception as e:  # noqa: BLE001
         return _err(e)
+
+
+def api_grammar(req: dict) -> dict:
+    """The surface reference for the help sidebar — pulled from the live tables so it can't
+    drift from what actually parses."""
+    from grassmann.syntax import mcalc as _m
+    ops = {"*": "matmul / scale", "'": "dual / transpose", ".*": "elementwise ×",
+           "./": "elementwise ÷", "@": "compose", "^": "power", "+": "add", "-": "subtract",
+           "(+)": "direct sum / stack"}
+    fns = sorted(set(_m._MC_ELEMENTWISE) | {
+        "tr", "det", "logdet", "inv", "norm1", "norm2", "sum", "relu", "vector", "matrix"})
+    return {
+        "operators": [{"op": k, "meaning": v} for k, v in ops.items()],
+        "functions": fns,
+        "spaces": ["R^n", "(R^n)*", "A -> B", "A (x) B", "A (+) B",
+                   "T(phi)", "CT(phi)", "Img(f)", "Ker(f)"],
+        "types": ["scalar", "vector", "matrix", "vector(n)", "matrix(m,n)",
+                  "<space name>", "tangent(phi)", "cotangent(phi)"],
+        "bases": ["ImageBasis(f)", "OrthonormalBasis(b)", "DualBasis(b)",
+                  "ListBasis(v1,v2)", "WithInnerBasis(b,g)"],
+    }
 
 
 def _prettify(src: str, key_to_name: dict[str, str]) -> str:
@@ -170,7 +216,8 @@ def api_code(req: dict) -> dict:
         return _err(e)
 
 
-_ROUTES = {"/api/vars": api_vars, "/api/derivative": api_derivative, "/api/code": api_code}
+_ROUTES = {"/api/vars": api_vars, "/api/derivative": api_derivative, "/api/code": api_code,
+           "/api/grammar": api_grammar}
 
 
 # ===========================================================================
