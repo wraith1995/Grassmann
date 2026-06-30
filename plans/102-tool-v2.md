@@ -162,9 +162,14 @@ grouped, drawn from analytic references (the engine's own analytic tests are gro
    surface + UI. Largest; do last so the UI shell is ready to host it.
 4. **#6 examples** — curate once the above features exist (each example exercises one).
 
-## Open decisions (for the user)
-- **D1 — how a user provides an opaque function's derivative** (Jacobian-as-map vs directional;
-  symbolic vs numeric-callable).
-- **D2 — ASCII space syntax** (new ASCII spelling `R^n`/`->`/`(x)` vs reuse unicode `ℝ^n`/`⊸`/`⊗`
-  vs accept both).
-- **D3 — scope of v2** (do all 7, or stage #2 opaque separately as the big engine piece).
+## Decisions (resolved 2026-06-30)
+- **D1 — opaque derivative = BOTH symbolic and numeric-callable.** Accept a symbolic
+  `df : A → (A⊸B)` (Jacobian-as-map, composable, references another declared function) **or** a
+  pure numeric callable for `df` (sampled at run/codegen time). The diff rule emits `df(x)(dx)`
+  in both cases; only the realization of `df` differs (symbolic term vs program-backed kernel,
+  same as the opaque-QR `∂Q` path).
+- **D2 — ASCII space spelling.** `R^n`, `(R^n)*`, `R^n -> R^m`, `R^n (x) R^m`, `R^n (+) R^m`,
+  `T(phi)`, `CT(phi)`, `Img(f)`, `Ker(f)`. (Unicode acceptance optional later.)
+- **D3 — OPAQUE FUNCTIONS FIRST.** Build #2 (engine) up front, then UI + spaces/bases, then
+  examples. Revised sequencing: **#2 → (#4 UI + #3 spaces + #5 bases) → (#0 grammar, #1 LaTeX) →
+  #6 examples.**
