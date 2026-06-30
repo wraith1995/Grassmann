@@ -54,6 +54,33 @@ def _params_from_specs(specs) -> dict:
     return {s["name"]: _parameterization(s) for s in (specs or [])}
 
 
+def _opaque_kernel_defs(req: dict) -> tuple[str, dict]:
+    """For each opaque function with a formula, emit a numpy helper ``def _op_<name>(u): …`` so
+    the downloaded code is self-contained, plus a ``_OpaqueOp`` renderer that calls it. (The
+    derivative's ∂f remains a function parameter the caller supplies.)"""
+    import re
+    npfns = "sin cos tan exp log sqrt sinh cosh tanh arcsin arccos arctan abs sign".split()
+    defs = []
+    for f in (req.get("functions") or []):
+        if f.get("kind") == "param" or not f.get("components") or not f.get("name"):
+            continue
+        params, comps = f.get("params", []), f["components"]
+
+        def sub(c, params=params):
+            for fn in npfns:
+                c = re.sub(rf"\b{fn}\b", f"np.{fn}", c)
+            for i, p in enumerate(params):
+                c = re.sub(rf"\b{re.escape(p)}\b", f"_u[{i}]", c)
+            return c
+
+        body = ", ".join(sub(c) for c in comps)
+        defs.append(f"def _op_{f['name']}(_u):\n    _u = np.asarray(_u, dtype=float)\n"
+                    f"    return np.array([{body}])")
+    renderers = ({"_OpaqueOp": lambda op, a: f"_op_{op.name}(np.asarray({a[0]}, dtype=float))"}
+                 if defs else {})
+    return "\n\n".join(defs), renderers
+
+
 def _declarations(req: dict) -> tuple[dict, dict, dict, dict]:
     """Unified declaration model → ``(spaces, params, functions, bases)`` for ``build_problem``.
     ``req['spaces']`` is ``{name: ascii-space}``; ``req['functions']`` is a list of
@@ -190,10 +217,6 @@ def api_code(req: dict) -> dict:
         r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls,
                                 params=params or None, spaces=spaces or None,
                                 functions=functions or None, bases=bases or None)
-        if r.builder.func_env:
-            return {"unsupported": ("Python download is not yet available for opaque-function "
-                                    "problems (the ④ derivative inputs aren't wired to codegen "
-                                    "yet).")}
         key_to_name = {r.input_key(n): n for n in r.vars}
         if r.builder.geom_vars:
             # geometry/parameterization problems lower via ImageBasis(J); the emitted functions
@@ -212,14 +235,18 @@ def api_code(req: dict) -> dict:
             return out
         dims = req.get("dims") or {d: 3 for d in r.dim_names}
         dims = {k: int(v) for k, v in dims.items()}
-        key_to_name = {r.input_key(n): n for n in r.vars}
         out = {"dims": dims}
+        opaque_defs, opaque_rend = _opaque_kernel_defs(req)
+        renderers = {**op_renderers(), **opaque_rend}
 
         def emit(node, fname):
             prog = G.compile(r.instantiate(node, dims))
-            return _prettify(
-                pa.to_numpy_source(prog, func_name=fname, op_renderers=op_renderers()),
-                key_to_name)
+            src = _prettify(pa.to_numpy_source(prog, func_name=fname, op_renderers=renderers),
+                            key_to_name)
+            if opaque_defs:                          # self-contained opaque kernels
+                src = src.replace("import numpy as np\n",
+                                  "import numpy as np\n\n" + opaque_defs + "\n", 1)
+            return src
 
         # Emit each part independently — the derivative may hit an unsupported op (G12:
         # CallOp/sub-program) while the primal still emits fine.
