@@ -391,6 +391,8 @@ def _t(node: object) -> tuple[str, int]:
             return f"det({_t(f)[0]})", G.P_APP
         case T.LogDet(f=f):
             return f"logdet({_t(f)[0]})", G.P_APP
+        case T.OpaqueApply(op=op, arg=arg):
+            return f"{op.name}({_t(arg)[0]})", G.P_APP
         case T.Solve(f=f):
             return f"{_wrap_t(f, G.P_POSTFIX)}{G.INVERSE}", G.P_POSTFIX
         case T.Pinv(f=f):
