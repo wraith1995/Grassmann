@@ -114,8 +114,14 @@ supports chart-metric covariant AD (`transform/diff.py`), so this is mostly surf
     differences), and `covariant_derivative(u, v_coords)` returns ∇v directly. The user gives
     φ, not the immersion. Validated vs analytic sphere ref. (Fully-SYMBOLIC φ inside mcalc
     expressions deferred to C5 — coordinate-free immersion build + 2nd-order symbolic AD seam.)
-  - **C5 — mcalc decl integration**: a variable typed `tangent(phi)` / `cotangent(phi)` / … in
-    `build_problem` decls, wiring the geometry surface into the ASCII frontend + `G.diff`.
+  - **C5 DONE** — `build_problem(..., params={"phi": Parameterization})` accepts variables
+    typed `tangent(phi)`/`cotangent(phi)`/`normal(phi)`/`conormal(phi)` (fixed geometry spaces
+    `Img(J)`/`CoKer(J)`/duals via union-find fixed-space tracking). Expressions build with the
+    induced tangent metric; ordinary diff on tangent vars works; `run_geometry()` evaluates via
+    `ImageBasis(J)` + auto immersion feed. Verified ⟨v,w⟩=v_cᵀ g w_c on the sphere.
+  - **C5b (remaining)** — covariant derivative along the manifold *through `build_problem`*
+    (wrt = the φ point): the geometry API `Parameterization.covariant_derivative` already does
+    this (validated); wiring it through the ASCII-expression + point-as-wrt path is the next bit.
   - **C6 — web UI**: a parameterizations panel (declare φ: param→ambient), tangent-space var
     declarations, covariant-derivative output labeled as such.
 
