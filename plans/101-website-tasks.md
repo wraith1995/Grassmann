@@ -119,11 +119,16 @@ supports chart-metric covariant AD (`transform/diff.py`), so this is mostly surf
     `Img(J)`/`CoKer(J)`/duals via union-find fixed-space tracking). Expressions build with the
     induced tangent metric; ordinary diff on tangent vars works; `run_geometry()` evaluates via
     `ImageBasis(J)` + auto immersion feed. Verified ⟨v,w⟩=v_cᵀ g w_c on the sphere.
-  - **C5b (remaining)** — covariant derivative along the manifold *through `build_problem`*
-    (wrt = the φ point): the geometry API `Parameterization.covariant_derivative` already does
-    this (validated); wiring it through the ASCII-expression + point-as-wrt path is the next bit.
-  - **C6 — web UI**: a parameterizations panel (declare φ: param→ambient), tangent-space var
-    declarations, covariant-derivative output labeled as such.
+  - **C5b DONE** — covariant derivative along the manifold *through `build_problem`*: `wrt` =
+    a parameterization name → covariant diff w.r.t. its point (immersion gauge, tangent-var
+    sections + J marked); `McalcResult.covariant_run(points, coords, direction, sections)`
+    evaluates it. Verified ∇⟨v,w⟩=0 (metric compat) + product rule on the sphere. Builds on the
+    merged upstream Plan-45 result (immersed-inner diff is correct + metric-free).
+  - **C6 DONE** — web UI: a "Parameterizations" panel declares φ by component formulas
+    (`sin(u1)*cos(u2), …`, evaluated numerically); variable type dropdowns gain
+    `tangent(φ)`/`cotangent(φ)`/`normal(φ)`/`conormal(φ)`; covariant derivatives are labeled; a
+    "∇ covariant on a sphere" example. `/api/derivative` handles params + covariant diff.
+    **Phase C COMPLETE.**
 
 ---
 
