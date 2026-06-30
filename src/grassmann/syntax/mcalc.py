@@ -1385,8 +1385,17 @@ def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
     if wrt is not None:
         if wrt not in b.var_meta:
             raise McalcBuildError(f"diff variable {wrt!r} does not appear in the expression")
-        deriv = _G.diff(primal, b.var_meta[wrt].emit())
+        deriv = _simplify_safe(_G.diff(primal, b.var_meta[wrt].emit()))
     return McalcResult(b, primal, wrt, deriv)
+
+
+def _simplify_safe(expr):
+    """Run the rewrite simplifier on a derivative for a cleaner result; fall back to the raw
+    term if simplification fails (it must remain value-equivalent + lowerable)."""
+    try:
+        return _G.simplify(expr)
+    except Exception:  # noqa: BLE001
+        return expr
 
 
 def build_problem(expr: str, wrt: str | None = None,
