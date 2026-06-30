@@ -2238,9 +2238,12 @@ def _rep_compose(
     # mirroring ``_rep_eval``. With no free labels this is byte-identical to before.
     f_free = f_rep.free_labels
     fshape = _shape_of(f_rep.array)
+    for k, lab in enumerate(f_labels):       # f's space-axis dims (static + symbolic δ)
+        if k < len(fshape):
+            dim_of_label[lab] = fshape[k]
     for off, lab in enumerate(f_free):
         ax = len(f_factors) + off
-        if ax < len(fshape) and isinstance(fshape[ax], int):
+        if ax < len(fshape):
             dim_of_label[lab] = fshape[ax]
     operands = [f_rep.array]
     g_label_lists: list[str] = []
@@ -2268,9 +2271,11 @@ def _rep_compose(
         replaced[pos] = dom_label
         replaced_g[pos] = g_rep
         gshape = _shape_of(g_rep.array)
+        if gshape:                           # g's dom axis (0) sizes the replacing output label
+            dim_of_label[dom_label] = gshape[0]
         for off, lab in enumerate(g_rep.free_labels):
             ax = 2 + off
-            if ax < len(gshape) and isinstance(gshape[ax], int):
+            if ax < len(gshape):
                 dim_of_label[lab] = gshape[ax]
         out_free += g_rep.free_labels
 
@@ -2279,7 +2284,11 @@ def _rep_compose(
     )
     spec = ",".join(["".join(f_labels) + f_free, *g_label_lists]) + "->" + out_labels + out_free
 
-    out_shape = _shape_of_space(space) + tuple(dim_of_label[lab] for lab in out_free)
+    try:
+        space_shape = _shape_of_space(space)
+    except RepresentError:                   # dynamic-rank (FFS) result ⇒ shape from the einsum labels
+        space_shape = tuple(dim_of_label[lab] for lab in out_labels)
+    out_shape = space_shape + tuple(dim_of_label[lab] for lab in out_free)
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), operands,
         [pa.OutSpec("compose", out_shape)],
@@ -3733,6 +3742,11 @@ def _nested_vmap(sub: pa.Program, n_vars: int, n_free: int, n_cod: int):
         return np.moveaxis(full, range(n_vars), range(-n_vars, 0))
 
     fn.__qualname__ = fn.__name__ = f"vmap_nest({sub.name})"
+    # Expose the nest's shape so to_numpy_source can emit the equivalent cartesian-product helper
+    # (a multi-var nest can't be a single pa.ir.vmap, so it carries its own codegen metadata).
+    fn._vmap_body = sub
+    fn._nested_n_vars = n_vars
+    fn._nested_n_free = n_free
     return fn
 
 

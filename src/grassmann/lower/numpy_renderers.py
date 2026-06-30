@@ -61,6 +61,10 @@ def _scale_by_op(op, a):
 
 
 def _external_op(op, a):
+    if not a:  # an argument-less External is a CONSTANT (e.g. a Hodge volume-form basis vector)
+        import numpy as np
+        val = np.asarray(op.fn(), dtype=float)
+        return f"np.array({val.tolist()!r}, dtype=float)"
     xs = [f"np.asarray({e}, dtype=float)" for e in a]
     if op.name in _BINARY:
         return _BINARY[op.name].format(x=xs[0], y=xs[1])
@@ -93,6 +97,84 @@ def _dyn_eye(op, a):           # runtime identity sized by a ref array's column 
     return f"np.eye(int(np.asarray({a[0]}).shape[1]))"
 
 
+def _first_cols(op, a):        # _FirstColsOp(A, rank) -> A[:, :rank]  (rank orthonormal cols)
+    return f"np.asarray({a[0]}, dtype=float)[:, :int({a[1]})]"
+
+
+def _last_cols(op, a):         # _LastColsOp(A, rank) -> A[:, rank:]  (the complementary cols)
+    return f"np.asarray({a[0]}, dtype=float)[:, int({a[1]}):]"
+
+
+def _inv_transpose(op, a):     # _InvTransposeOp(A) -> inv(A).T
+    return f"np.linalg.inv(np.asarray({a[0]}, dtype=float)).T"
+
+
+# -- runtime dimension / rank arithmetic (0-d int producers sizing dynamic FFS axes) ---------
+
+def _prod_dim(op, a):          # ∏ of operands' axis lengths
+    return f"np.asarray(int(np.prod([np.asarray(_m).shape[{op.axis}] for _m in [{', '.join(a)}]])))"
+
+
+def _sum_dim(op, a):           # Σ of operands' axis lengths
+    return f"np.asarray(int(sum(np.asarray(_m).shape[{op.axis}] for _m in [{', '.join(a)}])))"
+
+
+def _scale_axis_dim(op, a):    # n · (axis length), static n
+    return f"np.asarray(int({op.n} * np.asarray({a[0]}).shape[{op.axis}]))"
+
+
+def _mul_axis_dim(op, a):      # int(n) · (axis length), runtime n
+    return f"np.asarray(int(int({a[0]}) * np.asarray({a[1]}).shape[{op.axis}]))"
+
+
+def _rank_op(op, a):           # numerical rank of A
+    tol = "None" if getattr(op, "tol", None) is None else repr(op.tol)
+    return f"np.asarray(int(np.linalg.matrix_rank(np.asarray({a[0]}, dtype=float), tol={tol})))"
+
+
+def _comp_rank(op, a):         # ambient − rank (the FFS complement dimension)
+    return f"np.asarray(int({op.ambient} - int({a[0]})))"
+
+
+def _eye_op(op, a):            # static identity np.eye(n)
+    return f"np.eye({op.n})"
+
+
+# -- FFS assembly ops (stacks / kron / metric orthonormalization) ----------------------------
+
+def _kron(op, a):              # chained Kronecker product
+    return f"__import__('functools').reduce(np.kron, [{', '.join(a)}])"
+
+
+def _hstack(op, a):            # _HStackOp(*mats) -> np.hstack
+    return f"np.hstack([np.asarray(_m, dtype=float) for _m in [{', '.join(a)}]])"
+
+
+def _col_stack(op, a):         # _ColStackOp(*cols) -> stack flattened cols as columns
+    return (f"np.stack([np.asarray(_c, dtype=float).reshape(-1) for _c in "
+            f"[{', '.join(a)}]], axis=1)")
+
+
+def _compose_via_std(op, a):   # _ComposeViaStdOp(R_to, R_from) -> solve(R_to, R_from)
+    return f"np.linalg.solve(np.asarray({a[0]}, dtype=float), np.asarray({a[1]}, dtype=float))"
+
+
+def _metric_orthonormal(op, a):  # _MetricOrthonormalOp(A, G) -> A @ inv(chol(Aᵀ G A))ᵀ
+    return (f"(lambda _a, _g: _a @ np.linalg.inv(np.linalg.cholesky(_a.T @ _g @ _a)).T)"
+            f"(np.asarray({a[0]}, dtype=float), np.asarray({a[1]}, dtype=float))")
+
+
+def _sqrt_spd(op, a):          # _SqrtSpdOp(G) -> the SPD square root via eigh
+    return (f"(lambda _w, _V: (_V * np.sqrt(_w)) @ _V.T)(*np.linalg.eigh("
+            f"0.5 * (np.asarray({a[0]}, dtype=float) + np.asarray({a[0]}, dtype=float).T)))")
+
+
+def _qr_sign_convention(op, a):  # _QrSignConventionOp(Q, R) -> (Q·s, s·R), s = sign(diag R) (0→1)
+    return (f"(lambda _Q, _R: (lambda _s: (_Q * _s, _s[:, None] * _R))"
+            f"(np.where(np.sign(np.diag(_R)) == 0, 1.0, np.sign(np.diag(_R)))))"
+            f"(np.asarray({a[0]}, dtype=float), np.asarray({a[1]}, dtype=float))")
+
+
 def _identity_mat(op, a):      # _IdentityMatOp(n) — a fixed n×n identity (no args)
     return f"np.eye({op.n})"
 
@@ -117,6 +199,23 @@ def op_renderers() -> dict:
         "_IdentityMatrixOp": _passthrough,
         "_IdentityArrOp": _passthrough,
         "_QrColsOp": _qr_cols,
+        "_FirstColsOp": _first_cols,
+        "_LastColsOp": _last_cols,
+        "_InvTransposeOp": _inv_transpose,
+        "_ProdDimOp": _prod_dim,
+        "_SumDimOp": _sum_dim,
+        "_ScaleAxisDimOp": _scale_axis_dim,
+        "_MulAxisDimOp": _mul_axis_dim,
+        "_RankOp": _rank_op,
+        "_CompRankOp": _comp_rank,
+        "_EyeOp": _eye_op,
+        "_KronOp": _kron,
+        "_HStackOp": _hstack,
+        "_ColStackOp": _col_stack,
+        "_ComposeViaStdOp": _compose_via_std,
+        "_MetricOrthonormalOp": _metric_orthonormal,
+        "_SqrtSpdOp": _sqrt_spd,
+        "_QrSignConventionOp": _qr_sign_convention,
         "_ProjectOp": _project_op,
         "_EmbedOp": _embed_op,
         "_DynEyeOp": _dyn_eye,
