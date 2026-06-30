@@ -94,10 +94,11 @@ Priority: **P1** blocks the website MVP · **P2** blocks advanced/geometry featu
   assumes det>0; the derivative path is sign-robust regardless).
 
 ### polyarray codegen
-- **G12 (P2) — IN PROGRESS** (agent, polyarray): `to_numpy_source` can't emit `CallOp`/
-  sub-Program — which the full-Jacobian **derivative** lowering uses (vmap-style). Primal numpy
-  emits fine; derivative download blocked until this lands. (`SvdOp`/`GSvdOp`/`WhileOp` still
-  open after — only bite if SVD/pinv-of-rectangular appear.)
+- **G12 (P2) — FIXED** (polyarray `feat/numpy-source-codegen`): `to_numpy_source` emits
+  `CallOp` (unwrap to inner Program/vmap), sub-Programs (nested defs), and vmap closures; +
+  grassmann renderers for `_ScaleOp`/`_AddOp`/`_ConcatOp`/`_TransposeOp`. **Derivative numpy
+  download now works** (primal + derivative emit and match `Program.run`). `SvdOp`/`GSvdOp`/
+  `WhileOp` still open (only bite if SVD/pinv-of-rectangular appear).
 
 ### Test harness
 - **G13 (P3)** oracle harness `A*exp(x)` left xfail — it uses its own gradient extraction, not
