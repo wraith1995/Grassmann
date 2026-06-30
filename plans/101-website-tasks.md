@@ -69,21 +69,53 @@ differentiator over matrixcalculus.
 
 ## Phase C — Parameterizations & geometry (the vision's centerpiece)
 
+### MODEL (user-directed 2026-06-30): tangent space = the IMAGE space `Img(J)`
+
+Model `tangent(φ@p)` as the **FFS image space `Img(J)`** where `J = dφ` is the immersion
+(chart Jacobian) — NOT a `Remetric`/`JᵀJ` metric space. Values live in `Img(J)` realized in
+`ImageBasis(J)`, and the **immersion gauge** gives the covariant derivative. This is the route
+in `tests/test_diff_analytic.py::test_covariant_derivative_via_christoffel` (the template):
+
+```
+Rt, Re = S.base("Rt", k), S.base("Re", n)               # param domain (k), ambient (n)
+J  = T.var("J", S.oprod(S.dual(Rt), Re), props=G.inj)   # immersion dφ : Rt ⊸ Re (injective)
+imgJ = S.img(J)                                          # TANGENT space = Img(J)
+x  = T.var("x", Rt)                                      # the point (param)
+v  = T.var("v", imgJ)                                    # a tangent vector
+e  = ... T.embed(v, Re) ...                              # embed into ambient = di·v
+set_subspace_gauge(J, "immersion")                       # immersion gauge ⇒ closed-form covariant
+jd = diff(e, x, deps={v.uid: Dv, J.uid: DJ})             # covariant derivative ∇v
+#   realize v / Dv in ImageBasis(J): env={v.uid: B.ImageBasis(J), Dv.uid: ...}
+#   project(∂ embed v) == Γ·v  (Levi-Civita ∇v) ; (I−P)·∂ == II·v (2nd fundamental form)
+```
+
+Four subspaces from the immersion `J : Rt ⊸ Re`:
+- **tangent** = `Img(J)`   · **cotangent** = `Dual(Img(J))`
+- **normal** = complement of `Img(J)` in ambient `Re` (`CoImg`/`CoKer`-style / `complete`) ·
+  **conormal** = `Dual(normal)`.
+
+So the mcalc Phase-C surface builds: ambient + param `base` spaces, the immersion map var `J`
+(`G.inj`), `Img(J)` (+ normal/duals), a value var in it, `embed` to ambient for the expression,
+and wires `diff(..., deps={J.uid: DJ, v.uid: Dv})` + `set_subspace_gauge(J,"immersion")` +
+`ImageBasis` env. [confirm builders via the Explore agent's report]
+
 Goal: user step 0–1 — named parameterizations `ℝⁿ→ℝᵐ` that are **callable in expressions AND
 induce geometry** (tangent/cotangent/normal/conormal), with covariant diff. The engine already
 supports chart-metric covariant AD (`transform/diff.py`), so this is mostly surface + wiring.
 
-- **C1 — Parameterization declaration.** UI + backend: define a named nonlinear map `φ: ℝⁿ→ℝᵐ`
-  (an expression in its own input var) reusable across the problem; make `φ(x)` callable inside
-  the main expression (a `Lam`/external map). (deps: A; engine: surface a parameterization in
-  `mcalc` — new work)
-- **C2 — Tangent/cotangent/normal/conormal helpers.** From a parameterization φ at a point/var,
-  build `tangent(φ@p)=Img(dφ)`, `cotangent=~Img`, `normal=`complement, `conormal=~normal` (FFS
-  of the chart differential). Let a variable be declared "on" such a space. (deps: C1; engine:
-  wire FFS-of-Jacobian + the chart metric `g=JᵀJ` that `diff.py` already recognizes)
-- **C3 — Covariant derivative output.** When the diff var lives on a tangent space, `G.diff`
-  already returns the covariant derivative (connection-corrected); render it + label it as
-  covariant. (deps: C2; engine: done — verify end-to-end through the web path)
+- **C1/C2/C3 CORE DONE** (`src/grassmann/syntax/geometry.py`, `tests/test_geometry.py`):
+  `Parameterization(name, param_dim, ambient_dim)` exposes `tangent=Img(dφ)`, `normal=CoKer`,
+  `cotangent`/`conormal` (duals), `point`, `tangent_vector`, `embed`, and `covariant_diff`
+  (immersion-gauge ∇v=Γ·v). Validated against analytic sphere+Monge Christoffel refs to 1e-10.
+  J=dφ / DJ=d²φ fed numerically; realization via `ImageBasis(J)` (`basis_env`+`run`).
+- **C-remaining**:
+  - **C4 — φ as a callable** in expressions (`φ(x)`): currently we model the immersion J=dφ;
+    add the nonlinear map φ itself (`G.lam`/External) so `φ(x)` is usable AND auto-derive
+    `J=dφ`, `DJ=d²φ` from it (vs. numeric feed) — closes the "callable + geometry" unification.
+  - **C5 — mcalc decl integration**: a variable typed `tangent(phi)` / `cotangent(phi)` / … in
+    `build_problem` decls, wiring the geometry surface into the ASCII frontend + `G.diff`.
+  - **C6 — web UI**: a parameterizations panel (declare φ: param→ambient), tangent-space var
+    declarations, covariant-derivative output labeled as such.
 
 ---
 
