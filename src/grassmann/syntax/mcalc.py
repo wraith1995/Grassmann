@@ -306,29 +306,120 @@ class McalcBuildError(Exception):
     """Raised when an AST cannot be resolved against the variable declarations."""
 
 
+def _space_tokens(s: str) -> list[str]:
+    toks: list[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c.isspace():
+            i += 1
+            continue
+        for m in ("(+)", "(x)", "->"):
+            if s.startswith(m, i):
+                toks.append(m); i += len(m); break
+        else:
+            if c in "()^*,":
+                toks.append(c); i += 1
+            elif c.isalnum() or c == "_":
+                j = i
+                while j < n and (s[j].isalnum() or s[j] == "_"):
+                    j += 1
+                toks.append(s[i:j]); i = j
+            else:
+                raise McalcBuildError(f"bad character {c!r} in space expression {s!r}")
+    return toks
+
+
+class _SpaceParser:
+    """ASCII space grammar (low→high precedence): ``A -> B`` (linear-map space, right-assoc) ·
+    ``A (+) B`` (⊕) · ``A (x) B`` (⊗) · ``S*`` (postfix dual) · atoms ``R^n`` / named / ``(…)`` /
+    ``T(phi)`` / ``CT(phi)``."""
+
+    def __init__(self, toks: list[str], src: str, env: dict, params: dict) -> None:
+        self.toks, self.src, self.env, self.params, self.i = toks, src, env, params, 0
+
+    def peek(self):
+        return self.toks[self.i] if self.i < len(self.toks) else None
+
+    def eat(self, want=None):
+        t = self.peek()
+        if want is not None and t != want:
+            raise McalcBuildError(f"space {self.src!r}: expected {want!r}, got {t!r}")
+        self.i += 1
+        return t
+
+    def arrow(self):
+        a = self.osum()
+        if self.peek() == "->":
+            self.eat("->")
+            return a >> self.arrow()
+        return a
+
+    def osum(self):
+        a = self.tensor()
+        while self.peek() == "(+)":
+            self.eat(); a = _G.osum(a, self.tensor())
+        return a
+
+    def tensor(self):
+        a = self.dual()
+        while self.peek() == "(x)":
+            self.eat(); a = _G.tensor(a, self.dual())
+        return a
+
+    def dual(self):
+        a = self.atom()
+        while self.peek() == "*":
+            self.eat(); a = _G.dual(a)
+        return a
+
+    def atom(self):
+        t = self.eat()
+        if t == "(":
+            inner = self.arrow(); self.eat(")"); return inner
+        if t == "R" and self.peek() == "^":
+            self.eat("^"); d = self.eat()
+            return _G.space(f"R^{d}", int(d) if d.isdigit() else _S.DimVar(d))
+        if t in ("T", "CT") and self.peek() == "(":
+            self.eat("("); arg = self.eat(); self.eat(")")
+            par = self.params.get(arg)
+            if par is None:
+                raise McalcBuildError(f"unknown parameterization {arg!r} in space {self.src!r}")
+            return _wrap(par.tangent if t == "T" else par.cotangent)
+        if t in self.env:
+            return self.env[t]
+        raise McalcBuildError(f"unknown space {t!r} in {self.src!r}")
+
+
 def _resolve_space(s: str, env: dict, params: dict | None = None):
-    """Resolve an ASCII space expression to a grassmann space ``Expr``. Supports: a named space
-    (declared earlier), ``R^n`` (n int or a symbolic dim), ``T(phi)``/``CT(phi)`` (tangent /
-    cotangent of a parameterization), ``Img(f)``/``Ker(f)``, and ``A -> B`` (linear-map space).
-    (The full `(x)`/`(+)`/`(.)* ` algebra is future work; this covers function dom/cod + vars.)"""
-    import re
+    """Resolve an ASCII space expression to a grassmann space ``Expr`` — the full algebra:
+    named refs, ``R^n``, ``A -> B``, ``A (x) B``, ``A (+) B``, ``S*`` (dual), ``T(phi)``/
+    ``CT(phi)``, and parentheses."""
     s = s.strip()
     if s in env:
         return env[s]
-    if "->" in s:                                   # A -> B : linear-map space ~A ⊗ B
-        a, b = s.split("->", 1)
-        return _resolve_space(a, env, params) >> _resolve_space(b, env, params)
-    m = re.fullmatch(r"R\^(\w+)", s)
-    if m:
-        d = m.group(1)
-        return _G.space(f"R^{d}", int(d) if d.isdigit() else _S.DimVar(d))
-    m = re.fullmatch(r"(T|CT|Img|Ker)\((\w+)\)", s)
-    if m and params is not None:
-        head, arg = m.group(1), m.group(2)
-        par = (params or {}).get(arg)
-        if par is not None and head in ("T", "CT"):
-            return _wrap(par.tangent if head == "T" else par.cotangent)
-    raise McalcBuildError(f"cannot parse space {s!r}")
+    p = _SpaceParser(_space_tokens(s), s, env, params or {})
+    sp = p.arrow()
+    if p.peek() is not None:
+        raise McalcBuildError(f"trailing input in space {s!r}: {p.peek()!r}")
+    return sp
+
+
+def _split_top_arrow(s: str) -> tuple[str, str] | None:
+    """Split a space string on a TOP-LEVEL ``->`` (depth-0, outside parens) → ``(dom, cod)``
+    for a map space; ``None`` if there is no top-level arrow."""
+    depth = 0
+    i = 0
+    while i < len(s) - 1:
+        c = s[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif depth == 0 and s[i:i + 2] == "->":
+            return s[:i].strip(), s[i + 2:].strip()
+        i += 1
+    return None
 
 
 def _maybe_space(ty: str, builder) -> bool:
@@ -527,16 +618,30 @@ class _Builder:
         if name in self.var_meta:
             return self.var_meta[name]
         ty_raw = self.decls.get(name) or default_type(name)
-        # a variable typed against a declared/ASCII space (e.g. "V", "R^4", "T(phi)")
+        # a variable typed against a declared/ASCII space (e.g. "V", "R^4", "V -> W")
         if ty_raw not in ("scalar", "vector", "matrix") and (
                 ty_raw in self.space_env or _maybe_space(ty_raw, self)):
-            space = _resolve_space(ty_raw, self.space_env, self.params)
-            sp = self.uf.fresh()
-            self.uf.set_fixed(sp, space, ty_raw)
-            def mks(self=self, name=name, sp=sp):
-                return _G.var(name, self.space_of(sp))
-            cache0: dict = {}
-            tn = _TN("vec", (lambda mks=mks, cache0=cache0: cache0.setdefault("v", mks())), sp=sp)
+            arrow = _split_top_arrow(ty_raw)
+            if arrow is not None:                    # a map space A -> B ⇒ a matrix/linear map
+                dom = _resolve_space(arrow[0], self.space_env, self.params)
+                cod = _resolve_space(arrow[1], self.space_env, self.params)
+                s = self.uf.fresh(); self.uf.set_fixed(s, dom, f"dom({name})")
+                t = self.uf.fresh(); self.uf.set_fixed(t, cod, f"cod({name})")
+                def mkM(self=self, name=name, s=s, t=t):
+                    props = _P.MapProps(bij=True) if name in self.bij_vars else None
+                    return _G.var(name, self.space_of(s) >> self.space_of(t), props)
+                cacheM: dict = {}
+                tn = _TN("mat", (lambda mkM=mkM, cacheM=cacheM: cacheM.setdefault("v", mkM())),
+                         src=s, tgt=t, var_name=name)
+            else:
+                space = _resolve_space(ty_raw, self.space_env, self.params)
+                sp = self.uf.fresh()
+                self.uf.set_fixed(sp, space, ty_raw)
+                def mks(self=self, name=name, sp=sp):
+                    return _G.var(name, self.space_of(sp))
+                cache0: dict = {}
+                tn = _TN("vec", (lambda mks=mks, cache0=cache0: cache0.setdefault("v", mks())),
+                         sp=sp)
             self.var_meta[name] = tn
             return tn
         head, dimnames = _parse_type(ty_raw, name)
@@ -562,8 +667,10 @@ class _Builder:
             cache = {}
             tn = _TN("mat", (lambda mkm=mkm, cache=cache: cache.setdefault("v", mkm())),
                      src=s, tgt=t, var_name=name)
-        elif head in ("tangent", "cotangent", "normal", "conormal"):
-            # a variable on a parameterization's geometry space (a FIXED space, not a slot)
+        elif head in ("tangent", "cotangent", "normal", "conormal", "T", "CT"):
+            # a variable on a parameterization's geometry space (a FIXED space, not a slot).
+            # T/CT are the preferred surface names for tangent/cotangent.
+            head = {"T": "tangent", "CT": "cotangent"}.get(head, head)
             if not dimnames:
                 raise self.err(f"{head}(phi) needs a parameterization name")
             par = self.params.get(dimnames[0])
