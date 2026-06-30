@@ -19,6 +19,9 @@
 
   /* three-column layout: examples rail + main + persistent grammar sidebar */
   .layout { display: grid; grid-template-columns: 160px 1fr 300px; gap: 26px; align-items: start; }
+  /* let the centre column shrink so wide code scrolls inside it instead of pushing the page */
+  .col-main { min-width: 0; }
+  .card { max-width: 100%; }
   @media (max-width: 1100px) {
     .layout { grid-template-columns: 1fr; }
     .col-examples { order: 3; }
@@ -74,7 +77,8 @@
   #flash { display:none; color:var(--ok); background:#ecfdf5; border:1px solid #a7f3d0;
            border-radius:8px; padding:8px 12px; font:13px inherit; margin-top:8px; }
   .dl { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
-  pre.code { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow-x:auto;
+  pre.code { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px;
+             overflow-x:auto; max-width:100%; white-space:pre;
              font: 12px ui-monospace, monospace; display:none; }
   .badge { display:inline-block; font-size:11px; background:#eef2ff; color:var(--acc);
            border:1px solid #c7d2fe; border-radius:6px; padding:1px 7px; margin-left:8px; }
@@ -164,9 +168,9 @@
           <div class="note">Free variables of the expression are detected automatically; set each type
             from the dropdown (built from your declarations), or choose <code>custom…</code> to type any
             space expression (e.g. <code>R^m -&gt; R^n</code>, <code>(R^3)* (x) R^3</code>).</div>
-          <div class="note">Every input is realized in a basis — the default is spelled out
-            (<code>StandardEuclideanBasis(R^n)</code>, or <code>{e₁,e₂,e₃}</code> when the size is
-            bound); pick a declared basis to change it.</div>
+          <div class="note">Every input is realized in a basis — the default is rendered
+            literally from its space: <code>{e₁,e₂,e₃}</code>, a dual basis <code>{e¹,e²,e³}</code>,
+            a tensor basis <code>{e₁,e₂} ⊗ {f₁,f₂}</code>; pick a declared basis to change it.</div>
         </div>
       </section>
 
@@ -419,17 +423,54 @@ function basisOptions() {
   return o;
 }
 
-// Spell out the standard (default) basis for a given type: {e1,e2,e3} when the dimension is
-// bound (a literal R^k), else the symbolic StandardBasis(<space>). Defaults are never opaque.
-function standardLabel(type) {
-  const m = /^R\^(\d+)$/.exec((type || "").trim());
-  if (m) {
-    const n = +m[1], sub = "₀₁₂₃₄₅₆₇₈₉";
-    const e = i => "e" + String(i).split("").map(c => sub[+c]).join("");
-    const vs = []; for (let i = 1; i <= Math.min(n, 6); i++) vs.push(e(i));
-    return "{" + vs.join(",") + (n > 6 ? ",…" : "") + "}";
+// Render the LITERAL standard basis of a type, mirroring the space grammar (no "StandardBasis"
+// label):  R^3 → {e₁,e₂,e₃};  R^n → {e₁,…,eₙ};  (R^3)* → {e¹,e²,e³} (dual basis);
+//   R^2 (x) R^3 → {e₁,e₂} ⊗ {f₁,f₂,f₃};  R^2 (+) R^3 → {e₁,e₂} ⊕ {f₁,f₂,f₃};
+//   R^2 -> R^3 → {e¹,e²} ⊗ {f₁,f₂,f₃} (matrix units, dom dualised).
+const _BL = ["e", "f", "g", "h"];
+function _bidx(n, up) {
+  const sub = "₀₁₂₃₄₅₆₇₈₉", sup = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+  const ex = { n: ["ₙ", "ⁿ"], m: ["ₘ", "ᵐ"], k: ["ₖ", "ᵏ"], p: ["ₚ", "ᵖ"] };
+  return String(n).split("").map(c =>
+    ex[c] ? ex[c][up ? 1 : 0] : (/[0-9]/.test(c) ? (up ? sup : sub)[+c] : (up ? "^" + c : "_" + c))).join("");
+}
+function _vecSet(dim, up, letter) {
+  const e = i => letter + _bidx(i, up);
+  if (/^[0-9]+$/.test(String(dim))) {
+    const n = +dim, v = []; for (let i = 1; i <= Math.min(n, 6); i++) v.push(e(i));
+    return "{" + v.join(", ") + (n > 6 ? ", …" : "") + "}";
   }
-  return "StandardEuclideanBasis(" + (type || "R^n") + ")";
+  return "{" + e(1) + ", …, " + e(dim) + "}";
+}
+function _matchParen(s) { let d = 0; for (let i = 0; i < s.length; i++) { if (s[i] === "(") d++; else if (s[i] === ")") { d--; if (d === 0) return i; } } return -1; }
+function _splitTop(s, op) {
+  const parts = []; let d = 0, last = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (d === 0 && s.startsWith(op, i)) {           // check operator before paren-depth (op may be "(x)")
+      parts.push(s.slice(last, i)); last = i + op.length; i += op.length - 1; continue;
+    }
+    const c = s[i]; if (c === "(") d++; else if (c === ")") d--;
+  }
+  if (!parts.length) return null; parts.push(s.slice(last)); return parts.map(x => x.trim());
+}
+function renderBasis(type, depth, up) {
+  depth = depth || 0; up = up || false;
+  let t = (type || "").trim();
+  const sp = spacesList.find(s => s.name === t);
+  if (sp && sp.expr) return renderBasis(sp.expr, depth, up);
+  if (t === "scalar" || t === "R") return "{1}";
+  while (t[0] === "(" && _matchParen(t) === t.length - 1) t = t.slice(1, -1).trim();
+  let p;
+  if ((p = _splitTop(t, "->"))) {
+    const dom = "(" + p.slice(0, -1).join("->") + ")*";
+    return renderBasis(dom, depth, up) + " ⊗ " + renderBasis(p[p.length - 1], depth + 1, up);
+  }
+  if ((p = _splitTop(t, "(+)"))) return p.map((x, i) => renderBasis(x, depth + i, up)).join(" ⊕ ");
+  if ((p = _splitTop(t, "(x)"))) return p.map((x, i) => renderBasis(x, depth + i, up)).join(" ⊗ ");
+  if (t.endsWith("*")) return renderBasis(t.slice(0, -1), depth, !up);
+  const m = /^R\s*\^\s*([A-Za-z0-9]+)$/.exec(t);
+  if (m) return _vecSet(m[1], up, _BL[depth % _BL.length]);
+  return "{basis of " + (type || "R^n") + "}";
 }
 
 // the tangent-basis select for a parameterization: default is the immersion gauge
@@ -451,7 +492,7 @@ function tangentBasisSelect(f, onpick) {
 // a basis <select> whose "standard" option is spelled out for `type`; value stays "standard".
 function basisSelect(current, type, onpick) {
   const s = document.createElement("select"); s.className = "d-basis";
-  const opts = [{ value: "standard", label: standardLabel(type) }];
+  const opts = [{ value: "standard", label: renderBasis(type) }];
   basesList.forEach(b => { if (b.name) opts.push({ value: b.name, label: b.name }); });
   if (current && !opts.some(o => o.value === current)) opts.push({ value: current, label: current });
   opts.forEach(o => {
@@ -664,8 +705,8 @@ $("addfn").onclick = () => { functionsList.push({ name: "", kind: "opaque", dom:
 $("addbase").onclick = () => { basesList.push({ name: "", expr: "" }); renderBases(); renderVars(); renderFunctions(); };
 
 // Bases template dropdown: pick a constructor skeleton to insert (item 5)
-const BASIS_TEMPLATES = ["StandardEuclideanBasis(n)", "DualBasis(b)", "ImageBasis(phi)",
-                         "OrthonormalBasis(b)", "ListBasis(v1, v2)", "WithInnerBasis(b, g)"];
+const BASIS_TEMPLATES = ["DualBasis(b)", "ImageBasis(phi)", "OrthonormalBasis(b)",
+                         "ListBasis(v1, v2)", "WithInnerBasis(b, g)"];
 (function initBasisTemplates() {
   const sel = $("basetpl");
   const ph = document.createElement("option"); ph.value = ""; ph.textContent = "+ template"; sel.appendChild(ph);
