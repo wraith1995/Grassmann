@@ -152,6 +152,11 @@ function showError(msg) {
   $("error").innerHTML = msg ? `<div class="err">${msg}</div>` : "";
 }
 
+// surface any uncaught JS error / failed request so failures are visible, not silent
+window.addEventListener("error", e => showError("JS error: " + (e.message || e.error)));
+window.addEventListener("unhandledrejection", e =>
+  showError("Request failed (is the server running?): " + ((e.reason && e.reason.message) || e.reason)));
+
 async function refreshVars() {
   const expr = $("expr").value.trim();
   if (!expr) { $("vars").innerHTML = ""; return; }
@@ -199,8 +204,14 @@ async function compute() {
 
 async function genCode() {
   const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
-  const res = await post("/api/code", { expression: expr, wrt: wrt || null, decls: CURRENT_VARS });
+  const res = await post("/api/code",
+    { expression: expr, wrt: wrt || null, decls: CURRENT_VARS, params: paramSpecs() });
   if (res.error) { showError("Python codegen: " + res.error); return; }
+  if (res.unsupported) {
+    showError(res.unsupported);
+    $("primalcode").style.display = $("derivcode").style.display = "none";
+    return;
+  }
   showError("");
   const pc = res.primal_py || ("# function: " + (res.primal_error || "unavailable"));
   $("primalcode").textContent = "# --- function f ---\n" + pc;

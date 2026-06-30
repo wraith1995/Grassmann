@@ -125,7 +125,13 @@ def api_code(req: dict) -> dict:
     try:
         wrt = req.get("wrt") or None
         decls = req.get("decls") or None
-        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls)
+        params = _params_from_specs(req.get("params"))
+        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls, params=params or None)
+        if r.builder.geom_vars:
+            # geometry/parameterization problems lower via ImageBasis + an immersion feed,
+            # not the standard compile→numpy path — no standalone numpy module (yet).
+            return {"unsupported": ("Python download is not yet available for "
+                                    "parameterization / tangent-space problems.")}
         dims = req.get("dims") or {d: 3 for d in r.dim_names}
         dims = {k: int(v) for k, v in dims.items()}
         key_to_name = {r.input_key(n): n for n in r.vars}
@@ -168,6 +174,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store, max-age=0")  # always serve fresh
         self.end_headers()
         self.wfile.write(body)
 
