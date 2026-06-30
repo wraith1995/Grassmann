@@ -306,6 +306,44 @@ class McalcBuildError(Exception):
     """Raised when an AST cannot be resolved against the variable declarations."""
 
 
+def _resolve_space(s: str, env: dict, params: dict | None = None):
+    """Resolve an ASCII space expression to a grassmann space ``Expr``. Supports: a named space
+    (declared earlier), ``R^n`` (n int or a symbolic dim), ``T(phi)``/``CT(phi)`` (tangent /
+    cotangent of a parameterization), ``Img(f)``/``Ker(f)``, and ``A -> B`` (linear-map space).
+    (The full `(x)`/`(+)`/`(.)* ` algebra is future work; this covers function dom/cod + vars.)"""
+    import re
+    s = s.strip()
+    if s in env:
+        return env[s]
+    if "->" in s:                                   # A -> B : linear-map space ~A ⊗ B
+        a, b = s.split("->", 1)
+        return _resolve_space(a, env, params) >> _resolve_space(b, env, params)
+    m = re.fullmatch(r"R\^(\w+)", s)
+    if m:
+        d = m.group(1)
+        return _G.space(f"R^{d}", int(d) if d.isdigit() else _S.DimVar(d))
+    m = re.fullmatch(r"(T|CT|Img|Ker)\((\w+)\)", s)
+    if m and params is not None:
+        head, arg = m.group(1), m.group(2)
+        par = (params or {}).get(arg)
+        if par is not None and head in ("T", "CT"):
+            return _wrap(par.tangent if head == "T" else par.cotangent)
+    raise McalcBuildError(f"cannot parse space {s!r}")
+
+
+def _maybe_space(ty: str, builder) -> bool:
+    """Whether ``ty`` is a (non-geometry) space expression — a named space, ``R^n``, or
+    ``A -> B``. Geometry types (``tangent(...)`` etc.) keep their dedicated path."""
+    import re
+    if re.match(r"(tangent|cotangent|normal|conormal|T|CT|Img|Ker)\(", ty):
+        return False
+    try:
+        _resolve_space(ty, builder.space_env, builder.params)
+        return True
+    except McalcBuildError:
+        return False
+
+
 def _parse_type(ty: str, var: str) -> tuple[str, list[str]]:
     """Parse a declared type into ``(head, dim_names)``. Forms (suffix tier — user-named,
     shared dims; the advanced ``R^n``/``R^n->R^m`` space-expression tier is future work):
@@ -373,7 +411,14 @@ class _UF:
         if ra == rb:
             return ra
         na, nb = self.names.get(ra), self.names.get(rb)
-        if na is not None and nb is not None and na != nb:
+        fa, fb = self.fixed.get(ra), self.fixed.get(rb)
+        if fa is not None and fb is not None:
+            # two fixed (geometry/declared) spaces: OK iff the SAME space (labels may differ)
+            if _node(fa) != _node(fb):
+                raise McalcBuildError(
+                    f"space mismatch: {na!r} and {nb!r} are forced equal by the expression "
+                    f"but are different spaces")
+        elif na is not None and nb is not None and na != nb:
             raise McalcBuildError(
                 f"space/dimension mismatch: {na!r} and {nb!r} are forced equal by the "
                 f"expression but were declared distinct")
@@ -408,7 +453,8 @@ class _TN:
 
 
 class _Builder:
-    def __init__(self, decls: dict[str, str], src: str, params: dict | None = None) -> None:
+    def __init__(self, decls: dict[str, str], src: str, params: dict | None = None,
+                 spaces: dict | None = None, functions: dict | None = None) -> None:
         self.decls = decls
         self.src = src
         self.params = params or {}        # name -> Parameterization (geometry spaces)
@@ -419,6 +465,15 @@ class _Builder:
         self.slot_of_dimname: dict[str, int] = {}   # user dim name -> its slot
         self.bij_vars: set[str] = set()       # matrix vars asserted invertible (inv/det/logdet)
         self.geom_vars: dict[str, tuple] = {}  # name -> (Parameterization, head) for geometry vars
+        # named spaces (ASCII space exprs) + opaque/declared functions
+        self.space_env: dict[str, object] = {}
+        for nm, sexpr in (spaces or {}).items():
+            self.space_env[nm] = _resolve_space(sexpr, self.space_env, self.params)
+        self.func_env: dict[str, tuple] = {}   # name -> (opaque handle, dom Expr, cod Expr)
+        for nm, spec in (functions or {}).items():
+            dom = _resolve_space(spec["dom"], self.space_env, self.params)
+            cod = _resolve_space(spec["cod"], self.space_env, self.params)
+            self.func_env[nm] = (_G.opaque(nm, dom, cod, spec.get("numeric")), dom, cod)
 
     # -- space materialisation ----------------------------------------------
 
@@ -471,7 +526,20 @@ class _Builder:
     def _var(self, name: str) -> _TN:
         if name in self.var_meta:
             return self.var_meta[name]
-        head, dimnames = _parse_type(self.decls.get(name) or default_type(name), name)
+        ty_raw = self.decls.get(name) or default_type(name)
+        # a variable typed against a declared/ASCII space (e.g. "V", "R^4", "T(phi)")
+        if ty_raw not in ("scalar", "vector", "matrix") and (
+                ty_raw in self.space_env or _maybe_space(ty_raw, self)):
+            space = _resolve_space(ty_raw, self.space_env, self.params)
+            sp = self.uf.fresh()
+            self.uf.set_fixed(sp, space, ty_raw)
+            def mks(self=self, name=name, sp=sp):
+                return _G.var(name, self.space_of(sp))
+            cache0: dict = {}
+            tn = _TN("vec", (lambda mks=mks, cache0=cache0: cache0.setdefault("v", mks())), sp=sp)
+            self.var_meta[name] = tn
+            return tn
+        head, dimnames = _parse_type(ty_raw, name)
         if head == "scalar":
             expr = _G.var(name, _G.R)
             tn = _TN("scalar", (lambda e=expr: e))
@@ -654,6 +722,14 @@ class _Builder:
             raise self.err("only named function application is supported")
         h = node.fn.text
         args = [self.infer(a) for a in node.args]
+        if h in self.func_env:                       # a declared opaque function  f(x)
+            op, dom, cod = self.func_env[h]
+            if len(args) != 1:
+                raise self.err(f"opaque function {h} takes one argument")
+            (a,) = args
+            sp = self.uf.fresh()
+            self.uf.set_fixed(sp, cod, f"cod({h})")
+            return _TN("vec", (lambda op=op, a=a: op(a.emit())), sp=sp)
         if h in _MC_ELEMENTWISE:
             (x,) = args
             fn = getattr(_sc, _MC_ELEMENTWISE[h])
@@ -794,6 +870,20 @@ class McalcResult:
         """Substitute concrete integer sizes for the symbolic Nat dims in ``node`` (a term
         ``Expr``), so it can be lowered + run. ``dims`` maps dim-name -> int."""
         return instantiate(node, dims)
+
+    @property
+    def required_derivatives(self) -> list[dict]:
+        """The opaque-function derivatives the engine requires to evaluate the derivative
+        (step ④ in the UI) — one per opaque ``f`` used, with its source name and order. The
+        user supplies these numerically (a provided Jacobian or finite-difference) + a frame."""
+        if self.derivative is None:
+            return []
+        from grassmann.transform.diff import enumerate_derivative_inputs
+        out = []
+        for r in enumerate_derivative_inputs(self.derivative.node):
+            out.append({"name": r.source.name, "order": r.order,
+                        "key": f"{r.var.name}_{r.var.uid}"})
+        return out
 
     @property
     def var_kinds(self) -> dict[str, str]:
@@ -945,8 +1035,9 @@ class McalcResult:
 
 
 def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
-           params: dict | None = None) -> McalcResult:
-    b = _Builder(decls or {}, expr, params)
+           params: dict | None = None, spaces: dict | None = None,
+           functions: dict | None = None) -> McalcResult:
+    b = _Builder(decls or {}, expr, params, spaces, functions)
     tn = b.infer(parse_ast(expr))
     primal = tn.emit()
     if wrt is not None and params and wrt in params:
@@ -973,14 +1064,16 @@ def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
 
 def build_problem(expr: str, wrt: str | None = None,
                   decls: dict[str, str] | None = None,
-                  params: dict | None = None) -> McalcResult:
+                  params: dict | None = None,
+                  spaces: dict | None = None,
+                  functions: dict | None = None) -> McalcResult:
     """Compile a matrixcalculus-style problem into a :class:`McalcResult` (primal + optional
     derivative + variable/dim metadata). ``decls`` maps name -> a type:
     ``scalar|vector|matrix`` (with optional ``(n)``/``(m,n)`` dims), or — when ``params`` maps
     a name to a :class:`grassmann.syntax.geometry.Parameterization` — a geometry space
     ``tangent(phi)|cotangent(phi)|normal(phi)|conormal(phi)``. Absent names default by the
     naming convention (:func:`default_type`)."""
-    return _build(expr, decls, wrt, params)
+    return _build(expr, decls, wrt, params, spaces, functions)
 
 
 def mcbuild(expr: str, decls: dict[str, str] | None = None):

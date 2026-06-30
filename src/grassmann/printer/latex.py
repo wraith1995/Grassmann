@@ -168,6 +168,9 @@ def _render_term(e: _t.Term) -> tuple[str, int]:  # noqa: C901,PLR0911,PLR0912 -
             return rf"\det\!\left({_sub(f, 0)}\right)", Prec.APP
         case _t.LogDet(f=f):
             return rf"\log\det\!\left({_sub(f, 0)}\right)", Prec.APP
+        case _t.OpaqueApply(op=op, arg=arg):
+            nm = op.name if len(op.name) == 1 else rf"\operatorname{{{op.name}}}"
+            return rf"{nm}\!\left({_sub(arg, 0)}\right)", Prec.APP
         case _t.Solve(f=f):
             return f"{_sub(f, _PFX_BASE)}^{{-1}}", Prec.POSTFIX
         case _t.Pinv(f=f):
