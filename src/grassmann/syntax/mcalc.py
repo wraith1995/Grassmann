@@ -347,7 +347,8 @@ class _UF:
 
     def __init__(self) -> None:
         self.parent: list[int] = []
-        self.names: dict[int, str] = {}   # root -> user dim name (if any)
+        self.names: dict[int, str] = {}    # root -> user dim name (if any)
+        self.fixed: dict[int, object] = {}  # root -> a fixed geometry space (Img(J) etc.)
 
     def fresh(self) -> int:
         self.parent.append(len(self.parent))
@@ -355,6 +356,11 @@ class _UF:
 
     def set_name(self, slot: int, name: str) -> None:
         self.names[self.find(slot)] = name
+
+    def set_fixed(self, slot: int, space, label: str) -> None:
+        r = self.find(slot)
+        self.fixed[r] = space
+        self.names[r] = label
 
     def find(self, a: int) -> int:
         while self.parent[a] != a:
@@ -369,11 +375,13 @@ class _UF:
         na, nb = self.names.get(ra), self.names.get(rb)
         if na is not None and nb is not None and na != nb:
             raise McalcBuildError(
-                f"dimension mismatch: named dims {na!r} and {nb!r} are forced equal by the "
+                f"space/dimension mismatch: {na!r} and {nb!r} are forced equal by the "
                 f"expression but were declared distinct")
         self.parent[rb] = ra
         if self.names.get(ra) is None and nb is not None:
             self.names[ra] = nb
+        if ra not in self.fixed and rb in self.fixed:
+            self.fixed[ra] = self.fixed[rb]
         return ra
 
 
@@ -400,15 +408,17 @@ class _TN:
 
 
 class _Builder:
-    def __init__(self, decls: dict[str, str], src: str) -> None:
+    def __init__(self, decls: dict[str, str], src: str, params: dict | None = None) -> None:
         self.decls = decls
         self.src = src
+        self.params = params or {}        # name -> Parameterization (geometry spaces)
         self.uf = _UF()
         self.var_meta: dict[str, _TN] = {}   # name -> its leaf _TN (built once, shared)
         self.space_cache: dict[int, object] = {}
         self.dim_label: dict[int, str] = {}   # rep -> the Nat dim name used for that space
         self.slot_of_dimname: dict[str, int] = {}   # user dim name -> its slot
         self.bij_vars: set[str] = set()       # matrix vars asserted invertible (inv/det/logdet)
+        self.geom_vars: dict[str, tuple] = {}  # name -> (Parameterization, head) for geometry vars
 
     # -- space materialisation ----------------------------------------------
 
@@ -428,9 +438,12 @@ class _Builder:
         only at run time (matching matrixcalculus's symbolic-dimension model)."""
         rep = self.uf.find(slot)
         if rep not in self.space_cache:
-            label = self.uf.names.get(rep) or f"n{rep}"
-            self.dim_label[rep] = label
-            self.space_cache[rep] = _G.space(f"S{rep}", _S.DimVar(label))
+            if rep in self.uf.fixed:                  # a fixed geometry space (Img(J), …)
+                self.space_cache[rep] = self.uf.fixed[rep]
+            else:
+                label = self.uf.names.get(rep) or f"n{rep}"
+                self.dim_label[rep] = label
+                self.space_cache[rep] = _G.space(f"S{rep}", _S.DimVar(label))
         return self.space_cache[rep]
 
     def err(self, msg: str) -> McalcBuildError:
@@ -481,6 +494,22 @@ class _Builder:
             cache = {}
             tn = _TN("mat", (lambda mkm=mkm, cache=cache: cache.setdefault("v", mkm())),
                      src=s, tgt=t, var_name=name)
+        elif head in ("tangent", "cotangent", "normal", "conormal"):
+            # a variable on a parameterization's geometry space (a FIXED space, not a slot)
+            if not dimnames:
+                raise self.err(f"{head}(phi) needs a parameterization name")
+            par = self.params.get(dimnames[0])
+            if par is None:
+                raise self.err(f"unknown parameterization {dimnames[0]!r} for {name!r}")
+            space = {"tangent": par.tangent, "cotangent": par.cotangent,
+                     "normal": par.normal, "conormal": par.conormal}[head]
+            sp = self.uf.fresh()
+            self.uf.set_fixed(sp, _wrap(space), f"{head}({dimnames[0]})")
+            self.geom_vars[name] = (par, head)
+            def mkg(self=self, name=name, sp=sp):
+                return _G.var(name, self.space_of(sp))
+            cache = {}
+            tn = _TN("vec", (lambda mkg=mkg, cache=cache: cache.setdefault("v", mkg())), sp=sp)
         else:
             raise self.err(f"unknown declared type {head!r} for {name!r}")
         self.var_meta[name] = tn
@@ -807,6 +836,32 @@ class McalcResult:
         rep = self.builder.uf.find(slot)
         return int(dims[self.builder.dim_label[rep]])
 
+    def run_geometry(self, points: dict[str, object], coords: dict[str, object]):
+        """Run a primal that contains **geometry** variables (declared on `tangent(phi)` etc.).
+        Realizes each geometry value in its parameterization's `ImageBasis` and auto-feeds the
+        immersion `J=dφ`/`DJ=d²φ` at the given point. ``points`` maps parameterization name ->
+        the point `u` (an ℝᵏ array); ``coords`` maps geometry-var name -> its coordinate array
+        in the tangent frame. Tangent vars only (normal/cotangent realization is future work)."""
+        import numpy as np
+
+        from grassmann.core import basis as _B
+        from grassmann.lower.represent import represent
+        b = self.builder
+        env: dict = {}
+        feed: dict = {}
+        fed_params: set = set()
+        for name, (par, head) in b.geom_vars.items():
+            if head != "tangent":
+                raise McalcBuildError(
+                    f"geometry run supports tangent(...) values; {head}({par.name}) not yet")
+            var = self.vars[name]
+            env[var.node.uid] = _B.ImageBasis(par.J)
+            feed[self.input_key(name)] = np.asarray(coords[name], float)
+            if par.name not in fed_params:
+                feed.update(par.feed_at(points[par.name]))
+                fed_params.add(par.name)
+        return np.asarray(represent(_node(self.primal), basis_env=env).run(feed)["result"])
+
     def grad(self, values: dict[str, object], dims: dict[str, int]):
         """Numeric derivative of the primal w.r.t. ``wrt`` under the matrixcalculus numpy
         convention. Scalar-f → gradient (vector, or matrix when ``wrt`` is a matrix);
@@ -823,8 +878,9 @@ class McalcResult:
         return raw.swapaxes(-1, -2) if raw.ndim == 2 else raw
 
 
-def _build(expr: str, decls: dict[str, str] | None, wrt: str | None) -> McalcResult:
-    b = _Builder(decls or {}, expr)
+def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
+           params: dict | None = None) -> McalcResult:
+    b = _Builder(decls or {}, expr, params)
     tn = b.infer(parse_ast(expr))
     primal = tn.emit()
     deriv = None
@@ -836,11 +892,15 @@ def _build(expr: str, decls: dict[str, str] | None, wrt: str | None) -> McalcRes
 
 
 def build_problem(expr: str, wrt: str | None = None,
-                  decls: dict[str, str] | None = None) -> McalcResult:
+                  decls: dict[str, str] | None = None,
+                  params: dict | None = None) -> McalcResult:
     """Compile a matrixcalculus-style problem into a :class:`McalcResult` (primal + optional
-    derivative + variable/dim metadata). ``decls`` maps name -> ``scalar|vector|matrix``
-    (absent names default by the naming convention, :func:`default_type`)."""
-    return _build(expr, decls, wrt)
+    derivative + variable/dim metadata). ``decls`` maps name -> a type:
+    ``scalar|vector|matrix`` (with optional ``(n)``/``(m,n)`` dims), or — when ``params`` maps
+    a name to a :class:`grassmann.syntax.geometry.Parameterization` — a geometry space
+    ``tangent(phi)|cotangent(phi)|normal(phi)|conormal(phi)``. Absent names default by the
+    naming convention (:func:`default_type`)."""
+    return _build(expr, decls, wrt, params)
 
 
 def mcbuild(expr: str, decls: dict[str, str] | None = None):

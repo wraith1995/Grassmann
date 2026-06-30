@@ -119,3 +119,38 @@ def test_callable_parameterization_auto_derives_covariant_derivative():
 
     grad_v = par.covariant_derivative(u0, vv)                 # ∇v[a,c], auto-derived
     np.testing.assert_allclose(grad_v, np.einsum("cab,b->ca", gamma, vv).T, atol=1e-4)
+
+
+# --- C5: mcalc declaration integration (tangent(phi) etc. in build_problem) ----------------
+
+def test_mcalc_geometry_decls_resolve_spaces():
+    from grassmann.syntax.mcalc import build_problem
+    par = Parameterization("phi", 2, 3, immersion=_sphere_point)
+    params = {"phi": par}
+    for head, space in [("tangent", par.tangent), ("normal", par.normal),
+                        ("cotangent", par.cotangent), ("conormal", par.conormal)]:
+        r = build_problem("v", decls={"v": f"{head}(phi)"}, params=params)
+        assert r.vars["v"].node.space == space
+
+
+def test_mcalc_tangent_inner_is_induced_metric():
+    from grassmann.syntax.mcalc import build_problem
+    par = Parameterization("phi", 2, 3, immersion=_sphere_point)
+    params = {"phi": par}
+    u0 = np.array([0.9, 0.5])
+    g = par.jacobian_at(u0) @ par.jacobian_at(u0).T          # induced tangent metric
+    vc, wc = np.array([0.7, -0.3]), np.array([0.2, 0.5])
+
+    r = build_problem("v'*w", decls={"v": "tangent(phi)", "w": "tangent(phi)"}, params=params)
+    assert np.allclose(r.run_geometry({"phi": u0}, {"v": vc, "w": wc}), vc @ g @ wc)
+
+    r2 = build_problem("norm2(v)^2", decls={"v": "tangent(phi)"}, params=params)
+    assert np.allclose(r2.run_geometry({"phi": u0}, {"v": vc}), vc @ g @ vc)
+
+
+def test_mcalc_ordinary_diff_on_tangent_var_builds():
+    from grassmann.syntax.mcalc import build_problem
+    par = Parameterization("phi", 2, 3, immersion=_sphere_point)
+    r = build_problem("v'*w", wrt="v", decls={"v": "tangent(phi)", "w": "tangent(phi)"},
+                      params={"phi": par})
+    assert r.derivative is not None                          # d/dv ⟨v,w⟩ = λ dv. ⟨dv, w⟩
