@@ -583,6 +583,12 @@ class _Builder:
             raise self.err(f"unknown basis {node.text!r}")
         if isinstance(node, App) and isinstance(node.fn, Name):
             h, a = node.fn.text, node.args
+            if h in ("StandardBasis", "standard", "euclidean"):
+                from grassmann.lower.represent import default_basis
+                arg = a[0]
+                if isinstance(arg, Name) and arg.text in self.space_env:
+                    return default_basis(_node(self.space_env[arg.text]))
+                raise self.err(f"{h}(V) needs a declared space name, got {arg!r}")
             if h == "ImageBasis":
                 return _B.ImageBasis(self._as_map(a[0]))
             if h == "OrthonormalBasis":
@@ -1088,6 +1094,8 @@ class McalcResult:
         from grassmann.lower.represent import represent
         env = {}
         for vname, bname in (realize or {}).items():
+            if bname in ("standard", "euclidean", ""):
+                continue   # the default (standard Euclidean) basis ⇒ no special realization
             env[self.vars[vname].node.uid] = self.builder.resolve_basis(bname)
         feed = {self.input_key(n): np.asarray(v, float) for n, v in values.items()}
         feed.update(raw_feed or {})
