@@ -98,6 +98,30 @@ declared `d²f` or errors clearly. ~the size of the `det`/`logdet` addition, plu
 
 ---
 
+## GUI spec (v2, decided 2026-06-30 via sketches)
+
+- **Two-column layout.** Left: declarations → expression → output. Right: **persistent grammar
+  sidebar** (collapses on narrow screens), generated from the live op/function/space tables.
+- **Declarations = grouped sections** (not one list): **Spaces · Functions · Bases · Variables**,
+  each a list of rows + an inline `[+ …]` sub-form:
+  - **+ space**: `name = <ASCII space expr>` (`R^n`, `(R^n)*`, `A->B`, `A (x) B`, `A (+) B`,
+    `T(phi)`, `CT(phi)`, `Img(f)`), live-checked.
+  - **+ function**: `name : A -> B`, kind **opaque** | **parameterization**, optional `numeric`
+    (formula/callable). **No derivative field** (engine-required, surfaced at ④).
+  - **+ basis**: `name = <basis expr>` (`ImageBasis(f)`, `OrthonormalBasis(b)`, `DualBasis(b)`,
+    `ListBasis(…)`, `WithInnerBasis(b,g)`).
+  - **+ variable**: `name : <space>`, optional **realize in [basis]**.
+- **Expression** then **differentiate w.r.t.** then **Compute** — after all declarations (#4).
+- **Output**: ③ Function → Derivative (labeled **covariant** when applicable) → **④ REQUIRED
+  INPUTS** (the opaque derivatives the term needs) → ⑤ Download.
+- **④ Required derivative inputs** (the novel step, opaque lifecycle): lists each required `∂f`
+  (from `enumerate_derivative_inputs`); **frame defaults to a sensible choice (standard / the
+  value's declared basis), shown read-only with an override dropdown**; value via **finite-
+  difference from f's numeric** or **a provided numpy `dF(x)`**. Appears **after render, before
+  Python**. `∂v` for a `T(φ)` value is the chart connection — supplied automatically.
+- **⑤ Download**: Python · LaTeX (copy + standalone `.tex`).
+- **Examples** (curated, #6) along the bottom.
+
 ## #3 — Advanced spaces: `T(φ)`/`CT(φ)` + expose the ASCII space interface
 
 - **Rename + prune for parameterizations**: expose **`T(φ)`** (tangent) and **`CT(φ)`**
