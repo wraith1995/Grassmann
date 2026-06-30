@@ -406,6 +406,20 @@ def _resolve_space(s: str, env: dict, params: dict | None = None):
     return sp
 
 
+def _collect_dim_vars(node, seen: set | None = None) -> set:
+    """All symbolic ``DimVar`` names appearing anywhere in ``node`` (a term/space tree)."""
+    seen = seen if seen is not None else set()
+    if isinstance(node, _S.DimVar):
+        seen.add(node.name)
+    elif isinstance(node, (list, tuple)):
+        for x in node:
+            _collect_dim_vars(x, seen)
+    elif hasattr(node, "__dataclass_fields__"):
+        for f in node.__dataclass_fields__:
+            _collect_dim_vars(getattr(node, f), seen)
+    return seen
+
+
 def _split_top_arrow(s: str) -> tuple[str, str] | None:
     """Split a space string on a TOP-LEVEL ``->`` (depth-0, outside parens) → ``(dom, cod)``
     for a map space; ``None`` if there is no top-level arrow."""
@@ -1066,10 +1080,13 @@ class McalcResult:
 
     @property
     def dim_names(self) -> list[str]:
-        """The symbolic Nat dimension names this problem is polymorphic over — user-declared
-        names (e.g. ``"n"``, ``"m"``) where given, else auto names (``"n0"``), one per
-        independent space and shared across unified ones."""
-        return sorted(set(self.builder.dim_label.values()))
+        """Every symbolic Nat dimension this problem is polymorphic over — collected from the
+        built term, so it includes both auto names (``"n0"``) and user-named dims from symbolic
+        spaces (``R^n`` → ``"n"``). Set these to concrete sizes to run / generate Python."""
+        names = _collect_dim_vars(_node(self.primal))
+        if self.derivative is not None:
+            names |= _collect_dim_vars(self.derivative.node)
+        return sorted(names)
 
     def instantiate(self, node: object, dims: dict[str, int]) -> object:
         """Substitute concrete integer sizes for the symbolic Nat dims in ``node`` (a term
