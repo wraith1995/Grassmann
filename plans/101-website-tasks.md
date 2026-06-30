@@ -109,9 +109,11 @@ supports chart-metric covariant AD (`transform/diff.py`), so this is mostly surf
   (immersion-gauge ∇v=Γ·v). Validated against analytic sphere+Monge Christoffel refs to 1e-10.
   J=dφ / DJ=d²φ fed numerically; realization via `ImageBasis(J)` (`basis_env`+`run`).
 - **C-remaining**:
-  - **C4 — φ as a callable** in expressions (`φ(x)`): currently we model the immersion J=dφ;
-    add the nonlinear map φ itself (`G.lam`/External) so `φ(x)` is usable AND auto-derive
-    `J=dφ`, `DJ=d²φ` from it (vs. numeric feed) — closes the "callable + geometry" unification.
+  - **C4 DONE** — callable parameterization: `Parameterization(name,k,n, immersion=φ)` takes φ
+    as a numeric callable; `jacobian_at`/`hessian_at`/`feed_at` auto-derive `dφ`/`d²φ` (central
+    differences), and `covariant_derivative(u, v_coords)` returns ∇v directly. The user gives
+    φ, not the immersion. Validated vs analytic sphere ref. (Fully-SYMBOLIC φ inside mcalc
+    expressions deferred to C5 — coordinate-free immersion build + 2nd-order symbolic AD seam.)
   - **C5 — mcalc decl integration**: a variable typed `tangent(phi)` / `cotangent(phi)` / … in
     `build_problem` decls, wiring the geometry surface into the ASCII frontend + `G.diff`.
   - **C6 — web UI**: a parameterizations panel (declare φ: param→ambient), tangent-space var
