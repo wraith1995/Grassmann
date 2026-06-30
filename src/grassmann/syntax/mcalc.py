@@ -621,10 +621,7 @@ class _Builder:
             h, a = node.fn.text, node.args
             if h in ("StandardEuclideanBasis", "StandardBasis", "standard", "euclidean"):
                 from grassmann.lower.represent import default_basis
-                arg = a[0]
-                if isinstance(arg, Name) and arg.text in self.space_env:
-                    return default_basis(_node(self.space_env[arg.text]))
-                raise self.err(f"{h}(V) needs a declared space name, got {arg!r}")
+                return default_basis(self._basis_space_arg(a[0], h))
             if h == "ImageBasis":
                 return _B.ImageBasis(self._as_map(a[0]))
             if h == "OrthonormalBasis":
@@ -637,6 +634,20 @@ class _Builder:
                 return _B.WithInnerBasis(self.resolve_basis(a[0]),
                                          _node(self._var(a[1].text).emit()))
         raise self.err(f"cannot resolve basis {expr!r}")
+
+    def _basis_space_arg(self, arg, h: str):
+        """Resolve a StandardEuclideanBasis argument to a space node: a declared space name (``V``),
+        a dimension (``n`` ⇒ ``R^n``), a literal (``3`` ⇒ ``R^3``), or a space expr (``R^n``)."""
+        if isinstance(arg, Name) and arg.text in self.space_env:
+            return _node(self.space_env[arg.text])
+        if isinstance(arg, Name):                       # a dimension name ⇒ R^<name>
+            return _node(_resolve_space(f"R^{arg.text}", self.space_env, self.params))
+        if isinstance(arg, Num):                        # a literal size ⇒ R^<k>
+            return _node(_resolve_space(f"R^{int(float(arg.text))}", self.space_env, self.params))
+        if (isinstance(arg, Bin) and arg.op == "^" and isinstance(arg.left, Name)
+                and arg.left.text == "R" and isinstance(arg.right, (Name, Num))):  # R^n / R^3
+            return _node(_resolve_space(f"R^{arg.right.text}", self.space_env, self.params))
+        raise self.err(f"{h}(...) needs a space, dimension, or size — got {arg!r}")
 
     def _as_map(self, node):
         """A map term for ImageBasis: a parameterization's immersion ``J`` or a matrix var."""

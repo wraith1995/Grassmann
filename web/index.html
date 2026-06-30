@@ -150,7 +150,9 @@
         </div>
 
         <div class="decl-section">
-          <div class="decl-head"><h2>Bases</h2><button class="add" id="addbase" type="button">+ add</button></div>
+          <div class="decl-head"><h2>Bases</h2>
+            <span><select id="basetpl" class="d-sm"></select>
+            <button class="add" id="addbase" type="button">+ add</button></span></div>
           <div id="bases"></div>
           <div class="note">e.g. <code>ImageBasis(phi)</code>, <code>OrthonormalBasis(b)</code>,
             <code>DualBasis(b)</code> — validated against your declarations on Compute.</div>
@@ -633,6 +635,20 @@ $("adddim").onclick = () => { dimsList.push({ name: "", value: "" }); renderDims
 $("addspace").onclick = () => { spacesList.push({ name: "", expr: "" }); renderSpaces(); };
 $("addfn").onclick = () => { functionsList.push({ name: "", kind: "opaque", dom: "", cod: "", params: [], components: [] }); renderFunctions(); renderVars(); };
 $("addbase").onclick = () => { basesList.push({ name: "", expr: "" }); renderBases(); renderVars(); renderFunctions(); };
+
+// Bases template dropdown: pick a constructor skeleton to insert (item 5)
+const BASIS_TEMPLATES = ["StandardEuclideanBasis(n)", "DualBasis(b)", "ImageBasis(phi)",
+                         "OrthonormalBasis(b)", "ListBasis(v1, v2)", "WithInnerBasis(b, g)"];
+(function initBasisTemplates() {
+  const sel = $("basetpl");
+  const ph = document.createElement("option"); ph.value = ""; ph.textContent = "+ template"; sel.appendChild(ph);
+  BASIS_TEMPLATES.forEach(t => { const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o); });
+  sel.onchange = e => {
+    const t = e.target.value; if (!t) return;
+    basesList.push({ name: "", expr: t }); renderBases(); renderVars(); renderFunctions();
+    e.target.value = "";
+  };
+})();
 $("addvar").onclick = () => { varsList.push({ name: "", type: "" }); renderVars(); };
 
 const exbox = $("exlist");
