@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grassmann — coordinate-free matrix calculus</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['$$', '$$']] } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+<style>
+  :root { --fg:#1a1a2e; --mut:#6b7280; --line:#e5e7eb; --acc:#3b4cca; --bg:#fafafc; --err:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         color: var(--fg); background: var(--bg); margin: 0; line-height: 1.5; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 2px; }
+  .sub { color: var(--mut); font-size: 14px; margin-bottom: 22px; }
+  .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 16px; }
+  .sentence label { color: var(--mut); }
+  input[type=text] { font: 15px ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background:#fff; }
+  #expr { flex: 1 1 360px; min-width: 240px; }
+  #wrt { width: 88px; }
+  .vars { margin: 18px 0; display: flex; flex-wrap: wrap; gap: 10px; }
+  .vrow { display: flex; align-items: center; gap: 6px; background:#fff; border:1px solid var(--line);
+          border-radius: 8px; padding: 5px 9px; font-size: 14px; }
+  .vrow code { font-size: 14px; }
+  select { font: 14px inherit; padding: 3px 6px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  button { font: 14px inherit; padding: 8px 16px; border: 0; border-radius: 8px;
+           background: var(--acc); color:#fff; cursor: pointer; }
+  button.ghost { background:#fff; color: var(--acc); border:1px solid var(--acc); padding:6px 12px; }
+  button:disabled { opacity:.5; cursor: default; }
+  .out { margin-top: 22px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+  .card h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--mut); }
+  .math { overflow-x:auto; }
+  .err { color: var(--err); background:#fef2f2; border:1px solid #fecaca; border-radius:8px;
+         padding:10px 12px; font: 13px ui-monospace, monospace; white-space: pre-wrap; }
+  .examples { margin-top: 26px; }
+  .examples h3 { font-size:13px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
+  .ex { display:inline-block; margin:4px 6px 0 0; padding:5px 9px; font: 13px ui-monospace, monospace;
+        background:#fff; border:1px solid var(--line); border-radius:7px; cursor:pointer; }
+  .ex:hover { border-color: var(--acc); color: var(--acc); }
+  .row { display:flex; gap:10px; align-items:center; margin-top:14px; flex-wrap: wrap; }
+  .dl { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  pre.code { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow-x:auto;
+             font: 12px ui-monospace, monospace; display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Grassmann matrix calculus</h1>
+  <div class="sub">Type a matrixcalculus-style expression — get the <b>coordinate-free</b> derivative.</div>
+
+  <div class="sentence">
+    <label>derivative of</label>
+    <input id="expr" type="text" spellcheck="false" placeholder="0.5*x'*A*x" value="0.5*x'*A*x">
+    <label>w.r.t.</label>
+    <input id="wrt" type="text" spellcheck="false" placeholder="x" value="x">
+    <button id="go">Compute</button>
+  </div>
+
+  <div class="vars" id="vars"></div>
+  <div id="error"></div>
+
+  <div class="out" id="out" style="display:none">
+    <div class="card"><h3>Function</h3><div class="math" id="primal"></div></div>
+    <div class="card"><h3 id="dlabel">Derivative</h3><div class="math" id="deriv"></div></div>
+    <div class="dl">
+      <button class="ghost" id="codebtn">Generate Python ▾</button>
+    </div>
+    <pre class="code" id="primalcode"></pre>
+    <pre class="code" id="derivcode"></pre>
+  </div>
+
+  <div class="examples">
+    <h3>Examples</h3>
+    <div id="exlist"></div>
+  </div>
+</div>
+
+<script>
+const EXAMPLES = [
+  ["0.5*x'*A*x", "x"], ["A*exp(x)", "x"], ["sin(x)'*y", "x"], ["(y.*v)'*x", "x"],
+  ["a^b", "a"], ["norm2(A*x-y)^2", "x"], ["sum(log(exp(-y.*(X*w)) + vector(1)))", "w"],
+  ["tr(A*X'*B*X*C)", "X"], ["log(det(inv(X)))", "X"],
+];
+const $ = id => document.getElementById(id);
+let CURRENT_VARS = {};   // name -> selected type
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: {"Content-Type":"application/json"},
+                                body: JSON.stringify(body) });
+  return r.json();
+}
+
+function showError(msg) {
+  $("error").innerHTML = msg ? `<div class="err">${msg}</div>` : "";
+}
+
+async function refreshVars() {
+  const expr = $("expr").value.trim();
+  if (!expr) { $("vars").innerHTML = ""; return; }
+  const res = await post("/api/vars", { expression: expr });
+  if (res.error) { showError(res.error); $("vars").innerHTML = ""; return; }
+  showError("");
+  const prev = CURRENT_VARS; CURRENT_VARS = {};
+  $("vars").innerHTML = "";
+  for (const v of res.vars) {
+    const t = prev[v.name] || v.type;
+    CURRENT_VARS[v.name] = t;
+    const row = document.createElement("div");
+    row.className = "vrow";
+    row.innerHTML = `<code>${v.name}</code> is a
+      <select data-name="${v.name}">
+        ${["scalar","vector","matrix"].map(k =>
+            `<option value="${k}" ${k===t?"selected":""}>${k}</option>`).join("")}
+      </select>`;
+    row.querySelector("select").onchange = e => CURRENT_VARS[v.name] = e.target.value;
+    $("vars").appendChild(row);
+  }
+}
+
+async function compute() {
+  const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
+  if (!expr) return;
+  const res = await post("/api/derivative", { expression: expr, wrt: wrt || null, decls: CURRENT_VARS });
+  if (res.error) { showError(res.error); $("out").style.display = "none"; return; }
+  showError("");
+  $("out").style.display = "block";
+  $("primal").innerHTML = `$$${res.primal_latex}$$`;
+  if (res.derivative_latex) {
+    $("dlabel").textContent = `Derivative  ∂/∂${wrt}`;
+    $("deriv").innerHTML = `$$${res.derivative_latex}$$`;
+    $("deriv").parentElement.style.display = "block";
+  } else {
+    $("deriv").parentElement.style.display = "none";
+  }
+  $("primalcode").style.display = $("derivcode").style.display = "none";
+  if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
+}
+
+async function genCode() {
+  const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
+  const res = await post("/api/code", { expression: expr, wrt: wrt || null, decls: CURRENT_VARS });
+  if (res.error) { showError("Python codegen: " + res.error); return; }
+  showError("");
+  if (res.primal_py) { $("primalcode").textContent = res.primal_py; $("primalcode").style.display = "block"; }
+  if (res.derivative_py) { $("derivcode").textContent = res.derivative_py; $("derivcode").style.display = "block"; }
+}
+
+function loadExample(expr, wrt) {
+  $("expr").value = expr; $("wrt").value = wrt;
+  refreshVars().then(compute);
+}
+
+$("exlist").innerHTML = "";
+for (const [e, w] of EXAMPLES) {
+  const s = document.createElement("span");
+  s.className = "ex"; s.textContent = e;
+  s.onclick = () => loadExample(e, w);
+  $("exlist").appendChild(s);
+}
+
+let t = null;
+$("expr").addEventListener("input", () => { clearTimeout(t); t = setTimeout(refreshVars, 250); });
+$("go").onclick = compute;
+$("codebtn").onclick = genCode;
+$("expr").addEventListener("keydown", e => { if (e.key === "Enter") compute(); });
+$("wrt").addEventListener("keydown", e => { if (e.key === "Enter") compute(); });
+
+refreshVars().then(compute);
+</script>
+</body>
+</html>

@@ -233,6 +233,38 @@ def parse_ast(src: str) -> object:
     return node
 
 
+def free_vars(expression: str) -> list[str]:
+    """The free variable names of an expression, in first-appearance order — the names the
+    web tool renders type dropdowns for. Excludes function heads (``sin``/``tr``/…) and the
+    reserved identity ``eye``."""
+    seen: dict[str, None] = {}
+
+    def walk(n: object, is_fn: bool = False) -> None:
+        if isinstance(n, Name):
+            if not is_fn and n.text != "eye":
+                seen.setdefault(n.text, None)
+        elif isinstance(n, App):
+            walk(n.fn, is_fn=True)
+            for a in n.args:
+                walk(a)
+        elif isinstance(n, Bin):
+            walk(n.left); walk(n.right)
+        elif isinstance(n, (Post, Pre)):
+            walk(n.operand)
+        elif isinstance(n, ListN):
+            for it in n.items:
+                walk(it)
+
+    walk(parse_ast(expression))
+    return list(seen)
+
+
+def default_decls(expression: str) -> dict[str, str]:
+    """``{name: "scalar"|"vector"|"matrix"}`` for each free variable, by the naming
+    convention (:func:`default_type`) — the initial dropdown selections for the web tool."""
+    return {n: default_type(n) for n in free_vars(expression)}
+
+
 # ===========================================================================
 # Type-directed builder  (generic AST -> core IR).
 # ===========================================================================
