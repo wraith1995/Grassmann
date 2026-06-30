@@ -154,3 +154,38 @@ def test_mcalc_ordinary_diff_on_tangent_var_builds():
     r = build_problem("v'*w", wrt="v", decls={"v": "tangent(phi)", "w": "tangent(phi)"},
                       params={"phi": par})
     assert r.derivative is not None                          # d/dv ⟨v,w⟩ = λ dv. ⟨dv, w⟩
+
+
+# --- C5b: covariant derivative ALONG the manifold via build_problem (wrt=parameterization) -
+
+def _setup_cov():
+    from grassmann.syntax.mcalc import build_problem
+    par = Parameterization("phi", 2, 3, immersion=_sphere_point)
+    r = build_problem("v'*w", wrt="phi",
+                      decls={"v": "tangent(phi)", "w": "tangent(phi)"}, params={"phi": par})
+    u0 = np.array([0.9, 0.5])
+    g = par.jacobian_at(u0) @ par.jacobian_at(u0).T
+    return par, r, u0, g
+
+
+def test_mcalc_covariant_metric_compatibility():
+    # ∇⟨v,w⟩ = 0 for constant tangent sections (Levi-Civita metric compatibility, ∇g=0).
+    from grassmann.syntax.mcalc import build_problem  # noqa: F401 (used in _setup_cov)
+    par, r, u0, g = _setup_cov()
+    assert r.geom_param is par and r.derivative is not None
+    vc, wc = np.array([0.7, -0.3]), np.array([0.2, 0.5])
+    for a in range(2):
+        val = r.covariant_run({"phi": u0}, {"v": vc, "w": wc}, direction=np.eye(2)[a])
+        assert np.allclose(val, 0.0, atol=1e-9)
+
+
+def test_mcalc_covariant_product_rule():
+    # with a varying section ∂v/∂x = Dvc and constant w:  ∇⟨v,w⟩[a] == Dvc[a]·g·wc
+    from grassmann.syntax.mcalc import build_problem  # noqa: F401
+    par, r, u0, g = _setup_cov()
+    vc, wc = np.array([0.7, -0.3]), np.array([0.2, 0.5])
+    Dvc = np.array([[0.4, -0.1], [0.2, 0.6]])
+    for a in range(2):
+        got = r.covariant_run({"phi": u0}, {"v": vc, "w": wc},
+                              direction=np.eye(2)[a], sections={"v": Dvc})
+        assert np.allclose(got, Dvc[a] @ g @ wc)
