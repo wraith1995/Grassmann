@@ -139,10 +139,9 @@ def api_grammar(req: dict) -> dict:
     ops = {"*": "matmul / apply / scale", "'": "dual / transpose", ".*": "elementwise ×",
            "./": "elementwise ÷", ".^": "elementwise power", "/": "divide",
            "^": "power", "@": "compose (f∘g)", "\\": "solve  (A⁻¹b)",
-           "(x)": "tensor / outer", "(+)": "direct sum / stack",
-           "+": "add", "-": "subtract"}
+           "(+)": "direct sum / stack", "+": "add", "-": "subtract"}
     fns = sorted(set(_m._MC_ELEMENTWISE) | {
-        "tr", "det", "logdet", "inv", "pinv", "solve", "kron", "dot",
+        "tr", "det", "logdet", "inv", "pinv", "solve", "kron", "dot", "outer",
         "norm1", "norm2", "sum", "relu", "vector", "matrix"})
     return {
         "operators": [{"op": k, "meaning": v} for k, v in ops.items()],

@@ -47,7 +47,7 @@ class McalcParseError(Exception):
 # table is sorted longest-first. ``(+)`` (direct sum) deliberately wins over ``(``.
 _OPS = sorted(
     [
-        "(+)", "(x)", ".*", "./", ".^", "->",
+        "(+)", ".*", "./", ".^", "->",
         "+", "-", "*", "/", "^", "'", "@", "\\",
         "(", ")", "[", "]", ",", ";", ":",
     ],
@@ -114,7 +114,6 @@ _INFIX: dict[str, tuple[int, bool]] = {
     ".*": (70, False), "./": (70, False),
     "@": (70, False),                            # compose (coordinate-free extension)
     "\\": (70, False),                           # solve / backslash:  A \ b = A⁻¹ b
-    "(x)": (65, False),                          # tensor / outer product (vectors)
     "+": (60, False), "-": (60, False),
     ";": (50, False),                            # row-stack (within [ ... ])
     "(+)": (40, False),                          # direct sum / stack (coordinate-free)
@@ -791,8 +790,6 @@ class _Builder:
             return self._pow(a, b)
         if op == "\\":
             return self._solve(a, b)
-        if op == "(x)":
-            return self._otimes(a, b)
         if op == "(+)":
             return self._ostack(a, b)
         raise self.err(f"operator {op!r} not yet supported")
@@ -806,12 +803,6 @@ class _Builder:
             self.bij_vars.add(a.var_name)
         return _TN("vec", (lambda a=a, b=b: _wrap(
             _T.solve_apply(_node(a.emit()), _node(b.emit())))), sp=a.src)
-
-    def _otimes(self, a: _TN, b: _TN) -> _TN:
-        """``x (x) y`` — the tensor / outer product of two vectors (an element of their ⊗)."""
-        if a.kind != "vec" or b.kind != "vec":
-            raise self.err("`(x)` (tensor) needs two vectors")
-        return _TN("vec", (lambda a=a, b=b: _G.tensor(a.emit(), b.emit())), sp=self.uf.fresh())
 
     def _ostack(self, a: _TN, b: _TN) -> _TN:
         """``a (+) b`` — stack two vectors into their direct sum ``a ⊕ b``."""
@@ -1003,6 +994,12 @@ class _Builder:
                 raise self.err("dot(x, y) needs two vectors")
             self.uf.union(x.sp, y.sp)
             return _TN("scalar", lambda x=x, y=y: self._inner(x.sp, x.emit(), y.emit()))
+        if h in ("outer", "tensor"):     # x ⊗ y  (the outer/tensor product of two vectors)
+            (x, y) = args if len(args) == 2 else (None, None)
+            if x is None or x.kind != "vec" or y.kind != "vec":
+                raise self.err(f"{h}(x, y) needs two vectors")
+            return _TN("vec", (lambda x=x, y=y: _G.tensor(x.emit(), y.emit())),
+                       sp=self.uf.fresh())
         if h in ("det", "logdet"):
             (m,) = args
             if m.kind != "mat":
