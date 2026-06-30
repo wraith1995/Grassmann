@@ -58,12 +58,31 @@ def api_derivative(req: dict) -> dict:
         return _err(e)
 
 
+def _prettify(src: str, key_to_name: dict[str, str]) -> str:
+    """Rename the raw program-input parameters (``x_0``, ``A_2``, the direction ``dx_7``) to
+    readable names (``x``, ``A``, ``dx``) in the generated source — exact-token replacement so
+    internal temporaries (``t_0``) are untouched."""
+    import re
+
+    head = re.search(r"def \w+\(([^)]*)\)", src)
+    if not head:
+        return src
+    params = [p.strip() for p in head.group(1).split(",") if p.strip()]
+    rename = {}
+    for p in params:
+        rename[p] = key_to_name.get(p) or re.sub(r"_\d+$", "", p)
+    for old, new in rename.items():
+        if old != new:
+            src = re.sub(rf"\b{re.escape(old)}\b", new, src)
+    return src
+
+
 def api_code(req: dict) -> dict:
     """Standalone numpy source for the primal (and derivative) at concrete dimensions."""
     try:
         import polyarray as pa
 
-        from grassmann.lower.numpy_renderers import op_renderers  # provided below
+        from grassmann.lower.numpy_renderers import op_renderers
     except Exception as e:  # noqa: BLE001 - codegen optional / partial
         return _err(e)
     try:
@@ -72,13 +91,26 @@ def api_code(req: dict) -> dict:
         r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls)
         dims = req.get("dims") or {d: 3 for d in r.dim_names}
         dims = {k: int(v) for k, v in dims.items()}
+        key_to_name = {r.input_key(n): n for n in r.vars}
         out = {"dims": dims}
-        prog = G.compile(r.instantiate(r.primal, dims))
-        out["primal_py"] = pa.to_numpy_source(prog, func_name="f", op_renderers=op_renderers())
+
+        def emit(node, fname):
+            prog = G.compile(r.instantiate(node, dims))
+            return _prettify(
+                pa.to_numpy_source(prog, func_name=fname, op_renderers=op_renderers()),
+                key_to_name)
+
+        # Emit each part independently — the derivative may hit an unsupported op (G12:
+        # CallOp/sub-program) while the primal still emits fine.
+        try:
+            out["primal_py"] = emit(r.primal, "f")
+        except Exception as e:  # noqa: BLE001
+            out["primal_error"] = f"{type(e).__name__}: {e}"
         if r.derivative is not None:
-            dprog = G.compile(r.instantiate(r.derivative, dims))
-            out["derivative_py"] = pa.to_numpy_source(
-                dprog, func_name="df", op_renderers=op_renderers())
+            try:
+                out["derivative_py"] = emit(r.derivative, "df")
+            except Exception as e:  # noqa: BLE001
+                out["derivative_error"] = f"{type(e).__name__}: {e}"
         return out
     except Exception as e:  # noqa: BLE001
         return _err(e)

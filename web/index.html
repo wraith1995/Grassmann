@@ -146,8 +146,13 @@ async function genCode() {
   const res = await post("/api/code", { expression: expr, wrt: wrt || null, decls: CURRENT_VARS });
   if (res.error) { showError("Python codegen: " + res.error); return; }
   showError("");
-  if (res.primal_py) { $("primalcode").textContent = res.primal_py; $("primalcode").style.display = "block"; }
-  if (res.derivative_py) { $("derivcode").textContent = res.derivative_py; $("derivcode").style.display = "block"; }
+  const pc = res.primal_py || ("# function: " + (res.primal_error || "unavailable"));
+  $("primalcode").textContent = "# --- function f ---\n" + pc;
+  $("primalcode").style.display = "block";
+  const dc = res.derivative_py || ("# derivative codegen not yet available for this expression\n# ("
+             + (res.derivative_error || "") + ")");
+  $("derivcode").textContent = "# --- derivative df ---\n" + dc;
+  $("derivcode").style.display = "block";
 }
 
 function loadExample(expr, wrt) {
