@@ -170,6 +170,16 @@ def test_diff_chain_rule_through_exp():
     assert G.latex(d) == r"\lambda dx.\; \exp(x) \odot dx"
 
 
+def test_diff_inner_product_advanced_eta_pretty():
+    # Advanced-η (opt-in RIESZ_SOP) folds the noisy lambda d/dx⟨x,x⟩ into the covector 2·x♭.
+    # The default-path pin above (test_diff_inner_product_has_correct_structure) is unchanged.
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    d = G.diff(G.dot(x, x), x.node)
+    folded = G.normal_form(d, RIESZ_SOP)
+    assert G.latex(folded) == r"2 \cdot x^{\flat}"
+
+
 def test_latex_accepts_raw_term_and_expr():
     # Both the embed Expr handle and the raw core node render identically.
     assert G.latex(f(x)) == raw_latex(f(x).node)

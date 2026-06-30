@@ -25,17 +25,10 @@ from .diff import (
     enumerate_derivative_inputs,
 )
 from .pullback import PullbackError, pullback, transport_map
-from .transport import (
-    TransportError,
-    assert_rational,
-    pull_along,
-    pushforward,
-    transport_basis,
-    transport_cobasis,
-)
 from .rewrite import (
     AGGRESSIVE_SOP,
     DEFAULT_SOP,
+    RIESZ_SOP,
     RewriteError,
     SoPConfig,
     alpha_canon,
@@ -50,6 +43,14 @@ from .rewrite import (
     subst,
     sum_of_products,
     term_key,
+)
+from .transport import (
+    TransportError,
+    assert_rational,
+    pull_along,
+    pushforward,
+    transport_basis,
+    transport_cobasis,
 )
 
 __all__ = [
@@ -83,5 +84,6 @@ __all__ = [
     "SoPConfig",
     "DEFAULT_SOP",
     "AGGRESSIVE_SOP",
+    "RIESZ_SOP",
     "RewriteError",
 ]

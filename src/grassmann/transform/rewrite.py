@@ -46,6 +46,7 @@ from grassmann.core.term import (
     Dagger,
     Embed,
     Eval,
+    External,
     Flat,
     Frame,
     Identity,
@@ -107,6 +108,7 @@ class SoPConfig:
     dissolve_oplus: bool = False  # dissolve ⊕ into a sum of injections (⊕ disappears; + outermost)
     canon_scalars: bool = False  # canonicalize scalar PRODUCTS (commutative ·); partial rational NF
     canon_binders: bool = True   # α-canonicalize bound vars (α-variant terms → identical NF)
+    eta_advanced: bool = False   # fold a seed-linear λ into its covector/map (Riesz/adjoint η)
 
 
 # The default preset: the conservative, value-EXACT end of the ladder — only the commutative
@@ -116,6 +118,10 @@ DEFAULT_SOP = SoPConfig()
 # The aggressive preset: also canonicalizes ⊗ factor order up-to-iso, inserting a `Permute`
 # output correction `𝒞` so the value/layout is still restored exactly.
 AGGRESSIVE_SOP = SoPConfig(order_otimes=True)
+
+# The "pretty derivative" preset: collapse seed-linear lambdas (a `diff` result) into the
+# lambda-free covector / linear map they denote (Riesz / adjoint η). Value-exact; opt-in.
+RIESZ_SOP = SoPConfig(eta_advanced=True)
 
 
 # ===========================================================================
@@ -725,6 +731,194 @@ def rule_eta(node: Term) -> Term | None:
     if _mentions_vars(body.f, {v.uid for v in vars_}):
         return None  # f must be closed w.r.t. the bound vars
     return body.f
+
+
+def _mentions(t: object, uid: int) -> bool:
+    """``t`` (a Term, or a numeric scalar) mentions the variable ``uid``. A non-Term scalar
+    (a ``Scale`` coefficient may be a bare ``float``) never mentions a variable."""
+    return is_term(t) and _mentions_vars(t, {uid})
+
+
+def _peel_inner(arm: Term, r: Term, dvar: Var) -> Term | None:
+    """The covector core of advanced-η: ``arm`` (the inner-product slot that contains the seed
+    ``dvar``) and ``r`` (the δ-closed *Riesz arm*). Return the lambda-free covector ``M`` with
+    ``⟨δ, evalₘ⟩``-style application equal to ``λδ. ⟨arm, r⟩`` — peeling each linear map off the
+    δ-slot moves its adjoint onto ``r`` (``⟨A(δ),r⟩ = ⟨δ, A†(r)⟩``). Metric symmetry makes the
+    bare ``⟨δ, r⟩ → r♭`` arm Dagger-free."""
+    uid = dvar.uid
+    if isinstance(arm, Var) and arm.uid == uid:
+        return Eval(Flat(dvar.space), (0,), (r,))  # ⟨δ, r⟩ → r♭
+    if isinstance(arm, Scale) and not _mentions(arm.scalar, uid):
+        return _peel_inner(arm.vector, Scale(arm.scalar, r), dvar)  # ⟨c·v, r⟩ = ⟨v, c·r⟩
+    if (
+        isinstance(arm, Eval)
+        and arm.positions == (0,)
+        and len(arm.args) == 1
+        and not _mentions(arm.f, uid)
+    ):
+        # ⟨A(δ), r⟩ = ⟨δ, A†(r)⟩ — peel the map, accumulate the adjoint onto the Riesz arm.
+        return _peel_inner(arm.args[0], Eval(Dagger(arm.f), (0,), (r,)), dvar)
+    if _is_hadamard(arm):
+        # ⟨c ⊙ δ, r⟩ = ⟨δ, c ⊙ r⟩ — the elementwise (diagonal) map is self-adjoint, so the
+        # δ-free factor moves onto the Riesz arm unchanged (matrix-calc elementwise chain rule).
+        c, v = _hadamard_split(arm, uid)
+        if v is not None:
+            return _peel_inner(v, External(arm.space, arm.data, (c, r)), dvar)
+    return None
+
+
+def _is_hadamard(t: object) -> bool:
+    return (
+        isinstance(t, External)
+        and getattr(t.data, "name", None) == "hadamard"
+        and len(t.args) == 2
+    )
+
+
+def _hadamard_split(t: External, uid: int) -> tuple[Term, Term | None]:
+    """Split a ``hadamard(a, b)`` into ``(δ-free factor, δ-bearing factor)`` — exactly one arm
+    may mention δ (else ``(_, None)``: the elementwise product is nonlinear / not our shape)."""
+    a, b = t.args
+    if _mentions(a, uid) and not _mentions(b, uid):
+        return b, a
+    if _mentions(b, uid) and not _mentions(a, uid):
+        return a, b
+    return a, None
+
+
+def _flatten_compose(t: Term) -> list[Term]:
+    """Flatten a binary ``Compose(f, (0,), (g,))`` chain into its factor list, descending BOTH
+    sides (composition is associative, so left- and right-nested spellings both flatten):
+    ``A∘B∘C`` → ``[A, B, C]``. A non-Compose, or a multi-slot ``Compose``, is a single factor."""
+    if isinstance(t, Compose) and t.positions == (0,) and len(t.gs) == 1:
+        return [*_flatten_compose(t.f), *_flatten_compose(t.gs[0])]
+    return [t]
+
+
+def _compose_chain(factors: list[Term], fallback_space: Space) -> Term:
+    """Rebuild a left-nested binary ``Compose`` chain from a factor list (``[]`` → ``Identity``)."""
+    if not factors:
+        return Identity(fallback_space)
+    m = factors[0]
+    for g in factors[1:]:
+        m = Compose(m, (0,), (g,))
+    return m
+
+
+def _factor_trace(node: Trace, dvar: Var) -> Term | None:
+    """Fold a matrix-trace monomial ``tr(L ∘ δ ∘ R)`` (δ a square map, appearing once as a bare
+    ``δ`` or ``δ†`` factor) into its Frobenius covector. Cyclic invariance rotates δ to the end:
+    ``tr(L∘δ∘R) = tr((R∘L)∘δ) = ⟨δ, (R∘L)†⟩``  (and ``tr((R∘L)∘δ†) = ⟨δ, R∘L⟩``). This turns the
+    matrix-calculus trace derivatives into the inner-product form the covector peel already
+    handles. Bails (``None``) unless exactly one factor is a *bare* δ / δ† occurrence."""
+    uid = dvar.uid
+    factors = _flatten_compose(node.f)
+    idxs = [i for i, fac in enumerate(factors) if _mentions(fac, uid)]
+    if len(idxs) != 1:
+        return None
+    k = idxs[0]
+    fac = factors[k]
+    if isinstance(fac, Var) and fac.uid == uid:
+        daggered = False
+    elif isinstance(fac, Dagger) and isinstance(fac.f, Var) and fac.f.uid == uid:
+        daggered = True
+    else:
+        return None  # δ buried inside a non-bare factor — not a clean trace pairing
+    rest = factors[k + 1 :] + factors[:k]  # cyclic rotation: the factor after δ moves to front
+    rmap = _compose_chain(rest, dvar.space)
+    riesz = rmap if daggered else Dagger(rmap)  # ⟨δ, R⟩ for δ†, else ⟨δ, R†⟩
+    return _peel_inner(dvar, riesz, dvar)
+
+
+def _factor_inner(s: Space, a: Term, b: Term, dvar: Var) -> Term | None:
+    """Fold ``λδ. ⟨a, b⟩`` (a *scalar* inner-product monomial) into its covector. Exactly one
+    arm may mention δ (both ⇒ the nonlinear ``⟨δ,δ⟩``, rejected by the linearity gate before we
+    get here; neither ⇒ not a δ-functional). The metric is symmetric, so the choice of which
+    arm is the input vs the Riesz arm is value-free."""
+    uid = dvar.uid
+    a_has, b_has = _mentions(a, uid), _mentions(b, uid)
+    if a_has and not b_has:
+        return _peel_inner(a, b, dvar)
+    if b_has and not a_has:
+        return _peel_inner(b, a, dvar)
+    return None
+
+
+def _factor_llam_body(node: Term, dvar: Var) -> Term | None:
+    """Find a lambda-free ``M`` with ``Eval(M, (0,), (dvar,)) ≡ node`` — i.e. the linear map /
+    covector that the seed-linear body ``node`` denotes. Returns ``None`` for any shape it
+    cannot express lambda-free (strictly conservative — the ``LLam`` is then left intact)."""
+    uid = dvar.uid
+    # λδ. δ  →  Id  (the identity Jacobian; the vector-regime base case, generalizing rule_eta).
+    if isinstance(node, Var) and node.uid == uid:
+        return Identity(dvar.space)
+    # λδ. c·v  →  c · M_v   (the coefficient c must be δ-closed).
+    if isinstance(node, Scale) and not _mentions(node.scalar, uid):
+        m = _factor_llam_body(node.vector, dvar)
+        return Scale(node.scalar, m) if m is not None else None
+    # λδ. Σ vᵢ  →  Σ Mᵢ   (covectors / maps add).
+    if isinstance(node, Sum):
+        ms = [_factor_llam_body(v, dvar) for v in node.vectors]
+        if any(m is None for m in ms):
+            return None
+        return Sum(tuple(ms))
+    # Scalar regime: an inner product ⟨a, b⟩ = Eval(Inner(s), (0,1), (a,b)).
+    if (
+        isinstance(node, Eval)
+        and isinstance(node.f, Inner)
+        and node.positions == (0, 1)
+        and len(node.args) == 2
+    ):
+        return _factor_inner(node.f.space, node.args[0], node.args[1], dvar)
+    # Scalar regime: a matrix-trace pairing tr(L ∘ δ ∘ R) — the Frobenius covector.
+    if isinstance(node, Trace):
+        return _factor_trace(node, dvar)
+    # Vector regime: a δ-closed map applied to δ-stuff  →  A ∘ (δ ↦ arg).
+    if (
+        isinstance(node, Eval)
+        and node.positions == (0,)
+        and len(node.args) == 1
+        and not _mentions(node.f, uid)
+    ):
+        m = _factor_llam_body(node.args[0], dvar)
+        return Compose(node.f, (0,), (m,)) if m is not None else None
+    return None
+
+
+def rule_eta_advanced(node: Term) -> Term | None:
+    """**Advanced η-reduction** (covector / linear-map folding) — make a derivative look like the
+    map it *is*. Collapse a single-seed linear lambda ``λδ. body`` whose body is a covector /
+    linear-map expression in δ into the lambda-free term it denotes:
+
+        ``λδ. ⟨δ, x⟩ + ⟨x, δ⟩ → 2·x♭``,   ``λδ. ⟨A(δ), w⟩ → (A†w)♭``,   ``λδ. A(δ) → A``.
+
+    The body must be **exactly-once linear** in δ (the resource gate rejects the nonlinear
+    ``⟨δ,δ⟩`` and the δ-unused body). Sound on this branch because an ``LLam`` lowers identically
+    to the stored map it denotes (the FFS re-orientation, plans/92): the rewrite is an equality
+    of the coordinate-free algebra, verified value-identical by the suite. Opt-in
+    (``SoPConfig.eta_advanced``); off in ``simplify``/``DEFAULT_SOP``."""
+    if not isinstance(node, LLam) or len(node.vars) != 1:
+        return None
+    (dvar,) = node.vars
+    body = node.body
+    # Defer the bare η shape λδ.f(δ) to rule_eta (it produces f directly; avoids f∘Id churn).
+    if (
+        isinstance(body, Eval)
+        and body.positions == (0,)
+        and tuple(body.args) == node.vars
+        and not _mentions_vars(body.f, {dvar.uid})
+    ):
+        return None
+    from grassmann.infer.linearity import LinearityError, check_llam_resources
+
+    try:
+        check_llam_resources(node)  # exactly-once gate: rejects ⟨δ,δ⟩ and δ-unused bodies
+    except LinearityError:
+        return None
+    m = _factor_llam_body(body, dvar)
+    if m is None or _mentions_vars(m, {dvar.uid}):
+        return None  # not expressible lambda-free, or δ leaked — leave the LLam intact
+    return m
 
 
 def rule_eval_compose_fold(node: Term) -> Term | None:
@@ -1419,6 +1613,10 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
         rules += _DISTRIBUTE_RULES
     if cfg.push_contractions:
         rules += _CONTRACTION_RULES
+    if cfg.eta_advanced:
+        # After distribution (body is a flat sum of monomials) and before collect, so the
+        # emitted Sum of covectors collapses (x♭ + x♭ → 2·x♭).
+        rules.append(rule_eta_advanced)
     if cfg.canon_scalars:
         rules.append(rule_scalar_product)
     if cfg.collect:
@@ -1619,6 +1817,7 @@ __all__ = [
     "SoPConfig",
     "DEFAULT_SOP",
     "AGGRESSIVE_SOP",
+    "RIESZ_SOP",
     "subst",
     "rewrite",
     "beta",
