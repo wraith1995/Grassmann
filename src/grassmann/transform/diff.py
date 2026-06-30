@@ -110,6 +110,76 @@ class _DCtx:
         return self.x.space
 
 
+# ===========================================================================
+# Derivative-input provenance + enumeration (`§tracer-reqs`).
+#
+# A ``deps[uid] = None`` tracer differentiates into a fresh symbolic derivative-MAP input
+# ``∂ⁿsource/∂xⁿ : X ⊸ …`` (a Program input pointwise samples).  These two registries give the
+# inputs structured provenance — (base tracer var, derivative order) — so a caller can read off
+# EXACTLY which derivatives a (possibly multiply-differentiated) term references, by var identity
+# rather than by parsing the ``d_…`` name.  They also DEDUPE: the derivative of a given source
+# w.r.t. a given ``x`` is allocated once and reused across repeated/nested ``diff`` calls, so the
+# enumerated requirement set is a true set (no duplicate input per (source, order)).
+_DERIV_INPUTS: dict[int, DerivInput] = {}            # deriv-var.uid -> provenance record
+_DERIV_INPUT_BY_KEY: dict[tuple[int, int], Var] = {}  # (immediate-source.uid, x.uid) -> deriv var
+
+
+@dataclass(frozen=True)
+class DerivInput:
+    """Provenance of a symbolic derivative-map input that ``diff`` allocated for a ``deps=None``
+    tracer.  ``var`` is the Program-input map ``∂ᵒʳᵈᵉʳsource/∂xᵒʳᵈᵉʳ``; ``source`` is the base
+    tracer ``Var`` it ultimately differentiates; ``order`` is the derivative order (1 = first)."""
+
+    var: Var
+    source: Var
+    order: int
+
+
+def _alloc_deriv_input(source: Var, ctx: _DCtx, space: Space | None = None) -> Var:
+    """Get-or-create the symbolic derivative-map input ``∂source/∂x`` (codomain space
+    ``source.space`` by default, or ``space`` when the derivative lands elsewhere — e.g. a metric
+    gradient ``M ⊸ M*⊗M*``), recording its provenance.  Deduped by ``(source.uid, x.uid)`` so
+    repeated/nested ``diff`` of the same source reuses one input.  When ``source`` is itself a
+    derivative input, the new var inherits the base tracer and bumps the order (so an order-``n``
+    chain reports ``(base, n)``)."""
+    key = (source.uid, ctx.x.uid)
+    existing = _DERIV_INPUT_BY_KEY.get(key)
+    if existing is not None:
+        return existing
+    cod = space if space is not None else source.space
+    var = Var(f"d_{source.name}_{next(_counter)}", linear_map_space(ctx.X, cod))
+    parent = _DERIV_INPUTS.get(source.uid)
+    base, order = (parent.source, parent.order + 1) if parent is not None else (source, 1)
+    _DERIV_INPUTS[var.uid] = DerivInput(var=var, source=base, order=order)
+    _DERIV_INPUT_BY_KEY[key] = var
+    return var
+
+
+def enumerate_derivative_inputs(term: Term) -> list[DerivInput]:
+    """The symbolic derivative-map inputs (``deps=None`` tracer derivatives) that occur in ``term``,
+    each with provenance ``(base tracer var, derivative order)``.  A requirements pass reads this
+    after lowering to sample exactly the chart/field derivatives actually used — and to confirm
+    pruning unreferenced tracers leaves a valid program.  Deterministic order: by ``(source name,
+    order, uid)``."""
+    seen: dict[int, DerivInput] = {}
+
+    def walk(n: object) -> None:
+        if isinstance(n, Var) and n.uid in _DERIV_INPUTS:
+            seen[n.uid] = _DERIV_INPUTS[n.uid]
+        for c in _children(n):
+            walk(c)
+
+    walk(term)
+    return sorted(seen.values(), key=lambda r: (r.source.name, r.order, r.var.uid))
+
+
+def clear_deriv_inputs() -> None:
+    """Drop all recorded derivative-input provenance + dedup keys (test hygiene / a fresh tracer
+    session).  Safe to omit — keys are globally unique Var uids, so stale reuse cannot occur."""
+    _DERIV_INPUTS.clear()
+    _DERIV_INPUT_BY_KEY.clear()
+
+
 def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
     """Total covariant derivative ``d e / d x : X ⊸ space(e)`` (the public entry point)."""
     if not is_term(e):
@@ -238,8 +308,9 @@ def _dd_var(e: Var, ctx: _DCtx) -> Term:
             dval = ctx.deps[e.uid]
             if dval is None:
                 # Unknown derivative ⇒ a fresh symbolic map var ∂e/∂x : X ⊸ space(e); its
-                # directional derivative is (∂e/∂x)·h.
-                dmap = Var(f"d_{e.name}_{next(_counter)}", linear_map_space(ctx.X, e.space))
+                # directional derivative is (∂e/∂x)·h.  Provenance-tracked + deduped so a
+                # requirements pass can enumerate (source, order) — see _alloc_deriv_input.
+                dmap = _alloc_deriv_input(e, ctx)
             else:
                 dmap = dval
             ctx._ddval[e.uid] = Eval(dmap, (0,), (ctx.h,))
@@ -1096,8 +1167,7 @@ def _chart_frame_of(g: Term, ctx: _DCtx) -> tuple[Var, Term] | None:
     dval = ctx.deps[J.uid]
     if dval is not None:
         return (J, dval)
-    DJ = Var(f"d_{J.name}_{next(_counter)}", linear_map_space(ctx.X, J.space))
-    return (J, DJ)
+    return (J, _alloc_deriv_input(J, ctx))  # provenance-tracked ∂J/∂x input
 
 
 def _manifold_of(s: Space) -> Space | None:
@@ -1204,7 +1274,7 @@ def _metric_gradient(g: Term, M: Space, ctx: _DCtx) -> Term | None:
         from grassmann.core.space import dual, oprod
 
         cod = oprod(dual(M), dual(M))
-        return Var(f"d_{g.name}_{next(_counter)}", linear_map_space(ctx.X, cod))
+        return _alloc_deriv_input(g, ctx, space=cod)  # provenance-tracked ∂g/∂x input
     if _depends_on_x(g, ctx):
         raise DiffError(
             "diff: x-dependent metric must be a marked variable so its gradient is known; "
