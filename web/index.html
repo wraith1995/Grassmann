@@ -255,7 +255,8 @@ $("codebtn").onclick = genCode;
 $("expr").addEventListener("keydown", e => { if (e.key === "Enter") compute(); });
 $("wrt").addEventListener("keydown", e => { if (e.key === "Enter") compute(); });
 
-refreshVars().then(compute);
+if (location.hash === "#geometry") loadGeometryExample();
+else refreshVars().then(compute);
 </script>
 </body>
 </html>
