@@ -72,8 +72,24 @@ function f : V -> V            # opaque
 function df : V -> (V -> V)    # opaque (or analytic)
 ```
 
-### Open decision (see questions): how `df` is provided — Jacobian-as-map `df:A→(A⊸B)`
-vs directional `df(x,h)→B`; and symbolic-vs-numeric for running.
+### REVISED (user, 2026-06-30): the user does NOT declare the derivative
+
+The engine **requires** the derivative; the user does not pre-declare it. Mechanism (already
+in-tree, the Explore map confirmed):
+- An opaque `f` is declared with just `dom → cod` (+ an optional numeric kernel to evaluate the
+  primal). NO `df`.
+- `diff(f(x), x)` marks `f` as a tracer (`deps[f.uid] = None`); `_dd` allocates a fresh symbolic
+  derivative-input map `dF : A ⊸ B` (`_alloc_deriv_input`) and emits `Eval(dF, h)`.
+- `enumerate_derivative_inputs(jd)` then reads off **exactly which derivatives are required**
+  (source `f`, order, the input `Var dF`) — surfaced in the UI **after the derivative is
+  rendered**.
+- The user supplies those numerically (and **declares the frame/basis** the required derivative
+  is expressed in — for inputs/outputs they didn't otherwise realize) **before generating
+  Python**. Reuses the `§qr-auto` program-backed-var + `ffs_gauge_feed` seeding path.
+- So the lifecycle is: declare `f` → write `f(x)` → diff → render → **"required derivative
+  inputs (+ frame)"** panel → supply → run/download.
+
+[Engine build deferred — forwarded to the opaque-function engine task with this design.]
 
 ### Risk / scope
 Real engine work across core + infer + lower + diff (mirror how `Trace`/`External` thread the
