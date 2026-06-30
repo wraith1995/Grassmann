@@ -545,7 +545,8 @@ class _TN:
 
 class _Builder:
     def __init__(self, decls: dict[str, str], src: str, params: dict | None = None,
-                 spaces: dict | None = None, functions: dict | None = None) -> None:
+                 spaces: dict | None = None, functions: dict | None = None,
+                 bases: dict | None = None) -> None:
         self.decls = decls
         self.src = src
         self.params = params or {}        # name -> Parameterization (geometry spaces)
@@ -565,6 +566,44 @@ class _Builder:
             dom = _resolve_space(spec["dom"], self.space_env, self.params)
             cod = _resolve_space(spec["cod"], self.space_env, self.params)
             self.func_env[nm] = (_G.opaque(nm, dom, cod, spec.get("numeric")), dom, cod)
+        self.bases_src: dict[str, str] = dict(bases or {})   # name -> ASCII basis expr (lazy)
+
+    # -- bases (resolved lazily, after vars are built) ----------------------
+
+    def resolve_basis(self, expr):
+        """Resolve an ASCII basis expression to a core ``Basis`` — ``ImageBasis(f)`` (f a
+        parameterization or matrix var), ``OrthonormalBasis(b)``, ``DualBasis(b)``,
+        ``ListBasis(v1,…)``, ``WithInnerBasis(b,g)``, or a declared basis name."""
+        from grassmann.core import basis as _B
+        node = parse_ast(expr) if isinstance(expr, str) else expr
+        if isinstance(node, Name):
+            if node.text in self.bases_src:
+                return self.resolve_basis(self.bases_src[node.text])
+            raise self.err(f"unknown basis {node.text!r}")
+        if isinstance(node, App) and isinstance(node.fn, Name):
+            h, a = node.fn.text, node.args
+            if h == "ImageBasis":
+                return _B.ImageBasis(self._as_map(a[0]))
+            if h == "OrthonormalBasis":
+                return _B.OrthonormalBasis(self.resolve_basis(a[0]))
+            if h == "DualBasis":
+                return _B.DualBasis(self.resolve_basis(a[0]))
+            if h == "ListBasis":
+                return _B.ListBasis(tuple(_node(self._var(v.text).emit()) for v in a))
+            if h == "WithInnerBasis":
+                return _B.WithInnerBasis(self.resolve_basis(a[0]),
+                                         _node(self._var(a[1].text).emit()))
+        raise self.err(f"cannot resolve basis {expr!r}")
+
+    def _as_map(self, node):
+        """A map term for ImageBasis: a parameterization's immersion ``J`` or a matrix var."""
+        if isinstance(node, Name):
+            if node.text in self.params:
+                return self.params[node.text].J
+            tn = self._var(node.text)
+            if tn.kind == "mat":
+                return _node(tn.emit())
+        raise self.err(f"ImageBasis needs a map (parameterization or matrix var), got {node!r}")
 
     # -- space materialisation ----------------------------------------------
 
@@ -979,6 +1018,30 @@ class McalcResult:
         return instantiate(node, dims)
 
     @property
+    def bases(self) -> dict[str, object]:
+        """The declared bases resolved to core ``Basis`` nodes (raises per-basis on bad refs).
+        Used to validate the Bases section and to realize values (`realize_run`)."""
+        return {nm: self.builder.resolve_basis(nm) for nm in self.builder.bases_src}
+
+    def realize_run(self, node, values: dict, dims: dict | None = None,
+                    realize: dict | None = None, raw_feed: dict | None = None):
+        """Run ``node`` realizing chosen values in declared bases. ``realize`` maps a variable
+        name -> a declared basis name; that value lowers in that basis. ``values`` are keyed by
+        variable name; ``raw_feed`` supplies extra program inputs by their raw key (e.g. a
+        parameterization immersion ``J``). Generalizes the geometry realization to declared
+        bases."""
+        import numpy as np
+
+        from grassmann.lower.represent import represent
+        env = {}
+        for vname, bname in (realize or {}).items():
+            env[self.vars[vname].node.uid] = self.builder.resolve_basis(bname)
+        feed = {self.input_key(n): np.asarray(v, float) for n, v in values.items()}
+        feed.update(raw_feed or {})
+        term = self.instantiate(node, dims) if dims else node
+        return np.asarray(represent(_node(term), basis_env=env).run(feed)["result"])
+
+    @property
     def required_derivatives(self) -> list[dict]:
         """The opaque-function derivatives the engine requires to evaluate the derivative
         (step ④ in the UI) — one per opaque ``f`` used, with its source name and order. The
@@ -1143,8 +1206,8 @@ class McalcResult:
 
 def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
            params: dict | None = None, spaces: dict | None = None,
-           functions: dict | None = None) -> McalcResult:
-    b = _Builder(decls or {}, expr, params, spaces, functions)
+           functions: dict | None = None, bases: dict | None = None) -> McalcResult:
+    b = _Builder(decls or {}, expr, params, spaces, functions, bases)
     tn = b.infer(parse_ast(expr))
     primal = tn.emit()
     if wrt is not None and params and wrt in params:
@@ -1173,14 +1236,15 @@ def build_problem(expr: str, wrt: str | None = None,
                   decls: dict[str, str] | None = None,
                   params: dict | None = None,
                   spaces: dict | None = None,
-                  functions: dict | None = None) -> McalcResult:
+                  functions: dict | None = None,
+                  bases: dict | None = None) -> McalcResult:
     """Compile a matrixcalculus-style problem into a :class:`McalcResult` (primal + optional
     derivative + variable/dim metadata). ``decls`` maps name -> a type:
     ``scalar|vector|matrix`` (with optional ``(n)``/``(m,n)`` dims), or — when ``params`` maps
     a name to a :class:`grassmann.syntax.geometry.Parameterization` — a geometry space
     ``tangent(phi)|cotangent(phi)|normal(phi)|conormal(phi)``. Absent names default by the
     naming convention (:func:`default_type`)."""
-    return _build(expr, decls, wrt, params, spaces, functions)
+    return _build(expr, decls, wrt, params, spaces, functions, bases)
 
 
 def mcbuild(expr: str, decls: dict[str, str] | None = None):
