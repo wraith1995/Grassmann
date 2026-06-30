@@ -130,9 +130,11 @@
         <div class="decl-section">
           <div class="decl-head"><h2>Dimensions</h2><button class="add" id="adddim" type="button">+ add</button></div>
           <div id="dims"></div>
-          <div class="note">Declare dimension variables (bound to a size), then use them in spaces and
-            variable types — e.g. <code>R^n</code>, <code>vector(n)</code>, <code>matrix(m,n)</code>,
+          <div class="note">Declare dimension variables, then use them in spaces and
+            variable types — e.g. <code>R^n</code>, <code>R^m -&gt; R^n</code>,
             <code>V = R^n</code>.</div>
+          <div class="note">Dimensions are opaque (symbolic) by default — leave the size blank.
+            Give a number to bind a specific size (used when you Generate Python).</div>
         </div>
 
         <div class="decl-section">
@@ -158,10 +160,9 @@
         <div class="decl-section">
           <div class="decl-head"><h2>Variables</h2><button class="add" id="addvar" type="button">+ add</button></div>
           <div id="vars"></div>
-          <datalist id="typedl"></datalist>
-          <div class="note">Free variables of the expression are detected automatically; set each type.
-            Type any space expression (e.g. <code>R^n</code>, <code>R^m -&gt; R^n</code>,
-            <code>(R^3)* (x) R^3</code>) or pick a suggestion.</div>
+          <div class="note">Free variables of the expression are detected automatically; set each type
+            from the dropdown (built from your declarations), or choose <code>custom…</code> to type any
+            space expression (e.g. <code>R^m -&gt; R^n</code>, <code>(R^3)* (x) R^3</code>).</div>
           <div class="note">Every input is realized in a basis — default is the standard (Euclidean)
             basis; pick a declared basis to change it.</div>
         </div>
@@ -262,13 +263,14 @@ function selectFrom(arr, val) {
   return s;
 }
 
-// ----- type options for the Variables select -----
+// ----- type options for the Variables select (built from declarations) -----
 function typeOptions() {
-  const o = ["scalar", "vector", "matrix"];
+  const o = ["scalar"];
+  dimsList.forEach(d => { if (d.name) o.push(`R^${d.name}`); });                // vectors
+  dimsList.forEach(a => dimsList.forEach(b => {                                  // matrices
+    if (a.name && b.name) o.push(`R^${a.name} -> R^${b.name}`); }));
   spacesList.forEach(s => { if (s.name) o.push(s.name); });
-  functionsList.forEach(f => {
-    if (f.kind === "param" && f.name) { o.push(`T(${f.name})`); o.push(`CT(${f.name})`); }
-  });
+  functionsList.forEach(f => { if (f.kind === "param" && f.name) { o.push(`T(${f.name})`); o.push(`CT(${f.name})`); } });
   return o;
 }
 
@@ -279,11 +281,11 @@ function renderDims2() {
     const row = document.createElement("div"); row.className = "drow";
     const name = inp("d-name", "n", d.name);
     const val = document.createElement("input");
-    val.type = "number"; val.min = "1"; val.className = "d-num"; val.placeholder = "3";
+    val.type = "number"; val.min = "1"; val.className = "d-num"; val.placeholder = "opaque";
     val.value = d.value || "";
-    name.oninput = e => { d.name = e.target.value.trim(); };
+    name.oninput = e => { d.name = e.target.value.trim(); renderVars(); };
     val.oninput = e => { d.value = e.target.value.trim(); };
-    row.append(name, span("="), val, delBtn(() => { dimsList.splice(i, 1); renderDims2(); }));
+    row.append(name, span("="), val, delBtn(() => { dimsList.splice(i, 1); renderDims2(); renderVars(); }));
     box.appendChild(row);
   });
 }
@@ -361,35 +363,36 @@ function renderBases() {
 
 function renderVars() {
   const box = $("vars"); box.innerHTML = "";
-  updateTypeDatalist();
   varsList.forEach((v, i) => {
     const row = document.createElement("div"); row.className = "drow";
     const name = inp("d-name", "x", v.name);
-    // type: free-text space expression backed by a shared <datalist> of suggestions
-    if (!v.type) v.type = typeOptions()[0];
-    const tin = inp("d-sm", "R^n", v.type);
-    tin.setAttribute("list", "typedl");
     name.oninput = e => { v.name = e.target.value.trim(); };
+    // type: a real <select> built from declarations, plus a `custom…` escape that
+    // reveals a free-text field for any space expression (e.g. R^m -> R^n, (R^3)* (x) R^3)
+    const opts = typeOptions();
+    if (!v.type) v.type = opts[0];
+    const isCustom = !opts.includes(v.type);
+    const tsel = selectFrom(opts.concat(["custom…"]), isCustom ? "custom…" : v.type);
+    tsel.className = "d-sm";
+    const tin = inp("d-sm", "R^m -> R^n", isCustom ? v.type : "");
+    tin.style.display = isCustom ? "" : "none";
     tin.oninput = e => { v.type = e.target.value.trim(); };
+    tsel.onchange = e => {
+      if (e.target.value === "custom…") {
+        tin.style.display = ""; tin.value = isCustom ? v.type : ""; v.type = tin.value; tin.focus();
+      } else {
+        tin.style.display = "none"; v.type = e.target.value;
+      }
+    };
     // realization basis: default "standard" (Euclidean), or any declared basis
     if (!v.basis) v.basis = "standard";
     const bopts = basisOptions();
     if (v.basis && !bopts.includes(v.basis)) bopts.push(v.basis);   // keep a stale basis visible
     const bsel = selectFrom(bopts, v.basis); bsel.className = "d-basis";
     bsel.onchange = e => { v.basis = e.target.value; };
-    row.append(name, span(":"), tin, span("in", "mut"), bsel,
+    row.append(name, span(":"), tsel, tin, span("in", "mut"), bsel,
                delBtn(() => { varsList.splice(i, 1); renderVars(); }));
     box.appendChild(row);
-  });
-}
-
-// fill the shared <datalist> with the current type suggestions (scalar/vector/matrix/
-// declared spaces / T(name) / CT(name)) — refreshed whenever spaces/functions change.
-function updateTypeDatalist() {
-  const dl = $("typedl"); if (!dl) return;
-  dl.innerHTML = "";
-  typeOptions().forEach(o => {
-    const op = document.createElement("option"); op.value = o; dl.appendChild(op);
   });
 }
 
@@ -454,6 +457,11 @@ async function detectVars() {
   showError("");
   for (const v of res.vars)
     if (!varsList.some(x => x.name === v.name)) varsList.push({ name: v.name, type: v.type });
+  // auto-declare any dimensions the detected types reference (opaque by default)
+  let dimsChanged = false;
+  for (const n of (res.dims || []))
+    if (n && !dimsList.some(d => d.name === n)) { dimsList.push({ name: n, value: "" }); dimsChanged = true; }
+  if (dimsChanged) renderDims2();
   renderVars();
 }
 
@@ -548,41 +556,52 @@ async function loadGrammar() {
 
 // ===================== EXAMPLES =====================
 const EXAMPLES = [
-  { label: "0.5*x'*A*x", expr: "0.5*x'*A*x", wrt: "x", spaces: [], functions: [], bases: [],
-    vars: [{ name: "x", type: "vector" }, { name: "A", type: "matrix" }] },
-  { label: "A*exp(x)", expr: "A*exp(x)", wrt: "x", spaces: [], functions: [], bases: [],
-    vars: [{ name: "A", type: "matrix" }, { name: "x", type: "vector" }] },
-  { label: "sin(x)'*y", expr: "sin(x)'*y", wrt: "x", spaces: [], functions: [], bases: [],
-    vars: [{ name: "x", type: "vector" }, { name: "y", type: "vector" }] },
-  { label: "(y.*v)'*x", expr: "(y.*v)'*x", wrt: "x", spaces: [], functions: [], bases: [],
-    vars: [{ name: "x", type: "vector" }, { name: "y", type: "vector" },
-           { name: "v", type: "vector" }] },
-  { label: "a^b", expr: "a^b", wrt: "a", spaces: [], functions: [], bases: [],
+  { label: "0.5*x'*A*x", expr: "0.5*x'*A*x", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^n" }, { name: "A", type: "R^n -> R^n" }] },
+  { label: "A*exp(x)", expr: "A*exp(x)", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^n -> R^n" }, { name: "x", type: "R^n" }] },
+  { label: "sin(x)'*y", expr: "sin(x)'*y", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^n" }, { name: "y", type: "R^n" }] },
+  { label: "(y.*v)'*x", expr: "(y.*v)'*x", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^n" }, { name: "y", type: "R^n" },
+           { name: "v", type: "R^n" }] },
+  { label: "a^b", expr: "a^b", wrt: "a",
+    dims: [], spaces: [], functions: [], bases: [],
     vars: [{ name: "a", type: "scalar" }, { name: "b", type: "scalar" }] },
-  { label: "norm2(A*x-y)^2", expr: "norm2(A*x-y)^2", wrt: "x", spaces: [], functions: [], bases: [],
-    vars: [{ name: "A", type: "matrix" }, { name: "x", type: "vector" },
-           { name: "y", type: "vector" }] },
+  { label: "norm2(A*x-y)^2", expr: "norm2(A*x-y)^2", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^n -> R^n" }, { name: "x", type: "R^n" },
+           { name: "y", type: "R^n" }] },
   { label: "logistic loss", expr: "sum(log(exp(-y.*(X*w)) + vector(1)))", wrt: "w",
-    spaces: [], functions: [], bases: [],
-    vars: [{ name: "X", type: "matrix" }, { name: "w", type: "vector" },
-           { name: "y", type: "vector" }] },
-  { label: "tr(A*X'*B*X*C)", expr: "tr(A*X'*B*X*C)", wrt: "X", spaces: [], functions: [], bases: [],
-    vars: [{ name: "A", type: "matrix" }, { name: "B", type: "matrix" },
-           { name: "C", type: "matrix" }, { name: "X", type: "matrix" }] },
-  { label: "log(det(inv(X)))", expr: "log(det(inv(X)))", wrt: "X", spaces: [], functions: [], bases: [],
-    vars: [{ name: "X", type: "matrix" }] },
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "X", type: "R^n -> R^n" }, { name: "w", type: "R^n" },
+           { name: "y", type: "R^n" }] },
+  { label: "tr(A*X'*B*X*C)", expr: "tr(A*X'*B*X*C)", wrt: "X",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^n -> R^n" }, { name: "B", type: "R^n -> R^n" },
+           { name: "C", type: "R^n -> R^n" }, { name: "X", type: "R^n -> R^n" }] },
+  { label: "log(det(inv(X)))", expr: "log(det(inv(X)))", wrt: "X",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "X", type: "R^n -> R^n" }] },
   { label: "∇ on a sphere", expr: "v'*w", wrt: "sphere",
+    dims: [], spaces: [], bases: [],
     functions: [{ name: "sphere", kind: "param", dom: "", cod: "",
                   params: ["u1", "u2"],
                   components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] }],
     vars: [{ name: "v", type: "T(sphere)" }, { name: "w", type: "T(sphere)" }] },
   { label: "opaque f", expr: "f(x)'*y", wrt: "x",
-    spaces: [{ name: "V", expr: "R^4" }],
+    dims: [{ name: "n", value: "" }], bases: [],
+    spaces: [{ name: "V", expr: "R^n" }],
     functions: [{ name: "f", kind: "opaque", dom: "V", cod: "V",
-                  params: ["u1", "u2", "u3", "u4"],
-                  components: ["sin(u1)", "sin(u2)", "sin(u3)", "sin(u4)"] }],
+                  params: ["u1", "u2", "u3"],
+                  components: ["sin(u1)", "sin(u2)", "sin(u3)"] }],
     vars: [{ name: "x", type: "V" }, { name: "y", type: "V" }] },
   { label: "opaque chart ∂φ", expr: "phi(u)", wrt: "u",
+    dims: [], bases: [],
     spaces: [{ name: "U", expr: "R^2" }],
     functions: [{ name: "phi", kind: "opaque", dom: "U", cod: "R^3",
                   params: ["u1", "u2"],
@@ -591,7 +610,7 @@ const EXAMPLES = [
 ];
 
 function applyExample(ex) {
-  dimsList = clone(ex.dimsList);
+  dimsList = clone(ex.dims || []);
   spacesList = clone(ex.spaces); functionsList = clone(ex.functions);
   basesList = clone(ex.bases); varsList = clone(ex.vars);
   $("expr").value = ex.expr; $("wrt").value = ex.wrt;
@@ -600,11 +619,11 @@ function applyExample(ex) {
 }
 
 // ===================== WIRING =====================
-$("adddim").onclick = () => { dimsList.push({ name: "", value: "" }); renderDims2(); };
+$("adddim").onclick = () => { dimsList.push({ name: "", value: "" }); renderDims2(); renderVars(); };
 $("addspace").onclick = () => { spacesList.push({ name: "", expr: "" }); renderSpaces(); };
 $("addfn").onclick = () => { functionsList.push({ name: "", kind: "opaque", dom: "", cod: "", params: [], components: [] }); renderFunctions(); renderVars(); };
 $("addbase").onclick = () => { basesList.push({ name: "", expr: "" }); renderBases(); renderVars(); renderFunctions(); };
-$("addvar").onclick = () => { varsList.push({ name: "", type: "vector" }); renderVars(); };
+$("addvar").onclick = () => { varsList.push({ name: "", type: "" }); renderVars(); };
 
 const exbox = $("exlist");
 EXAMPLES.forEach(ex => {
