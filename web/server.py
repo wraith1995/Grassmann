@@ -22,6 +22,39 @@ _HERE = Path(__file__).resolve().parent
 
 
 # ===========================================================================
+# Parameterizations — build a numeric immersion φ:ℝᵏ→ℝⁿ from formula components.
+# ===========================================================================
+
+def _make_immersion(param_names: list[str], components: list[str]):
+    """A numeric callable ``u -> ℝⁿ`` evaluating each component formula over the parameter
+    names, in a restricted numpy namespace (no builtins) — for the LOCAL tool."""
+    import numpy as np
+    ns_funcs = {k: getattr(np, k) for k in (
+        "sin cos tan exp log sqrt sinh cosh tanh arcsin arccos arctan abs sign".split())}
+    ns_funcs["pi"] = np.pi
+    codes = [compile(c, "<immersion>", "eval") for c in components]
+
+    def phi(u):
+        ns = dict(ns_funcs)
+        for i, p in enumerate(param_names):
+            ns[p] = float(u[i])
+        return np.array([eval(c, {"__builtins__": {}}, ns) for c in codes], float)  # noqa: S307
+    return phi
+
+
+def _parameterization(spec: dict):
+    from grassmann.syntax.geometry import Parameterization
+    pnames = spec["params"]
+    comps = spec["components"]
+    return Parameterization(spec["name"], len(pnames), len(comps),
+                            immersion=_make_immersion(pnames, comps))
+
+
+def _params_from_specs(specs) -> dict:
+    return {s["name"]: _parameterization(s) for s in (specs or [])}
+
+
+# ===========================================================================
 # Engine glue — each returns a JSON-able dict, never raises.
 # ===========================================================================
 
@@ -40,11 +73,14 @@ def api_vars(req: dict) -> dict:
 
 
 def api_derivative(req: dict) -> dict:
-    """Build the primal + (optional) derivative and render both as LaTeX."""
+    """Build the primal + (optional) derivative and render both as LaTeX. When ``params``
+    (parameterization specs) are given and ``wrt`` names one, the derivative is the COVARIANT
+    derivative along that manifold."""
     try:
         wrt = req.get("wrt") or None
         decls = req.get("decls") or None
-        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls)
+        params = _params_from_specs(req.get("params"))
+        r = mcalc.build_problem(req["expression"], wrt=wrt, decls=decls, params=params or None)
         out = {
             "primal_latex": G.latex(r.primal),
             "dim_names": r.dim_names,
@@ -53,6 +89,7 @@ def api_derivative(req: dict) -> dict:
         if r.derivative is not None:
             out["derivative_latex"] = G.latex(r.derivative)
             out["wrt"] = wrt
+            out["covariant"] = r.geom_param is not None
         return out
     except Exception as e:  # noqa: BLE001
         return _err(e)
