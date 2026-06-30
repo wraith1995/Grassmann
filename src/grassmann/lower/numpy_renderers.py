@@ -35,6 +35,23 @@ def _const_op(op, a):
     return f"np.array({val.tolist()!r}, dtype=np.{op.dtype})"
 
 
+def _scale_op(op, a):
+    return f"({op.factor!r} * np.asarray({a[0]}, dtype=float))"
+
+
+def _add_op(op, a):
+    return "(" + " + ".join(f"np.asarray({e}, dtype=float)" for e in a) + ")"
+
+
+def _concat_op(op, a):
+    return ("np.concatenate(["
+            + ", ".join(f"np.asarray({e}, dtype=float).reshape(-1)" for e in a) + "])")
+
+
+def _transpose_op(op, a):
+    return f"np.asarray({a[0]}, dtype=float).T"
+
+
 def _axis_len_op(op, a):
     return f"np.asarray(int(np.asarray({a[0]}).shape[{op.axis}]))"
 
@@ -59,5 +76,9 @@ def op_renderers() -> dict:
         "_ConstOp": _const_op,
         "_AxisLenOp": _axis_len_op,
         "_ScaleByOp": _scale_by_op,
+        "_ScaleOp": _scale_op,
+        "_AddOp": _add_op,
+        "_ConcatOp": _concat_op,
+        "_TransposeOp": _transpose_op,
         "_ExternalOp": _external_op,
     }
