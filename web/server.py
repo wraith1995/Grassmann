@@ -136,11 +136,14 @@ def api_grammar(req: dict) -> dict:
     """The surface reference for the help sidebar — pulled from the live tables so it can't
     drift from what actually parses."""
     from grassmann.syntax import mcalc as _m
-    ops = {"*": "matmul / scale", "'": "dual / transpose", ".*": "elementwise ×",
-           "./": "elementwise ÷", "@": "compose", "^": "power", "+": "add", "-": "subtract",
-           "(+)": "direct sum / stack"}
+    ops = {"*": "matmul / apply / scale", "'": "dual / transpose", ".*": "elementwise ×",
+           "./": "elementwise ÷", ".^": "elementwise power", "/": "divide",
+           "^": "power", "@": "compose (f∘g)", "\\": "solve  (A⁻¹b)",
+           "(x)": "tensor / outer", "(+)": "direct sum / stack",
+           "+": "add", "-": "subtract"}
     fns = sorted(set(_m._MC_ELEMENTWISE) | {
-        "tr", "det", "logdet", "inv", "norm1", "norm2", "sum", "relu", "vector", "matrix"})
+        "tr", "det", "logdet", "inv", "pinv", "solve", "kron", "dot",
+        "norm1", "norm2", "sum", "relu", "vector", "matrix"})
     return {
         "operators": [{"op": k, "meaning": v} for k, v in ops.items()],
         "functions": fns,

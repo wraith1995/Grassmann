@@ -47,8 +47,8 @@ class McalcParseError(Exception):
 # table is sorted longest-first. ``(+)`` (direct sum) deliberately wins over ``(``.
 _OPS = sorted(
     [
-        "(+)", ".*", "./", ".^", "->",
-        "+", "-", "*", "/", "^", "'", "@",
+        "(+)", "(x)", ".*", "./", ".^", "->",
+        "+", "-", "*", "/", "^", "'", "@", "\\",
         "(", ")", "[", "]", ",", ";", ":",
     ],
     key=len,
@@ -113,9 +113,11 @@ _INFIX: dict[str, tuple[int, bool]] = {
     "*": (70, False), "/": (70, False),
     ".*": (70, False), "./": (70, False),
     "@": (70, False),                            # compose (coordinate-free extension)
+    "\\": (70, False),                           # solve / backslash:  A \ b = A⁻¹ b
+    "(x)": (65, False),                          # tensor / outer product (vectors)
     "+": (60, False), "-": (60, False),
     ";": (50, False),                            # row-stack (within [ ... ])
-    "(+)": (40, False),                          # direct sum (coordinate-free extension)
+    "(+)": (40, False),                          # direct sum / stack (coordinate-free)
 }
 _POSTFIX = {"'"}          # transpose / dual / dagger
 _APP_BP = 100             # function application  f(...) / f[...]
@@ -787,7 +789,35 @@ class _Builder:
             return self._div(a, b)
         if op in ("^", ".^"):
             return self._pow(a, b)
+        if op == "\\":
+            return self._solve(a, b)
+        if op == "(x)":
+            return self._otimes(a, b)
+        if op == "(+)":
+            return self._ostack(a, b)
         raise self.err(f"operator {op!r} not yet supported")
+
+    def _solve(self, a: _TN, b: _TN) -> _TN:
+        """``A \\ b`` — solve ``A x = b`` (i.e. ``A⁻¹ b``). A must be a (square, invertible) map."""
+        if a.kind != "mat" or b.kind != "vec":
+            raise self.err("`\\` (solve) needs a matrix on the left and a vector on the right")
+        self.uf.union(a.tgt, b.sp)           # b lives in A's codomain; result in A's domain
+        if a.var_name:
+            self.bij_vars.add(a.var_name)
+        return _TN("vec", (lambda a=a, b=b: _wrap(
+            _T.solve_apply(_node(a.emit()), _node(b.emit())))), sp=a.src)
+
+    def _otimes(self, a: _TN, b: _TN) -> _TN:
+        """``x (x) y`` — the tensor / outer product of two vectors (an element of their ⊗)."""
+        if a.kind != "vec" or b.kind != "vec":
+            raise self.err("`(x)` (tensor) needs two vectors")
+        return _TN("vec", (lambda a=a, b=b: _G.tensor(a.emit(), b.emit())), sp=self.uf.fresh())
+
+    def _ostack(self, a: _TN, b: _TN) -> _TN:
+        """``a (+) b`` — stack two vectors into their direct sum ``a ⊕ b``."""
+        if a.kind != "vec" or b.kind != "vec":
+            raise self.err("`(+)` (stack) needs two vectors")
+        return _TN("vec", (lambda a=a, b=b: _G.ostack(a.emit(), b.emit())), sp=self.uf.fresh())
 
     def _mul(self, a: _TN, b: _TN) -> _TN:  # noqa: C901
         ak, bk = a.kind, b.kind
@@ -947,6 +977,32 @@ class _Builder:
             self._mark_bij(m)            # matrixcalculus inv ⇒ invertible
             return _TN("mat", (lambda m=m: _wrap(_T.solve(_node(m.emit())))),
                        src=m.tgt, tgt=m.src)
+        if h == "pinv":
+            (m,) = args
+            if m.kind != "mat":
+                raise self.err("pinv takes a matrix")
+            return _TN("mat", (lambda m=m: _wrap(_T.Pinv(_node(m.emit())))),
+                       src=m.tgt, tgt=m.src)
+        if h == "solve":            # solve(A, b) = A⁻¹ b
+            (A, b) = args if len(args) == 2 else (None, None)
+            if A is None or A.kind != "mat" or b.kind != "vec":
+                raise self.err("solve(A, b) needs a matrix and a vector")
+            self.uf.union(A.tgt, b.sp)
+            self._mark_bij(A)
+            return _TN("vec", (lambda A=A, b=b: _wrap(
+                _T.solve_apply(_node(A.emit()), _node(b.emit())))), sp=A.src)
+        if h == "kron":
+            (A, B) = args if len(args) == 2 else (None, None)
+            if A is None or A.kind != "mat" or B.kind != "mat":
+                raise self.err("kron(A, B) needs two matrices")
+            s, t = self.uf.fresh(), self.uf.fresh()
+            return _TN("mat", (lambda A=A, B=B: _G.kron(A.emit(), B.emit())), src=s, tgt=t)
+        if h == "dot":
+            (x, y) = args if len(args) == 2 else (None, None)
+            if x is None or x.kind != "vec" or y.kind != "vec":
+                raise self.err("dot(x, y) needs two vectors")
+            self.uf.union(x.sp, y.sp)
+            return _TN("scalar", lambda x=x, y=y: self._inner(x.sp, x.emit(), y.emit()))
         if h in ("det", "logdet"):
             (m,) = args
             if m.kind != "mat":
