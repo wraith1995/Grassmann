@@ -519,10 +519,13 @@ def _external(node: object) -> str:
     data = node.data
     name = getattr(data, "name", None)
     if name is None or name not in G.EXTERNAL_NAME_TO_HEAD:
-        raise UnparseError(
-            f"cannot unparse External with opaque data {data!r}; only stdlib "
-            f"ExternalOp nodes round-trip"
-        )
+        # A non-stdlib (opaque) External — e.g. a constant basis vector inside a Hodge volume
+        # form. It doesn't round-trip to a re-parseable form, but render it readably (its name
+        # applied to any args) rather than crashing the whole pretty-print.
+        if name is not None:
+            inner = ", ".join(_t(a)[0] for a in node.args)
+            return f"{name}({inner})" if node.args else name
+        raise UnparseError(f"cannot unparse External with opaque data {data!r}")
     head = G.EXTERNAL_NAME_TO_HEAD[name]
     if head == "hadamard":
         x, y = node.args
