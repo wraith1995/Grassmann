@@ -156,10 +156,15 @@ def _err(e: Exception) -> dict:
 
 
 def api_vars(req: dict) -> dict:
-    """Free variables of an expression + their default (naming-convention) types."""
+    """Free variables of an expression + their default types, expressed over an opaque dimension
+    ``n`` (every vector/matrix is built from ``R^n`` — no dimensionless vector/matrix). Also
+    returns the dimension variables to declare (opaque by default)."""
     try:
         decls = mcalc.default_decls(req["expression"])
-        return {"vars": [{"name": n, "type": t} for n, t in decls.items()]}
+        tmap = {"scalar": "scalar", "vector": "R^n", "matrix": "R^n -> R^n"}
+        vars_out = [{"name": n, "type": tmap.get(t, t)} for n, t in decls.items()]
+        needs_n = any(t in ("vector", "matrix") for t in decls.values())
+        return {"vars": vars_out, "dims": (["n"] if needs_n else [])}
     except Exception as e:  # noqa: BLE001 - report any parse error to the UI
         return _err(e)
 
@@ -272,8 +277,9 @@ def api_code(req: dict) -> dict:
                 except Exception as e:  # noqa: BLE001
                     out["derivative_error"] = f"{type(e).__name__}: {e}"
             return out
-        dims = req.get("dims") or {d: 3 for d in r.dim_names}
-        dims = {k: int(v) for k, v in dims.items()}
+        # opaque dims default to 3; user-bound (specific) dims override
+        dims = {d: 3 for d in r.dim_names}
+        dims.update({k: int(v) for k, v in (req.get("dims") or {}).items() if str(v).strip()})
         out = {"dims": dims}
         opaque_defs, opaque_rend = _opaque_kernel_defs(req)
         renderers = {**op_renderers(), **opaque_rend}
