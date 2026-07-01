@@ -93,8 +93,8 @@ def _embed_op(op, a):          # P @ vsub  (sub-coords -> ambient), reshaped
     return base + (f".reshape({tuple(op.shape)})" if getattr(op, "shape", ()) else "")
 
 
-def _dyn_eye(op, a):           # runtime identity sized by a ref array's column axis
-    return f"np.eye(int(np.asarray({a[0]}).shape[1]))"
+def _dyn_eye(op, a):           # runtime identity sized by a ref array's axis (default column)
+    return f"np.eye(int(np.asarray({a[0]}).shape[{getattr(op, 'axis', 1)}]))"
 
 
 def _first_cols(op, a):        # _FirstColsOp(A, rank) -> A[:, :rank]  (rank orthonormal cols)
