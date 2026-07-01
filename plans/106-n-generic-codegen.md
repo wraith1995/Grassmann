@@ -41,9 +41,14 @@ lowering flows a runtime dim instead of a static int** — the same lane the FFS
 - [x] Step 3 — vmap/derivative (VECTOR-wrt): `_rep_llam_vmap` sweeps `n` runtime directions with
       `np.eye(n)`. `D(A*exp(x),x)`, `D(norm2(A*x-y)^2,x)` generic, match the engine exactly.
 - [x] Step 4 — `api_code` emits SYMBOLIC-first, falls back to `n→3`.
-- [ ] **Remaining: MATRIX-wrt binders.** `D(tr(A*X'*B*X*C),X)`, `D(logdet(inv(X)),X)` still fall
-      back to `n→3`: the vmap seed is a MATRIX `ℝⁿ⊸ℝⁿ`, so the eye is `(n², n, n)` — needs a
-      product-dim (`_ProdDimOp` → stmt-sourced `DimAtom`) + a tensor-eye op + the 4-tensor reshape.
-      Tractable (polyarray supports stmt-sourced product dims) but more plumbing.
-- Verified generic at n=4,5,6. Full suite 2346 + polyarray 138 green at every step.
-- Commits: `887b843` (1,2,4), `8a754c2` (3 vector-wrt), on `feat/mcalc-frontend`.
+- [x] **MATRIX / TENSOR-wrt binders.** The vmap seed for a matrix wrt `X : ℝⁿ⊸ℝⁿ` builds an
+      `(∏dᵢ, d₀, d₁, …)` eye: a product-dim (`_ProdShapeOp` → stmt-sourced `DimAtom`) + `_DynEyeTensorOp`.
+      Also runtime-sized `_rep_zeros` (`_DynZerosOp`) and `_rep_solve`'s `InvOp` OutSpec off the
+      operand. `D(tr(A*X'*B*X*C),X)`, `D(logdet(inv(X)),X)`, `D(X*X,X)` all n-generic.
+- [x] **Fallback order.** `api_code` tries BOTH the η-reduced and raw forms SYMBOLICALLY first,
+      then concrete dims — never settling for `n→3` while an n-generic spelling exists.
+
+**DONE.** Every mcalc example (gradients, Jacobians, matrix-wrt, logistic loss) generates
+dimension-generic numpy — verified against the engine at n=4 and n=7 (`test_ngeneric_codegen.py`).
+Full suite 2346 + polyarray 138 green throughout.
+- Commits: `887b843` (1,2,4), `8a754c2` (3 vector-wrt), then matrix/tensor-wrt, on `feat/mcalc-frontend`.
