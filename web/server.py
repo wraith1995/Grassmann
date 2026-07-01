@@ -213,7 +213,8 @@ def api_grammar(req: dict) -> dict:
            "(+)": "direct sum / stack", "+": "add", "-": "subtract"}
     fns = sorted(set(_m._MC_ELEMENTWISE) | {
         "tr", "det", "logdet", "inv", "pinv", "solve", "kron", "dot", "outer",
-        "wedge", "hodge", "norm1", "norm2", "sum", "relu", "vector", "matrix"})
+        "wedge", "hodge", "flat", "sharp", "norm1", "norm2", "sum", "relu",
+        "vector", "matrix"})
     return {
         "operators": [{"op": k, "meaning": v} for k, v in ops.items()],
         "functions": fns,

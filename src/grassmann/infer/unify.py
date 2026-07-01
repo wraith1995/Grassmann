@@ -175,12 +175,14 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             else:  # dropping the tensor-unit (Scalar) changed the arity ⇒ re-dispatch
                 unify(na, nb, store)
             return
-        # Scalar is the ⊗-unit: ``X ⊗ ℝ ≅ X``. A map into ℝ (``A ⊸ ℝ`` synthesized as
-        # ``A* ⊗ Scalar``) must unify with the bare dual ``A*`` produced by ``flat``.
-        case (OProd(), _) if any(isinstance(x, Scalar) for x in a.spaces):
+        # Scalar is the ⊗-unit (``X ⊗ ℝ ≅ X``) and a single-factor product is its factor
+        # (``OProd((X,)) ≅ X`` — a k=1 exterior/tensor power ``V⊗¹``). So an ``A ⊸ ℝ`` (≡ ``A* ⊗
+        # Scalar``) unifies with the bare dual ``A*`` from ``flat``, and ``Λ¹(V)`` (in ``V⊗¹``)
+        # with a bare ``V`` value.
+        case (OProd(), _) if len(a.spaces) == 1 or any(isinstance(x, Scalar) for x in a.spaces):
             unify(_drop_scalar_factors(a), b, store)
             return
-        case (_, OProd()) if any(isinstance(x, Scalar) for x in b.spaces):
+        case (_, OProd()) if len(b.spaces) == 1 or any(isinstance(x, Scalar) for x in b.spaces):
             unify(a, _drop_scalar_factors(b), store)
             return
         case (OPlusRep(), OPlusRep()):
@@ -249,14 +251,14 @@ def _solve_meta(m: SpaceMeta, s: Space, store: MetaStore) -> None:
 
 
 def _drop_scalar_factors(s: OProd) -> Space:
-    """An ``OProd`` with its ``Scalar`` (⊗-unit) factors removed; a single remaining factor
-    collapses to itself, an all-scalar product to ``Scalar``."""
+    """An ``OProd`` with its ``Scalar`` (⊗-unit) factors removed and a single-factor product
+    collapsed to its factor (``OProd((X,)) ≅ X``); an all-scalar product becomes ``Scalar``."""
     kept = tuple(x for x in s.spaces if not isinstance(x, Scalar))
-    if len(kept) == len(s.spaces):
-        return s
     if not kept:
         return Scalar()
-    return kept[0] if len(kept) == 1 else OProd(kept)
+    if len(kept) == 1:
+        return kept[0]
+    return s if len(kept) == len(s.spaces) else OProd(kept)
 
 
 def _ffs_map_alpha_eq(f: object, g: object) -> bool:

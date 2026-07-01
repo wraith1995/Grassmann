@@ -1118,6 +1118,18 @@ class _Builder:
             from grassmann.stdlib.exterior import exterior_power
             self.uf.set_fixed(s, exterior_power(base, k + 1), f"Omega(.,{k + 1})")
             return _TN("vec", demit, sp=s, grade=k + 1, ext_base=base)
+        if h in ("flat", "lower"):       # x♭ — lower a vector to a covector (the metric ♭)
+            (v,) = args
+            if v.kind != "vec":
+                raise self.err("flat(x) lowers a vector to a covector")
+            return _TN("cov", v.emit, sp=v.sp, usp=v.sp)   # Riesz-carried: w ↦ ⟨x, w⟩
+        if h in ("sharp", "raise"):      # a♯ — raise a covector to a vector (the metric ♯)
+            (c,) = args
+            if c.kind != "cov":
+                raise self.err("sharp(a) raises a covector to a vector")
+            if c.pmap is not None:
+                raise self.err("sharp(a): only a plain covector (no pending map) is supported")
+            return _TN("vec", c.emit, sp=c.usp, var_name=c.var_name)   # the Riesz vector
         if h in ("det", "logdet"):
             (m,) = args
             if m.kind != "mat":
