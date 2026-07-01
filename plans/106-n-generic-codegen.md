@@ -36,8 +36,14 @@ lowering flows a runtime dim instead of a static int** — the same lane the FFS
    `dims={n:3}` fallback if a node still can't. Update `_prettify`.
 
 ## Status
-- [ ] Step 1 — foundation (vars)
-- [ ] Step 2 — linear algebra
-- [ ] Step 3 — vmap/derivative
-- [ ] Step 4 — api_code wiring
-- Branch: `feat/mcalc-frontend`. Full suite must stay green at each step.
+- [x] Step 1 — foundation (vars): `DimVar → canonical input-sourced DimAtom`; `x`, `x+x` generic.
+- [x] Step 2 — linear algebra: `A*x`, `x'*x`, `0.5*x'*A*x` generic (metric `np.eye(n)` runtime).
+- [x] Step 3 — vmap/derivative (VECTOR-wrt): `_rep_llam_vmap` sweeps `n` runtime directions with
+      `np.eye(n)`. `D(A*exp(x),x)`, `D(norm2(A*x-y)^2,x)` generic, match the engine exactly.
+- [x] Step 4 — `api_code` emits SYMBOLIC-first, falls back to `n→3`.
+- [ ] **Remaining: MATRIX-wrt binders.** `D(tr(A*X'*B*X*C),X)`, `D(logdet(inv(X)),X)` still fall
+      back to `n→3`: the vmap seed is a MATRIX `ℝⁿ⊸ℝⁿ`, so the eye is `(n², n, n)` — needs a
+      product-dim (`_ProdDimOp` → stmt-sourced `DimAtom`) + a tensor-eye op + the 4-tensor reshape.
+      Tractable (polyarray supports stmt-sourced product dims) but more plumbing.
+- Verified generic at n=4,5,6. Full suite 2346 + polyarray 138 green at every step.
+- Commits: `887b843` (1,2,4), `8a754c2` (3 vector-wrt), on `feat/mcalc-frontend`.
