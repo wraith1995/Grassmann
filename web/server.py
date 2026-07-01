@@ -198,6 +198,17 @@ def api_derivative(req: dict) -> dict:
             out["wrt"] = wrt
             out["covariant"] = r.geom_param is not None
             out["required_derivatives"] = r.required_derivatives
+            # advanced η-reduction: fold the seed-λ into a coordinate-free covector/map (the
+            # "gradient" form — no explicit direction ``dx``).
+            try:
+                from grassmann.embed.ops import wrap
+                from grassmann.transform.rewrite import RIESZ_SOP, normal_form
+                eta = normal_form(r.derivative.node, RIESZ_SOP)
+                eta_latex = G.latex(wrap(eta))
+                if eta_latex != out["derivative_latex"]:
+                    out["derivative_eta_latex"] = eta_latex
+            except Exception:  # noqa: BLE001 - η-reduction is best-effort; keep the plain form
+                pass
         return out
     except Exception as e:  # noqa: BLE001
         return _err(e)
