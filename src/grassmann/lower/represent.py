@@ -305,6 +305,12 @@ class _Ctx:
     # axis means "not yet minted".  For ker/coker the recorded atom IS the complement
     # axis (``ambient − rank``), since that is the real subspace dimension there.
     ffs_dim_atoms: dict[tuple[str, int], pa.DimAtom] = field(default_factory=dict)
+    # `106`: n-generic codegen. A symbolic ``DimVar('n')`` (an mcalc dimension-polymorphic size)
+    # lowers as a RUNTIME dimension — a canonical input-sourced ``DimAtom`` minted from the first
+    # Var that carries that dim (source ``("in", var, axis)``) and reused by every later occurrence,
+    # so ``x, A : ℝⁿ`` share one atom (einsums/eyes unify) and the emitted numpy sizes off the input
+    # shapes (``np.eye(n)``) instead of a hardcoded literal. Keyed by the DimVar name.
+    dimvar_atoms: dict[str, pa.DimAtom] = field(default_factory=dict)
 
 
 # ===========================================================================
@@ -569,6 +575,7 @@ def _rep_var(e: T.Var, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> R
                 basis = _natural_basis(space, e, ctx)
             case _:                                         # (3) a concrete basis — declare in it if it fits
                 basis = _resolve_target(ctx, space, target) or _natural_basis(space, e, ctx)
+    _ensure_dimvar_atoms(ctx, e, space)          # `106`: symbolic ℝⁿ axes → canonical runtime atoms
     shape = _shape_of_space_dyn(space, ctx)
     if _is_static(shape):
         arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
@@ -604,8 +611,8 @@ def _make_dynamic_ffs_input(
     for axis, d in enumerate(dyn_shape):
         if isinstance(d, int):
             in_shape.append(d)
-        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "stmt":
-            in_shape.append(d)
+        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] in ("stmt", "in"):
+            in_shape.append(d)          # a canonical stmt (FFS δ) or input-sourced (`106` DimVar) atom
         else:
             in_shape.append(pa.DimAtom.from_input(f"δ:{name}@{axis}", name, axis))
     arr = _make_input(ctx, name, tuple(in_shape), note=f"var:{e.name}")
@@ -5181,6 +5188,16 @@ def _dyn_identity(ctx: _Ctx, space: S.Space, *, note: str) -> pa.SymArray:
     identity of the runtime rank.  Only reachable when the static fast path raised
     ``DynamicDim``; the static path stays a plain ``np.eye`` const.
     """
+    dv = _dimvar_of_space(space)          # `106`: a symbolic ℝⁿ metric ⇒ np.eye(n), n from an input
+    if dv is not None and dv in ctx.dimvar_atoms:
+        atom = ctx.dimvar_atoms[dv]
+        _, in_name, axis = atom.source
+        ref = ctx.prog.input_arrays.get(in_name)
+        if ref is not None:
+            [out] = ctx.prog.emit_stmt(
+                _DynEyeOp(axis=axis), [ref], [pa.OutSpec("dyn-eye", (atom, atom))], note=note,
+            )
+            return out
     real = _realize_ffs_for_space(ctx, space)
     delta = _shape_of(real.cols)[1]
     [out] = ctx.prog.emit_stmt(
@@ -5315,6 +5332,42 @@ def _static_dim(space: S.Space) -> int:
         ) from exc
 
 
+def _dimvar_of_space(space: S.Space) -> str | None:
+    """The ``DimVar`` name of a single-axis ``ℝⁿ`` space (or its dual), else ``None`` (`106`).
+
+    Used to size that axis by a canonical RUNTIME input-sourced atom instead of a static int, so a
+    symbolic mcalc dimension lowers to dimension-generic numpy (``np.eye(n)``, ``A.shape[0]``)."""
+    s = space.space if isinstance(space, S.Dual) else space
+    if isinstance(s, S.OPlusRep) and isinstance(s.count, S.DimVar) and isinstance(s.space, S.Scalar):
+        return s.count.name
+    return None
+
+
+def _space_axes(space: S.Space) -> tuple[S.Space, ...]:
+    """The per-array-axis component spaces of a VALUE space, mirroring ``_shape_of_space``'s axes
+    (``⊗`` factors are separate axes; a single-axis space is itself)."""
+    match space:
+        case S.Scalar():
+            return ()
+        case S.OProd(spaces):
+            return spaces
+        case S.WithInner(s, _):
+            return _space_axes(s)
+        case _:
+            return (space,)
+
+
+def _ensure_dimvar_atoms(ctx: "_Ctx", e: T.Var, space: S.Space) -> None:
+    """Mint (once) the canonical runtime ``DimAtom`` for each ``DimVar`` axis of ``e``'s space,
+    sourcing the FIRST occurrence from THIS var's shape axis; later occurrences reuse it so all
+    ``ℝⁿ`` values share one atom (einsums/eyes unify) (`106`)."""
+    name = _var_name(e)
+    for axis, ax_space in enumerate(_space_axes(space)):
+        dv = _dimvar_of_space(ax_space)
+        if dv is not None and dv not in ctx.dimvar_atoms:
+            ctx.dimvar_atoms[dv] = pa.DimAtom.from_input(dv, name, axis)
+
+
 def _shape_of_space(space: S.Space) -> tuple[int, ...]:
     """The polyarray array shape mirroring ``space`` (`41 §0`).
 
@@ -5362,6 +5415,9 @@ def _shape_of_space_dyn(
         case S.WithInner(s, _):
             return _shape_of_space_dyn(s, ctx)
         case _:
+            dv = _dimvar_of_space(space)          # `106`: a symbolic ℝⁿ axis → its runtime atom
+            if dv is not None and dv in ctx.dimvar_atoms:
+                return (ctx.dimvar_atoms[dv],)
             return _shape_of_space(space)
 
 
@@ -5591,10 +5647,14 @@ class _ConstOp:
 
 @dataclass(frozen=True)
 class _DynEyeOp:
-    """A runtime identity sized by a reference array's column axis (the FFS rank ``δ_f``)."""
+    """A runtime identity sized by a reference array's axis (default the FFS rank column ``δ_f`` at
+    axis 1; ``axis=k`` sizes ``np.eye`` off ``ref.shape[k]`` — used for a `106` ``DimVar('n')``
+    whose canonical atom sources from an input's shape axis)."""
 
-    def __call__(self, ref: np.ndarray) -> np.ndarray:  # ref is (ambient, δ)
-        return np.eye(int(np.asarray(ref).shape[1]))
+    axis: int = 1
+
+    def __call__(self, ref: np.ndarray) -> np.ndarray:
+        return np.eye(int(np.asarray(ref).shape[self.axis]))
 
 
 @dataclass(frozen=True)
