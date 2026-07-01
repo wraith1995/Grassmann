@@ -631,6 +631,8 @@ async function loadGrammar() {
   const box = $("grammar"); box.innerHTML = "";
   box.appendChild(grammarSection("Operators",
     (g.operators || []).map(o => `<span class="grow"><code>${escHtml(o.op)}</code> <span class="gm">${escHtml(o.meaning)}</span></span>`)));
+  box.appendChild(grammarSection("Derivatives (inline; leave w.r.t. empty)",
+    (g.derivatives || []).map(o => `<span class="grow"><code>${escHtml(o.op)}</code> <span class="gm">${escHtml(o.meaning)}</span></span>`)));
   box.appendChild(grammarSection("Functions", (g.functions || []).map(f => `<code>${escHtml(f)}</code>`)));
   box.appendChild(grammarSection("Spaces", (g.spaces || []).map(s => `<code>${escHtml(s)}</code>`)));
   box.appendChild(grammarSection("Types", (g.types || []).map(t => `<code>${escHtml(t)}</code>`)));
@@ -690,6 +692,9 @@ const EXAMPLES = [
                   params: ["u1", "u2"],
                   components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] }],
     vars: [{ name: "u", type: "U" }] },
+  { label: "D(f,x): gradient", expr: "D(0.5*x'*x, x)", wrt: "",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^3" }] },
   { label: "wedge / area", expr: "norm2(wedge(a, b))^2", wrt: "a",
     dims: [], spaces: [], functions: [], bases: [],
     vars: [{ name: "a", type: "Lambda(R^3, 1)" }, { name: "b", type: "Lambda(R^3, 1)" }] },
