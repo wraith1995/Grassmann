@@ -321,16 +321,7 @@ def api_code(req: dict) -> dict:
             from grassmann.lower.represent import represent
             return represent(node, target=out_basis) if out_basis is not None else represent(node)
 
-        def _emit_one(expr, fname):
-            # Prefer the SYMBOLIC (dimension-generic) node — ``n`` taken from the input shapes at
-            # run time (``np.eye(n)``) — and fall back to concrete dims (``n→3``) only if it can't
-            # lower yet (e.g. a non-η-reducible derivative whose vmap isn't dynamic-shaped).
-            sym = expr.node if hasattr(expr, "node") else expr
-            try:
-                prog = _compile(sym)
-            except Exception:  # noqa: BLE001 - dimension-generic lowering not available for this node
-                inst = r.instantiate(expr, dims)
-                prog = _compile(inst.node if hasattr(inst, "node") else inst)
+        def _render(prog, fname):
             src = _prettify(pa.to_numpy_source(prog, func_name=fname, op_renderers=renderers),
                             key_to_name)
             if opaque_defs:                          # self-contained opaque kernels
@@ -338,23 +329,35 @@ def api_code(req: dict) -> dict:
                                   "import numpy as np\n\n" + opaque_defs + "\n", 1)
             return src
 
+        def _node_of(expr):
+            return expr.node if hasattr(expr, "node") else expr
+
         def emit(expr, fname):
-            # Prefer the η-REDUCED form: it folds the seed λ into a direct covector/map, so the
-            # emitted numpy computes the gradient/Jacobian directly instead of materializing a map
-            # by looping a direction ``dx`` over a basis. Fall back to the raw form if η-reduction
-            # doesn't compile (e.g. an op the codegen can't yet render).
+            # Two axes of preference, tried best-first:
+            #  * η-REDUCED over raw: the η form folds the seed λ into a direct covector/map (no
+            #    direction-sweep) — cleaner and often the only dimension-generic spelling.
+            #  * SYMBOLIC over concrete: ``n`` from the input shapes at run time (``np.eye(n)``) vs
+            #    a hardcoded ``n→3``. So we try BOTH forms symbolically FIRST, then fall back to
+            #    concrete dims for either — never settling for n→3 while an n-generic spelling exists.
             from grassmann.embed.ops import wrap
             from grassmann.transform.rewrite import RIESZ_SOP, normal_form
             try:
                 reduced = wrap(normal_form(expr.node, RIESZ_SOP))
             except Exception:  # noqa: BLE001
                 reduced = None
-            if reduced is not None:
+            candidates = [c for c in (reduced, expr) if c is not None]
+            last: Exception | None = None
+            for c in candidates:                     # 1. dimension-generic (symbolic)
                 try:
-                    return _emit_one(reduced, fname)
-                except Exception:  # noqa: BLE001 - fall back to the un-reduced form
-                    pass
-            return _emit_one(expr, fname)
+                    return _render(_compile(_node_of(c)), fname)
+                except Exception as e:  # noqa: BLE001
+                    last = e
+            for c in candidates:                     # 2. concrete dims (n→3) fallback
+                try:
+                    return _render(_compile(_node_of(r.instantiate(c, dims))), fname)
+                except Exception as e:  # noqa: BLE001
+                    last = e
+            raise last if last is not None else RuntimeError("codegen: no candidate compiled")
 
         # Emit each part independently — the derivative may hit an unsupported op (G12:
         # CallOp/sub-program) while the primal still emits fine.

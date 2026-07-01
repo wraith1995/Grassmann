@@ -782,8 +782,12 @@ def _rep_const(
 def _rep_zeros(
     ctx: _Ctx, space: S.Space, *, note: str, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    shape = _shape_of_space(space)
-    arr = _const(ctx, np.zeros(shape), note=note)
+    dyn = _shape_of_space_dyn(space, ctx)
+    if _is_static(dyn):
+        arr = _const(ctx, np.zeros(dyn), note=note)
+    else:                                    # `106`: a symbolic ℝⁿ zero ⇒ np.zeros(n) at run time
+        dz = _dyn_zeros(ctx, dyn, note=note)
+        arr = dz if dz is not None else _const(ctx, np.zeros(_shape_of_space(space)), note=note)
     # (A) the zero vector is zero in EVERY basis — realize directly in the target, no cob.
     want = _resolve_target(ctx, space, target)
     return Rep(arr, want if want is not None else default_basis(space), space)
@@ -2672,7 +2676,9 @@ def _rep_solve(
     _assert_square_full_rank(ctx, f_rep.array, note="assert:solve-bij")
     [out] = ctx.prog.emit_stmt(
         pa.InvOp(), [f_rep.array],
-        [pa.OutSpec("inv", _shape_of_space(space))], note="solve:InvOp",
+        # the inverse has the SAME (square) shape as ``f`` — read it off the realized operand so a
+        # symbolic ℝⁿ⊸ℝⁿ (`106`) sizes dynamically instead of via static ``_shape_of_space``.
+        [pa.OutSpec("inv", _shape_of(f_rep.array))], note="solve:InvOp",
     )
     # Honest tag: the inverse map ``f⁻¹`` (cod⊸dom) lives in the operand's dual-swapped slot
     # bases (the numeric inverse acts in whatever basis ``f`` arrived in), not ``default_basis``.
@@ -3834,6 +3840,15 @@ def _rep_llam_vmap(
             if dv is not None and dv in ctx.dimvar_atoms:
                 eyes.append(_dyn_identity(ctx, vsp, note=f"llam:vmap:eye({v.name})"))
                 continue
+            # `106`: a MULTI-axis DimVar binder (a matrix/tensor seed, e.g. wrt X : ℝⁿ⊸ℝⁿ) — the
+            # eye is (∏dᵢ, d₀, d₁, …), sized off the axes' source inputs at run time.
+            dyn = _shape_of_space_dyn(vsp, ctx)
+            if len(dyn) > 1 and all(isinstance(d, pa.DimAtom) and d.source
+                                    and d.source[0] == "in" for d in dyn):
+                te = _dyn_eye_tensor(ctx, dyn, note=f"llam:vmap:eye({v.name})")
+                if te is not None:
+                    eyes.append(te)
+                    continue
             # Runtime-rank binder (a dynamic FFS space, e.g. an exterior power Λᵏ whose rank is a
             # runtime SVD δ): sweep its basis with a δ×δ identity sized from the var's realized
             # basis ``cols`` (`51 §FFS-δ`).  An FFS space is single-axis, so the (δ,δ) identity
@@ -5225,6 +5240,56 @@ def _dyn_identity(ctx: _Ctx, space: S.Space, *, note: str) -> pa.SymArray:
     return out
 
 
+def _dyn_zeros(
+    ctx: _Ctx, dyn: tuple[int | pa.DimAtom, ...], *, note: str,
+) -> pa.SymArray | None:
+    """A runtime ``np.zeros(d₀, d₁, …)`` sized off the axes' source inputs (`106`); ``None`` if any
+    axis isn't an input-sourced runtime atom (so the caller falls back)."""
+    refs: list[pa.SymArray] = []
+    axes: list[int] = []
+    for atom in dyn:
+        if not (isinstance(atom, pa.DimAtom) and atom.source and atom.source[0] == "in"):
+            return None
+        _, in_name, axis = atom.source
+        ref = ctx.prog.input_arrays.get(in_name)
+        if ref is None:
+            return None
+        refs.append(ref)
+        axes.append(axis)
+    [out] = ctx.prog.emit_stmt(
+        _DynZerosOp(tuple(axes)), refs, [pa.OutSpec("dyn-zeros", tuple(dyn))], note=note,
+    )
+    return out
+
+
+def _dyn_eye_tensor(
+    ctx: _Ctx, dyn: tuple[int | pa.DimAtom, ...], *, note: str,
+) -> pa.SymArray | None:
+    """The vmap identity of a MULTI-axis DimVar binder (a matrix/tensor derivative seed) — an
+    ``(∏dᵢ, d₀, d₁, …)`` array sized off the axes' source inputs at run time (`106`). ``None`` if
+    any axis isn't an input-sourced runtime atom (so the caller falls back)."""
+    refs: list[pa.SymArray] = []
+    axes: list[int] = []
+    for atom in dyn:
+        if not (isinstance(atom, pa.DimAtom) and atom.source and atom.source[0] == "in"):
+            return None
+        _, in_name, axis = atom.source
+        ref = ctx.prog.input_arrays.get(in_name)
+        if ref is None:
+            return None
+        refs.append(ref)
+        axes.append(axis)
+    axes_t = tuple(axes)
+    # the flattened dimension ∏dᵢ, as a runtime atom sourced from a tiny 0-d prod Stmt.
+    ctx.prog.emit_stmt(_ProdShapeOp(axes_t), refs, [pa.OutSpec("vmap-eye-prod", ())],
+                       note=note + ":prod")
+    prod = pa.DimAtom(name="vmap-eye:prod", source=(len(ctx.prog.statements) - 1, 0))
+    [out] = ctx.prog.emit_stmt(
+        _DynEyeTensorOp(axes_t), refs, [pa.OutSpec("dyn-eye-tensor", (prod, *dyn))], note=note,
+    )
+    return out
+
+
 def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
     """Is ``basis`` a *non-orthonormal* basis needing an explicit Gram (`73 Topic 2`)?
 
@@ -5674,6 +5739,42 @@ class _DynEyeOp:
 
     def __call__(self, ref: np.ndarray) -> np.ndarray:
         return np.eye(int(np.asarray(ref).shape[self.axis]))
+
+
+@dataclass(frozen=True)
+class _ProdShapeOp:
+    """``∏ refs[i].shape[axes[i]]`` as a 0-d int — the flattened size of a multi-axis DimVar binder
+    (a matrix/tensor derivative seed) (`106`)."""
+
+    axes: tuple[int, ...]
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        return np.asarray(int(np.prod(
+            [int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)])))
+
+
+@dataclass(frozen=True)
+class _DynEyeTensorOp:
+    """``np.eye(∏dᵢ).reshape(∏dᵢ, d₀, d₁, …)`` — the vmap identity of a MULTI-axis DimVar binder
+    (a matrix/tensor seed ``ℝⁿ⊸ℝⁿ``): ``∏dᵢ`` runtime directions, each a basis tensor. Each ``dᵢ``
+    is read from ``refs[i].shape[axes[i]]`` (`106`)."""
+
+    axes: tuple[int, ...]
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        dims = [int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)]
+        prod = int(np.prod(dims)) if dims else 1
+        return np.eye(prod).reshape(prod, *dims)
+
+
+@dataclass(frozen=True)
+class _DynZerosOp:
+    """``np.zeros(d₀, d₁, …)`` sized off ``refs[i].shape[axes[i]]`` — a symbolic ℝⁿ zero (`106`)."""
+
+    axes: tuple[int, ...]
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        return np.zeros(tuple(int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)))
 
 
 @dataclass(frozen=True)

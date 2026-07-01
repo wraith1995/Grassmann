@@ -97,6 +97,21 @@ def _dyn_eye(op, a):           # runtime identity sized by a ref array's axis (d
     return f"np.eye(int(np.asarray({a[0]}).shape[{getattr(op, 'axis', 1)}]))"
 
 
+def _prod_shape(op, a):        # ∏ refs[i].shape[axes[i]] — flattened multi-axis DimVar binder dim
+    inner = ", ".join(f"int(np.asarray({a[i]}).shape[{ax}])" for i, ax in enumerate(op.axes))
+    return f"np.asarray(int(np.prod([{inner}])))"
+
+
+def _dyn_eye_tensor(op, a):    # np.eye(∏dᵢ).reshape(∏dᵢ, *dims) — matrix/tensor vmap seed identity
+    dims = ", ".join(f"int(np.asarray({a[i]}).shape[{ax}])" for i, ax in enumerate(op.axes))
+    return (f"(lambda _d: np.eye(int(np.prod(_d))).reshape(int(np.prod(_d)), *_d))([{dims}])")
+
+
+def _dyn_zeros(op, a):         # np.zeros((d₀, d₁, …)) — a symbolic ℝⁿ zero sized off input shapes
+    dims = ", ".join(f"int(np.asarray({a[i]}).shape[{ax}])" for i, ax in enumerate(op.axes))
+    return f"np.zeros(({dims},))"
+
+
 def _first_cols(op, a):        # _FirstColsOp(A, rank) -> A[:, :rank]  (rank orthonormal cols)
     return f"np.asarray({a[0]}, dtype=float)[:, :int({a[1]})]"
 
@@ -219,6 +234,9 @@ def op_renderers() -> dict:
         "_ProjectOp": _project_op,
         "_EmbedOp": _embed_op,
         "_DynEyeOp": _dyn_eye,
+        "_ProdShapeOp": _prod_shape,
+        "_DynEyeTensorOp": _dyn_eye_tensor,
+        "_DynZerosOp": _dyn_zeros,
         "_IdentityMatOp": _identity_mat,
         "_ReshapeOp": _reshape_op,
     }
