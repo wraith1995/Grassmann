@@ -29,6 +29,8 @@ a different basis (`41 §0` strategy).
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -124,6 +126,41 @@ class Rep:
 
 
 # ===========================================================================
+# Budget override (mask lane)
+# ===========================================================================
+# `represent` builds under `force_stmts` (every op → an imperative Stmt; the
+# build-then-simplify default). A caller can instead request the RATIONAL lane —
+# every op run inline as a closed-form `RationalFunction` over the program inputs,
+# no residual Stmts — so the result is a polynomial in those inputs. oracle uses
+# this to inline a derivative-DOF contraction over the cell vertices and detect
+# structural zeros symbolically (its sparsity mask), instead of probing.
+_REPRESENT_BUDGET: contextvars.ContextVar = contextvars.ContextVar(
+    "_gr_represent_budget", default=None
+)
+
+
+@contextlib.contextmanager
+def rational_lane():
+    """Within this context, `represent` builds programs in the closed-form RATIONAL lane
+    (statement-free RF over the inputs) instead of the default `force_stmts` lane."""
+    tok = _REPRESENT_BUDGET.set(pa.SymbolicBudget.build_big_symbols(retain_covariant=True))
+    try:
+        yield
+    finally:
+        _REPRESENT_BUDGET.reset(tok)
+
+
+def _lowering_budget() -> "pa.SymbolicBudget":
+    """The budget for a `represent`-built program: the mask-lane override, else `force_stmts`."""
+    return _REPRESENT_BUDGET.get() or pa.SymbolicBudget.force_stmts()
+
+
+def _rational_lane() -> bool:
+    """True inside `rational_lane()` — build statement-free closed-form RF (see `_REPRESENT_BUDGET`)."""
+    return _REPRESENT_BUDGET.get() is not None
+
+
+# ===========================================================================
 # Public entry point.
 # ===========================================================================
 
@@ -154,7 +191,7 @@ def represent(
     The program is built under polyarray's ``force_stmts`` budget (`42 §A4`) and the
     `41 §5` post-pass (``partial_eval``) is applied before returning.
     """
-    prog = pa.Program("represent", budget=pa.SymbolicBudget.force_stmts())
+    prog = pa.Program("represent", budget=_lowering_budget())
     ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={})
 
     rep = _rep(term, ctx, target=target)
@@ -169,8 +206,13 @@ def represent(
 
 
 def _post_pass(prog: pa.Program) -> pa.Program:
-    """`41 §5`: ``analyze`` (report) then aggressive ``partial_eval`` (collapse)."""
+    """`41 §5`: ``analyze`` (report) then aggressive ``partial_eval`` (collapse).
+
+    In the RATIONAL lane the whole point is to KEEP closed-form RF cells (statement-free,
+    so the program is inlinable), so the collapse-to-Stmts step is skipped."""
     pa.analyze(prog)  # structural cost report (side-effect-free; keeps the seam explicit)
+    if _REPRESENT_BUDGET.get() is not None:
+        return prog
     return pa.partial_eval(prog, max_cell_size=_MAX_CELL_SIZE)
 
 
@@ -2076,11 +2118,22 @@ def _rep_eval(
 
     basis = _result_basis_from_factors(f_rep.basis, contracted, space)
     out_shape = tuple(dim_of_label[lab] for lab in out_labels)
-    [out] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp(spec), operands,
-        [pa.OutSpec("eval", out_shape)],
-        note=f"eval:contract@{sorted(contracted)}",
-    )
+    if _rational_lane():
+        # RATIONAL lane: contract INLINE as per-cell symbolic RF, so the result is a closed-form
+        # polynomial in the program inputs (no residual bulk `EinsumStmtOp`). This is what lets a
+        # derivative-DOF contraction (e.g. Morley `∇u·n`) inline over the cell vertices, so oracle's
+        # sparsity mask can detect structural zeros with `is_zero`. np.einsum runs on object cells.
+        cells = [np.asarray(op.cells) for op in operands]
+        res = np.asarray(np.einsum(spec, *cells))
+        if tuple(res.shape) != tuple(out_shape):
+            res = res.reshape(out_shape)
+        out = pa.SymArray(res, program=ctx.prog, name="eval")
+    else:
+        [out] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp(spec), operands,
+            [pa.OutSpec("eval", out_shape)],
+            note=f"eval:contract@{sorted(contracted)}",
+        )
     rep = Rep(out, basis, space, free_labels=out_free)
     # Un-fuse a surviving map-space slot.  When ``f``'s surviving slot is itself a *fused*
     # map space (its f-array axis is a single product-dim — e.g. the cod of a ``Kron``/``Pinv``
@@ -2131,10 +2184,14 @@ def _fuse_arg_to_slot(
     if space_dims[0] == slot or prod != slot:
         return arg_rep
     new_shape = (slot, *ashape[n_space:])
-    [fused] = ctx.prog.emit_stmt(
-        _ReshapeOp(tuple(new_shape)), [arg_rep.array],
-        [pa.OutSpec("fuse-arg", new_shape)], note=f"eval:fuse-arg-axes@{pos}",
-    )
+    if _rational_lane():
+        fused = pa.SymArray(
+            np.asarray(arg_rep.array.cells).reshape(new_shape), program=ctx.prog, name="fuse-arg")
+    else:
+        [fused] = ctx.prog.emit_stmt(
+            _ReshapeOp(tuple(new_shape)), [arg_rep.array],
+            [pa.OutSpec("fuse-arg", new_shape)], note=f"eval:fuse-arg-axes@{pos}",
+        )
     return Rep(fused, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
 
 
@@ -2172,10 +2229,14 @@ def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     if cur_prod != want_prod:
         return rep  # not a pure reshape of the space axes — leave untouched
     new_shape = tuple(want_space_shape) + tuple(ashape[n_space:])
-    [unfused] = ctx.prog.emit_stmt(
-        _ReshapeOp(new_shape), [rep.array],
-        [pa.OutSpec("eval-unfuse", new_shape)], note="eval:unfuse-result-slot",
-    )
+    if _rational_lane():
+        unfused = pa.SymArray(
+            np.asarray(rep.array.cells).reshape(new_shape), program=ctx.prog, name="eval-unfuse")
+    else:
+        [unfused] = ctx.prog.emit_stmt(
+            _ReshapeOp(new_shape), [rep.array],
+            [pa.OutSpec("eval-unfuse", new_shape)], note="eval:unfuse-result-slot",
+        )
     return Rep(unfused, rep.basis, rep.space, free_labels=rep.free_labels)
 
 
@@ -2446,7 +2507,7 @@ def _build_lam_subprogram(
     cached = parent.lam_subprograms.get(key)
     if cached is not None:
         return cached
-    sub = pa.Program("lam", budget=pa.SymbolicBudget.force_stmts())
+    sub = pa.Program("lam", budget=_lowering_budget())
     # Do NOT inherit the parent's pins for the sub-inputs: a free var pinned to a basis realized by
     # FRAME VARS (a list_basis etc.) would be re-realized inside the sub-Program, leaking those frame
     # vars as un-fed sub-inputs.  Declaring the sub-inputs frame-var-free (default/natural) keeps the
@@ -3671,7 +3732,7 @@ def _rep_llam_vmap(
     free_vars = [v for v in _free_term_vars(body) if v.uid not in bound_uids]
 
     # 1. Build the body sub-Program (mirror ``_build_lam_subprogram``'s structure).
-    sub = pa.Program("llam_body", budget=pa.SymbolicBudget.force_stmts())
+    sub = pa.Program("llam_body", budget=_lowering_budget())
     sub_ctx = _Ctx(prog=sub, basis_env=ctx.basis_env, inputs={})
     # 2. Inputs IN ORDER: the bound vars FIRST (each a rank-1 input in its binding basis), then the
     #    body's free vars.  Lowering the body may ALSO pull in extra inputs (e.g. the abstract
@@ -4976,6 +5037,8 @@ def _assert_axis_dims(
             f"Eval/Compose: contracted dim mismatch — f axis {pos}={fshape[pos]} "
             f"vs arg axis 0={ashape[0]}"
         )
+    if _rational_lane():
+        return  # the static check above suffices; skip the runtime AssertOp (keep it statement-free)
     # Always emit the runtime dim-equality AssertOp (static axes too, `41 §4`).
     _assert_contract_axes_runtime(ctx, f_arr, pos, arg_rep.array, 0, note=note)
 
