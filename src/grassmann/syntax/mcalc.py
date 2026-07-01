@@ -1098,15 +1098,34 @@ class _Builder:
         if h == "D":                     # total (covariant) derivative  D(f, x) = ∂f/∂x
             (fn, xv) = args if len(args) == 2 else (None, None)
             if fn is None or getattr(xv, "var_name", None) is None:
-                raise self.err("D(f, x) needs an expression f and a variable x")
-            if fn.kind == "scalar":      # ∂(scalar)/∂x — a covector (the differential, a 1-form)
-                t = self.uf.fresh(); self.uf.set_fixed(t, _G.R, "R")
-                return _TN("mat", (lambda fn=fn, xv=xv: _G.diff(fn.emit(), xv.emit())),
-                           src=xv.sp, tgt=t)
-            if fn.kind == "vec":         # ∂(vector)/∂x — the Jacobian map
-                return _TN("mat", (lambda fn=fn, xv=xv: _G.diff(fn.emit(), xv.emit())),
-                           src=xv.sp, tgt=fn.sp)
-            raise self.err("D(f, x): f must be a scalar or vector expression")
+                # x must be a bare VARIABLE (a tensor) — never a function (you can't differentiate
+                # with respect to a map / non-linear function).
+                raise self.err("D(f, x) needs an expression f and a tensor variable x "
+                               "(differentiate w.r.t. any vector/matrix/tensor — not a function)")
+
+            def _slot(space, lab):
+                s = self.uf.fresh(); self.uf.set_fixed(s, space, lab); return s
+
+            def _space_slot(tn, lab):
+                # the slot carrying a value's FULL space, across kinds (so ∂f/∂x can range over any
+                # tensor x and land in any tensor f): scalar→ℝ, vec→its slot, cov→V*, mat→V⊸W.
+                if tn.kind == "scalar":
+                    return _slot(_G.R, "R")
+                if tn.kind == "vec":
+                    return tn.sp
+                if tn.kind == "cov":
+                    return _slot(_G.dual(self.space_of(tn.usp)), lab)
+                if tn.kind == "mat":
+                    return _slot(self.space_of(tn.src) >> self.space_of(tn.tgt), lab)
+                if tn.sp != -1:          # a geometry/tangent value carrying a plain space slot
+                    return tn.sp
+                raise self.err(f"D(f, x): cannot differentiate a {tn.kind!r} operand")
+
+            # ∂f/∂x is the linear map  (x's space) ⊸ (f's space).
+            src = _space_slot(xv, "D-dom")
+            tgt = _space_slot(fn, "D-cod")
+            return _TN("mat", (lambda fn=fn, xv=xv: _G.diff(fn.emit(), xv.emit())),
+                       src=src, tgt=tgt)
         if h == "d":                     # exterior derivative  d(g, x) : Ωᵏ → Ωᵏ⁺¹
             (g, xv) = args if len(args) == 2 else (None, None)
             if g is None or getattr(xv, "var_name", None) is None:

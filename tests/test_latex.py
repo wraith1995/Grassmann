@@ -54,7 +54,8 @@ def test_tensor_over_sum_parenthesizes():
 
 
 def test_compose():
-    assert G.latex(A @ A) == r"A \circ A"
+    # ``∘`` always carries the slot subscript naming which argument the operand feeds.
+    assert G.latex(A @ A) == r"A \circ_{0} A"
 
 
 def test_nondefault_positions_surface_as_subscripts():

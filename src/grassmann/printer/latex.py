@@ -246,9 +246,12 @@ def _render_app(f: object, pos: tuple[int, ...], args: tuple[object, ...]) -> st
 
 
 def _render_compose(f: _t.Term, pos: tuple[int, ...], gs: tuple[_t.Term, ...]) -> tuple[str, int]:
-    if len(gs) == 1 and pos == (0,):
+    # The subscript on ``∘`` names WHICH argument slot(s) of ``f`` the operand feeds — shown
+    # always (including the default single-slot ``∘₀``) so the rendering is unambiguous.
+    if len(gs) == 1:
         op = BINOPS["compose"]
-        return f"{_sub(f, Prec.COMPOSE)} {op.latex} {_sub(gs[0], Prec.COMPOSE)}", Prec.COMPOSE
+        return (f"{_sub(f, Prec.COMPOSE)} {op.latex}_{{{_idx(pos)}}} "
+                f"{_sub(gs[0], Prec.COMPOSE)}", Prec.COMPOSE)
     inside = ", ".join(_sub(g, 0) for g in gs)
     return rf"{_sub(f, Prec.POSTFIX)} \circ_{{{_idx(pos)}}} ({inside})", Prec.COMPOSE
 

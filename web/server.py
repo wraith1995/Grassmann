@@ -155,6 +155,24 @@ def _err(e: Exception) -> dict:
     return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _eta_latex(expr) -> str | None:
+    """The advanced η-reduction of ``expr`` as LaTeX (fold a seed-linear λ into a coordinate-free
+    covector/map). Always returned so the panel is ALWAYS shown — even when the reduction leaves
+    the term unchanged. ``None`` only if η-reduction itself fails. Any binder that survives is
+    α-canonicalized to a nameless ``%1`` — renamed back to the original binder's name for
+    readability."""
+    try:
+        from grassmann.embed.ops import wrap
+        from grassmann.transform.rewrite import RIESZ_SOP, normal_form
+        node = expr.node
+        eta_latex = G.latex(wrap(normal_form(node, RIESZ_SOP)))
+        for i, sv in enumerate(getattr(node, "vars", ())):
+            eta_latex = eta_latex.replace(f"\\%{i + 1}", sv.name)
+        return eta_latex
+    except Exception:  # noqa: BLE001 - η-reduction is best-effort
+        return None
+
+
 def api_vars(req: dict) -> dict:
     """Free variables of an expression + their default types, expressed over an opaque dimension
     ``n`` (every vector/matrix is built from ``R^n`` — no dimensionless vector/matrix). Also
@@ -182,6 +200,7 @@ def api_derivative(req: dict) -> dict:
                                 functions=functions or None, bases=bases or None)
         out = {
             "primal_latex": G.latex(r.primal),
+            "primal_eta_latex": _eta_latex(r.primal),
             "dim_names": r.dim_names,
             "var_kinds": r.var_kinds,
         }
@@ -195,20 +214,10 @@ def api_derivative(req: dict) -> dict:
             out["basis_errors"] = errs
         if r.derivative is not None:
             out["derivative_latex"] = G.latex(r.derivative)
+            out["derivative_eta_latex"] = _eta_latex(r.derivative)
             out["wrt"] = wrt
             out["covariant"] = r.geom_param is not None
             out["required_derivatives"] = r.required_derivatives
-            # advanced η-reduction: fold the seed-λ into a coordinate-free covector/map (the
-            # "gradient" form — no explicit direction ``dx``).
-            try:
-                from grassmann.embed.ops import wrap
-                from grassmann.transform.rewrite import RIESZ_SOP, normal_form
-                eta = normal_form(r.derivative.node, RIESZ_SOP)
-                eta_latex = G.latex(wrap(eta))
-                if eta_latex != out["derivative_latex"]:
-                    out["derivative_eta_latex"] = eta_latex
-            except Exception:  # noqa: BLE001 - η-reduction is best-effort; keep the plain form
-                pass
         return out
     except Exception as e:  # noqa: BLE001
         return _err(e)

@@ -176,20 +176,25 @@
 
       <!-- ===================== EXPRESSION ===================== -->
       <div class="sentence">
-        <label>derivative of</label>
-        <input id="expr" type="text" spellcheck="false" placeholder="0.5*x'*A*x">
-        <label>w.r.t.</label>
-        <input id="wrt" type="text" spellcheck="false" placeholder="x">
+        <label>expression</label>
+        <input id="expr" type="text" spellcheck="false" placeholder="D(0.5*x'*A*x, x)">
         <button id="compute" type="button">Compute</button>
       </div>
+      <div class="sub" style="margin:-4px 0 8px">Take derivatives inline: <code>D(f, x)</code>
+        (total / covariant) and <code>d(g, x)</code> (exterior). Both the expression and its
+        η-reduction are shown.</div>
 
       <div id="error"></div>
       <div id="flash"></div>
 
       <!-- ===================== OUTPUT ===================== -->
       <div class="out" id="out" style="display:none">
-        <div class="card"><h3>Function</h3><div class="math" id="primal"></div></div>
-        <div class="card" id="derivcard"><h3 id="dlabel">Derivative</h3><div class="math" id="deriv"></div></div>
+        <div class="card"><h3>Expression</h3><div class="math" id="primal"></div></div>
+        <div class="card" id="primaletacard" style="display:none">
+          <h3>After η-reduction<span class="badge">reduced form</span></h3>
+          <div class="cap">a seed-linear λ folded into a coordinate-free covector / map (no explicit direction dx)</div>
+          <div class="math" id="primaleta"></div></div>
+        <div class="card" id="derivcard" style="display:none"><h3 id="dlabel">Derivative</h3><div class="math" id="deriv"></div></div>
         <div class="card" id="etacard" style="display:none">
           <h3>Derivative after η-reduction<span class="badge">gradient form</span></h3>
           <div class="cap">the seed λdx folded into a coordinate-free covector / map (no explicit direction)</div>
@@ -542,8 +547,13 @@ async function detectVars() {
   const res = await post("/api/vars", { expression: expr });
   if (res.error) { showError(res.error); renderVars(); return; }
   showError("");
-  for (const v of res.vars)
-    if (!varsList.some(x => x.name === v.name)) varsList.push({ name: v.name, type: v.type });
+  for (const v of res.vars) {
+    // skip names that are already declared as a variable OR as a function (e.g. the chart
+    // ``sphere`` in ``D(v'*w, sphere)`` is a parameterization, not a variable — don't add it).
+    if (varsList.some(x => x.name === v.name)) continue;
+    if (functionsList.some(f => f.name === v.name)) continue;
+    varsList.push({ name: v.name, type: v.type });
+  }
   // auto-declare any dimensions the detected types reference (opaque by default)
   let dimsChanged = false;
   for (const n of (res.dims || []))
@@ -554,29 +564,33 @@ async function detectVars() {
 
 // ===================== COMPUTE =====================
 async function runDerivative() {
-  const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
+  const expr = $("expr").value.trim();
   if (!expr) return;
   const res = await post("/api/derivative",
-    { expression: expr, wrt: wrt || null, decls: declsObj(), spaces: spacesObj(),
+    { expression: expr, wrt: null, decls: declsObj(), spaces: spacesObj(),
       functions: functionsArr(), bases: basesArr(), realize: realizeObj() });
   if (res.error) { showError(res.error); $("out").style.display = "none"; return; }
   const berrs = Object.entries(res.basis_errors || {});
   showError(berrs.length ? "Basis: " + berrs.map(([k, v]) => `${k}: ${v}`).join("; ") : "");
   $("out").style.display = "block";
-  LAST_PRIMAL = res.primal_latex || ""; LAST_DERIV = res.derivative_latex || "";
+  LAST_PRIMAL = res.primal_latex || ""; LAST_DERIV = res.derivative_latex || res.primal_latex || "";
   $("primal").innerHTML = `$$${res.primal_latex}$$`;
+  // the expression's η-reduction (folds an inline D(f,x) into its coordinate-free gradient form)
+  if (res.primal_eta_latex) {
+    $("primaleta").innerHTML = `$$${res.primal_eta_latex}$$`;
+    $("primaletacard").style.display = "block";
+  } else {
+    $("primaletacard").style.display = "none";
+  }
+  // legacy w.r.t. derivative panels (only when a wrt-derivative is returned)
   if (res.derivative_latex) {
-    const cov = res.covariant;
-    $("dlabel").innerHTML = (cov ? `Covariant derivative ∇<sub>∂${escHtml(wrt)}</sub>` : `Derivative ∂/∂${escHtml(wrt)}`)
-      + (cov ? `<span class="badge">covariant</span>` : "");
+    $("dlabel").innerHTML = (res.covariant ? `Covariant derivative<span class="badge">covariant</span>` : `Derivative`);
     $("deriv").innerHTML = `$$${res.derivative_latex}$$`;
     $("derivcard").style.display = "block";
     if (res.derivative_eta_latex) {
       $("etaderiv").innerHTML = `$$${res.derivative_eta_latex}$$`;
       $("etacard").style.display = "block";
-    } else {
-      $("etacard").style.display = "none";
-    }
+    } else { $("etacard").style.display = "none"; }
   } else {
     $("derivcard").style.display = "none";
     $("etacard").style.display = "none";
@@ -587,8 +601,8 @@ async function runDerivative() {
 }
 
 async function genCode() {
-  const expr = $("expr").value.trim(), wrt = $("wrt").value.trim();
-  const body = { expression: expr, wrt: wrt || null, decls: declsObj(),
+  const expr = $("expr").value.trim();
+  const body = { expression: expr, wrt: null, decls: declsObj(),
                  spaces: spacesObj(), functions: functionsArr(), bases: basesArr(),
                  realize: realizeObj(), dims: dimsObj() };
   const pf = paramFnsAsParams();
@@ -730,7 +744,9 @@ function applyExample(ex) {
   dimsList = clone(ex.dims || []);
   spacesList = clone(ex.spaces); functionsList = clone(ex.functions);
   basesList = clone(ex.bases); varsList = clone(ex.vars);
-  $("expr").value = ex.expr; $("wrt").value = ex.wrt;
+  // derivatives are inline now: a wrt-example ``f`` w.r.t. ``x`` becomes ``D(f, x)``; examples
+  // already written with inline D/d (wrt === "") pass through unchanged.
+  $("expr").value = ex.wrt ? `D(${ex.expr}, ${ex.wrt})` : ex.expr;
   renderDims2(); renderSpaces(); renderFunctions(); renderBases(); renderVars();
   detectVars().then(runDerivative);
 }
@@ -766,7 +782,6 @@ let t = null;
 $("expr").addEventListener("input", () => { clearTimeout(t); t = setTimeout(detectVars, 250); });
 $("compute").onclick = () => detectVars().then(runDerivative);
 $("expr").addEventListener("keydown", e => { if (e.key === "Enter") detectVars().then(runDerivative); });
-$("wrt").addEventListener("keydown", e => { if (e.key === "Enter") detectVars().then(runDerivative); });
 $("codebtn").onclick = genCode;
 $("copybtn").onclick = copyLatex;
 $("texbtn").onclick = exportTex;

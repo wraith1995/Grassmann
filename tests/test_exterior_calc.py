@@ -30,6 +30,23 @@ def test_total_derivative_of_linear_map_is_the_map():
     assert np.allclose(J, A.T) or np.allclose(J, A)
 
 
+def test_total_derivative_wrt_matrix():
+    # D allows differentiating w.r.t. ANY tensor variable, not just vectors:
+    # ∂ tr(A·X) / ∂X = Aᵀ  (the matrix gradient, returned over the flattened matrix space)
+    r = build_problem("D(tr(A*X), X)", decls={"A": "R^3 -> R^3", "X": "R^3 -> R^3"})
+    A = np.array([[1.0, 2, 0], [0, 3, 1], [1, 0, 2]])
+    out = np.asarray(G.run(r.primal, {f"A_{r.vars['A'].node.uid}": A.T,
+                                      f"X_{r.vars['X'].node.uid}": np.eye(3)})["result"])
+    assert np.allclose(out.reshape(3, 3), A)
+
+
+def test_total_derivative_matrix_valued_wrt_matrix_builds():
+    # a matrix-valued f w.r.t. a matrix x (a 4-tensor) builds and runs
+    r = build_problem("D(X*X, X)", decls={"X": "R^3 -> R^3"})
+    out = np.asarray(G.run(r.primal, {f"X_{r.vars['X'].node.uid}": np.eye(3)})["result"])
+    assert out.size == 81  # (3×3) ⊸ (3×3)
+
+
 def test_exterior_derivative_of_scalar_is_differential():
     # d(½|x|², x) = df, the differential 1-form; |df|² = |x|²
     xv = np.array([1.0, 2.0, 3.0])
