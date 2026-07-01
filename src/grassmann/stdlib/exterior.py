@@ -236,10 +236,8 @@ def hodge_star(omega: Expr, k: int) -> Expr:
     """
     V = _base_space_of_exterior(omega, k)
     n = _ambient_dim(V)
-    if not (1 <= k <= n - 1):
-        raise ValueError(f"hodge_star: need 1 ≤ k ≤ n−1 (n={n}), got k={k}")
-    Lk = exterior_power(V, k)
-    Lnk = exterior_power(V, n - k)
+    if not (0 <= k <= n):
+        raise ValueError(f"hodge_star: need 0 ≤ k ≤ n (n={n}), got k={k}")
     Ln = exterior_power(V, n)
 
     from grassmann.stdlib.scalar import reciprocal, sqrt
@@ -250,6 +248,12 @@ def hodge_star(omega: Expr, k: int) -> Expr:
     # unit volume form: antisymmetric-project the standard basis tensor onto Λⁿ, then normalise.
     vol = G.project(G.tensor(*[_std_basis_vector(V, i, n) for i in range(n)]), Ln)
     vol_unit = G.scale(reciprocal(sqrt(_pair(Ln, vol, vol))), vol)
+    if k == 0:                          # ⋆ of a 0-form (scalar) = that scalar times the volume form
+        return G.scale(omega, vol_unit).with_note(base_space=V, exterior_k=n)
+    if k == n:                          # ⋆ of the top form = its coefficient ⟨ω, vol⟩ (a scalar)
+        return _pair(Ln, omega, vol_unit)
+    Lk = exterior_power(V, k)
+    Lnk = exterior_power(V, n - k)
     # the wedge-into-volume pairing M : Λⁿ⁻ᵏ → (Λᵏ)*  (curried so pinv sees Λⁿ⁻ᵏ ⊸ Dual(Λᵏ)).
     pairing = G.llam(Lnk, lambda g: G.llam(
         Lk, lambda a: _pair(Ln, wedge(a, g, k, n - k), vol_unit)))

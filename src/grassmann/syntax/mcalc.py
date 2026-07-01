@@ -1089,6 +1089,8 @@ class _Builder:
             from grassmann.stdlib.exterior import exterior_power, hodge_star
             k, base = x.grade, x.ext_base
             nn = dim_of(_node(base))
+            if k == nn:                  # ⋆ of a top form is a scalar (the volume coefficient)
+                return _TN("scalar", (lambda x=x, k=k: hodge_star(x.emit(), k)))
             s = self.uf.fresh()
             self.uf.set_fixed(s, exterior_power(base, nn - k), f"Lambda(.,{nn - k})")
             return _TN("vec", (lambda x=x, k=k: hodge_star(x.emit(), k)),
@@ -1118,18 +1120,30 @@ class _Builder:
             from grassmann.stdlib.exterior import exterior_power
             self.uf.set_fixed(s, exterior_power(base, k + 1), f"Omega(.,{k + 1})")
             return _TN("vec", demit, sp=s, grade=k + 1, ext_base=base)
-        if h in ("flat", "lower"):       # x♭ — lower a vector to a covector (the metric ♭)
+        if h in ("flat", "lower"):       # x♭ — lower a vector to a 1-form  V → Λ¹(V*)
             (v,) = args
             if v.kind != "vec":
-                raise self.err("flat(x) lowers a vector to a covector")
-            return _TN("cov", v.emit, sp=v.sp, usp=v.sp)   # Riesz-carried: w ↦ ⟨x, w⟩
-        if h in ("sharp", "raise"):      # a♯ — raise a covector to a vector (the metric ♯)
+                raise self.err("flat(x) lowers a vector to a 1-form")
+            from grassmann.embed import builders as _B
+            from grassmann.stdlib.exterior import exterior_power
+            Vsp = self.space_of(v.sp)                      # the vector's space (eager)
+            Vstar = _G.dual(Vsp)
+            s = self.uf.fresh(); self.uf.set_fixed(s, exterior_power(Vstar, 1), "Omega(.,1)")
+            return _TN("vec", (lambda v=v, Vsp=Vsp, Vstar=Vstar: _G.project(
+                _B.flat(Vsp)(v.emit()), exterior_power(Vstar, 1))),
+                sp=s, grade=1, ext_base=Vstar)
+        if h in ("sharp", "raise"):      # a♯ — raise a 1-form to a vector  Λ¹(V*) → V
             (c,) = args
-            if c.kind != "cov":
-                raise self.err("sharp(a) raises a covector to a vector")
-            if c.pmap is not None:
-                raise self.err("sharp(a): only a plain covector (no pending map) is supported")
-            return _TN("vec", c.emit, sp=c.usp, var_name=c.var_name)   # the Riesz vector
+            if c.grade != 1 or c.ext_base is None:
+                raise self.err("sharp(a) raises a 1-form Λ¹(V*) to a vector")
+            from grassmann.core import space as _S2
+            from grassmann.embed import builders as _B
+            vstar = c.ext_base                             # the form's base V* = Dual(V)
+            bn = _node(vstar)
+            V = _wrap(bn.space) if isinstance(bn, _S2.Dual) else _G.dual(vstar)  # peel Dual ⇒ V
+            s = self.uf.fresh(); self.uf.set_fixed(s, V, "sharp")
+            return _TN("vec", (lambda c=c, V=V, vstar=vstar: _B.sharp(V)(
+                _B.embed(c.emit(), vstar))), sp=s)
         if h in ("det", "logdet"):
             (m,) = args
             if m.kind != "mat":
