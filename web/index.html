@@ -615,13 +615,17 @@ async function genCode() {
     return;
   }
   showError("");
-  const pc = res.primal_py || ("# function: " + (res.primal_error || "unavailable"));
-  $("primalcode").textContent = "# --- function f ---\n" + pc;
+  const pc = res.primal_py || ("# " + (res.primal_error || "unavailable"));
+  $("primalcode").textContent = "# --- f ---\n" + pc;
   $("primalcode").style.display = "block";
-  const dc = res.derivative_py || ("# derivative codegen not yet available for this expression\n# ("
-             + (res.derivative_error || "") + ")");
-  $("derivcode").textContent = "# --- derivative df ---\n" + dc;
-  $("derivcode").style.display = "block";
+  // derivatives are inline (the expression IS the derivative when it uses D/d), so the primal
+  // Python already computes it. Only show a separate df block for the legacy w.r.t. path.
+  if (res.derivative_py) {
+    $("derivcode").textContent = "# --- derivative df ---\n" + res.derivative_py;
+    $("derivcode").style.display = "block";
+  } else {
+    $("derivcode").style.display = "none";
+  }
 }
 
 function copyLatex() {
