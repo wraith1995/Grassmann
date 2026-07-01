@@ -317,11 +317,20 @@ def api_code(req: dict) -> dict:
         # the chosen OUTPUT basis (the result is expressed in it); default = standard/natural.
         out_basis = _resolve_out_basis(r, req.get("out_basis"))
 
-        def _emit_one(expr, fname):
+        def _compile(node):
             from grassmann.lower.represent import represent
-            inst = r.instantiate(expr, dims)
-            node = inst.node if hasattr(inst, "node") else inst
-            prog = represent(node, target=out_basis) if out_basis is not None else represent(node)
+            return represent(node, target=out_basis) if out_basis is not None else represent(node)
+
+        def _emit_one(expr, fname):
+            # Prefer the SYMBOLIC (dimension-generic) node — ``n`` taken from the input shapes at
+            # run time (``np.eye(n)``) — and fall back to concrete dims (``n→3``) only if it can't
+            # lower yet (e.g. a non-η-reducible derivative whose vmap isn't dynamic-shaped).
+            sym = expr.node if hasattr(expr, "node") else expr
+            try:
+                prog = _compile(sym)
+            except Exception:  # noqa: BLE001 - dimension-generic lowering not available for this node
+                inst = r.instantiate(expr, dims)
+                prog = _compile(inst.node if hasattr(inst, "node") else inst)
             src = _prettify(pa.to_numpy_source(prog, func_name=fname, op_renderers=renderers),
                             key_to_name)
             if opaque_defs:                          # self-contained opaque kernels

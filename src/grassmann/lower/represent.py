@@ -157,6 +157,18 @@ def represent(
     prog = pa.Program("represent", budget=pa.SymbolicBudget.force_stmts())
     ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={})
 
+    # `106`: pre-REALIZE every free input var that carries a symbolic ``DimVar('n')``, so its
+    # canonical runtime atom AND its input array both exist before any node needs an ℝⁿ shape (e.g.
+    # a standalone metric in an η-reduced derivative sizes ``np.eye(n)`` off that input). Only
+    # DimVar-carrying vars are touched, so a fully-static term lowers byte-identically as before.
+    for v in _free_term_vars(term):
+        try:
+            vs = _synth(v)
+            if any(_dimvar_of_space(ax) for ax in _space_axes(vs)):
+                _rep_var(v, ctx)
+        except Exception:  # noqa: BLE001 - best-effort pre-realize; per-node lowering still mints
+            pass
+
     rep = _rep(term, ctx, target=target)
     prog.add_output("result", rep.array)
 
