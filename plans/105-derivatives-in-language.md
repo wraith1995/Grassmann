@@ -65,6 +65,22 @@ Recommend **A → B → C**, each verified (`d∘d=0`, etc.) and downloadable.
 - **Optional `wrt`** end to end (render + download with inline `D`/`d`).
 - Grammar "Derivatives" section + a `D(f,x): gradient` example.
 
+### DONE ✅✅ — the 3D vector-calculus table (grad / curl / div via de Rham)
+`flat`/`sharp` now bridge **vectors ↔ 1-forms `Λ¹(V*)`**, and `hodge` handles `k=0`/`k=n`, so the
+textbook operators are RECOVERED as compositions (examples in the GUI, `test_exterior_calc.py`):
+
+| operator | de Rham (ASCII) | check |
+| --- | --- | --- |
+| grad f | `sharp(d(f, x))` | `= x` for `f=½|x|²`  ✅ exact |
+| curl F | `sharp(hodge(d(flat(F), x)))` | `∝ 2[A₃₂,A₁₃,A₂₁]` (× induced-metric `√(C(n,k))`) |
+| div F  | `hodge(d(hodge(flat(F)), x))` | `= tr A` for `F=A·x`  ✅ exact |
+| d∘d    | `d(d(f, x), x)` | `= 0`  ✅ |
+
+d in 3D: `Ω⁰→Ω¹→Ω²→Ω³→0`; ⋆d in 3D: `Ω⁰⇢Ω²`, `Ω¹⇢Ω¹`(curl), `Ω²⇢Ω⁰`(div). curl carries the same
+induced-`Λᵏ`-metric normalization as `⋆⋆ = ±/C(n,k)` (a fully-normalized `⋆` would remove it).
+`sqrtm` and the axis-arg terms (`lift`/`unlift`/`permute`/`project`/`embed`/`remetric`) not
+exposed — the first was wrong via `G.sqrt`, the rest don't fit the value-arg call surface.
+
 ### DONE ✅ — `d` for all k, and `flat`/`sharp`
 - **`d(g, x)` for all k** via `dω = Σⱼ eʲ ∧ ∂ⱼω` (`stdlib.exterior_derivative`); **`d∘d = 0`**
   verified. The enablers were two CORE canonicalization fixes: a **single-factor `OProd`**
