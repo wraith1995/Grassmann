@@ -155,6 +155,14 @@ def _err(e: Exception) -> dict:
     return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _resolve_out_basis(r, name):
+    """Resolve the chosen OUTPUT basis name to a core ``Basis`` (the result is expressed in it),
+    or ``None`` for the default standard/natural basis."""
+    if not name or name in ("standard", "euclidean", ""):
+        return None
+    return r.builder.resolve_basis(name)
+
+
 def _eta_latex(expr) -> str | None:
     """The advanced η-reduction of ``expr`` as LaTeX (fold a seed-linear λ into a coordinate-free
     covector/map). Always returned so the panel is ALWAYS shown — even when the reduction leaves
@@ -306,9 +314,14 @@ def api_code(req: dict) -> dict:
         out = {"dims": dims}
         opaque_defs, opaque_rend = _opaque_kernel_defs(req)
         renderers = {**op_renderers(), **opaque_rend}
+        # the chosen OUTPUT basis (the result is expressed in it); default = standard/natural.
+        out_basis = _resolve_out_basis(r, req.get("out_basis"))
 
         def _emit_one(expr, fname):
-            prog = G.compile(r.instantiate(expr, dims))
+            from grassmann.lower.represent import represent
+            inst = r.instantiate(expr, dims)
+            node = inst.node if hasattr(inst, "node") else inst
+            prog = represent(node, target=out_basis) if out_basis is not None else represent(node)
             src = _prettify(pa.to_numpy_source(prog, func_name=fname, op_renderers=renderers),
                             key_to_name)
             if opaque_defs:                          # self-contained opaque kernels
