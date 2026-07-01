@@ -1144,6 +1144,11 @@ class _Builder:
             s = self.uf.fresh(); self.uf.set_fixed(s, V, "sharp")
             return _TN("vec", (lambda c=c, V=V, vstar=vstar: _B.sharp(V)(
                 _B.embed(c.emit(), vstar))), sp=s)
+        if h in ("transpose", "dagger", "adjoint"):   # Aᵀ / A† — the map transpose (swap dom↔cod)
+            (m,) = args
+            if m.kind != "mat":
+                raise self.err("transpose(A) transposes a matrix / linear map")
+            return _TN("mat", (lambda m=m: _G.dagger(m.emit())), src=m.tgt, tgt=m.src)
         if h in ("det", "logdet"):
             (m,) = args
             if m.kind != "mat":
