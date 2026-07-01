@@ -1171,3 +1171,183 @@ def test_scalar_poly_atom_not_recognized_without_flag() -> None:
     assert not _is_monomial(mono, False)  # default: scalar product is not an atom
     assert _is_monomial(mono, True)  # canon_scalars: it is
     assert not is_normalized_sop(mono, DEFAULT_SOP)
+
+
+# ===========================================================================
+# Advanced η-reduction (covector / linear-map folding) — opt-in RIESZ_SOP.
+#
+# Fold a seed-linear lambda (a `diff` result) into the lambda-free covector / map it
+# denotes (Riesz / adjoint η). Each is an equality of the coordinate-free algebra, so the
+# folded form must lower to the SAME numbers as the original LLam (the `_same` gate). The
+# folded and original terms are both MAPS, so we compile each directly and compare the whole
+# Jacobian (no probe seed needed — the bound seed is fed internally by the lowering).
+# ===========================================================================
+
+
+def test_eta_advanced_scalar_riesz() -> None:
+    # v1: λδ. ⟨δ, w⟩ → w♭ (a covector); and the scaled form λδ. 3·⟨δ, w⟩ → 3·w♭.
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    V = S.base("V", 3)
+    w, d = T.var("w", V), T.var("d", V)
+    llam = T.LLam((d,), T.Eval(T.Inner(V), (0, 1), (d, w)))
+    folded = sum_of_products(llam, RIESZ_SOP)
+    assert not isinstance(folded, T.LLam)  # the binder is gone
+    feed = {_key(w): np.array([1.0, -2.0, 0.5])}
+    _same(llam, folded, feed)
+    # scaled, and with δ in the OTHER inner slot (metric is symmetric ⇒ same covector)
+    scaled = T.LLam((d,), T.Scale(3.0, T.Eval(T.Inner(V), (0, 1), (w, d))))
+    _same(scaled, sum_of_products(scaled, RIESZ_SOP), feed)
+
+
+def test_eta_advanced_diff_inner_product() -> None:
+    # The marquee case: diff(⟨x,x⟩, x) = λdx. ⟨dx,x⟩ + ⟨x,dx⟩  →  2·x♭.
+    from grassmann.transform import diff
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    V = G.space("V", 3)
+    x = G.var("x", V)
+    d = diff(G.dot(x, x).node, x.node)
+    folded = sum_of_products(d, RIESZ_SOP)
+    # 2·(covector) — a Scale by 2.0 over a single covector atom, no lambda.
+    assert isinstance(folded, T.Scale) and folded.scalar == 2.0
+    assert not isinstance(folded, T.LLam)
+    feed = {_key(x.node): np.array([1.0, 2.0, 3.0])}
+    _same(d, folded, feed)
+    np.testing.assert_allclose(_run(folded, feed), 2.0 * np.array([1.0, 2.0, 3.0]))
+
+
+def test_eta_advanced_adjoint_peel() -> None:
+    # v3: λδ. ⟨A(δ), w⟩ = λδ. ⟨δ, A†(w)⟩ → (A†w)♭ — the map peels off, its adjoint lands on
+    # the Riesz arm. Verified value-identical (this is where the `A(x)†` of the motivating
+    # example comes from).
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    V, W = S.base("V", 3), S.base("W", 2)
+    A = T.var("A", S.linear_map_space(V, W))
+    w, d = T.var("w", W), T.var("d", V)
+    llam = T.LLam((d,), T.Eval(T.Inner(W), (0, 1), (T.Eval(A, (0,), (d,)), w)))
+    folded = sum_of_products(llam, RIESZ_SOP)
+    assert not isinstance(folded, T.LLam)
+    feed = {_key(A): np.arange(6.0).reshape(3, 2), _key(w): np.array([1.0, -1.0])}
+    _same(llam, folded, feed)
+
+
+def test_eta_advanced_vector_jacobian() -> None:
+    # v4: vector-valued bodies fold to a lambda-free MAP.
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    V, W = S.base("V", 3), S.base("W", 2)
+    d = T.var("d", V)
+    # λδ. δ → Identity(V)  (NOT handled by plain rule_eta; advanced-η's identity case)
+    assert sum_of_products(T.LLam((d,), d), RIESZ_SOP) == T.Identity(V)
+    # λδ. A(δ) → A  (overlaps rule_eta; both give A — value-equal)
+    A = T.var("A", S.linear_map_space(V, W))
+    assert sum_of_products(T.LLam((d,), T.Eval(A, (0,), (d,))), RIESZ_SOP) == A
+
+
+def test_eta_advanced_hadamard_elementwise() -> None:
+    # The matrix-calculus elementwise chain rule: ⟨c ⊙ δ, w⟩ = ⟨δ, c ⊙ w⟩ → (c⊙w)♭ (the
+    # diagonal map diag(c) is self-adjoint). This is what folds `d/dx sin(x)'·y`.
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    V = S.base("V", 3)
+    c, w, d = T.var("c", V), T.var("w", V), T.var("d", V)
+    cd = G.hadamard(G.wrap(c), G.wrap(d)).node  # c ⊙ δ
+    llam = T.LLam((d,), T.Eval(T.Inner(V), (0, 1), (cd, w)))
+    folded = sum_of_products(llam, RIESZ_SOP)
+    assert not isinstance(folded, T.LLam)
+    feed = {_key(c): np.array([2.0, -1.0, 0.5]), _key(w): np.array([1.0, 3.0, -2.0])}
+    _same(llam, folded, feed)
+
+
+def test_eta_advanced_trace_frobenius() -> None:
+    # Matrix-trace pairings fold via cyclic rotation: tr(L ∘ δ ∘ R) = ⟨δ, (R∘L)†⟩. This is the
+    # heart of matrix-calculus gradients (tr(A·X'·B·X·C), log det, …).
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    V = S.base("V", 3)
+    MS = S.linear_map_space(V, V)
+    A, B, d = T.var("A", MS), T.var("B", MS), T.var("d", MS)
+    feed = {_key(A): np.arange(9.0).reshape(3, 3), _key(B): (np.arange(9.0)[::-1]).reshape(3, 3)}
+    # bare δ in the middle of a chain (left-nested Compose), and the δ† variant
+    for chain in (
+        T.Compose(T.Compose(A, (0,), (d,)), (0,), (B,)),       # A ∘ δ ∘ B
+        T.Compose(T.Compose(A, (0,), (T.Dagger(d),)), (0,), (B,)),  # A ∘ δ† ∘ B
+    ):
+        llam = T.LLam((d,), T.Trace(chain, 0, 1))
+        folded = sum_of_products(llam, RIESZ_SOP)
+        assert not isinstance(folded, T.LLam)
+        _same(llam, folded, feed)
+
+
+def test_eta_advanced_matrixcalculus_examples() -> None:
+    # End-to-end through the matrixcalculus front end: 8 of the 9 matrix-calculus website
+    # examples fold to a lambda-free covector/map AND lower to the SAME numbers as the raw
+    # lambda. `A*exp(x)` is the lone exception — its Jacobian A·diag(exp(x)) needs a
+    # diagonal-map primitive (a documented special case).
+    from grassmann.syntax import mcalc
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    cases = [
+        ("0.5*x'*A*x", "x", {"x": "R^n", "A": "R^n -> R^n"}),
+        ("sin(x)'*y", "x", {"x": "R^n", "y": "R^n"}),
+        ("(y.*v)'*x", "x", {"x": "R^n", "y": "R^n", "v": "R^n"}),
+        ("a^b", "a", {"a": "scalar", "b": "scalar"}),
+        ("norm2(A*x-y)^2", "x", {"A": "R^n -> R^n", "x": "R^n", "y": "R^n"}),
+        ("sum(log(exp(-y.*(X*w)) + vector(1)))", "w", {"X": "R^n -> R^n", "w": "R^n", "y": "R^n"}),
+        ("tr(A*X'*B*X*C)", "X", {k: "R^n -> R^n" for k in ("A", "B", "C", "X")}),
+        ("log(det(inv(X)))", "X", {"X": "R^n -> R^n"}),
+    ]
+    rng = np.random.default_rng(7)
+    n = 4
+    for expr, wrt, decls in cases:
+        r = mcalc.build_problem(expr, wrt=wrt, decls=decls)
+        raw = r.derivative.node
+        folded = sum_of_products(raw, RIESZ_SOP)
+        assert not _count(folded, T.LLam), f"{expr}: expected fold, got {G.latex(folded)}"
+        vals = {}
+        for nm, ty in decls.items():
+            if "->" in ty:
+                m = rng.standard_normal((n, n))
+                vals[nm] = m + 3 * np.eye(n) if nm in (wrt, "X") else m
+            elif ty == "scalar":
+                vals[nm] = abs(rng.standard_normal()) + 0.5  # positive (a^b needs a > 0)
+            else:
+                vals[nm] = rng.standard_normal((n,))
+        a = np.asarray(r.run_node(raw, vals, {"n": n}))
+        b = np.asarray(r.run_node(G.wrap(folded), vals, {"n": n}))
+        # squeeze: a scalar covector folds to a 1×1 map while the raw λ lowers to a 1-vector —
+        # same value, cosmetic shape difference.
+        np.testing.assert_allclose(np.squeeze(a), np.squeeze(b), atol=1e-7, err_msg=f"{expr}: value drift")
+
+
+def test_eta_advanced_rejects_nonlinear_and_unmatched() -> None:
+    # Strictly conservative: anything not expressible lambda-free is left exactly intact.
+    from grassmann.transform.rewrite import RIESZ_SOP, rule_eta_advanced
+
+    V = S.base("V", 3)
+    d, e, w, z = T.var("d", V), T.var("e", V), T.var("w", V), T.var("z", V)
+    # ⟨δ,δ⟩ is NONLINEAR (δ used twice) — the linearity gate rejects it.
+    nl = T.LLam((d,), T.Eval(T.Inner(V), (0, 1), (d, d)))
+    assert rule_eta_advanced(nl) is None
+    # multi-arg LLam — out of scope (single seed only).
+    multi = T.LLam((d, e), T.Eval(T.Inner(V), (0, 1), (d, e)))
+    assert rule_eta_advanced(multi) is None
+    # rank-1 vector Jacobian Scale(⟨δ,z⟩, w): δ sits in a scalar coefficient — bail.
+    rank1 = T.LLam((d,), T.Scale(T.Eval(T.Inner(V), (0, 1), (d, z)), w))
+    assert rule_eta_advanced(rank1) is None
+    out = sum_of_products(rank1, RIESZ_SOP)  # left intact (modulo α-canon) + value-preserved
+    assert isinstance(out, T.LLam)
+    _same(rank1, out, {_key(z): np.array([1.0, 0.0, -1.0]), _key(w): np.array([2.0, 1.0, 0.0])})
+
+
+def test_eta_advanced_off_by_default() -> None:
+    # The default path is untouched: without the flag, the foldable LLam is NOT folded.
+    from grassmann.transform.rewrite import DEFAULT_SOP
+
+    V = S.base("V", 3)
+    w, d = T.var("w", V), T.var("d", V)
+    llam = T.LLam((d,), T.Eval(T.Inner(V), (0, 1), (d, w)))
+    out = sum_of_products(llam, DEFAULT_SOP)
+    assert isinstance(out, T.LLam)  # binder preserved under DEFAULT_SOP

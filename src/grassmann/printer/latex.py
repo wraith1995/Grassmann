@@ -223,7 +223,9 @@ def _render_eval(f: _t.Term, pos: tuple[int, ...], args: tuple[_t.Term, ...]) ->
     """Special-case the metric maps for readability, else a generic application."""
     if isinstance(f, _t.Inner) and len(args) == 2:
         return rf"\langle {_sub(args[0], 0)}, {_sub(args[1], 0)}\rangle", Prec.ATOM
-    if isinstance(f, _t.Flat) and len(args) == 1:
+    if isinstance(f, (_t.Flat, _t.Inner)) and len(args) == 1:
+        # The covector r♭: a partially-applied metric (Flat, or Inner after rule_musical
+        # canonicalizes ♭→Inner) — the advanced-η / Riesz output. Render r^♭, not ⟨·,·⟩(r).
         return f"{_sub(args[0], _PFX_BASE)}^{{\\flat}}", Prec.POSTFIX
     if isinstance(f, _t.Sharp) and len(args) == 1:
         return f"{_sub(args[0], _PFX_BASE)}^{{\\sharp}}", Prec.POSTFIX
