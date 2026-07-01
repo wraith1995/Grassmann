@@ -258,21 +258,39 @@ def hodge_star(omega: Expr, k: int) -> Expr:
 
 def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
     """The exterior derivative ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` of a ``k``-form FIELD ``ω`` over the point
-    ``x ∈ V`` (``Ωᵏ = Λᵏ(V*)``).  ``dω`` is the antisymmetrization of ``∂ω/∂x = diff(ω, x)``.
+    ``x ∈ V`` (``Ωᵏ = Λᵏ(V*)``), by the coordinate formula ``dω = Σⱼ eʲ ∧ ∂ⱼω``:
 
-    ``k = 0`` (a scalar field): ``df`` is the differential 1-form (the gradient covector), landed
-    in ``Λ¹(V*)``.  ``k ≥ 1`` needs the ``alt(∂ω/∂x)`` construction over ``(V*)⊗ᵏ⁺¹`` (still being
-    wired — the higher derivative is curried and needs uncurrying).
+    - ``∂ⱼω = ∂ω/∂xⱼ`` — the partial derivative, ``diff(ω, x)`` applied to the ``j``-th basis
+      vector ``eⱼ ∈ V``;
+    - ``eʲ ∈ Λ¹(V*)`` — the ``j``-th standard dual basis 1-form (a constant);
+    - ``k = 0`` (a scalar field) has no wedge: ``df = Σⱼ (∂ⱼf) · eʲ`` (the differential 1-form).
+
+    Coordinate-free up to the standard orientation of ``V``. Nilpotent: ``d∘d = 0``.
     """
+    import numpy as np
+
+    from grassmann.lower.represent import ExternalOp
+    from grassmann.lower._dims import dim_of
     V = Expr(x.node.space) if isinstance(x, Expr) else Expr(x.space)
     Vstar = G.dual(V)
-    D_omega = G.diff(omega, x)                 # V ⊸ Λᵏ(V*)  (V ⊸ R when k = 0)
-    if k == 0:
-        return G.project(D_omega, exterior_power(Vstar, 1))   # df ∈ Λ¹(V*)
-    raise NotImplementedError(
-        "exterior_derivative: k ≥ 1 is not yet wired — needs alt(∂ω/∂x) over (V*)⊗ᵏ⁺¹ "
-        "(the higher-order derivative is curried and must be uncurried first)."
-    )
+    n = dim_of(V.node)
+    L1 = exterior_power(Vstar, 1)
+
+    def evec(j):                                # eⱼ ∈ V  (to take the j-th partial)
+        a = np.zeros(n); a[j] = 1.0
+        return G.external(V, ExternalOp(f"_e{j}", (lambda a=a: a)))
+
+    def eform(j):                               # eʲ ∈ Λ¹(V*)  (the dual basis 1-form)
+        a = np.zeros(n); a[j] = 1.0
+        return G.project(G.external(Vstar, ExternalOp(f"_ef{j}", (lambda a=a: a))), L1)
+
+    if k == 0:                                  # d of a 0-form = its differential, a clean 1-form
+        return G.project(G.diff(omega, x), L1)
+
+    def partial(j):
+        return G.diff(omega, x)(evec(j))        # ∂ω/∂xⱼ ∈ Λᵏ(V*)
+
+    return G.sum(*[wedge(eform(j), partial(j), 1, k) for j in range(n)])
 
 
 def _base_space_of_exterior(a: Expr, k: int) -> Expr:

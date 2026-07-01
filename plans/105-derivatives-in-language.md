@@ -65,7 +65,16 @@ Recommend **A → B → C**, each verified (`d∘d=0`, etc.) and downloadable.
 - **Optional `wrt`** end to end (render + download with inline `D`/`d`).
 - Grammar "Derivatives" section + a `D(f,x): gradient` example.
 
-### Remaining — `d` for k ≥ 1 (the general exterior derivative)
+### DONE ✅ — `d` for all k, and `flat`/`sharp`
+- **`d(g, x)` for all k** via `dω = Σⱼ eʲ ∧ ∂ⱼω` (`stdlib.exterior_derivative`); **`d∘d = 0`**
+  verified. The enablers were two CORE canonicalization fixes: a **single-factor `OProd`**
+  (`OProd((X,)) ≅ X`, so `Λ¹(V*) ⊆ V*`) in both `infer/subspace.py` and `infer/unify.py`.
+- **`flat(x)` / `sharp(a)`** — the musical isos ♭/♯ (via mcalc's Riesz covector); verified
+  `sharp(flat(x))·y = ⟨x,y⟩`.
+- `d∘d = 0` example + `test_exterior_calc.py`. Full suite 2323 + polyarray 138 green.
+- Still to expose (small): `lift`/`unlift`/`permute` as standalone ops (used internally now).
+
+### (superseded) `d` for k ≥ 1 — original notes
 `dω = alt(∂ω/∂x)` over `(V*)⊗ᵏ⁺¹`. Two real subtleties found:
 1. **Currying** — `diff(diff(ω,x),x)` is a NESTED `LLam` (`λdx.λdy.…`); needs uncurrying
    (`lift`) into a single `(V*)⊗ᵏ⁺¹` value before `alt`. For an OPAQUE form field the first
