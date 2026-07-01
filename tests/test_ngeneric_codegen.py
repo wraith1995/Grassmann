@@ -23,6 +23,10 @@ CASES = [
                               "C": "R^n -> R^n", "X": "R^n -> R^n"}),   # matrix wrt (gradient)
     ("D(log(det(inv(X))), X)", {"X": "R^n -> R^n"}),              # matrix wrt via inv/det
     ("D(X*X, X)", {"X": "R^n -> R^n"}),                           # matrix wrt (4-tensor)
+    ("x (+) y", {"x": "R^n", "y": "R^n"}),                        # direct sum (⊕) concat
+    ("pinv(A)*y", {"A": "R^n -> R^n", "y": "R^n"}),               # pseudo-inverse apply
+    ("A\\y", {"A": "R^n -> R^n", "y": "R^n"}),                    # solve / backslash
+    ("outer(x, y)", {"x": "R^n", "y": "R^n"}),                    # outer product (matrix)
 ]
 
 

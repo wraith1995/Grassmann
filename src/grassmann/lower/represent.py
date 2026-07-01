@@ -916,9 +916,12 @@ def _rep_oplus(
     reps = [_rep(v, ctx, subs[i]) for i, v in enumerate(vectors)] if subs is not None \
         else [_rep(v, ctx) for v in vectors]
     basis = want if subs is not None else B.basis_sum(*(r.basis for r in reps))
+    # `106`: the concat's length is the SUM of the operand lengths — derive it from the realized
+    # operands (a runtime sum atom when any is dynamic) so a symbolic ℝⁿ ⊕ ℝⁿ sizes correctly.
+    _arrs = [r.array for r in reps]
+    _sum = _combined_dim(ctx, [_shape_of(a)[0] for a in _arrs], "sum", _arrs, 0, label="oplus")
     [out] = ctx.prog.emit_stmt(
-        _ConcatOp(), [r.array for r in reps],
-        [pa.OutSpec("oplus", _shape_of_space(space))], note="oplus:concat",
+        _ConcatOp(), _arrs, [pa.OutSpec("oplus", (_sum,))], note="oplus:concat",
     )
     rep = Rep(out, basis, space)
     if subs is not None:
@@ -3578,7 +3581,7 @@ def _rep_kron(
     [out] = ctx.prog.emit_stmt(
         _KronFreeOp(len(f_rep.free_labels), len(g_rep.free_labels)),
         [f_rep.array, g_rep.array],
-        [pa.OutSpec("kron", _shape_of_space(space) + free_dims)], note="kron:block-einsum",
+        [pa.OutSpec("kron", _shape_of_space_dyn(space, ctx) + free_dims)], note="kron:block-einsum",
     )
     rep = Rep(out, default_basis(space), space, free_labels=out_free)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
