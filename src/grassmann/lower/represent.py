@@ -3827,6 +3827,13 @@ def _rep_llam_vmap(
         try:
             n_i = _static_dim(vsp)
         except RepresentError:
+            # `106`: a symbolic ℝⁿ binder (the derivative seed ``dx : ℝⁿ``) — sweep the n runtime
+            # directions with ``np.eye(n)`` sized off the DimVar's canonical input atom. A single-
+            # axis space, so the (n,n) identity already has the binder's coordinate shape.
+            dv = _dimvar_of_space(vsp)
+            if dv is not None and dv in ctx.dimvar_atoms:
+                eyes.append(_dyn_identity(ctx, vsp, note=f"llam:vmap:eye({v.name})"))
+                continue
             # Runtime-rank binder (a dynamic FFS space, e.g. an exterior power Λᵏ whose rank is a
             # runtime SVD δ): sweep its basis with a δ×δ identity sized from the var's realized
             # basis ``cols`` (`51 §FFS-δ`).  An FFS space is single-axis, so the (δ,δ) identity
