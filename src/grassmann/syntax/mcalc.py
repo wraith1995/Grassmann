@@ -391,6 +391,10 @@ class _SpaceParser:
             self.eat("("); base = self.arrow(); self.eat(","); kk = self.eat(); self.eat(")")
             from grassmann.stdlib.exterior import exterior_power
             return exterior_power(base, int(kk))
+        if t in ("Omega", "Ω") and self.peek() == "(":    # Ωᵏ(V) = Λᵏ(V*) — the k-forms
+            self.eat("("); base = self.arrow(); self.eat(","); kk = self.eat(); self.eat(")")
+            from grassmann.stdlib.exterior import exterior_power
+            return exterior_power(_G.dual(base), int(kk))
         if t in self.env:
             return self.env[t]
         raise McalcBuildError(f"unknown space {t!r} in {self.src!r}")
@@ -1089,6 +1093,31 @@ class _Builder:
             self.uf.set_fixed(s, exterior_power(base, nn - k), f"Lambda(.,{nn - k})")
             return _TN("vec", (lambda x=x, k=k: hodge_star(x.emit(), k)),
                        sp=s, grade=nn - k, ext_base=base)
+        if h == "D":                     # total (covariant) derivative  D(f, x) = ∂f/∂x
+            (fn, xv) = args if len(args) == 2 else (None, None)
+            if fn is None or getattr(xv, "var_name", None) is None:
+                raise self.err("D(f, x) needs an expression f and a variable x")
+            if fn.kind == "scalar":      # ∂(scalar)/∂x — a covector (the differential, a 1-form)
+                t = self.uf.fresh(); self.uf.set_fixed(t, _G.R, "R")
+                return _TN("mat", (lambda fn=fn, xv=xv: _G.diff(fn.emit(), xv.emit())),
+                           src=xv.sp, tgt=t)
+            if fn.kind == "vec":         # ∂(vector)/∂x — the Jacobian map
+                return _TN("mat", (lambda fn=fn, xv=xv: _G.diff(fn.emit(), xv.emit())),
+                           src=xv.sp, tgt=fn.sp)
+            raise self.err("D(f, x): f must be a scalar or vector expression")
+        if h == "d":                     # exterior derivative  d(g, x) : Ωᵏ → Ωᵏ⁺¹
+            (g, xv) = args if len(args) == 2 else (None, None)
+            if g is None or getattr(xv, "var_name", None) is None:
+                raise self.err("d(g, x) needs a form g and the point variable x")
+            from grassmann.stdlib.exterior import exterior_derivative
+            k = g.grade if g.kind == "vec" else 0
+            def demit(g=g, xv=xv, k=k):
+                return exterior_derivative(g.emit(), xv.emit(), k)
+            base = _G.dual(self.space_of(xv.sp)) if g.ext_base is None else g.ext_base
+            s = self.uf.fresh()
+            from grassmann.stdlib.exterior import exterior_power
+            self.uf.set_fixed(s, exterior_power(base, k + 1), f"Omega(.,{k + 1})")
+            return _TN("vec", demit, sp=s, grade=k + 1, ext_base=base)
         if h in ("det", "logdet"):
             (m,) = args
             if m.kind != "mat":

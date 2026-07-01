@@ -61,8 +61,10 @@ def test_example_builds_diffs_and_downloads(ex):
     assert "error" not in c, f"code build failed: {c.get('error')}"
     assert "primal_error" not in c, f"primal Python failed to generate: {c.get('primal_error')}"
     assert "primal_py" in c, "no primal Python emitted"
-    # the derivative must emit too (geometry returns a {'geometry': True} bundle with derivative_py)
-    assert "derivative_py" in c, f"derivative Python failed to generate: {c.get('derivative_error')}"
+    # the derivative must emit too, UNLESS w.r.t. is empty (an inline-derivative example) —
+    # geometry returns a {'geometry': True} bundle that still carries derivative_py.
+    if req["wrt"] is not None:
+        assert "derivative_py" in c, f"derivative Python failed: {c.get('derivative_error')}"
 
 
 @pytest.mark.parametrize("ex", [e for e in EXAMPLES if e["label"] in (

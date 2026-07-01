@@ -256,6 +256,25 @@ def hodge_star(omega: Expr, k: int) -> Expr:
     return G.pinv(pairing)(G.flat(Lk)(omega)).with_note(base_space=V, exterior_k=n - k)
 
 
+def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
+    """The exterior derivative ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` of a ``k``-form FIELD ``ω`` over the point
+    ``x ∈ V`` (``Ωᵏ = Λᵏ(V*)``).  ``dω`` is the antisymmetrization of ``∂ω/∂x = diff(ω, x)``.
+
+    ``k = 0`` (a scalar field): ``df`` is the differential 1-form (the gradient covector), landed
+    in ``Λ¹(V*)``.  ``k ≥ 1`` needs the ``alt(∂ω/∂x)`` construction over ``(V*)⊗ᵏ⁺¹`` (still being
+    wired — the higher derivative is curried and needs uncurrying).
+    """
+    V = Expr(x.node.space) if isinstance(x, Expr) else Expr(x.space)
+    Vstar = G.dual(V)
+    D_omega = G.diff(omega, x)                 # V ⊸ Λᵏ(V*)  (V ⊸ R when k = 0)
+    if k == 0:
+        return G.project(D_omega, exterior_power(Vstar, 1))   # df ∈ Λ¹(V*)
+    raise NotImplementedError(
+        "exterior_derivative: k ≥ 1 is not yet wired — needs alt(∂ω/∂x) over (V*)⊗ᵏ⁺¹ "
+        "(the higher-order derivative is curried and must be uncurried first)."
+    )
+
+
 def _base_space_of_exterior(a: Expr, k: int) -> Expr:
     """Recover the ambient base space ``V`` from a value ``a : Λᵏ(V) = Img(alt(V, k))``.
 
