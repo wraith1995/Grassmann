@@ -207,6 +207,8 @@
         </div>
 
         <div class="dl">
+          <label for="outbasis" style="font-size:13px;color:var(--mut)">output basis</label>
+          <select id="outbasis" style="font-size:13px"></select>
           <button class="ghost" id="codebtn" type="button">Generate Python</button>
           <button class="ghost" id="copybtn" type="button">Copy LaTeX</button>
           <button class="ghost" id="texbtn" type="button">Export .tex</button>
@@ -529,6 +531,19 @@ function realizeObj() {
 }
 function spacesObj()  { const o = {}; spacesList.forEach(s => { if (s.name && s.expr) o[s.name] = s.expr; }); return o; }
 function basesArr()   { return basesList.filter(b => b.name && b.expr).map(b => ({ name: b.name, expr: b.expr })); }
+// The "output basis" dropdown: standard (default) + every declared basis. The result is expressed
+// in the chosen basis when it is a basis of the result's space (e.g. a tangent frame for geometry).
+function renderOutBasis() {
+  const sel = $("outbasis"); if (!sel) return;
+  const cur = sel.value || PENDING_OUTBASIS || "";
+  sel.innerHTML = "";
+  const opt = (v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.appendChild(o); };
+  opt("", "standard (default)");
+  basesList.forEach(b => { if (b.name && b.expr) opt(b.name, b.name); });
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
+  PENDING_OUTBASIS = "";
+}
+let PENDING_OUTBASIS = "";
 function functionsArr() {
   return functionsList.filter(f => f.name).map(f => ({
     name: f.name, kind: f.kind, dom: f.dom || "", cod: f.cod || "",
@@ -596,6 +611,7 @@ async function runDerivative() {
     $("etacard").style.display = "none";
   }
   renderRequired(res.required_derivatives || []);
+  renderOutBasis();
   $("primalcode").style.display = $("derivcode").style.display = "none";
   if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
 }
@@ -606,6 +622,7 @@ async function genCode() {
                  spaces: spacesObj(), functions: functionsArr(), bases: basesArr(),
                  realize: realizeObj(), dims: dimsObj() };
   const pf = paramFnsAsParams();
+  body.out_basis = ($("outbasis") && $("outbasis").value) || "";
   if (pf.length) body.params = pf;   // additive: lets the geometry codegen path receive the immersion
   const res = await post("/api/code", body);
   if (res.error) { showError("Python codegen: " + res.error); return; }
@@ -756,7 +773,8 @@ function applyExample(ex) {
   // derivatives are inline now: a wrt-example ``f`` w.r.t. ``x`` becomes ``D(f, x)``; examples
   // already written with inline D/d (wrt === "") pass through unchanged.
   $("expr").value = ex.wrt ? `D(${ex.expr}, ${ex.wrt})` : ex.expr;
-  renderDims2(); renderSpaces(); renderFunctions(); renderBases(); renderVars();
+  PENDING_OUTBASIS = ex.outBasis || "";
+  renderDims2(); renderSpaces(); renderFunctions(); renderBases(); renderVars(); renderOutBasis();
   detectVars().then(runDerivative);
 }
 
