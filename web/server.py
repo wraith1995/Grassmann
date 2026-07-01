@@ -307,14 +307,32 @@ def api_code(req: dict) -> dict:
         opaque_defs, opaque_rend = _opaque_kernel_defs(req)
         renderers = {**op_renderers(), **opaque_rend}
 
-        def emit(node, fname):
-            prog = G.compile(r.instantiate(node, dims))
+        def _emit_one(expr, fname):
+            prog = G.compile(r.instantiate(expr, dims))
             src = _prettify(pa.to_numpy_source(prog, func_name=fname, op_renderers=renderers),
                             key_to_name)
             if opaque_defs:                          # self-contained opaque kernels
                 src = src.replace("import numpy as np\n",
                                   "import numpy as np\n\n" + opaque_defs + "\n", 1)
             return src
+
+        def emit(expr, fname):
+            # Prefer the η-REDUCED form: it folds the seed λ into a direct covector/map, so the
+            # emitted numpy computes the gradient/Jacobian directly instead of materializing a map
+            # by looping a direction ``dx`` over a basis. Fall back to the raw form if η-reduction
+            # doesn't compile (e.g. an op the codegen can't yet render).
+            from grassmann.embed.ops import wrap
+            from grassmann.transform.rewrite import RIESZ_SOP, normal_form
+            try:
+                reduced = wrap(normal_form(expr.node, RIESZ_SOP))
+            except Exception:  # noqa: BLE001
+                reduced = None
+            if reduced is not None:
+                try:
+                    return _emit_one(reduced, fname)
+                except Exception:  # noqa: BLE001 - fall back to the un-reduced form
+                    pass
+            return _emit_one(expr, fname)
 
         # Emit each part independently — the derivative may hit an unsupported op (G12:
         # CallOp/sub-program) while the primal still emits fine.
