@@ -190,6 +190,10 @@
       <div class="out" id="out" style="display:none">
         <div class="card"><h3>Function</h3><div class="math" id="primal"></div></div>
         <div class="card" id="derivcard"><h3 id="dlabel">Derivative</h3><div class="math" id="deriv"></div></div>
+        <div class="card" id="etacard" style="display:none">
+          <h3>Derivative after η-reduction<span class="badge">gradient form</span></h3>
+          <div class="cap">the seed λdx folded into a coordinate-free covector / map (no explicit direction)</div>
+          <div class="math" id="etaderiv"></div></div>
 
         <div class="card" id="reqcard" style="display:none">
           <h3>④ Required derivative inputs</h3>
@@ -567,8 +571,15 @@ async function runDerivative() {
       + (cov ? `<span class="badge">covariant</span>` : "");
     $("deriv").innerHTML = `$$${res.derivative_latex}$$`;
     $("derivcard").style.display = "block";
+    if (res.derivative_eta_latex) {
+      $("etaderiv").innerHTML = `$$${res.derivative_eta_latex}$$`;
+      $("etacard").style.display = "block";
+    } else {
+      $("etacard").style.display = "none";
+    }
   } else {
     $("derivcard").style.display = "none";
+    $("etacard").style.display = "none";
   }
   renderRequired(res.required_derivatives || []);
   $("primalcode").style.display = $("derivcode").style.display = "none";
