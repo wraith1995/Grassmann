@@ -6069,3 +6069,37 @@ def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
                 return bool(a == b)
             except ValueError:
                 return False
+
+
+def numpy_op_renderers() -> dict:
+    """``to_numpy_source`` ``op_renderers`` for grassmann's front-end data/shape ops.
+
+    A grassmann body lowered into a folded pointwise assembly ``Program`` (plan ``46`` — e.g. a
+    stiffness form's metric core) can carry ops that :mod:`polyarray` does not know how to render
+    itself (its builtin table is keyed by type and is deliberately front-end-agnostic).  This maps
+    each such op *class name* to a renderer ``(op, arg_exprs) -> python_expression_str`` that
+    reproduces the op's ``__call__`` value, so ``polyarray.to_numpy_source`` can emit standalone
+    numpy for the fold.  Pass via ``op_renderers=grassmann.lower.numpy_op_renderers()`` — pointwise
+    merges it in ``fold_op_renderers``.  Mirrors :func:`chartlib.covariant.numpy_op_renderers`.
+
+    Covers the three shape/const ops emitted by :func:`_const` and the reduction lowering:
+
+    * :class:`_ConstOp` (no args) — a frozen numeric constant, re-materialised from its raw bytes;
+    * :class:`_AxisLenOp` — the 0-d int length of an input's axis (the FFS rank ``δ_f``);
+    * :class:`_ReshapeOp` — reshape an input.
+    """
+
+    def _const(op: "_ConstOp", args: list[str]) -> str:
+        # Reproduce __call__: np.frombuffer(data_bytes, dtype).reshape(shape).copy().
+        return (
+            f"np.frombuffer({op.data_bytes!r}, dtype={op.dtype!r})"
+            f".reshape({tuple(op.shape)!r}).copy()"
+        )
+
+    def _axis_len(op: "_AxisLenOp", args: list[str]) -> str:
+        return f"np.asarray(int(np.asarray({args[0]}).shape[{op.axis}]))"
+
+    def _reshape(op: "_ReshapeOp", args: list[str]) -> str:
+        return f"np.asarray({args[0]}, dtype=float).reshape({tuple(op.shape)!r})"
+
+    return {"_ConstOp": _const, "_AxisLenOp": _axis_len, "_ReshapeOp": _reshape}
