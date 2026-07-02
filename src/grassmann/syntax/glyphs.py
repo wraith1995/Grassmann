@@ -106,7 +106,7 @@ P_ATOM = 100
 
 # term constructors
 TERM_HEADS = frozenset({
-    "id", "zero", "Eval", "NEval", "Compose", "Trace",
+    "id", "zero", "Eval", "NEval", "Compose", "Trace", "det", "logdet",
     "inner", "flat", "sharp", "Solve", "Pinv", "Dagger", "sqrtm",
     "SolveApply", "PinvApply", "project", "embed", "assert",
     "inj", "proj", "remetric", "lift", "unlift", "permute", "tpermute", "kron",

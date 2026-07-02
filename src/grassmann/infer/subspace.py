@@ -22,6 +22,7 @@ from grassmann.core.space import (
     OPlus,
     OPlusRep,
     OProd,
+    Scalar,
     Space,
 )
 
@@ -35,7 +36,13 @@ def _norm(s: Space) -> Space:
         case OPlus(spaces):
             return OPlus(tuple(_norm(x) for x in spaces))
         case OProd(spaces):
-            return OProd(tuple(_norm(x) for x in spaces))
+            # Drop the ⊗-unit (Scalar) and collapse a single-factor product to its factor:
+            # ``X ⊗ ℝ ≅ X`` and ``OProd((X,)) ≅ X`` — so a k=1 exterior power ``Λ¹(V) = Img(alt)``,
+            # whose codomain is the 1-tuple ``V⊗¹ = OProd((V,))``, is recognized as ``⊑ V``.
+            ns = [_norm(x) for x in spaces if not isinstance(x, Scalar)]
+            if not ns:
+                return Scalar()
+            return ns[0] if len(ns) == 1 else OProd(tuple(ns))
         case Dual(inner):
             return Dual(_norm(inner))
         case _:

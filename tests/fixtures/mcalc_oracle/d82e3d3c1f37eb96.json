@@ -1,0 +1,24 @@
+{
+  "codeExport": {
+    "latex": "\\documentclass[12pt]{article}\n\\begin{document}\nfunction:\n\\[\n  f = 0.5\\cdot x^\\top \\cdot A\\cdot x\n\\]\n\ngradient:\n\\[\n  \\frac{\\partial f}{\\partial x} = 0.5\\cdot A\\cdot x+0.5\\cdot A^\\top \\cdot x\n\\]\nwhere\n\\begin{itemize}\n  \\item $A$ is a matrix\n  \\item $x$ is a vector\n\\end{itemize}\n\\end{document}\n",
+    "python": "\"\"\"\nSample code automatically generated on 2026-06-26 18:27:44\n\nby www.matrixcalculus.org\n\nfrom input\n\nd/dx 0.5*x'*A*x = 0.5*A*x+0.5*A'*x\n\nwhere\n\nA is a matrix\nx is a vector\n\nThe generated code is provided \"as is\" without warranty of any kind.\n\"\"\"\n\nfrom __future__ import division, print_function, absolute_import\n\nimport numpy as np\n\ndef fAndG(A, x):\n    assert isinstance(A, np.ndarray)\n    dim = A.shape\n    assert len(dim) == 2\n    A_rows = dim[0]\n    A_cols = dim[1]\n    assert isinstance(x, np.ndarray)\n    dim = x.shape\n    assert len(dim) == 1\n    x_rows = dim[0]\n    assert A_rows == x_rows == A_cols\n\n    t_0 = (A).dot(x)\n    functionValue = (0.5 * (x).dot(t_0))\n    gradient = ((0.5 * t_0) + (0.5 * (A.T).dot(x)))\n\n    return functionValue, gradient\n\ndef checkGradient(A, x):\n    # numerical gradient checking\n    # f(x + t * delta) - f(x - t * delta) / (2t)\n    # should be roughly equal to inner product <g, delta>\n    t = 1E-6\n    delta = np.random.randn(3)\n    f1, _ = fAndG(A, x + t * delta)\n    f2, _ = fAndG(A, x - t * delta)\n    f, g = fAndG(A, x)\n    print('approximation error',\n          np.linalg.norm((f1 - f2) / (2*t) - np.tensordot(g, delta, axes=1)))\n\ndef generateRandomData():\n    A = np.random.randn(3, 3)\n    x = np.random.randn(3)\n\n    return A, x\n\nif __name__ == '__main__':\n    A, x = generateRandomData()\n    functionValue, gradient = fAndG(A, x)\n    print('functionValue = ', functionValue)\n    print('gradient = ', gradient)\n\n    print('numerical gradient checking ...')\n    checkGradient(A, x)\n"
+  },
+  "csStr": "",
+  "derivative": "0.5\\cdot A\\cdot x+0.5\\cdot A^\\top \\cdot x",
+  "derivativeCS": "0.5\\cdot A\\cdot x+0.5\\cdot A^\\top \\cdot x",
+  "errorEnd": null,
+  "errorStart": null,
+  "errorString": "",
+  "expression": "0.5*x'*A*x",
+  "expressionLatex": "0.5\\cdot x^\\top \\cdot A\\cdot x",
+  "markTokens": null,
+  "varList": [
+    "A",
+    "x"
+  ],
+  "varType": [
+    "matrix",
+    "vector"
+  ],
+  "wrt": "x"
+}

@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grassmann — coordinate-free matrix calculus</title>
+<script>
+  window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['$$', '$$']] } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+<style>
+  :root { --fg:#1a1a2e; --mut:#6b7280; --line:#e5e7eb; --acc:#3b4cca; --bg:#fafafc; --err:#b91c1c; --ok:#047857; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         color: var(--fg); background: var(--bg); margin: 0; line-height: 1.5; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 2px; }
+  .sub { color: var(--mut); font-size: 14px; margin-bottom: 22px; }
+
+  /* three-column layout: examples rail + main + persistent grammar sidebar */
+  .layout { display: grid; grid-template-columns: 160px 1fr 300px; gap: 26px; align-items: start; }
+  /* let the centre column shrink so wide code scrolls inside it instead of pushing the page */
+  .col-main { min-width: 0; }
+  .card { max-width: 100%; }
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; }
+    .col-examples { order: 3; }
+    .col-side { order: 2; }
+  }
+
+  /* declarations */
+  .decl { display: grid; gap: 14px; margin-bottom: 22px; }
+  .decl-section { background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .decl-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .decl-head h2 { margin:0; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--mut); }
+  .add { font:13px inherit; background:#fff; color:var(--acc); border:1px solid var(--acc);
+         border-radius:7px; padding:3px 10px; cursor:pointer; }
+  .note { color:var(--mut); font-size:12px; margin-top:6px; }
+
+  .drow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+  .drow.sub2 { margin-top:4px; padding-left:6px; }
+  .flabel { color:var(--mut); font-size:12px; min-width:88px; }
+  input[type=text] { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background:#fff; }
+  .d-name { width: 96px; }
+  .d-sm { width: 150px; }
+  .d-basis { max-width: 140px; }
+  .d-grow { flex: 1 1 240px; min-width: 180px; }
+  select { font: 14px inherit; padding: 5px 8px; border:1px solid var(--line); border-radius:7px; background:#fff; }
+  .del { background:#fff; color:var(--err); border:1px solid var(--line); border-radius:7px;
+         padding:5px 9px; cursor:pointer; font:13px inherit; }
+  span.mut { color:var(--mut); font-size:13px; }
+
+  /* expression sentence */
+  .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 16px;
+              background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .sentence label { color: var(--mut); }
+  #expr { flex: 1 1 320px; min-width: 220px; font-size:15px; }
+  #wrt { width: 96px; font-size:15px; }
+  button { font: 14px inherit; padding: 8px 16px; border: 0; border-radius: 8px;
+           background: var(--acc); color:#fff; cursor: pointer; }
+  button.ghost { background:#fff; color: var(--acc); border:1px solid var(--acc); padding:6px 12px; }
+  button:disabled { opacity:.5; cursor: default; }
+
+  /* output */
+  .out { margin-top: 22px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+  .card h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--mut); }
+  .math { overflow-x:auto; }
+  .cap { color:var(--mut); font-size:12px; margin:-2px 0 10px; }
+  .reqrow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;
+            padding:6px 0; border-top:1px dashed var(--line); }
+  .reqrow:first-child { border-top:0; }
+  .reqname { font-size:14px; }
+  .err { color: var(--err); background:#fef2f2; border:1px solid #fecaca; border-radius:8px;
+         padding:10px 12px; font: 13px ui-monospace, monospace; white-space: pre-wrap; }
+  #flash { display:none; color:var(--ok); background:#ecfdf5; border:1px solid #a7f3d0;
+           border-radius:8px; padding:8px 12px; font:13px inherit; margin-top:8px; }
+  .dl { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  pre.code { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px;
+             overflow-x:auto; max-width:100%; white-space:pre;
+             font: 12px ui-monospace, monospace; display:none; }
+  .badge { display:inline-block; font-size:11px; background:#eef2ff; color:var(--acc);
+           border:1px solid #c7d2fe; border-radius:6px; padding:1px 7px; margin-left:8px; }
+
+  /* examples rail (left, sticky vertical list) */
+  .col-examples { position: sticky; top: 18px; }
+  #exlist { display:flex; flex-direction:column; gap:6px; }
+  .ex { display:block; padding:6px 9px; font: 12px ui-monospace, monospace;
+        background:#fff; border:1px solid var(--line); border-radius:7px; cursor:pointer;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ex:hover { border-color: var(--acc); color: var(--acc); }
+  @media (max-width: 1100px) {
+    #exlist { flex-direction:row; flex-wrap:wrap; }
+    .ex { white-space:normal; }
+  }
+
+  /* grammar sidebar */
+  .col-side { position: sticky; top: 18px; }
+  .side-title { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--mut);
+                margin:0 0 10px; }
+  #grammar { background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .gsec { margin-bottom:12px; }
+  .gsec:last-child { margin-bottom:0; }
+  .gsec h4 { margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--acc); }
+  .gitems { display:flex; flex-wrap:wrap; gap:6px 10px; }
+  .gitems code { font: 12px ui-monospace, monospace; background:#f3f4f6; padding:1px 5px; border-radius:4px; }
+  .gitems .gm { color:var(--mut); font-size:11px; }
+  .grow { display:flex; gap:6px; align-items:baseline; width:100%; }
+
+  /* dimensions declaration: bound dimension sizes */
+  input[type=number] { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background:#fff; }
+  .d-num { width: 96px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Grassmann matrix calculus</h1>
+  <div class="sub">Declare your spaces, functions and variables — then take the
+    <b>coordinate-free</b> derivative.</div>
+
+  <div class="layout">
+    <!-- ===================== EXAMPLES RAIL ===================== -->
+    <aside class="col-examples">
+      <h3 class="side-title">Examples</h3>
+      <div id="exlist"></div>
+    </aside>
+
+    <main class="col-main">
+
+      <!-- ===================== DECLARATIONS ===================== -->
+      <section class="decl">
+        <div class="decl-section">
+          <div class="decl-head"><h2>Dimensions</h2><button class="add" id="adddim" type="button">+ add</button></div>
+          <div id="dims"></div>
+          <div class="note">Symbolic dimension variables — use them in spaces and variable
+            types, e.g. <code>R^n</code>, <code>R^m -&gt; R^n</code>, <code>V = R^n</code>.
+            For a <i>specific</i> size, just write the literal (<code>R^3</code>) in the type —
+            symbolic dims default to a size when you Generate Python.</div>
+        </div>
+
+        <div class="decl-section">
+          <div class="decl-head"><h2>Spaces</h2><button class="add" id="addspace" type="button">+ add</button></div>
+          <div id="spaces"></div>
+        </div>
+
+        <div class="decl-section">
+          <div class="decl-head"><h2>Functions</h2><button class="add" id="addfn" type="button">+ add</button></div>
+          <div id="functions"></div>
+          <div class="note">A <b>parameterization</b> defines an immersion ℝᵏ→ℝⁿ from its
+            params/components (leave dom/cod blank). An <b>opaque</b> function is a black box
+            with optional numeric components.</div>
+        </div>
+
+        <div class="decl-section">
+          <div class="decl-head"><h2>Bases</h2>
+            <span><select id="basetpl" class="d-sm"></select>
+            <button class="add" id="addbase" type="button">+ add</button></span></div>
+          <div id="bases"></div>
+          <div class="note">e.g. <code>ImageBasis(phi)</code>, <code>OrthonormalBasis(b)</code>,
+            <code>DualBasis(b)</code> — validated against your declarations on Compute.</div>
+        </div>
+
+        <div class="decl-section">
+          <div class="decl-head"><h2>Variables</h2><button class="add" id="addvar" type="button">+ add</button></div>
+          <div id="vars"></div>
+          <div class="note">Free variables of the expression are detected automatically; set each type
+            from the dropdown (built from your declarations), or choose <code>custom…</code> to type any
+            space expression (e.g. <code>R^m -&gt; R^n</code>, <code>(R^3)* (x) R^3</code>).</div>
+          <div class="note">Every input is realized in a basis — the default is rendered
+            literally from its space: <code>{e₁,e₂,e₃}</code>, a dual basis <code>{e¹,e²,e³}</code>,
+            a tensor basis <code>{e₁,e₂} ⊗ {f₁,f₂}</code>; pick a declared basis to change it.</div>
+        </div>
+      </section>
+
+      <!-- ===================== EXPRESSION ===================== -->
+      <div class="sentence">
+        <label>expression</label>
+        <input id="expr" type="text" spellcheck="false" placeholder="D(0.5*x'*A*x, x)">
+        <button id="compute" type="button">Compute</button>
+      </div>
+      <div class="sub" style="margin:-4px 0 8px">Take derivatives inline: <code>D(f, x)</code>
+        (total / covariant) and <code>d(g, x)</code> (exterior). Both the expression and its
+        η-reduction are shown.</div>
+
+      <div id="error"></div>
+      <div id="flash"></div>
+
+      <!-- ===================== OUTPUT ===================== -->
+      <div class="out" id="out" style="display:none">
+        <div class="card"><h3>Expression</h3><div class="math" id="primal"></div></div>
+        <div class="card" id="primaletacard" style="display:none">
+          <h3>After η-reduction<span class="badge">reduced form</span></h3>
+          <div class="cap">a seed-linear λ folded into a coordinate-free covector / map (no explicit direction dx)</div>
+          <div class="math" id="primaleta"></div></div>
+        <div class="card" id="derivcard" style="display:none"><h3 id="dlabel">Derivative</h3><div class="math" id="deriv"></div></div>
+        <div class="card" id="etacard" style="display:none">
+          <h3>Derivative after η-reduction<span class="badge">gradient form</span></h3>
+          <div class="cap">the seed λdx folded into a coordinate-free covector / map (no explicit direction)</div>
+          <div class="math" id="etaderiv"></div></div>
+
+        <div class="card" id="reqcard" style="display:none">
+          <h3>④ Required derivative inputs</h3>
+          <div class="cap">the engine needs these to run / export; supply before Python.</div>
+          <div id="reqrows"></div>
+        </div>
+
+        <div class="dl">
+          <label for="outbasis" style="font-size:13px;color:var(--mut)">output basis</label>
+          <select id="outbasis" style="font-size:13px"></select>
+          <button class="ghost" id="codebtn" type="button">Generate Python</button>
+          <button class="ghost" id="copybtn" type="button">Copy LaTeX</button>
+          <button class="ghost" id="texbtn" type="button">Export .tex</button>
+        </div>
+        <pre class="code" id="primalcode"></pre>
+        <pre class="code" id="derivcode"></pre>
+      </div>
+
+    </main>
+
+    <!-- ===================== GRAMMAR SIDEBAR ===================== -->
+    <aside class="col-side">
+      <h3 class="side-title">Grammar</h3>
+      <div id="grammar"></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const clone = o => JSON.parse(JSON.stringify(o || []));
+const splitList = s => s.split(',').map(x => x.trim()).filter(Boolean);
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: {"Content-Type":"application/json"},
+                                body: JSON.stringify(body) });
+  return r.json();
+}
+
+function showError(msg) { $("error").innerHTML = msg ? `<div class="err">${escHtml(msg)}</div>` : ""; }
+function flash(msg) {
+  const f = $("flash"); f.textContent = msg; f.style.display = "block";
+  clearTimeout(flash._t); flash._t = setTimeout(() => f.style.display = "none", 1600);
+}
+function escHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// surface any uncaught JS error / failed request so failures are visible, not silent
+window.addEventListener("error", e => showError("JS error: " + (e.message || e.error)));
+window.addEventListener("unhandledrejection", e =>
+  showError("Request failed (is the server running?): " + ((e.reason && e.reason.message) || e.reason)));
+
+// ===================== STATE =====================
+// Edited as arrays (stable identity for rename), serialized to the contract shapes on send.
+let dimsList = [];       // [{name, value}]                -> {name: parseInt(value)}
+let spacesList = [];     // [{name, expr}]                 -> {name: expr}
+let functionsList = [];  // [{name, kind, dom, cod, params:[], components:[]}]
+let basesList = [];      // [{name, expr}]  (display-only)
+let varsList = [];       // [{name, type}]                 -> {name: type}
+let LAST_PRIMAL = "", LAST_DERIV = "";
+
+// ----- small DOM helpers -----
+function inp(cls, ph, val) {
+  const e = document.createElement("input");
+  e.type = "text"; e.spellcheck = false;
+  if (cls) e.className = cls; if (ph) e.placeholder = ph;
+  e.value = val || ""; return e;
+}
+function span(t, cls) { const s = document.createElement("span"); s.textContent = t; if (cls) s.className = cls; return s; }
+function delBtn(fn) {
+  const b = document.createElement("button"); b.type = "button"; b.className = "del";
+  b.textContent = "✕"; b.onclick = fn; return b;
+}
+function selectFrom(arr, val) {
+  const s = document.createElement("select");
+  arr.forEach(o => { const op = document.createElement("option"); op.value = o; op.textContent = o;
+    if (o === val) op.selected = true; s.appendChild(op); });
+  return s;
+}
+
+// ----- type options for the Variables select (built from declarations) -----
+function typeOptions() {
+  const o = ["scalar"];
+  dimsList.forEach(d => { if (d.name) o.push(`R^${d.name}`); });                // vectors
+  dimsList.forEach(a => dimsList.forEach(b => {                                  // matrices
+    if (a.name && b.name) o.push(`R^${a.name} -> R^${b.name}`); }));
+  spacesList.forEach(s => { if (s.name) o.push(s.name); });
+  functionsList.forEach(f => { if (f.kind === "param" && f.name) { o.push(`T(${f.name})`); o.push(`CT(${f.name})`); } });
+  return o;
+}
+
+// ===================== RENDERERS =====================
+function renderDims2() {
+  const box = $("dims"); box.innerHTML = "";
+  dimsList.forEach((d, i) => {
+    const row = document.createElement("div"); row.className = "drow";
+    const name = inp("d-name", "n", d.name);
+    name.oninput = e => { d.name = e.target.value.trim(); renderVars(); };
+    row.append(name, span("symbolic"),
+               delBtn(() => { dimsList.splice(i, 1); renderDims2(); renderVars(); }));
+    box.appendChild(row);
+  });
+}
+
+function renderSpaces() {
+  const box = $("spaces"); box.innerHTML = "";
+  spacesList.forEach((s, i) => {
+    const row = document.createElement("div"); row.className = "drow";
+    const name = inp("d-name", "V", s.name), expr = inp("d-grow", "R^4", s.expr);
+    name.oninput = e => { s.name = e.target.value.trim(); renderVars(); };
+    expr.oninput = e => { s.expr = e.target.value.trim(); };
+    row.append(name, span("="), expr, delBtn(() => { spacesList.splice(i, 1); renderSpaces(); renderVars(); }));
+    box.appendChild(row);
+  });
+}
+
+function renderFunctions() {
+  const box = $("functions"); box.innerHTML = "";
+  functionsList.forEach((f, i) => {
+    const row = document.createElement("div"); row.className = "decl-section"; row.style.background = "#fafafc";
+    const name = inp("d-name", "f", f.name);
+    const dom = inp("d-sm", "dom", f.dom), cod = inp("d-sm", "cod", f.cod);
+    const kind = selectFrom(["opaque", "param"], f.kind);
+    // show readable labels for the kind select
+    kind.options[0].textContent = "opaque"; kind.options[1].textContent = "parameterization";
+    const comps = inp("d-grow", "sin(u1), sin(u2)", f.components.join(", "));
+    const params = inp("d-grow", "u1, u2", f.params.join(", "));
+
+    name.oninput = e => { f.name = e.target.value.trim(); renderVars(); };
+    dom.oninput = e => { f.dom = e.target.value.trim(); };
+    cod.oninput = e => { f.cod = e.target.value.trim(); };
+    kind.onchange = e => { f.kind = e.target.value; renderVars(); };
+    comps.oninput = e => { f.components = splitList(e.target.value); };
+    params.oninput = e => { f.params = splitList(e.target.value); };
+
+    const l1 = document.createElement("div"); l1.className = "drow";
+    l1.append(name, span(":"), dom, span("→"), cod, kind,
+              delBtn(() => { functionsList.splice(i, 1); renderFunctions(); renderVars(); }));
+    const l2 = document.createElement("div"); l2.className = "drow sub2";
+    l2.append(span("components", "flabel"), comps);
+    const l3 = document.createElement("div"); l3.className = "drow sub2";
+    l3.append(span("params", "flabel"), params);
+    row.append(l1, l2, l3);
+    // opaque functions are realized in input/output bases (default "standard")
+    if (f.kind === "opaque") {
+      if (!f.inBasis) f.inBasis = "standard";
+      if (!f.outBasis) f.outBasis = "standard";
+      const inSel = basisSelect(f.inBasis, f.dom, val => { f.inBasis = val; });
+      const outSel = basisSelect(f.outBasis, f.cod, val => { f.outBasis = val; });
+      const l4 = document.createElement("div"); l4.className = "drow sub2";
+      l4.append(span("input basis", "flabel"), inSel, span("output basis", "flabel"), outSel);
+      row.append(l4);
+    }
+    // a parameterization induces a domain (R^k) basis and a tangent basis (the immersion gauge)
+    if (f.kind === "param") {
+      if (!f.domBasis) f.domBasis = "standard";
+      if (!f.tanBasis) f.tanBasis = "imagebasis";
+      const k = f.params.length || 2;
+      const domSel = basisSelect(f.domBasis, `R^${k}`, val => { f.domBasis = val; });
+      const tanSel = tangentBasisSelect(f, val => { f.tanBasis = val; });
+      const l4 = document.createElement("div"); l4.className = "drow sub2";
+      l4.append(span("domain basis", "flabel"), domSel, span("tangent basis", "flabel"), tanSel);
+      row.append(l4);
+    }
+    box.appendChild(row);
+  });
+}
+
+function renderBases() {
+  const box = $("bases"); box.innerHTML = "";
+  basesList.forEach((b, i) => {
+    const row = document.createElement("div"); row.className = "drow";
+    const name = inp("d-name", "b", b.name), expr = inp("d-grow", "ImageBasis(phi)", b.expr);
+    name.oninput = e => { b.name = e.target.value.trim(); renderVars(); renderFunctions(); };
+    expr.oninput = e => { b.expr = e.target.value.trim(); };
+    row.append(name, span("="), expr,
+               delBtn(() => { basesList.splice(i, 1); renderBases(); renderVars(); renderFunctions(); }));
+    box.appendChild(row);
+  });
+}
+
+function renderVars() {
+  const box = $("vars"); box.innerHTML = "";
+  varsList.forEach((v, i) => {
+    const row = document.createElement("div"); row.className = "drow";
+    const name = inp("d-name", "x", v.name);
+    name.oninput = e => { v.name = e.target.value.trim(); };
+    // type: a real <select> built from declarations, plus a `custom…` escape that
+    // reveals a free-text field for any space expression (e.g. R^m -> R^n, (R^3)* (x) R^3)
+    const opts = typeOptions();
+    if (!v.type) v.type = opts[0];
+    const isCustom = !opts.includes(v.type);
+    const tsel = selectFrom(opts.concat(["custom…"]), isCustom ? "custom…" : v.type);
+    tsel.className = "d-sm";
+    const tin = inp("d-sm", "R^m -> R^n", isCustom ? v.type : "");
+    tin.style.display = isCustom ? "" : "none";
+    tin.oninput = e => { v.type = e.target.value.trim(); };
+    tsel.onchange = e => {
+      if (e.target.value === "custom…") {
+        tin.style.display = ""; tin.value = isCustom ? v.type : ""; v.type = tin.value; tin.focus();
+      } else {
+        tin.style.display = "none"; v.type = e.target.value;
+      }
+    };
+    // realization basis: default spelled out (StandardBasis / {e₁…}), or any declared basis
+    if (!v.basis) v.basis = "standard";
+    const bsel = basisSelect(v.basis, v.type, val => { v.basis = val; });
+    row.append(name, span(":"), tsel, tin, span("in", "mut"), bsel,
+               delBtn(() => { varsList.splice(i, 1); renderVars(); }));
+    box.appendChild(row);
+  });
+}
+
+function renderRequired(list) {
+  const card = $("reqcard"), box = $("reqrows");
+  if (!list || !list.length) { card.style.display = "none"; box.innerHTML = ""; return; }
+  card.style.display = "block"; box.innerHTML = "";
+  list.forEach(d => {
+    const row = document.createElement("div"); row.className = "reqrow";
+    const nm = document.createElement("code"); nm.className = "reqname"; nm.textContent = "∂" + d.name;
+    row.append(nm, span(`(order ${d.order})`, "mut"),
+               span("frame", "mut"), selectFrom(["standard", "orthonormal"], "standard"),
+               span("value", "mut"), selectFrom(["finite-difference", "numpy"], "finite-difference"));
+    box.appendChild(row);
+  });
+}
+
+// ----- basis options for the realization selects (standard = Euclidean) -----
+function basisOptions() {
+  const o = ["standard"];
+  basesList.forEach(b => { if (b.name) o.push(b.name); });
+  return o;
+}
+
+// Render the LITERAL standard basis of a type, mirroring the space grammar (no "StandardBasis"
+// label):  R^3 → {e₁,e₂,e₃};  R^n → {e₁,…,eₙ};  (R^3)* → {e¹,e²,e³} (dual basis);
+//   R^2 (x) R^3 → {e₁,e₂} ⊗ {f₁,f₂,f₃};  R^2 (+) R^3 → {e₁,e₂} ⊕ {f₁,f₂,f₃};
+//   R^2 -> R^3 → {e¹,e²} ⊗ {f₁,f₂,f₃} (matrix units, dom dualised).
+const _BL = ["e", "f", "g", "h"];
+function _bidx(n, up) {
+  const sub = "₀₁₂₃₄₅₆₇₈₉", sup = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+  const ex = { n: ["ₙ", "ⁿ"], m: ["ₘ", "ᵐ"], k: ["ₖ", "ᵏ"], p: ["ₚ", "ᵖ"] };
+  return String(n).split("").map(c =>
+    ex[c] ? ex[c][up ? 1 : 0] : (/[0-9]/.test(c) ? (up ? sup : sub)[+c] : (up ? "^" + c : "_" + c))).join("");
+}
+function _vecSet(dim, up, letter) {
+  const e = i => letter + _bidx(i, up);
+  if (/^[0-9]+$/.test(String(dim))) {
+    const n = +dim, v = []; for (let i = 1; i <= Math.min(n, 6); i++) v.push(e(i));
+    return "{" + v.join(", ") + (n > 6 ? ", …" : "") + "}";
+  }
+  return "{" + e(1) + ", …, " + e(dim) + "}";
+}
+function _matchParen(s) { let d = 0; for (let i = 0; i < s.length; i++) { if (s[i] === "(") d++; else if (s[i] === ")") { d--; if (d === 0) return i; } } return -1; }
+function _splitTop(s, op) {
+  const parts = []; let d = 0, last = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (d === 0 && s.startsWith(op, i)) {           // check operator before paren-depth (op may be "(x)")
+      parts.push(s.slice(last, i)); last = i + op.length; i += op.length - 1; continue;
+    }
+    const c = s[i]; if (c === "(") d++; else if (c === ")") d--;
+  }
+  if (!parts.length) return null; parts.push(s.slice(last)); return parts.map(x => x.trim());
+}
+function renderBasis(type, depth, up) {
+  depth = depth || 0; up = up || false;
+  let t = (type || "").trim();
+  const sp = spacesList.find(s => s.name === t);
+  if (sp && sp.expr) return renderBasis(sp.expr, depth, up);
+  if (t === "scalar" || t === "R") return "{1}";
+  let g;
+  if ((g = /^T\((.+)\)$/.exec(t))) return "ImageBasis(" + g[1] + ")";       // tangent frame ∂φ
+  if ((g = /^CT\((.+)\)$/.exec(t))) return "DualBasis(ImageBasis(" + g[1] + "))";  // cotangent
+  while (t[0] === "(" && _matchParen(t) === t.length - 1) t = t.slice(1, -1).trim();
+  let p;
+  if ((p = _splitTop(t, "->"))) {
+    const dom = "(" + p.slice(0, -1).join("->") + ")*";
+    return renderBasis(dom, depth, up) + " ⊗ " + renderBasis(p[p.length - 1], depth + 1, up);
+  }
+  if ((p = _splitTop(t, "(+)"))) return p.map((x, i) => renderBasis(x, depth + i, up)).join(" ⊕ ");
+  if ((p = _splitTop(t, "(x)"))) return p.map((x, i) => renderBasis(x, depth + i, up)).join(" ⊗ ");
+  if (t.endsWith("*")) return renderBasis(t.slice(0, -1), depth, !up);
+  const m = /^R\s*\^\s*([A-Za-z0-9]+)$/.exec(t);
+  if (m) return _vecSet(m[1], up, _BL[depth % _BL.length]);
+  return "{basis of " + (type || "R^n") + "}";
+}
+
+// the tangent-basis select for a parameterization: default is the immersion gauge
+// ImageBasis(φ) (what the covariant derivative actually uses), or any declared basis.
+function tangentBasisSelect(f, onpick) {
+  const s = document.createElement("select"); s.className = "d-basis";
+  const cur = f.tanBasis || "imagebasis";
+  const opts = [{ value: "imagebasis", label: `ImageBasis(${f.name || "φ"})` }];
+  basesList.forEach(b => { if (b.name) opts.push({ value: b.name, label: b.name }); });
+  if (cur !== "imagebasis" && !opts.some(o => o.value === cur)) opts.push({ value: cur, label: cur });
+  opts.forEach(o => {
+    const op = document.createElement("option"); op.value = o.value; op.textContent = o.label;
+    if (o.value === cur) op.selected = true; s.appendChild(op);
+  });
+  s.onchange = e => onpick(e.target.value);
+  return s;
+}
+
+// a basis <select> whose "standard" option is spelled out for `type`; value stays "standard".
+function basisSelect(current, type, onpick) {
+  const s = document.createElement("select"); s.className = "d-basis";
+  const opts = [{ value: "standard", label: renderBasis(type) }];
+  basesList.forEach(b => { if (b.name) opts.push({ value: b.name, label: b.name }); });
+  if (current && !opts.some(o => o.value === current)) opts.push({ value: current, label: current });
+  opts.forEach(o => {
+    const op = document.createElement("option"); op.value = o.value; op.textContent = o.label;
+    if (o.value === current) op.selected = true; s.appendChild(op);
+  });
+  s.onchange = e => onpick(e.target.value);
+  return s;
+}
+
+// ===================== SERIALIZERS (-> contract shapes) =====================
+// bound dimension sizes: { name: int } for entries with a name AND a valid integer value
+// Dimensions are symbolic-only — never bound here. A specific size is written as a literal
+// (R^3) in the type; symbolic dims default to a size server-side on download.
+function dimsObj() { return {}; }
+function declsObj()   { const o = {}; varsList.forEach(v => { if (v.name) o[v.name] = v.type; }); return o; }
+// chosen non-standard realization bases per variable: { varname: basisName } (standard omitted)
+function realizeObj() {
+  const o = {};
+  varsList.forEach(v => { if (v.name && v.basis && v.basis !== "standard") o[v.name] = v.basis; });
+  return o;
+}
+function spacesObj()  { const o = {}; spacesList.forEach(s => { if (s.name && s.expr) o[s.name] = s.expr; }); return o; }
+function basesArr()   { return basesList.filter(b => b.name && b.expr).map(b => ({ name: b.name, expr: b.expr })); }
+// The "output basis" dropdown: standard (default) + every declared basis. The result is expressed
+// in the chosen basis when it is a basis of the result's space (e.g. a tangent frame for geometry).
+function renderOutBasis() {
+  const sel = $("outbasis"); if (!sel) return;
+  const cur = sel.value || PENDING_OUTBASIS || "";
+  sel.innerHTML = "";
+  const opt = (v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.appendChild(o); };
+  opt("", "standard (default)");
+  basesList.forEach(b => { if (b.name && b.expr) opt(b.name, b.name); });
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
+  PENDING_OUTBASIS = "";
+}
+let PENDING_OUTBASIS = "";
+function functionsArr() {
+  return functionsList.filter(f => f.name).map(f => ({
+    name: f.name, kind: f.kind, dom: f.dom || "", cod: f.cod || "",
+    params: f.params, components: f.components }));
+}
+// parameterization functions, in the legacy `params` shape the codegen endpoint consumes
+function paramFnsAsParams() {
+  return functionsList.filter(f => f.kind === "param" && f.name && f.components.length)
+    .map(f => ({ name: f.name, params: f.params, components: f.components }));
+}
+
+// ===================== FREE-VAR DETECTION =====================
+async function detectVars() {
+  const expr = $("expr").value.trim();
+  if (!expr) { renderVars(); return; }
+  const res = await post("/api/vars", { expression: expr });
+  if (res.error) { showError(res.error); renderVars(); return; }
+  showError("");
+  for (const v of res.vars) {
+    // skip names that are already declared as a variable OR as a function (e.g. the chart
+    // ``sphere`` in ``D(v'*w, sphere)`` is a parameterization, not a variable — don't add it).
+    if (varsList.some(x => x.name === v.name)) continue;
+    if (functionsList.some(f => f.name === v.name)) continue;
+    varsList.push({ name: v.name, type: v.type });
+  }
+  // auto-declare any dimensions the detected types reference (opaque by default)
+  let dimsChanged = false;
+  for (const n of (res.dims || []))
+    if (n && !dimsList.some(d => d.name === n)) { dimsList.push({ name: n, value: "" }); dimsChanged = true; }
+  if (dimsChanged) renderDims2();
+  renderVars();
+}
+
+// ===================== COMPUTE =====================
+async function runDerivative() {
+  const expr = $("expr").value.trim();
+  if (!expr) return;
+  const res = await post("/api/derivative",
+    { expression: expr, wrt: null, decls: declsObj(), spaces: spacesObj(),
+      functions: functionsArr(), bases: basesArr(), realize: realizeObj() });
+  if (res.error) { showError(res.error); $("out").style.display = "none"; return; }
+  const berrs = Object.entries(res.basis_errors || {});
+  showError(berrs.length ? "Basis: " + berrs.map(([k, v]) => `${k}: ${v}`).join("; ") : "");
+  $("out").style.display = "block";
+  LAST_PRIMAL = res.primal_latex || ""; LAST_DERIV = res.derivative_latex || res.primal_latex || "";
+  $("primal").innerHTML = `$$${res.primal_latex}$$`;
+  // the expression's η-reduction (folds an inline D(f,x) into its coordinate-free gradient form)
+  if (res.primal_eta_latex) {
+    $("primaleta").innerHTML = `$$${res.primal_eta_latex}$$`;
+    $("primaletacard").style.display = "block";
+  } else {
+    $("primaletacard").style.display = "none";
+  }
+  // legacy w.r.t. derivative panels (only when a wrt-derivative is returned)
+  if (res.derivative_latex) {
+    $("dlabel").innerHTML = (res.covariant ? `Covariant derivative<span class="badge">covariant</span>` : `Derivative`);
+    $("deriv").innerHTML = `$$${res.derivative_latex}$$`;
+    $("derivcard").style.display = "block";
+    if (res.derivative_eta_latex) {
+      $("etaderiv").innerHTML = `$$${res.derivative_eta_latex}$$`;
+      $("etacard").style.display = "block";
+    } else { $("etacard").style.display = "none"; }
+  } else {
+    $("derivcard").style.display = "none";
+    $("etacard").style.display = "none";
+  }
+  renderRequired(res.required_derivatives || []);
+  renderOutBasis();
+  $("primalcode").style.display = $("derivcode").style.display = "none";
+  if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
+}
+
+async function genCode() {
+  const expr = $("expr").value.trim();
+  const body = { expression: expr, wrt: null, decls: declsObj(),
+                 spaces: spacesObj(), functions: functionsArr(), bases: basesArr(),
+                 realize: realizeObj(), dims: dimsObj() };
+  const pf = paramFnsAsParams();
+  body.out_basis = ($("outbasis") && $("outbasis").value) || "";
+  if (pf.length) body.params = pf;   // additive: lets the geometry codegen path receive the immersion
+  const res = await post("/api/code", body);
+  if (res.error) { showError("Python codegen: " + res.error); return; }
+  if (res.unsupported) {
+    showError(res.unsupported);
+    $("primalcode").style.display = $("derivcode").style.display = "none";
+    return;
+  }
+  showError("");
+  const pc = res.primal_py || ("# " + (res.primal_error || "unavailable"));
+  $("primalcode").textContent = "# --- f ---\n" + pc;
+  $("primalcode").style.display = "block";
+  // derivatives are inline (the expression IS the derivative when it uses D/d), so the primal
+  // Python already computes it. Only show a separate df block for the legacy w.r.t. path.
+  if (res.derivative_py) {
+    $("derivcode").textContent = "# --- derivative df ---\n" + res.derivative_py;
+    $("derivcode").style.display = "block";
+  } else {
+    $("derivcode").style.display = "none";
+  }
+}
+
+function copyLatex() {
+  const tex = `$$${LAST_PRIMAL}$$` + (LAST_DERIV ? `\n$$${LAST_DERIV}$$` : "");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(tex).then(() => flash("Copied LaTeX to clipboard"))
+      .catch(() => showError("Clipboard blocked by the browser."));
+  } else { showError("Clipboard API unavailable."); }
+}
+
+function exportTex() {
+  const body = "\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\n"
+    + `\\[${LAST_PRIMAL}\\]\n` + (LAST_DERIV ? `\\[${LAST_DERIV}\\]\n` : "")
+    + "\\end{document}\n";
+  const blob = new Blob([body], { type: "text/x-tex" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "grassmann.tex";
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+}
+
+// ===================== GRAMMAR SIDEBAR =====================
+function grammarSection(title, itemsHtml) {
+  const sec = document.createElement("div"); sec.className = "gsec";
+  const h = document.createElement("h4"); h.textContent = title; sec.appendChild(h);
+  const items = document.createElement("div"); items.className = "gitems";
+  items.innerHTML = itemsHtml.join(""); sec.appendChild(items);
+  return sec;
+}
+async function loadGrammar() {
+  const g = await post("/api/grammar", {});
+  if (g.error) { showError(g.error); return; }
+  const box = $("grammar"); box.innerHTML = "";
+  box.appendChild(grammarSection("Operators",
+    (g.operators || []).map(o => `<span class="grow"><code>${escHtml(o.op)}</code> <span class="gm">${escHtml(o.meaning)}</span></span>`)));
+  box.appendChild(grammarSection("Derivatives (inline; leave w.r.t. empty)",
+    (g.derivatives || []).map(o => `<span class="grow"><code>${escHtml(o.op)}</code> <span class="gm">${escHtml(o.meaning)}</span></span>`)));
+  box.appendChild(grammarSection("Functions", (g.functions || []).map(f => `<code>${escHtml(f)}</code>`)));
+  box.appendChild(grammarSection("Spaces", (g.spaces || []).map(s => `<code>${escHtml(s)}</code>`)));
+  box.appendChild(grammarSection("Types", (g.types || []).map(t => `<code>${escHtml(t)}</code>`)));
+  box.appendChild(grammarSection("Bases", (g.bases || []).map(b => `<code>${escHtml(b)}</code>`)));
+}
+
+// ===================== EXAMPLES =====================
+const EXAMPLES = [
+  { label: "0.5*x'*A*x", expr: "0.5*x'*A*x", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^n" }, { name: "A", type: "R^n -> R^n" }] },
+  { label: "A*exp(x)", expr: "A*exp(x)", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^n -> R^n" }, { name: "x", type: "R^n" }] },
+  { label: "sin(x)'*y", expr: "sin(x)'*y", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^n" }, { name: "y", type: "R^n" }] },
+  { label: "(y.*v)'*x", expr: "(y.*v)'*x", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^n" }, { name: "y", type: "R^n" },
+           { name: "v", type: "R^n" }] },
+  { label: "a^b", expr: "a^b", wrt: "a",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "a", type: "scalar" }, { name: "b", type: "scalar" }] },
+  { label: "norm2(A*x-y)^2", expr: "norm2(A*x-y)^2", wrt: "x",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^n -> R^n" }, { name: "x", type: "R^n" },
+           { name: "y", type: "R^n" }] },
+  { label: "logistic loss", expr: "sum(log(exp(-y.*(X*w)) + vector(1)))", wrt: "w",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "X", type: "R^n -> R^n" }, { name: "w", type: "R^n" },
+           { name: "y", type: "R^n" }] },
+  { label: "tr(A*X'*B*X*C)", expr: "tr(A*X'*B*X*C)", wrt: "X",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^n -> R^n" }, { name: "B", type: "R^n -> R^n" },
+           { name: "C", type: "R^n -> R^n" }, { name: "X", type: "R^n -> R^n" }] },
+  { label: "log(det(inv(X)))", expr: "log(det(inv(X)))", wrt: "X",
+    dims: [{ name: "n", value: "" }], spaces: [], functions: [], bases: [],
+    vars: [{ name: "X", type: "R^n -> R^n" }] },
+  { label: "∇⟨v,w⟩ on a sphere", expr: "v(u)'*w(u)", wrt: "u",
+    dims: [], bases: [],
+    spaces: [{ name: "U", expr: "R^2" }],
+    functions: [{ name: "sphere", kind: "param", dom: "", cod: "",
+                  params: ["u1", "u2"],
+                  components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] },
+                { name: "v", kind: "opaque", dom: "U", cod: "T(sphere)",
+                  params: ["u1", "u2"], components: ["cos(u1)", "u2"] },
+                { name: "w", kind: "opaque", dom: "U", cod: "T(sphere)",
+                  params: ["u1", "u2"], components: ["u1", "sin(u2)"] }],
+    vars: [{ name: "u", type: "U" }] },
+  { label: "opaque f", expr: "f(x)'*y", wrt: "x",
+    dims: [], bases: [],
+    spaces: [{ name: "V", expr: "R^3" }],
+    functions: [{ name: "f", kind: "opaque", dom: "V", cod: "V",
+                  params: ["u1", "u2", "u3"],
+                  components: ["sin(u1)", "sin(u2)", "sin(u3)"] }],
+    vars: [{ name: "x", type: "V" }, { name: "y", type: "V" }] },
+  { label: "opaque chart ∂φ", expr: "phi(u)", wrt: "u",
+    dims: [], bases: [],
+    spaces: [{ name: "U", expr: "R^2" }],
+    functions: [{ name: "phi", kind: "opaque", dom: "U", cod: "R^3",
+                  params: ["u1", "u2"],
+                  components: ["sin(u1)*cos(u2)", "sin(u1)*sin(u2)", "cos(u1)"] }],
+    vars: [{ name: "u", type: "U" }] },
+  { label: "D(f,x): gradient", expr: "D(0.5*x'*x, x)", wrt: "",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^3" }] },
+  { label: "d∘d = 0", expr: "d(d(0.5*x'*x, x), x)", wrt: "",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^3" }] },
+  { label: "grad = ♯d f", expr: "sharp(d(0.5*x'*x, x))", wrt: "",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "x", type: "R^3" }] },
+  { label: "curl = ♯⋆d♭F", expr: "sharp(hodge(d(flat(A*x), x)))", wrt: "",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^3 -> R^3" }, { name: "x", type: "R^3" }] },
+  { label: "div = ⋆d⋆♭F", expr: "hodge(d(hodge(flat(A*x)), x))", wrt: "",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "A", type: "R^3 -> R^3" }, { name: "x", type: "R^3" }] },
+  { label: "wedge / area", expr: "norm2(wedge(a, b))^2", wrt: "a",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "a", type: "Lambda(R^3, 1)" }, { name: "b", type: "Lambda(R^3, 1)" }] },
+  { label: "hodge = cross", expr: "hodge(wedge(a, b))", wrt: "a",
+    dims: [], spaces: [], functions: [], bases: [],
+    vars: [{ name: "a", type: "Lambda(R^3, 1)" }, { name: "b", type: "Lambda(R^3, 1)" }] },
+];
+
+function applyExample(ex) {
+  dimsList = clone(ex.dims || []);
+  spacesList = clone(ex.spaces); functionsList = clone(ex.functions);
+  basesList = clone(ex.bases); varsList = clone(ex.vars);
+  // derivatives are inline now: a wrt-example ``f`` w.r.t. ``x`` becomes ``D(f, x)``; examples
+  // already written with inline D/d (wrt === "") pass through unchanged.
+  $("expr").value = ex.wrt ? `D(${ex.expr}, ${ex.wrt})` : ex.expr;
+  PENDING_OUTBASIS = ex.outBasis || "";
+  renderDims2(); renderSpaces(); renderFunctions(); renderBases(); renderVars(); renderOutBasis();
+  detectVars().then(runDerivative);
+}
+
+// ===================== WIRING =====================
+$("adddim").onclick = () => { dimsList.push({ name: "", value: "" }); renderDims2(); renderVars(); };
+$("addspace").onclick = () => { spacesList.push({ name: "", expr: "" }); renderSpaces(); };
+$("addfn").onclick = () => { functionsList.push({ name: "", kind: "opaque", dom: "", cod: "", params: [], components: [] }); renderFunctions(); renderVars(); };
+$("addbase").onclick = () => { basesList.push({ name: "", expr: "" }); renderBases(); renderVars(); renderFunctions(); };
+
+// Bases template dropdown: pick a constructor skeleton to insert (item 5)
+const BASIS_TEMPLATES = ["DualBasis(b)", "ImageBasis(phi)", "OrthonormalBasis(b)",
+                         "ListBasis(v1, v2)", "WithInnerBasis(b, g)"];
+(function initBasisTemplates() {
+  const sel = $("basetpl");
+  const ph = document.createElement("option"); ph.value = ""; ph.textContent = "+ template"; sel.appendChild(ph);
+  BASIS_TEMPLATES.forEach(t => { const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o); });
+  sel.onchange = e => {
+    const t = e.target.value; if (!t) return;
+    basesList.push({ name: "", expr: t }); renderBases(); renderVars(); renderFunctions();
+    e.target.value = "";
+  };
+})();
+$("addvar").onclick = () => { varsList.push({ name: "", type: "" }); renderVars(); };
+
+const exbox = $("exlist");
+EXAMPLES.forEach(ex => {
+  const s = document.createElement("span"); s.className = "ex"; s.textContent = ex.label;
+  s.onclick = () => applyExample(ex); exbox.appendChild(s);
+});
+
+let t = null;
+$("expr").addEventListener("input", () => { clearTimeout(t); t = setTimeout(detectVars, 250); });
+$("compute").onclick = () => detectVars().then(runDerivative);
+$("expr").addEventListener("keydown", e => { if (e.key === "Enter") detectVars().then(runDerivative); });
+$("codebtn").onclick = genCode;
+$("copybtn").onclick = copyLatex;
+$("texbtn").onclick = exportTex;
+
+// ===================== INIT =====================
+loadGrammar();
+const _byHash = { "#geometry": "∇ on a sphere", "#opaque": "opaque f", "#chart": "opaque chart ∂φ" };
+const _hashEx = EXAMPLES.find(e => e.label === _byHash[location.hash]);
+applyExample(_hashEx || EXAMPLES[0]);
+</script>
+</body>
+</html>

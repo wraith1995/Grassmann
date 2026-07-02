@@ -168,7 +168,22 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             _unify_seq(a.spaces, b.spaces, store, "⊕")
             return
         case (OProd(), OProd()):
-            _unify_seq(a.spaces, b.spaces, store, "⊗")
+            na, nb = _drop_scalar_factors(a), _drop_scalar_factors(b)
+            if (isinstance(na, OProd) and isinstance(nb, OProd)
+                    and len(na.spaces) == len(nb.spaces)):
+                _unify_seq(na.spaces, nb.spaces, store, "⊗")
+            else:  # dropping the tensor-unit (Scalar) changed the arity ⇒ re-dispatch
+                unify(na, nb, store)
+            return
+        # Scalar is the ⊗-unit (``X ⊗ ℝ ≅ X``) and a single-factor product is its factor
+        # (``OProd((X,)) ≅ X`` — a k=1 exterior/tensor power ``V⊗¹``). So an ``A ⊸ ℝ`` (≡ ``A* ⊗
+        # Scalar``) unifies with the bare dual ``A*`` from ``flat``, and ``Λ¹(V)`` (in ``V⊗¹``)
+        # with a bare ``V`` value.
+        case (OProd(), _) if len(a.spaces) == 1 or any(isinstance(x, Scalar) for x in a.spaces):
+            unify(_drop_scalar_factors(a), b, store)
+            return
+        case (_, OProd()) if len(b.spaces) == 1 or any(isinstance(x, Scalar) for x in b.spaces):
+            unify(a, _drop_scalar_factors(b), store)
             return
         case (OPlusRep(), OPlusRep()):
             if not dim_eq(a.count, b.count):
@@ -198,13 +213,29 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             unify(a, b.space, store)
             return
         case ((Ker() | Img() | CoKer() | CoImg()), _) if type(a) is type(b):
-            # FFS unify by structural term equality of the keying map (`25 §2`).
-            if a.f != b.f:  # type: ignore[attr-defined]
+            # FFS unify by α-equivalence of the keying map (`25 §2`): two independently-built
+            # FFS spaces — e.g. `Img(alt(V,k))` from two `exterior_power` sites — differ only in
+            # binder uids, yet denote the SAME subspace. Fast path is raw equality; on a raw
+            # mismatch fall back to α-canonical comparison (binders renamed to a canonical form).
+            if a.f != b.f and not _ffs_map_alpha_eq(a.f, b.f):  # type: ignore[attr-defined]
                 raise UnifyError(f"FFS map mismatch: {a!r} ~ {b!r}")
             return
         case (App(), App()):
             if a.g != b.g or a.positions != b.positions or a.args != b.args:
                 raise UnifyError(f"SpaceFunction application mismatch: {a!r} ~ {b!r}")
+            return
+        # Involution ``s** ≡ s`` (`20 §5`).  Tried only AFTER the structural cases (so
+        # ``Dual(Dual(V)) ~ Dual(?α)`` still solves ``?α := Dual(V)`` via the ``(Dual,
+        # Dual)`` rule above, never collapsing prematurely).  When ONE side is a bare
+        # double dual and the other is NOT a ``Dual`` (e.g. a contraction against an
+        # already-dual factor — what differentiating through a ``Dagger`` produces:
+        # ``⊕ⁿ ℝ ~ Dual(Dual(⊕ⁿ ℝ))``), peel the outer pair and retry.  For these
+        # finite-dim Euclidean spaces the double dual is an identity, not just an iso.
+        case (Dual(), _) if isinstance(store.walk(a.space), Dual):
+            unify(store.walk(a.space).space, b, store)
+            return
+        case (_, Dual()) if isinstance(store.walk(b.space), Dual):
+            unify(a, store.walk(b.space).space, store)
             return
         case _:
             raise UnifyError(f"cannot unify {a!r} ~ {b!r}")
@@ -217,6 +248,28 @@ def _solve_meta(m: SpaceMeta, s: Space, store: MetaStore) -> None:
     if _occurs(store, m, s):
         raise UnifyError(f"occurs-check: {m!r} occurs in {s!r}")
     store.solve(m, s)
+
+
+def _drop_scalar_factors(s: OProd) -> Space:
+    """An ``OProd`` with its ``Scalar`` (⊗-unit) factors removed and a single-factor product
+    collapsed to its factor (``OProd((X,)) ≅ X``); an all-scalar product becomes ``Scalar``."""
+    kept = tuple(x for x in s.spaces if not isinstance(x, Scalar))
+    if not kept:
+        return Scalar()
+    if len(kept) == 1:
+        return kept[0]
+    return s if len(kept) == len(s.spaces) else OProd(kept)
+
+
+def _ffs_map_alpha_eq(f: object, g: object) -> bool:
+    """Are two FFS keying maps α-equivalent (equal up to renaming of bound variables)?  Used so
+    independently-constructed FFS spaces (``Img(alt(V,k))`` etc.) unify.  Lazy import of
+    ``alpha_canon`` avoids an ``infer ← transform`` import cycle; only hit on a raw mismatch."""
+    try:
+        from grassmann.transform.rewrite import alpha_canon
+    except Exception:  # noqa: BLE001 - transform unavailable ⇒ fall back to raw inequality
+        return False
+    return alpha_canon(f) == alpha_canon(g)
 
 
 def _metric_eq(a: object, b: object) -> bool:
