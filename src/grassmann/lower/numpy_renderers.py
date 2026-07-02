@@ -97,9 +97,14 @@ def _dyn_eye(op, a):           # runtime identity sized by a ref array's axis (d
     return f"np.eye(int(np.asarray({a[0]}).shape[{getattr(op, 'axis', 1)}]))"
 
 
-def _prod_shape(op, a):        # ∏ refs[i].shape[axes[i]] — flattened multi-axis DimVar binder dim
+def _prod_shape(op, a):        # static · ∏ refs[i].shape[axes[i]] — flattened tensor-product dim
     inner = ", ".join(f"int(np.asarray({a[i]}).shape[{ax}])" for i, ax in enumerate(op.axes))
-    return f"np.asarray(int(np.prod([{inner}])))"
+    return f"np.asarray(int({getattr(op, 'static', 1)} * int(np.prod([{inner}] or [1]))))"
+
+
+def _sum_shape(op, a):         # static + Σ refs[i].shape[axes[i]] — flattened direct-sum dim
+    inner = " + ".join(f"int(np.asarray({a[i]}).shape[{ax}])" for i, ax in enumerate(op.axes))
+    return f"np.asarray(int({getattr(op, 'static', 0)} + ({inner or '0'})))"
 
 
 def _dyn_eye_tensor(op, a):    # np.eye(∏dᵢ).reshape(∏dᵢ, *dims) — matrix/tensor vmap seed identity
@@ -159,6 +164,15 @@ def _eye_op(op, a):            # static identity np.eye(n)
 
 def _kron(op, a):              # chained Kronecker product
     return f"__import__('functools').reduce(np.kron, [{', '.join(a)}])"
+
+
+def _kron_free(op, a):         # Kron of two maps with trailing free (basis/seed) axes (block ⊗)
+    nf, ng = op.nf_free, op.ng_free
+    return (
+        f"(lambda _F, _G: (_F.reshape(_F.shape[0], 1, _F.shape[1], 1, *_F.shape[2:], *([1]*{ng})) "
+        f"* _G.reshape(1, _G.shape[0], 1, _G.shape[1], *([1]*{nf}), *_G.shape[2:])).reshape("
+        f"_F.shape[0]*_G.shape[0], _F.shape[1]*_G.shape[1], *_F.shape[2:], *_G.shape[2:]))"
+        f"(np.asarray({a[0]}, dtype=float), np.asarray({a[1]}, dtype=float))")
 
 
 def _hstack(op, a):            # _HStackOp(*mats) -> np.hstack
@@ -225,6 +239,7 @@ def op_renderers() -> dict:
         "_CompRankOp": _comp_rank,
         "_EyeOp": _eye_op,
         "_KronOp": _kron,
+        "_KronFreeOp": _kron_free,
         "_HStackOp": _hstack,
         "_ColStackOp": _col_stack,
         "_ComposeViaStdOp": _compose_via_std,
@@ -235,6 +250,7 @@ def op_renderers() -> dict:
         "_EmbedOp": _embed_op,
         "_DynEyeOp": _dyn_eye,
         "_ProdShapeOp": _prod_shape,
+        "_SumShapeOp": _sum_shape,
         "_DynEyeTensorOp": _dyn_eye_tensor,
         "_DynZerosOp": _dyn_zeros,
         "_IdentityMatOp": _identity_mat,

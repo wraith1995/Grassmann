@@ -86,7 +86,8 @@ def test_hodge_double_star(n, k):
 
 def test_hodge_grade_bounds():
     V = G.space("R3", 3)
+    # k=0 (⋆1 = vol) and k=n (⋆vol = scalar) are valid; only k<0 or k>n are out of range.
     with pytest.raises(ValueError):
-        hodge_star(G.var("x", exterior_power(V, 1)), 0)
+        hodge_star(G.var("x", exterior_power(V, 1)), -1)
     with pytest.raises(ValueError):
-        hodge_star(G.var("x", exterior_power(V, 1)), 3)
+        hodge_star(G.var("x", exterior_power(V, 1)), 4)
