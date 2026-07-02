@@ -164,6 +164,13 @@ def _render_term(e: _t.Term) -> tuple[str, int]:  # noqa: C901,PLR0911,PLR0912 -
             return _render_compose(f, pos, gs)
         case _t.Trace(f=f, i=i, j=j):
             return rf"\operatorname{{tr}}_{{{i},{j}}}({_sub(f, 0)})", Prec.APP
+        case _t.Det(f=f):
+            return rf"\det\!\left({_sub(f, 0)}\right)", Prec.APP
+        case _t.LogDet(f=f):
+            return rf"\log\det\!\left({_sub(f, 0)}\right)", Prec.APP
+        case _t.OpaqueApply(op=op, arg=arg):
+            nm = op.name if len(op.name) == 1 else rf"\operatorname{{{op.name}}}"
+            return rf"{nm}\!\left({_sub(arg, 0)}\right)", Prec.APP
         case _t.Solve(f=f):
             return f"{_sub(f, _PFX_BASE)}^{{-1}}", Prec.POSTFIX
         case _t.Pinv(f=f):
@@ -216,7 +223,9 @@ def _render_eval(f: _t.Term, pos: tuple[int, ...], args: tuple[_t.Term, ...]) ->
     """Special-case the metric maps for readability, else a generic application."""
     if isinstance(f, _t.Inner) and len(args) == 2:
         return rf"\langle {_sub(args[0], 0)}, {_sub(args[1], 0)}\rangle", Prec.ATOM
-    if isinstance(f, _t.Flat) and len(args) == 1:
+    if isinstance(f, (_t.Flat, _t.Inner)) and len(args) == 1:
+        # The covector r♭: a partially-applied metric (Flat, or Inner after rule_musical
+        # canonicalizes ♭→Inner) — the advanced-η / Riesz output. Render r^♭, not ⟨·,·⟩(r).
         return f"{_sub(args[0], _PFX_BASE)}^{{\\flat}}", Prec.POSTFIX
     if isinstance(f, _t.Sharp) and len(args) == 1:
         return f"{_sub(args[0], _PFX_BASE)}^{{\\sharp}}", Prec.POSTFIX
@@ -237,9 +246,12 @@ def _render_app(f: object, pos: tuple[int, ...], args: tuple[object, ...]) -> st
 
 
 def _render_compose(f: _t.Term, pos: tuple[int, ...], gs: tuple[_t.Term, ...]) -> tuple[str, int]:
-    if len(gs) == 1 and pos == (0,):
+    # The subscript on ``∘`` names WHICH argument slot(s) of ``f`` the operand feeds — shown
+    # always (including the default single-slot ``∘₀``) so the rendering is unambiguous.
+    if len(gs) == 1:
         op = BINOPS["compose"]
-        return f"{_sub(f, Prec.COMPOSE)} {op.latex} {_sub(gs[0], Prec.COMPOSE)}", Prec.COMPOSE
+        return (f"{_sub(f, Prec.COMPOSE)} {op.latex}_{{{_idx(pos)}}} "
+                f"{_sub(gs[0], Prec.COMPOSE)}", Prec.COMPOSE)
     inside = ", ".join(_sub(g, 0) for g in gs)
     return rf"{_sub(f, Prec.POSTFIX)} \circ_{{{_idx(pos)}}} ({inside})", Prec.COMPOSE
 

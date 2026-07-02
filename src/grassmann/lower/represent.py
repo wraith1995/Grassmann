@@ -194,6 +194,18 @@ def represent(
     prog = pa.Program("represent", budget=_lowering_budget())
     ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={})
 
+    # `106`: pre-REALIZE every free input var that carries a symbolic ``DimVar('n')``, so its
+    # canonical runtime atom AND its input array both exist before any node needs an ℝⁿ shape (e.g.
+    # a standalone metric in an η-reduced derivative sizes ``np.eye(n)`` off that input). Only
+    # DimVar-carrying vars are touched, so a fully-static term lowers byte-identically as before.
+    for v in _free_term_vars(term):
+        try:
+            vs = _synth(v)
+            if any(_dimvar_of_space(ax) for ax in _space_axes(vs)):
+                _rep_var(v, ctx)
+        except Exception:  # noqa: BLE001 - best-effort pre-realize; per-node lowering still mints
+            pass
+
     rep = _rep(term, ctx, target=target)
     prog.add_output("result", rep.array)
 
@@ -347,6 +359,12 @@ class _Ctx:
     # axis means "not yet minted".  For ker/coker the recorded atom IS the complement
     # axis (``ambient − rank``), since that is the real subspace dimension there.
     ffs_dim_atoms: dict[tuple[str, int], pa.DimAtom] = field(default_factory=dict)
+    # `106`: n-generic codegen. A symbolic ``DimVar('n')`` (an mcalc dimension-polymorphic size)
+    # lowers as a RUNTIME dimension — a canonical input-sourced ``DimAtom`` minted from the first
+    # Var that carries that dim (source ``("in", var, axis)``) and reused by every later occurrence,
+    # so ``x, A : ℝⁿ`` share one atom (einsums/eyes unify) and the emitted numpy sizes off the input
+    # shapes (``np.eye(n)``) instead of a hardcoded literal. Keyed by the DimVar name.
+    dimvar_atoms: dict[str, pa.DimAtom] = field(default_factory=dict)
 
 
 # ===========================================================================
@@ -520,6 +538,10 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_compose(e, f, positions, gs, ctx, target)
         case T.Trace(f, i, j):
             return _rep_trace(e, f, i, j, ctx, target)
+        case T.Det(_) | T.LogDet(_):
+            return _rep_det(e, ctx, target)
+        case T.OpaqueApply():
+            return _rep_opaque(e, ctx, target)
         case T.Solve(f):
             return _rep_solve(e, f, ctx, target)
         case T.Pinv(f):
@@ -607,6 +629,7 @@ def _rep_var(e: T.Var, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> R
                 basis = _natural_basis(space, e, ctx)
             case _:                                         # (3) a concrete basis — declare in it if it fits
                 basis = _resolve_target(ctx, space, target) or _natural_basis(space, e, ctx)
+    _ensure_dimvar_atoms(ctx, e, space)          # `106`: symbolic ℝⁿ axes → canonical runtime atoms
     shape = _shape_of_space_dyn(space, ctx)
     if _is_static(shape):
         arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
@@ -642,8 +665,8 @@ def _make_dynamic_ffs_input(
     for axis, d in enumerate(dyn_shape):
         if isinstance(d, int):
             in_shape.append(d)
-        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "stmt":
-            in_shape.append(d)
+        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] in ("stmt", "in"):
+            in_shape.append(d)          # a canonical stmt (FFS δ) or input-sourced (`106` DimVar) atom
         else:
             in_shape.append(pa.DimAtom.from_input(f"δ:{name}@{axis}", name, axis))
     arr = _make_input(ctx, name, tuple(in_shape), note=f"var:{e.name}")
@@ -801,8 +824,12 @@ def _rep_const(
 def _rep_zeros(
     ctx: _Ctx, space: S.Space, *, note: str, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    shape = _shape_of_space(space)
-    arr = _const(ctx, np.zeros(shape), note=note)
+    dyn = _shape_of_space_dyn(space, ctx)
+    if _is_static(dyn):
+        arr = _const(ctx, np.zeros(dyn), note=note)
+    else:                                    # `106`: a symbolic ℝⁿ zero ⇒ np.zeros(n) at run time
+        dz = _dyn_zeros(ctx, dyn, note=note)
+        arr = dz if dz is not None else _const(ctx, np.zeros(_shape_of_space(space)), note=note)
     # (A) the zero vector is zero in EVERY basis — realize directly in the target, no cob.
     want = _resolve_target(ctx, space, target)
     return Rep(arr, want if want is not None else default_basis(space), space)
@@ -931,9 +958,12 @@ def _rep_oplus(
     reps = [_rep(v, ctx, subs[i]) for i, v in enumerate(vectors)] if subs is not None \
         else [_rep(v, ctx) for v in vectors]
     basis = want if subs is not None else B.basis_sum(*(r.basis for r in reps))
+    # `106`: the concat's length is the SUM of the operand lengths — derive it from the realized
+    # operands (a runtime sum atom when any is dynamic) so a symbolic ℝⁿ ⊕ ℝⁿ sizes correctly.
+    _arrs = [r.array for r in reps]
+    _sum = _combined_dim(ctx, [_shape_of(a)[0] for a in _arrs], "sum", _arrs, 0, label="oplus")
     [out] = ctx.prog.emit_stmt(
-        _ConcatOp(), [r.array for r in reps],
-        [pa.OutSpec("oplus", _shape_of_space(space))], note="oplus:concat",
+        _ConcatOp(), _arrs, [pa.OutSpec("oplus", (_sum,))], note="oplus:concat",
     )
     rep = Rep(out, basis, space)
     if subs is not None:
@@ -1356,7 +1386,17 @@ def _same_space(ctx: _Ctx, a: B.Basis, b: B.Basis) -> bool:
         # Undeterminable (abstract, or a subspace-spanning term basis) — fall back to the weaker
         # variance parity so we at least never mix a vector basis with a covector one.
         return _basis_variance(ctx, a) == _basis_variance(ctx, b)
-    return _norm_space(sa) == _norm_space(sb)
+    if _norm_space(sa) == _norm_space(sb):
+        return True
+    # α-equivalent / ⊗-unit FFS spaces — e.g. two independently-built Λᵏ(V) — are the SAME space.
+    # Defer to unify (which carries the α-equivalence + Scalar-⊗-unit rules); both sides are
+    # concrete here, so it binds no metavariables and just decides structural sameness.
+    try:
+        from grassmann.infer.unify import MetaStore, unify
+        unify(sa, sb, MetaStore())
+        return True
+    except Exception:  # noqa: BLE001 - any unify failure ⇒ genuinely different spaces
+        return False
 
 
 def _src_or_std(ctx: _Ctx, source: B.Basis | None, f: object) -> B.Basis:
@@ -2069,7 +2109,7 @@ def _rep_eval(
     dim_of_label: dict[str, int] = {}
     fshape = _shape_of(f_rep.array)
     for k, lab in enumerate(f_labels):
-        if k < len(fshape) and isinstance(fshape[k], int):
+        if k < len(fshape):  # record static AND symbolic (δ) dims — out_shape may carry either
             dim_of_label[lab] = fshape[k]
     # The map ``f`` may itself carry free (basis-index / seed) labels — e.g. a
     # *differentiated* connection map applied to a slot. They trail f's space axes and ride
@@ -2077,7 +2117,7 @@ def _rep_eval(
     f_free = f_rep.free_labels
     for off, lab in enumerate(f_free):
         ax = len(f_factors) + off
-        if ax < len(fshape) and isinstance(fshape[ax], int):
+        if ax < len(fshape):
             dim_of_label[lab] = fshape[ax]
 
     operands = [f_rep.array]
@@ -2107,7 +2147,7 @@ def _rep_eval(
         out_free_labels += arg_rep.free_labels
         ashape = _shape_of(arg_rep.array)
         for off, lab in enumerate(arg_rep.free_labels):
-            if 1 + off < len(ashape) and isinstance(ashape[1 + off], int):
+            if 1 + off < len(ashape):
                 dim_of_label[lab] = ashape[1 + off]
         contracted.add(pos)
 
@@ -2210,7 +2250,10 @@ def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     ordinary ``Eval`` path is untouched.  Bails on any dynamic/FFS axis (non-``int`` dims) or a
     total-size mismatch, so only a genuine static fused↔unfused reshape is performed.
     """
-    want_space_shape = _shape_of_space(rep.space)
+    try:
+        want_space_shape = _shape_of_space(rep.space)
+    except RepresentError:
+        return rep  # dynamic/FFS axis ⇒ single-axis, nothing to un-fuse (the intended bail)
     if not all(isinstance(d, int) for d in want_space_shape):
         return rep
     ashape = _shape_of(rep.array)
@@ -2282,9 +2325,12 @@ def _rep_compose(
     # mirroring ``_rep_eval``. With no free labels this is byte-identical to before.
     f_free = f_rep.free_labels
     fshape = _shape_of(f_rep.array)
+    for k, lab in enumerate(f_labels):       # f's space-axis dims (static + symbolic δ)
+        if k < len(fshape):
+            dim_of_label[lab] = fshape[k]
     for off, lab in enumerate(f_free):
         ax = len(f_factors) + off
-        if ax < len(fshape) and isinstance(fshape[ax], int):
+        if ax < len(fshape):
             dim_of_label[lab] = fshape[ax]
     operands = [f_rep.array]
     g_label_lists: list[str] = []
@@ -2312,9 +2358,11 @@ def _rep_compose(
         replaced[pos] = dom_label
         replaced_g[pos] = g_rep
         gshape = _shape_of(g_rep.array)
+        if gshape:                           # g's dom axis (0) sizes the replacing output label
+            dim_of_label[dom_label] = gshape[0]
         for off, lab in enumerate(g_rep.free_labels):
             ax = 2 + off
-            if ax < len(gshape) and isinstance(gshape[ax], int):
+            if ax < len(gshape):
                 dim_of_label[lab] = gshape[ax]
         out_free += g_rep.free_labels
 
@@ -2323,7 +2371,11 @@ def _rep_compose(
     )
     spec = ",".join(["".join(f_labels) + f_free, *g_label_lists]) + "->" + out_labels + out_free
 
-    out_shape = _shape_of_space(space) + tuple(dim_of_label[lab] for lab in out_free)
+    try:
+        space_shape = _shape_of_space(space)
+    except RepresentError:                   # dynamic-rank (FFS) result ⇒ shape from the einsum labels
+        space_shape = tuple(dim_of_label[lab] for lab in out_labels)
+    out_shape = space_shape + tuple(dim_of_label[lab] for lab in out_free)
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), operands,
         [pa.OutSpec("compose", out_shape)],
@@ -2390,6 +2442,62 @@ def _rep_trace(
             return rep
         case _:
             return _match_result(ctx, rep, target)
+
+
+def _rep_det(
+    e: T.Det | T.LogDet, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``Det(f)``/``LogDet(f)`` — determinant (or log-det) of a square endomorphism ``f : V ⊸ V``.
+
+    The determinant is a similarity invariant (``det(P⁻¹AP) = det(A)``), so we realize ``f`` in
+    *standard* coordinates on both (square) slots and apply polyarray's ``DetOp``; ``LogDet``
+    follows with an elementwise ``log`` of that scalar.  The result is a basis-free ``Scalar``
+    (``_rep``'s safety net cob's it to ``target``, a no-op for a scalar)."""
+    space = _synth(e)  # Scalar
+    f_rep = _rep(e.f, ctx)
+    f_arr = _coerce_basis(ctx, f_rep, default_basis(f_rep.space), note="det:cob-std")
+    _assert_axes_equal(ctx, f_arr, 0, 1, note="assert:det-square")
+    [det_out] = ctx.prog.emit_stmt(
+        pa.DetOp(), [f_arr],
+        [pa.OutSpec("det", _shape_of_space(space))], note="det:DetOp",
+    )
+    out = det_out
+    if isinstance(e, T.LogDet):
+        [out] = ctx.prog.emit_stmt(
+            _ExternalOp(name="log", fn=np.log), [det_out],
+            [pa.OutSpec("logdet", _shape_of_space(space))], note="external:log",
+        )
+    return Rep(out, default_basis(space), space)
+
+
+def _rep_opaque(
+    e: T.OpaqueApply, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``OpaqueApply(op, arg)`` — apply an opaque map ``op : dom → cod`` to ``arg``.
+
+    The argument is lowered in *standard* coordinates on ``op.dom`` (the kernel's basis
+    contract — like :func:`_rep_external`/:func:`_rep_det`'s ``cob-std``) and the numeric
+    kernel ``op.fn`` is applied as a single runtime op.  Unlike ``_ExternalOp``, the output
+    shape is *decoupled* from the operand: it is the codomain's shape (the map need not be
+    shape-preserving).  The result is born in ``default_basis(op.cod)``; ``_rep``'s safety
+    net cob's it to ``target``.
+    """
+    op = e.op
+    if op.fn is None:
+        raise RepresentError(
+            f"opaque op {op.name!r} has no numeric kernel; supply one (fn=…) to run it"
+        )
+    cod = _synth(e)  # op.cod
+    arg_rep = _rep(e.arg, ctx)
+    arg_arr = _coerce_basis(
+        ctx, arg_rep, default_basis(op.dom), note=f"opaque:{op.name}:cob-std"
+    )
+    out_shape = _shape_of_space(cod)
+    [out] = ctx.prog.emit_stmt(
+        _OpaqueOp(name=op.name, fn=op.fn), [arg_arr],
+        [pa.OutSpec("opaque", out_shape)], note=f"opaque:{op.name}",
+    )
+    return Rep(out, default_basis(cod), cod)
 
 
 def _rep_neval(
@@ -2632,7 +2740,9 @@ def _rep_solve(
     _assert_square_full_rank(ctx, f_rep.array, note="assert:solve-bij")
     [out] = ctx.prog.emit_stmt(
         pa.InvOp(), [f_rep.array],
-        [pa.OutSpec("inv", _shape_of_space(space))], note="solve:InvOp",
+        # the inverse has the SAME (square) shape as ``f`` — read it off the realized operand so a
+        # symbolic ℝⁿ⊸ℝⁿ (`106`) sizes dynamically instead of via static ``_shape_of_space``.
+        [pa.OutSpec("inv", _shape_of(f_rep.array))], note="solve:InvOp",
     )
     # Honest tag: the inverse map ``f⁻¹`` (cod⊸dom) lives in the operand's dual-swapped slot
     # bases (the numeric inverse acts in whatever basis ``f`` arrived in), not ``default_basis``.
@@ -2706,9 +2816,18 @@ def _rep_pinv(
         f_rep = _rep(f, ctx)  # inverse is covariant — operand basis OK (honest operand-derived tag)
     else:
         f_rep = _rep(f, ctx, target=B.STD)  # rectangular ⇒ PinvOp only honest in an orthonormal basis
+    try:
+        pinv_shape = _shape_of_space(space)
+    except RepresentError:
+        # dynamic-rank (FFS) map ⇒ the pinv of a 2-D matrix transposes its (dom,cod) axes, so the
+        # result shape is the runtime operand shape reversed (FFS⊸FFS maps are 2-D).
+        in_shape = _shape_of(f_rep.array)
+        if len(in_shape) != 2:
+            raise
+        pinv_shape = in_shape[::-1]
     [out] = ctx.prog.emit_stmt(
         pa.PinvOp(), [f_rep.array],
-        [pa.OutSpec("pinv", _shape_of_space(space))], note="pinv:PinvOp",
+        [pa.OutSpec("pinv", pinv_shape)], note="pinv:PinvOp",
     )
     # Honest tag: the pseudo-inverse ``f⁺`` (cod⊸dom) lives in the operand's dual-swapped slot
     # bases — the numeric PinvOp acts in whatever basis ``f`` arrived in.
@@ -3523,7 +3642,7 @@ def _rep_kron(
     [out] = ctx.prog.emit_stmt(
         _KronFreeOp(len(f_rep.free_labels), len(g_rep.free_labels)),
         [f_rep.array, g_rep.array],
-        [pa.OutSpec("kron", _shape_of_space(space) + free_dims)], note="kron:block-einsum",
+        [pa.OutSpec("kron", _shape_of_space_dyn(space, ctx) + free_dims)], note="kron:block-einsum",
     )
     rep = Rep(out, default_basis(space), space, free_labels=out_free)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
@@ -3712,6 +3831,11 @@ def _nested_vmap(sub: pa.Program, n_vars: int, n_free: int, n_cod: int):
         return np.moveaxis(full, range(n_vars), range(-n_vars, 0))
 
     fn.__qualname__ = fn.__name__ = f"vmap_nest({sub.name})"
+    # Expose the nest's shape so to_numpy_source can emit the equivalent cartesian-product helper
+    # (a multi-var nest can't be a single pa.ir.vmap, so it carries its own codegen metadata).
+    fn._vmap_body = sub
+    fn._nested_n_vars = n_vars
+    fn._nested_n_free = n_free
     return fn
 
 
@@ -3770,7 +3894,32 @@ def _rep_llam_vmap(
     eyes: list[pa.SymArray] = []
     for v in vars_:
         vsp = _synth(v)
-        n_i = _static_dim(vsp)
+        try:
+            n_i = _static_dim(vsp)
+        except RepresentError:
+            # `106`: a symbolic ℝⁿ binder (the derivative seed ``dx : ℝⁿ``) — sweep the n runtime
+            # directions with ``np.eye(n)`` sized off the DimVar's canonical input atom. A single-
+            # axis space, so the (n,n) identity already has the binder's coordinate shape.
+            dv = _dimvar_of_space(vsp)
+            if dv is not None and dv in ctx.dimvar_atoms:
+                eyes.append(_dyn_identity(ctx, vsp, note=f"llam:vmap:eye({v.name})"))
+                continue
+            # `106`: a MULTI-axis DimVar binder (a matrix/tensor seed, e.g. wrt X : ℝⁿ⊸ℝⁿ) — the
+            # eye is (∏dᵢ, d₀, d₁, …), sized off the axes' source inputs at run time.
+            dyn = _shape_of_space_dyn(vsp, ctx)
+            if len(dyn) > 1 and all(isinstance(d, pa.DimAtom) and d.source
+                                    and d.source[0] == "in" for d in dyn):
+                te = _dyn_eye_tensor(ctx, dyn, note=f"llam:vmap:eye({v.name})")
+                if te is not None:
+                    eyes.append(te)
+                    continue
+            # Runtime-rank binder (a dynamic FFS space, e.g. an exterior power Λᵏ whose rank is a
+            # runtime SVD δ): sweep its basis with a δ×δ identity sized from the var's realized
+            # basis ``cols`` (`51 §FFS-δ`).  An FFS space is single-axis, so the (δ,δ) identity
+            # already has the binder's natural coordinate shape — no reshape needed.
+            basis = sub_basis_by_uid.get(v.uid) or default_basis(vsp)
+            eyes.append(_identity_like(ctx, basis))
+            continue
         # Each basis direction eⱼ must reach the body sub-input in the bound var's NATURAL
         # (possibly multi-axis) coordinate shape — the sub-input was declared with that shape by
         # ``_rep_var``.  Reshape the identity's rows from flat ``(n_i,)`` to ``(n_i, *natural)``:
@@ -3810,10 +3959,17 @@ def _rep_llam_vmap(
     # FIRST, then one var (basis-index) axis per bound var.  This is the TRANSPOSE of the space's
     # ``(dom…, cod…)`` factor order — but it is exactly what the eye path emits, so the value is
     # byte-identical for a default body (and the honest tag below describes THIS physical order).
-    cod_shape = _shape_of_space(body_rep.space)
+    try:
+        cod_shape = _shape_of_space(body_rep.space)
+    except RepresentError:
+        # dynamic-rank (FFS) body codomain ⇒ read the actual lowered array's shape (the per-slice
+        # body carries no batch axis, so its shape IS the codomain shape, δ axes and all).
+        cod_shape = _shape_of(body_rep.array)
     n_cod_axes = len(cod_shape)          # ARRAY axes of the body (0 for a scalar body)
     fn = _nested_vmap(sub, n_vars, n_shared, n_cod_axes)
-    dom_shape = tuple(_static_dim(_synth(v)) for v in vars_)
+    # Each bound var's domain axis is the basis-index axis of its eye (``eye.shape[0]``) — a plain
+    # int for a static binder, the runtime δ for a dynamic FFS one.
+    dom_shape = tuple(_shape_of(e)[0] for e in eyes)
     out_shape = cod_shape + dom_shape
     [out] = ctx.prog.emit_stmt(
         pa.CallOp(fn), [*eyes, *shared_arrays],
@@ -5132,10 +5288,70 @@ def _dyn_identity(ctx: _Ctx, space: S.Space, *, note: str) -> pa.SymArray:
     identity of the runtime rank.  Only reachable when the static fast path raised
     ``DynamicDim``; the static path stays a plain ``np.eye`` const.
     """
+    dv = _dimvar_of_space(space)          # `106`: a symbolic ℝⁿ metric ⇒ np.eye(n), n from an input
+    if dv is not None and dv in ctx.dimvar_atoms:
+        atom = ctx.dimvar_atoms[dv]
+        _, in_name, axis = atom.source
+        ref = ctx.prog.input_arrays.get(in_name)
+        if ref is not None:
+            [out] = ctx.prog.emit_stmt(
+                _DynEyeOp(axis=axis), [ref], [pa.OutSpec("dyn-eye", (atom, atom))], note=note,
+            )
+            return out
     real = _realize_ffs_for_space(ctx, space)
     delta = _shape_of(real.cols)[1]
     [out] = ctx.prog.emit_stmt(
         _DynEyeOp(), [real.cols], [pa.OutSpec("dyn-eye", (delta, delta))], note=note,
+    )
+    return out
+
+
+def _dyn_zeros(
+    ctx: _Ctx, dyn: tuple[int | pa.DimAtom, ...], *, note: str,
+) -> pa.SymArray | None:
+    """A runtime ``np.zeros(d₀, d₁, …)`` sized off the axes' source inputs (`106`); ``None`` if any
+    axis isn't an input-sourced runtime atom (so the caller falls back)."""
+    refs: list[pa.SymArray] = []
+    axes: list[int] = []
+    for atom in dyn:
+        if not (isinstance(atom, pa.DimAtom) and atom.source and atom.source[0] == "in"):
+            return None
+        _, in_name, axis = atom.source
+        ref = ctx.prog.input_arrays.get(in_name)
+        if ref is None:
+            return None
+        refs.append(ref)
+        axes.append(axis)
+    [out] = ctx.prog.emit_stmt(
+        _DynZerosOp(tuple(axes)), refs, [pa.OutSpec("dyn-zeros", tuple(dyn))], note=note,
+    )
+    return out
+
+
+def _dyn_eye_tensor(
+    ctx: _Ctx, dyn: tuple[int | pa.DimAtom, ...], *, note: str,
+) -> pa.SymArray | None:
+    """The vmap identity of a MULTI-axis DimVar binder (a matrix/tensor derivative seed) — an
+    ``(∏dᵢ, d₀, d₁, …)`` array sized off the axes' source inputs at run time (`106`). ``None`` if
+    any axis isn't an input-sourced runtime atom (so the caller falls back)."""
+    refs: list[pa.SymArray] = []
+    axes: list[int] = []
+    for atom in dyn:
+        if not (isinstance(atom, pa.DimAtom) and atom.source and atom.source[0] == "in"):
+            return None
+        _, in_name, axis = atom.source
+        ref = ctx.prog.input_arrays.get(in_name)
+        if ref is None:
+            return None
+        refs.append(ref)
+        axes.append(axis)
+    axes_t = tuple(axes)
+    # the flattened dimension ∏dᵢ, as a runtime atom sourced from a tiny 0-d prod Stmt.
+    ctx.prog.emit_stmt(_ProdShapeOp(axes_t), refs, [pa.OutSpec("vmap-eye-prod", ())],
+                       note=note + ":prod")
+    prod = pa.DimAtom(name="vmap-eye:prod", source=(len(ctx.prog.statements) - 1, 0))
+    [out] = ctx.prog.emit_stmt(
+        _DynEyeTensorOp(axes_t), refs, [pa.OutSpec("dyn-eye-tensor", (prod, *dyn))], note=note,
     )
     return out
 
@@ -5266,6 +5482,42 @@ def _static_dim(space: S.Space) -> int:
         ) from exc
 
 
+def _dimvar_of_space(space: S.Space) -> str | None:
+    """The ``DimVar`` name of a single-axis ``ℝⁿ`` space (or its dual), else ``None`` (`106`).
+
+    Used to size that axis by a canonical RUNTIME input-sourced atom instead of a static int, so a
+    symbolic mcalc dimension lowers to dimension-generic numpy (``np.eye(n)``, ``A.shape[0]``)."""
+    s = space.space if isinstance(space, S.Dual) else space
+    if isinstance(s, S.OPlusRep) and isinstance(s.count, S.DimVar) and isinstance(s.space, S.Scalar):
+        return s.count.name
+    return None
+
+
+def _space_axes(space: S.Space) -> tuple[S.Space, ...]:
+    """The per-array-axis component spaces of a VALUE space, mirroring ``_shape_of_space``'s axes
+    (``⊗`` factors are separate axes; a single-axis space is itself)."""
+    match space:
+        case S.Scalar():
+            return ()
+        case S.OProd(spaces):
+            return spaces
+        case S.WithInner(s, _):
+            return _space_axes(s)
+        case _:
+            return (space,)
+
+
+def _ensure_dimvar_atoms(ctx: "_Ctx", e: T.Var, space: S.Space) -> None:
+    """Mint (once) the canonical runtime ``DimAtom`` for each ``DimVar`` axis of ``e``'s space,
+    sourcing the FIRST occurrence from THIS var's shape axis; later occurrences reuse it so all
+    ``ℝⁿ`` values share one atom (einsums/eyes unify) (`106`)."""
+    name = _var_name(e)
+    for axis, ax_space in enumerate(_space_axes(space)):
+        dv = _dimvar_of_space(ax_space)
+        if dv is not None and dv not in ctx.dimvar_atoms:
+            ctx.dimvar_atoms[dv] = pa.DimAtom.from_input(dv, name, axis)
+
+
 def _shape_of_space(space: S.Space) -> tuple[int, ...]:
     """The polyarray array shape mirroring ``space`` (`41 §0`).
 
@@ -5308,20 +5560,77 @@ def _shape_of_space_dyn(
             cols_shape = _shape_of(real.cols)
             # the FFS basis matrix is (ambient, rank); the value lives in the rank axis.
             return (cols_shape[1],)
+        case S.Scalar():
+            return ()                                        # a scalar is 0-axis (NOT (1,))
         case S.OProd(spaces):
-            return tuple(_dyn_dim(s, ctx) for s in spaces)
+            return tuple(_dyn_dim(s, ctx) for s in spaces)   # ⊗ is multi-axis: one dim per factor
         case S.WithInner(s, _):
             return _shape_of_space_dyn(s, ctx)
         case _:
-            return _shape_of_space(space)
+            # every other value space is SINGLE-axis (the flattened total dim), matching
+            # ``_shape_of_space``'s ``(_static_dim(space),)`` — ``Dual(⊗)``/``⊕`` flatten to one axis.
+            return (_dyn_dim(space, ctx),)
+
+
+def _combine_atom_dims(
+    ctx: _Ctx, dims: list[int | pa.DimAtom], op: str,
+) -> int | pa.DimAtom:
+    """``sum``/``prod`` of ``dims`` (int | input-sourced ``DimAtom``) → a static int or a runtime
+    ``DimAtom`` sourced from a tiny 0-d Stmt reading the atoms' source-input shape axes (`106`).
+    Raises if a dim is a non-input-sourced dynamic atom (caller falls back to static)."""
+    static = 0 if op == "sum" else 1
+    refs: list[pa.SymArray] = []
+    axes: list[int] = []
+    for d in dims:
+        if isinstance(d, int):
+            static = static + d if op == "sum" else static * d
+        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "in":
+            _, in_name, axis = d.source
+            ref = ctx.prog.input_arrays.get(in_name)
+            if ref is None:
+                raise RepresentError("_combine_atom_dims: source input not realized")
+            refs.append(ref)
+            axes.append(axis)
+        else:
+            raise RepresentError(f"_combine_atom_dims: non-input-sourced dim {d!r}")
+    if not refs:
+        return static
+    out_op = _SumShapeOp(tuple(axes), static) if op == "sum" else _ProdShapeOp(tuple(axes), static)
+    ctx.prog.emit_stmt(out_op, refs, [pa.OutSpec(f"{op}-dim", ())], note=f"dyn:{op}-dim")
+    return pa.DimAtom(name=f"{op}(dims)", source=(len(ctx.prog.statements) - 1, 0))
 
 
 def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
-    shp = _shape_of_space_dyn(space, ctx)
-    if len(shp) != 1:
-        # a tensored factor's fused dim must be static (the substrate sizes ⊗ statically).
-        return _static_dim(space)
-    return shp[0]
+    """The FLATTENED (single) runtime dim of ``space`` — a product for ``⊗``/``Dual(⊗)``, a sum for
+    ``⊕`` — matching static ``dim_of`` but as a runtime atom when symbolic (`106`)."""
+    try:
+        return _static_dim(space)                        # static fast path (byte-identical)
+    except RepresentError:
+        pass
+    match space:
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():   # runtime-rank FFS δ (as before)
+            real = _realize_ffs_for_space(ctx, space)
+            return _shape_of(real.cols)[1]
+        case S.Dual(inner):
+            return _dyn_dim(inner, ctx)                   # a dual has the same total dim
+        case S.WithInner(s, _):
+            return _dyn_dim(s, ctx)
+        case S.OProd(spaces):
+            return _combine_atom_dims(ctx, [_dyn_dim(s, ctx) for s in spaces], "prod")
+        case S.OPlus(spaces):
+            return _combine_atom_dims(ctx, [_dyn_dim(s, ctx) for s in spaces], "sum")
+        case S.OPlusRep(count, inner):
+            dv = _dimvar_of_space(space)                  # ℝⁿ (count DimVar, inner Scalar)
+            if dv is not None and dv in ctx.dimvar_atoms:
+                return ctx.dimvar_atoms[dv]
+            if isinstance(count, S.DimLit):               # ⊕ᶜ inner ⇒ c copies of |inner|
+                return _combine_atom_dims(ctx, [_dyn_dim(inner, ctx)] * count.value, "sum")
+            return _static_dim(space)                     # re-raise (symbolic count, non-ℝⁿ)
+        case _:
+            dv = _dimvar_of_space(space)
+            if dv is not None and dv in ctx.dimvar_atoms:
+                return ctx.dimvar_atoms[dv]
+            return _static_dim(space)                     # re-raise
 
 
 def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
@@ -5542,10 +5851,64 @@ class _ConstOp:
 
 @dataclass(frozen=True)
 class _DynEyeOp:
-    """A runtime identity sized by a reference array's column axis (the FFS rank ``δ_f``)."""
+    """A runtime identity sized by a reference array's axis (default the FFS rank column ``δ_f`` at
+    axis 1; ``axis=k`` sizes ``np.eye`` off ``ref.shape[k]`` — used for a `106` ``DimVar('n')``
+    whose canonical atom sources from an input's shape axis)."""
 
-    def __call__(self, ref: np.ndarray) -> np.ndarray:  # ref is (ambient, δ)
-        return np.eye(int(np.asarray(ref).shape[1]))
+    axis: int = 1
+
+    def __call__(self, ref: np.ndarray) -> np.ndarray:
+        return np.eye(int(np.asarray(ref).shape[self.axis]))
+
+
+@dataclass(frozen=True)
+class _ProdShapeOp:
+    """``static · ∏ refs[i].shape[axes[i]]`` as a 0-d int — a flattened tensor-product dimension
+    (matrix/tensor seed, ``Dual(⊗)``, kron) (`106`)."""
+
+    axes: tuple[int, ...]
+    static: int = 1
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        return np.asarray(int(self.static * int(np.prod(
+            [int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)] or [1]))))
+
+
+@dataclass(frozen=True)
+class _SumShapeOp:
+    """``static + Σ refs[i].shape[axes[i]]`` as a 0-d int — a flattened direct-sum dimension
+    (``⊕``, an ``OPlusRep`` count) (`106`)."""
+
+    axes: tuple[int, ...]
+    static: int = 0
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        return np.asarray(int(self.static + int(sum(
+            int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)))))
+
+
+@dataclass(frozen=True)
+class _DynEyeTensorOp:
+    """``np.eye(∏dᵢ).reshape(∏dᵢ, d₀, d₁, …)`` — the vmap identity of a MULTI-axis DimVar binder
+    (a matrix/tensor seed ``ℝⁿ⊸ℝⁿ``): ``∏dᵢ`` runtime directions, each a basis tensor. Each ``dᵢ``
+    is read from ``refs[i].shape[axes[i]]`` (`106`)."""
+
+    axes: tuple[int, ...]
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        dims = [int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)]
+        prod = int(np.prod(dims)) if dims else 1
+        return np.eye(prod).reshape(prod, *dims)
+
+
+@dataclass(frozen=True)
+class _DynZerosOp:
+    """``np.zeros(d₀, d₁, …)`` sized off ``refs[i].shape[axes[i]]`` — a symbolic ℝⁿ zero (`106`)."""
+
+    axes: tuple[int, ...]
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        return np.zeros(tuple(int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)))
 
 
 @dataclass(frozen=True)
@@ -5698,6 +6061,23 @@ class _ExternalOp:
 
     def __call__(self, *xs: np.ndarray) -> np.ndarray:
         return np.asarray(self.fn(*[np.asarray(x, dtype=float) for x in xs]), dtype=float)
+
+
+@dataclass(frozen=True)
+class _OpaqueOp:
+    """Apply an opaque map's numpy kernel to its (standard-coord) operand array.
+
+    Lowers an :class:`~grassmann.core.term.OpaqueApply`: the kernel ``fn`` is a black-box
+    ``dom``-array → ``cod``-array callable.  Unlike :class:`_ExternalOp` (elementwise, shape-
+    preserving), the kernel may change shape — the out-shape is fixed by the codomain in
+    :func:`_rep_opaque`.  A numpy_renderer rule will be needed to codegen this op later.
+    """
+
+    name: str
+    fn: object
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        return np.asarray(self.fn(np.asarray(x, dtype=float)), dtype=float)
 
 
 # ===========================================================================

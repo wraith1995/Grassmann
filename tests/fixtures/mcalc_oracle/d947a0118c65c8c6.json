@@ -1,0 +1,24 @@
+{
+  "codeExport": {
+    "latex": "\\documentclass[12pt]{article}\n\\begin{document}\nfunction:\n\\[\n  f = a^{b}\n\\]\n\ngradient:\n\\[\n  \\frac{\\partial f}{\\partial a} = b\\cdot a^{(b-1)}\n\\]\nwhere\n\\begin{itemize}\n  \\item $a$ is a scalar\n  \\item $b$ is a scalar\n\\end{itemize}\n\\end{document}\n",
+    "python": "\"\"\"\nSample code automatically generated on 2026-06-26 18:27:45\n\nby www.matrixcalculus.org\n\nfrom input\n\nd/da a^b = b*a.^(b-1)\n\nwhere\n\na is a scalar\nb is a scalar\n\nThe generated code is provided \"as is\" without warranty of any kind.\n\"\"\"\n\nfrom __future__ import division, print_function, absolute_import\n\nimport numpy as np\n\ndef fAndG(a, b):\n    if isinstance(a, np.ndarray):\n        dim = a.shape\n        assert dim == (1, )\n    if isinstance(b, np.ndarray):\n        dim = b.shape\n        assert dim == (1, )\n\n    functionValue = (a ** b)\n    gradient = (b * (a ** (b - 1)))\n\n    return functionValue, gradient\n\ndef checkGradient(a, b):\n    # numerical gradient checking\n    # f(x + t * delta) - f(x - t * delta) / (2t)\n    # should be roughly equal to inner product <g, delta>\n    t = 1E-6\n    delta = float(np.random.randn(1))\n    f1, _ = fAndG(a + t * delta, b)\n    f2, _ = fAndG(a - t * delta, b)\n    f, g = fAndG(a, b)\n    print('approximation error',\n          np.linalg.norm((f1 - f2) / (2*t) - np.tensordot(g, delta, axes=0)))\n\ndef generateRandomData():\n    a = np.random.randn(1)\n    b = np.random.randn(1)\n\n    return a, b\n\nif __name__ == '__main__':\n    a, b = generateRandomData()\n    functionValue, gradient = fAndG(a, b)\n    print('functionValue = ', functionValue)\n    print('gradient = ', gradient)\n\n    print('numerical gradient checking ...')\n    checkGradient(a, b)\n"
+  },
+  "csStr": "",
+  "derivative": "b\\cdot a^{(b-1)}",
+  "derivativeCS": "b\\cdot a^{(b-1)}",
+  "errorEnd": null,
+  "errorStart": null,
+  "errorString": "",
+  "expression": "a^b",
+  "expressionLatex": "a^{b}",
+  "markTokens": null,
+  "varList": [
+    "a",
+    "b"
+  ],
+  "varType": [
+    "scalar",
+    "scalar"
+  ],
+  "wrt": "a"
+}

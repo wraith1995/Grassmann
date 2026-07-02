@@ -308,6 +308,76 @@ class Trace:
         return f"Trace({self.f!r}, {self.i}, {self.j})"
 
 
+@dataclass(frozen=True)
+class Det:
+    """``Det(f)`` — the determinant of a square endomorphism ``f : V ⊸ V`` (a ``Scalar``)."""
+
+    f: Term
+
+    def __post_init__(self) -> None:
+        _require_term(self.f, "Det.f")
+
+    def __repr__(self) -> str:
+        return f"Det({self.f!r})"
+
+
+@dataclass(frozen=True)
+class LogDet:
+    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``
+    (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
+    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`."""
+
+    f: Term
+
+    def __post_init__(self) -> None:
+        _require_term(self.f, "LogDet.f")
+
+    def __repr__(self) -> str:
+        return f"LogDet({self.f!r})"
+
+
+@dataclass(frozen=True)
+class OpaqueOp:
+    """An **opaque map** ``f : dom → cod`` — a declared black box with no body.
+
+    ``fn`` is an optional numpy kernel (an ``A``-array → ``B``-array callable) used to
+    *run* the op; it is excluded from equality/hash (``compare=False``) so two ops are
+    equal iff their ``name``/``dom``/``cod`` agree.  ``OpaqueOp`` is a *payload* (the
+    function symbol), not a Term — it is applied via :class:`OpaqueApply`."""
+
+    name: str
+    dom: Space
+    cod: Space
+    fn: object = field(default=None, compare=False)
+
+    def __post_init__(self) -> None:
+        if not is_space(self.dom):
+            raise TermError(f"OpaqueOp.dom: expected a Space, got {self.dom!r}")
+        if not is_space(self.cod):
+            raise TermError(f"OpaqueOp.cod: expected a Space, got {self.cod!r}")
+
+    def __repr__(self) -> str:
+        return f"OpaqueOp({self.name!r})"
+
+
+@dataclass(frozen=True)
+class OpaqueApply:
+    """``OpaqueApply(op, arg)`` — apply an opaque map ``op`` to ``arg`` (a Term in
+    ``op.dom``), yielding a Term in ``op.cod``.  Differentiated via an auto-allocated
+    Jacobian tracer input — see :mod:`grassmann.transform.diff`."""
+
+    op: OpaqueOp
+    arg: Term
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.op, OpaqueOp):
+            raise TermError(f"OpaqueApply.op: expected an OpaqueOp, got {self.op!r}")
+        _require_term(self.arg, "OpaqueApply.arg")
+
+    def __repr__(self) -> str:
+        return f"OpaqueApply({self.op.name!r}, {self.arg!r})"
+
+
 # ===========================================================================
 # Inverses & adjoint.
 # ===========================================================================
@@ -737,7 +807,7 @@ class Frame:
 
 
 # A Term is any of the node types above.
-Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Solve | Pinv | Sqrt | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | TuplePermute | Kron | LLam | Lam | Frame
+Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Det | LogDet | OpaqueApply | Solve | Pinv | Sqrt | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | TuplePermute | Kron | LLam | Lam | Frame
 
 _TERM_TYPES = (
     Var,
@@ -753,6 +823,9 @@ _TERM_TYPES = (
     NEval,
     Compose,
     Trace,
+    Det,
+    LogDet,
+    OpaqueApply,
     Solve,
     Pinv,
     SolveApply,
@@ -992,6 +1065,18 @@ def trace(f: Term, i: int, j: int) -> Trace:
     return Trace(f, i, j)
 
 
+def det(f: Term) -> Det:
+    return Det(f)
+
+
+def logdet(f: Term) -> LogDet:
+    return LogDet(f)
+
+
+def opaque_apply(op: OpaqueOp, arg: Term) -> OpaqueApply:
+    return OpaqueApply(op, arg)
+
+
 def solve(f: Term) -> Solve:
     return Solve(f)
 
@@ -1106,6 +1191,10 @@ __all__ = [
     "NEval",
     "Compose",
     "Trace",
+    "Det",
+    "LogDet",
+    "OpaqueOp",
+    "OpaqueApply",
     "Solve",
     "Pinv",
     "sqrt",
@@ -1146,6 +1235,9 @@ __all__ = [
     "compose",
     "chain",
     "trace",
+    "det",
+    "logdet",
+    "opaque_apply",
     "solve",
     "pinv",
     "solve_apply",

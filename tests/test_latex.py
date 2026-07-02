@@ -54,7 +54,8 @@ def test_tensor_over_sum_parenthesizes():
 
 
 def test_compose():
-    assert G.latex(A @ A) == r"A \circ A"
+    # ``∘`` always carries the slot subscript naming which argument the operand feeds.
+    assert G.latex(A @ A) == r"A \circ_{0} A"
 
 
 def test_nondefault_positions_surface_as_subscripts():
@@ -168,6 +169,16 @@ def test_diff_chain_rule_through_exp():
     # d/dx exp(x) = (dx ↦ exp(x) ⊙ dx) — the elementwise chain rule.
     d = G.diff(G.exp(x), x.node)
     assert G.latex(d) == r"\lambda dx.\; \exp(x) \odot dx"
+
+
+def test_diff_inner_product_advanced_eta_pretty():
+    # Advanced-η (opt-in RIESZ_SOP) folds the noisy lambda d/dx⟨x,x⟩ into the covector 2·x♭.
+    # The default-path pin above (test_diff_inner_product_has_correct_structure) is unchanged.
+    from grassmann.transform.rewrite import RIESZ_SOP
+
+    d = G.diff(G.dot(x, x), x.node)
+    folded = G.normal_form(d, RIESZ_SOP)
+    assert G.latex(folded) == r"2 \cdot x^{\flat}"
 
 
 def test_latex_accepts_raw_term_and_expr():

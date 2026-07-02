@@ -387,6 +387,12 @@ def _t(node: object) -> tuple[str, int]:
             return _app_like("Compose", f, pos, gs, _t0), G.P_APP
         case T.Trace(f=f, i=i, j=j):
             return f"Trace({_t(f)[0]}, {i}, {j})", G.P_APP
+        case T.Det(f=f):
+            return f"det({_t(f)[0]})", G.P_APP
+        case T.LogDet(f=f):
+            return f"logdet({_t(f)[0]})", G.P_APP
+        case T.OpaqueApply(op=op, arg=arg):
+            return f"{op.name}({_t(arg)[0]})", G.P_APP
         case T.Solve(f=f):
             return f"{_wrap_t(f, G.P_POSTFIX)}{G.INVERSE}", G.P_POSTFIX
         case T.Pinv(f=f):
@@ -513,10 +519,13 @@ def _external(node: object) -> str:
     data = node.data
     name = getattr(data, "name", None)
     if name is None or name not in G.EXTERNAL_NAME_TO_HEAD:
-        raise UnparseError(
-            f"cannot unparse External with opaque data {data!r}; only stdlib "
-            f"ExternalOp nodes round-trip"
-        )
+        # A non-stdlib (opaque) External — e.g. a constant basis vector inside a Hodge volume
+        # form. It doesn't round-trip to a re-parseable form, but render it readably (its name
+        # applied to any args) rather than crashing the whole pretty-print.
+        if name is not None:
+            inner = ", ".join(_t(a)[0] for a in node.args)
+            return f"{name}({inner})" if node.args else name
+        raise UnparseError(f"cannot unparse External with opaque data {data!r}")
     head = G.EXTERNAL_NAME_TO_HEAD[name]
     if head == "hadamard":
         x, y = node.args
