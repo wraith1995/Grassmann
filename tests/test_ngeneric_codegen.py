@@ -27,6 +27,7 @@ CASES = [
     ("pinv(A)*y", {"A": "R^n -> R^n", "y": "R^n"}),               # pseudo-inverse apply
     ("A\\y", {"A": "R^n -> R^n", "y": "R^n"}),                    # solve / backslash
     ("outer(x, y)", {"x": "R^n", "y": "R^n"}),                    # outer product (matrix)
+    ("kron(A, B)", {"A": "R^n -> R^n", "B": "R^n -> R^n"}),       # Kronecker (Dual(⊗)+product dims)
 ]
 
 

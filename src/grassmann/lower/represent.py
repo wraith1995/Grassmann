@@ -5497,23 +5497,77 @@ def _shape_of_space_dyn(
             cols_shape = _shape_of(real.cols)
             # the FFS basis matrix is (ambient, rank); the value lives in the rank axis.
             return (cols_shape[1],)
+        case S.Scalar():
+            return ()                                        # a scalar is 0-axis (NOT (1,))
         case S.OProd(spaces):
-            return tuple(_dyn_dim(s, ctx) for s in spaces)
+            return tuple(_dyn_dim(s, ctx) for s in spaces)   # ⊗ is multi-axis: one dim per factor
         case S.WithInner(s, _):
             return _shape_of_space_dyn(s, ctx)
         case _:
-            dv = _dimvar_of_space(space)          # `106`: a symbolic ℝⁿ axis → its runtime atom
-            if dv is not None and dv in ctx.dimvar_atoms:
-                return (ctx.dimvar_atoms[dv],)
-            return _shape_of_space(space)
+            # every other value space is SINGLE-axis (the flattened total dim), matching
+            # ``_shape_of_space``'s ``(_static_dim(space),)`` — ``Dual(⊗)``/``⊕`` flatten to one axis.
+            return (_dyn_dim(space, ctx),)
+
+
+def _combine_atom_dims(
+    ctx: _Ctx, dims: list[int | pa.DimAtom], op: str,
+) -> int | pa.DimAtom:
+    """``sum``/``prod`` of ``dims`` (int | input-sourced ``DimAtom``) → a static int or a runtime
+    ``DimAtom`` sourced from a tiny 0-d Stmt reading the atoms' source-input shape axes (`106`).
+    Raises if a dim is a non-input-sourced dynamic atom (caller falls back to static)."""
+    static = 0 if op == "sum" else 1
+    refs: list[pa.SymArray] = []
+    axes: list[int] = []
+    for d in dims:
+        if isinstance(d, int):
+            static = static + d if op == "sum" else static * d
+        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "in":
+            _, in_name, axis = d.source
+            ref = ctx.prog.input_arrays.get(in_name)
+            if ref is None:
+                raise RepresentError("_combine_atom_dims: source input not realized")
+            refs.append(ref)
+            axes.append(axis)
+        else:
+            raise RepresentError(f"_combine_atom_dims: non-input-sourced dim {d!r}")
+    if not refs:
+        return static
+    out_op = _SumShapeOp(tuple(axes), static) if op == "sum" else _ProdShapeOp(tuple(axes), static)
+    ctx.prog.emit_stmt(out_op, refs, [pa.OutSpec(f"{op}-dim", ())], note=f"dyn:{op}-dim")
+    return pa.DimAtom(name=f"{op}(dims)", source=(len(ctx.prog.statements) - 1, 0))
 
 
 def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
-    shp = _shape_of_space_dyn(space, ctx)
-    if len(shp) != 1:
-        # a tensored factor's fused dim must be static (the substrate sizes ⊗ statically).
-        return _static_dim(space)
-    return shp[0]
+    """The FLATTENED (single) runtime dim of ``space`` — a product for ``⊗``/``Dual(⊗)``, a sum for
+    ``⊕`` — matching static ``dim_of`` but as a runtime atom when symbolic (`106`)."""
+    try:
+        return _static_dim(space)                        # static fast path (byte-identical)
+    except RepresentError:
+        pass
+    match space:
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():   # runtime-rank FFS δ (as before)
+            real = _realize_ffs_for_space(ctx, space)
+            return _shape_of(real.cols)[1]
+        case S.Dual(inner):
+            return _dyn_dim(inner, ctx)                   # a dual has the same total dim
+        case S.WithInner(s, _):
+            return _dyn_dim(s, ctx)
+        case S.OProd(spaces):
+            return _combine_atom_dims(ctx, [_dyn_dim(s, ctx) for s in spaces], "prod")
+        case S.OPlus(spaces):
+            return _combine_atom_dims(ctx, [_dyn_dim(s, ctx) for s in spaces], "sum")
+        case S.OPlusRep(count, inner):
+            dv = _dimvar_of_space(space)                  # ℝⁿ (count DimVar, inner Scalar)
+            if dv is not None and dv in ctx.dimvar_atoms:
+                return ctx.dimvar_atoms[dv]
+            if isinstance(count, S.DimLit):               # ⊕ᶜ inner ⇒ c copies of |inner|
+                return _combine_atom_dims(ctx, [_dyn_dim(inner, ctx)] * count.value, "sum")
+            return _static_dim(space)                     # re-raise (symbolic count, non-ℝⁿ)
+        case _:
+            dv = _dimvar_of_space(space)
+            if dv is not None and dv in ctx.dimvar_atoms:
+                return ctx.dimvar_atoms[dv]
+            return _static_dim(space)                     # re-raise
 
 
 def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
@@ -5746,14 +5800,28 @@ class _DynEyeOp:
 
 @dataclass(frozen=True)
 class _ProdShapeOp:
-    """``∏ refs[i].shape[axes[i]]`` as a 0-d int — the flattened size of a multi-axis DimVar binder
-    (a matrix/tensor derivative seed) (`106`)."""
+    """``static · ∏ refs[i].shape[axes[i]]`` as a 0-d int — a flattened tensor-product dimension
+    (matrix/tensor seed, ``Dual(⊗)``, kron) (`106`)."""
 
     axes: tuple[int, ...]
+    static: int = 1
 
     def __call__(self, *refs: np.ndarray) -> np.ndarray:
-        return np.asarray(int(np.prod(
-            [int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)])))
+        return np.asarray(int(self.static * int(np.prod(
+            [int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)] or [1]))))
+
+
+@dataclass(frozen=True)
+class _SumShapeOp:
+    """``static + Σ refs[i].shape[axes[i]]`` as a 0-d int — a flattened direct-sum dimension
+    (``⊕``, an ``OPlusRep`` count) (`106`)."""
+
+    axes: tuple[int, ...]
+    static: int = 0
+
+    def __call__(self, *refs: np.ndarray) -> np.ndarray:
+        return np.asarray(int(self.static + int(sum(
+            int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)))))
 
 
 @dataclass(frozen=True)
