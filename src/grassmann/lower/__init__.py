@@ -26,6 +26,7 @@ from .represent import (
     Rep,
     RepresentError,
     cob,
+    numpy_op_renderers,
     realize_basis,
     represent,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "FfsRealization",
     "CobError",
     "represent",
+    "numpy_op_renderers",
     "Rep",
     "RepresentError",
 ]
