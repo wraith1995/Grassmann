@@ -152,7 +152,7 @@ def rational_lane():
         _REPRESENT_BUDGET.reset(tok)
 
 
-def _lowering_budget() -> "pa.SymbolicBudget":
+def _lowering_budget() -> pa.SymbolicBudget:
     """The budget for a `represent`-built program: the mask-lane override, else `force_stmts`."""
     return _REPRESENT_BUDGET.get() or pa.SymbolicBudget.force_stmts()
 
@@ -5574,7 +5574,7 @@ def _space_axes(space: S.Space) -> tuple[S.Space, ...]:
             return (space,)
 
 
-def _ensure_dimvar_atoms(ctx: "_Ctx", e: T.Var, space: S.Space) -> None:
+def _ensure_dimvar_atoms(ctx: _Ctx, e: T.Var, space: S.Space) -> None:
     """Mint (once) the canonical runtime ``DimAtom`` for each ``DimVar`` axis of ``e``'s space,
     sourcing the FIRST occurrence from THIS var's shape axis; later occurrences reuse it so all
     ``ℝⁿ`` values share one atom (einsums/eyes unify) (`106`)."""
@@ -6544,17 +6544,17 @@ def numpy_op_renderers() -> dict:
     * :class:`_ReshapeOp` — reshape an input.
     """
 
-    def _const(op: "_ConstOp", args: list[str]) -> str:
+    def _const(op: _ConstOp, args: list[str]) -> str:
         # Reproduce __call__: np.frombuffer(data_bytes, dtype).reshape(shape).copy().
         return (
             f"np.frombuffer({op.data_bytes!r}, dtype={op.dtype!r})"
             f".reshape({tuple(op.shape)!r}).copy()"
         )
 
-    def _axis_len(op: "_AxisLenOp", args: list[str]) -> str:
+    def _axis_len(op: _AxisLenOp, args: list[str]) -> str:
         return f"np.asarray(int(np.asarray({args[0]}).shape[{op.axis}]))"
 
-    def _reshape(op: "_ReshapeOp", args: list[str]) -> str:
+    def _reshape(op: _ReshapeOp, args: list[str]) -> str:
         return f"np.asarray({args[0]}, dtype=float).reshape({tuple(op.shape)!r})"
 
     return {"_ConstOp": _const, "_AxisLenOp": _axis_len, "_ReshapeOp": _reshape}
