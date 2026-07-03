@@ -29,6 +29,8 @@ a different basis (`41 §0` strategy).
 
 from __future__ import annotations
 
+from typing import assert_never
+
 import contextlib
 import contextvars
 import os
@@ -488,7 +490,7 @@ def _split_target_components(want: B.Basis | None, n: int) -> list[B.Basis] | No
     splits a ``BasisProd`` target, ``OPlusV`` a ``BasisSum``/``BasisRep``) builds each operand in its
     sub-target directly, so the assembled result lands in ``want`` with NO conversion cob.
     """
-    match want:
+    match want:  # audit: ok EX-FALLTHROUGH — returns None by design; caller bails via standard (verified) [approved Teo 2026-07-03]
         case B.BasisProd(bs) | B.BasisSum(bs) if len(bs) == n:
             return list(bs)
         case B.BasisRep(c, inner):
@@ -585,8 +587,13 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_llam(e, vars_, body, ctx, target)
         case T.Lam():
             return _rep_lam(e, ctx, target)
-        case _:
-            raise RepresentError(f"represent: unsupported term {e!r}")
+        case T.Frame():
+            raise RepresentError(
+                f"represent: unsupported term {e!r} (a Frame is a basis binder — it is consumed "
+                "by the embed/transform layers and never reaches lowering)"
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 # ---------------------------------------------------------------------------
@@ -674,7 +681,8 @@ def _make_dynamic_ffs_input(
     # (i) rank-consistency: the FFS map's computed rank must equal the input's δ axis.
     #     Only emitted for a single-axis FFS space whose map can be realized (the generic
     #     SVD/GSVD case carries a `rank` SymArray; the static QrOp case never reaches here).
-    if isinstance(space, (S.Img, S.Ker, S.CoImg, S.CoKer)):
+    from grassmann.infer.subspace import is_ffs
+    if is_ffs(space):
         real = _realize_ffs_for_space(ctx, space)
         if real.rank is not None:
             [delta_in] = ctx.prog.emit_stmt(
@@ -847,7 +855,7 @@ def _rep_identity(
     if (
         isinstance(want, B.BasisProd)
         and len(want.bases) == 2
-        and isinstance(want.bases[0], B.DualBasis)
+        and isinstance(want.bases[0], B.DualBasis)  # audit: ok EX-ISINSTANCE-LADDER — narrowing peel (BasisProd(Dual(b),b) endo eye), not dispatch [approved Teo 2026-07-03]
         and _basis_eq(want.bases[0].basis, want.bases[1])
     ):
         return Rep(arr, want, space)
@@ -1088,8 +1096,18 @@ def _metric_node_kind(f: T.Term) -> str | None:
             return "flat"
         case T.Sharp():
             return "sharp"
-        case _:
+        case (T.Assert() | T.Compose() | T.Dagger() | T.Det()
+              | T.Embed() | T.Eval() | T.External() | T.Frame()
+              | T.Identity() | T.InvLift() | T.Kron() | T.LLam()
+              | T.Lam() | T.Lift() | T.Lit() | T.LogDet()
+              | T.NEval() | T.OPlusV() | T.OProdV() | T.OpaqueApply()
+              | T.Permute() | T.Pinv() | T.PinvApply() | T.Project()
+              | T.Remetric() | T.Scale() | T.Solve() | T.SolveApply()
+              | T.Sqrt() | T.Sum() | T.Trace() | T.TupleEmbed()
+              | T.TuplePermute() | T.TupleProject() | T.Var() | T.Zero()):
             return None
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _rep_metric(f: T.Term, kind: str, ctx: _Ctx, *, basis: B.Basis) -> Rep:
@@ -1316,7 +1334,7 @@ def _norm_space(s: S.Space) -> S.Space:
             # so strip them for strict equality.  An FFS-typed term basis of ``Img(f)`` and a
             # ``ProjectedBasis(f, "image")`` are bases of the SAME space.
             return type(s)(f)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — peel base-case: leaf spaces already canonical [approved Teo 2026-07-03]
             return s
 
 
@@ -1356,8 +1374,10 @@ def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
         case B.CompleteBasis(_sub, complement, _reduce):
             # ambient = the complement's space (it supplies the completing ambient directions).
             return _space_of_basis(ctx, complement)
-        case _:
-            return None
+        case B.BVar() | B.BLam() | B.BApp():
+            return None  # abstract bases: space undeterminable ⇒ the cob guard weakens to variance
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _ffs_space_of(ctor, f) -> S.Space | None:
@@ -1459,7 +1479,7 @@ def _contains_abstract(b: B.Basis) -> bool:
         case B.ImageBasis(_f, src, tgt):
             return ((src is not None and _contains_abstract(src))
                     or (tgt is not None and _contains_abstract(tgt)))
-        case _:
+        case _:  # audit: ok EX-WILDCARD — safe classifier default: absence fails loud downstream [approved Teo 2026-07-03]
             return False
 
 
@@ -1489,7 +1509,7 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
         return _identity_like(ctx, frm)
     if isinstance(frm, B.PrimalBasis) and isinstance(frm.basis, B.DualBasis):
         return _basis_cob_rec(ctx, frm.basis.basis, to)               # PrimalBasis(DualBasis(x)) ≡ x
-    if isinstance(to, B.PrimalBasis) and isinstance(to.basis, B.DualBasis):
+    if isinstance(to, B.PrimalBasis) and isinstance(to.basis, B.DualBasis):  # audit: ok EX-ISINSTANCE-LADDER — narrowing peel of Primal(Dual) double-wrap; match dispatches rest [approved Teo 2026-07-03]
         return _basis_cob_rec(ctx, frm, to.basis.basis)
     match frm:
         case B.ScalarBasis():
@@ -1516,7 +1536,7 @@ def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _cob_from_list(ctx, frm, to)
         case B.CompleteBasis():
             return _cob_from_complete(ctx, frm, to)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1546,7 +1566,7 @@ def _cob_from_dual(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _dual_pair_cob(ctx, frm.basis, tb)
         case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric/metricized covector basis
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1572,7 +1592,7 @@ def _cob_from_primal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _dual_pair_cob(ctx, frm.basis, tb)
         case B.ListBasis() | B.CompleteBasis() | B.WithInnerBasis() | B.OrthonormalBasis():
             return _cob_via_standard(ctx, frm, to)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1591,7 +1611,7 @@ def _cob_from_sum(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _block_diag_cols(ctx, [_basis_cob_rec(ctx, f, tb) for f in fs])
         case B.ListBasis() | B.CompleteBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1607,7 +1627,7 @@ def _cob_from_prod(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
                 ctx, [_basis_cob_rec(ctx, f, t) for f, t in zip(fs, ts, strict=True)])
         case B.ListBasis() | B.CompleteBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1626,7 +1646,7 @@ def _cob_from_rep(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _block_diag_cols(ctx, [_basis_cob_rec(ctx, fb, t) for t in ts])
         case B.ListBasis() | B.CompleteBasis():
             return _cob_via_standard(ctx, frm, to)           # numeric basis ⇒ realize + compose
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1642,7 +1662,7 @@ def _cob_from_withinner(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             # raw → its g-orthonormalization ⇒ the orthonormalization factor: cob(std→to)=Uᵀ·G,
             # which is the Cholesky `Lᵀ` of the metric Gram (see `_orthonormal_metric`).
             return _cob_via_standard(ctx, frm, to)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)           # total backstop (guard-rejected here)
 
 
@@ -1658,7 +1678,7 @@ def _cob_from_orthonormal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
         case B.WithInnerBasis():
             # orthonormalized → raw ⇒ the inverse orthonormalization factor (L⁻ᵀ).
             return _cob_via_standard(ctx, frm, to)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)           # total backstop (guard-rejected here)
 
 
@@ -1698,7 +1718,7 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             # to = canonical metric-free ProjectedBasis of the SAME map ⇒ its in-space realize is
             # I, so cob = (realize to)⁻¹·(realize from) = I·R = R = the ImageBasis's own in-space.
             return _realize_ffs_in_space(ctx, frm)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1738,7 +1758,7 @@ def _cob_from_projected(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             c_to = realize_basis_cols(ctx, to)               # R = U_dᵀ·J (square ⇐ injective)
             n_amb, k_to = _shape_of(c_to)
             return _inverse_cols(ctx, c_to, n_amb, k_to, to)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1779,7 +1799,7 @@ def _cob_from_list(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             #                                                   the ListBasis is itself metricized)
         case B.ImageBasis() | B.ProjectedBasis():
             return _cob_via_standard(ctx, frm, to)           # same subspace via the variance fallback
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1798,7 +1818,7 @@ def _cob_from_complete(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
             return _cob_via_standard(ctx, frm, to)
         case B.ImageBasis() | B.ProjectedBasis():
             return _cob_via_standard(ctx, frm, to)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return _cob_via_standard(ctx, frm, to)
 
 
@@ -1923,7 +1943,7 @@ def _is_standard_orthonormal(b: B.Basis) -> bool:
             # `WithInnerBasis` is deliberately NOT recursed — a g-orthonormal basis is NOT
             # standard-orthonormal.
             return _is_standard_orthonormal(inner)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — safe direction: False only costs a pinv, never wrong [approved Teo 2026-07-03]
             return False
 
 
@@ -1961,8 +1981,19 @@ def _basis_variance(ctx: _Ctx, basis: B.Basis) -> bool:
             return _basis_variance(ctx, inner)
         case B.ListBasis(vectors):
             return bool(vectors) and _term_is_dual(vectors[0])
-        case _:
-            return False
+        case (B.ScalarBasis() | B.BasisSum() | B.BasisProd() | B.BasisRep()
+              | B.ImageBasis() | B.ProjectedBasis() | B.BVar() | B.BLam() | B.BApp()):
+            return False  # structurally primal (an FFS basis realizes in ambient coords)
+        case B.OrthonormalBasis(inner):
+            # Orthonormalization keeps the space ⇒ keeps the variance (probe-verified fix
+            # 2026-07-03: `Orth(Dual(b))` previously read primal, letting `_same_space`'s
+            # weakened variance guard pair a covector basis with a vector one).
+            return _basis_variance(ctx, inner)
+        case B.CompleteBasis(_, complement, _):
+            # The ambient (= the complement's space, as in `_space_of_basis`) carries the variance.
+            return _basis_variance(ctx, complement)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _term_is_dual(vector: object) -> bool:
@@ -2008,7 +2039,7 @@ def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
 
 def _is_ffs_basis(basis: B.Basis) -> bool:
     """Whether ``basis`` is an FFS basis (``ImageBasis`` or ``ProjectedBasis``)."""
-    return isinstance(basis, (B.ImageBasis, B.ProjectedBasis))
+    return isinstance(basis, (B.ImageBasis, B.ProjectedBasis))  # audit: ok EX-ISINSTANCE-LADDER — FFS basis is definitionally ImageBasis|ProjectedBasis [approved Teo 2026-07-03]
 
 
 def _strip_variance(basis: B.Basis) -> B.Basis:
@@ -2016,7 +2047,7 @@ def _strip_variance(basis: B.Basis) -> B.Basis:
     match basis:
         case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
             return _strip_variance(inner)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — peel base-case: non-wrapper leaf is itself [approved Teo 2026-07-03]
             return basis
 
 
@@ -2654,7 +2685,7 @@ def _free_term_vars(node: object) -> list[T.Var]:
             return
         if isinstance(n, T.Lam):
             bound = bound | {v.uid for v in n.term_vars}
-        elif isinstance(n, T.LLam):
+        elif isinstance(n, T.LLam):  # audit: ok EX-ISINSTANCE-LADDER — generic traversal; Var/Lam/LLam binder narrowing only [approved Teo 2026-07-03]
             bound = bound | {v.uid for v in n.vars}
         for child in T._children(n):
             walk(child, bound)
@@ -3271,7 +3302,7 @@ def _metric_target_basis(
     if len(slots) != len(map_space.spaces):
         return None
     if dual_slots:
-        if not all(isinstance(sb, B.DualBasis) for sb in slots):
+        if not all(isinstance(sb, B.DualBasis) for sb in slots):  # audit: ok EX-ISINSTANCE-LADDER — structural probe: no clean match => None => epilogue bail [approved Teo 2026-07-03]
             return None
         inners = [sb.basis for sb in slots]
     else:
@@ -3421,7 +3452,7 @@ def _tuple_block_basis_match(
         return None
     # slot 0 is always the (dual) domain; slot 1 the (primal) codomain.
     dom_slot, cod_slot = want.bases
-    if not isinstance(dom_slot, B.DualBasis):
+    if not isinstance(dom_slot, B.DualBasis):  # audit: ok EX-ISINSTANCE-LADDER — structural probe: no clean match => None => epilogue bail [approved Teo 2026-07-03]
         return None  # the domain slot of a canonical map basis is always dual
     oplus_inner = dom_slot.basis if dom_is_oplus else cod_slot
     block_inner = cod_slot if dom_is_oplus else dom_slot.basis
@@ -4360,7 +4391,7 @@ def _slot_swap_operand_target(want: B.Basis | None) -> B.Basis | None:
     if not isinstance(want, B.BasisProd) or len(want.bases) != 2:
         return None
     t0, t1 = want.bases
-    if not isinstance(t0, B.DualBasis):
+    if not isinstance(t0, B.DualBasis):  # audit: ok EX-ISINSTANCE-LADDER — structural probe: no clean steering => None => caller bails [approved Teo 2026-07-03]
         return None
     return B.basis_prod(B.dual_basis(t1), t0.basis)
 
@@ -4371,7 +4402,8 @@ def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.S
     Uses the FFS SVD/QR/GSVD seam for an FFS subspace; a plain ⊕-component subspace uses
     its standard-basis selection columns.
     """
-    if isinstance(sub, (S.Img, S.Ker, S.CoImg, S.CoKer)):
+    from grassmann.infer.subspace import is_ffs
+    if is_ffs(sub):
         # The FFS substrate (SvdOp/QrOp/GSvdOp) realizes the columns in ambient coords;
         # the column axis is rank-sized (static |dom| for an injective QrOp image, else
         # the runtime DimAtom δ_f) — `41 §1`, threaded by `_realize_ffs_for_space`.
@@ -4397,8 +4429,12 @@ def _ffs_which_and_map(basis: B.Basis) -> tuple[str, object]:
             return "image", f
         case B.ProjectedBasis(f, which, _src, _tgt):
             return which, f
-        case _:
+        case (B.ScalarBasis() | B.BVar() | B.DualBasis() | B.PrimalBasis() | B.BasisSum()
+              | B.BasisProd() | B.BasisRep() | B.ListBasis() | B.WithInnerBasis()
+              | B.OrthonormalBasis() | B.CompleteBasis() | B.BLam() | B.BApp()):
             raise RepresentError(f"_ffs_which_and_map: not an FFS basis: {basis!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _ffs_immersion(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
@@ -4414,7 +4450,7 @@ def _ffs_immersion(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
             return _realize_ffs_by_which(ctx, which, f, source=src, target=tgt).cols
         case B.ImageBasis(f, source, target):
             return _realize_image_basis(ctx, f, source, target)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return realize_basis_cols(ctx, basis)
 
 
@@ -4430,7 +4466,7 @@ def _ffs_immersion_std(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
             return _realize_ffs_by_which(ctx, which, f, source=src, target=tgt).cols
         case B.ImageBasis(f, source, _target):
             return _realize_image_basis(ctx, f, source, None)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return realize_basis_cols(ctx, basis)
 
 
@@ -4657,7 +4693,7 @@ def realize_basis_cols(ctx: _Ctx, b: B.Basis) -> pa.SymArray:
             return _realize_list_basis(ctx, vectors, backup, reduce)
         case B.CompleteBasis(sub, complement, reduce):
             return _realize_complete_basis(ctx, sub, complement, reduce)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             return realize_basis(ctx.prog, b)
 
 
@@ -4919,8 +4955,20 @@ def _peel_orthonormal_metric(inner: B.Basis) -> tuple[object | None, int]:
                 b = x
             case B.WithInnerBasis(_x, g):
                 return g, parity
-            case _:
-                return None, parity
+            case B.CompleteBasis(_, complement, _):
+                # A completion spans its AMBIENT — `_space_of_basis` reads the ambient off the
+                # COMPLEMENT, so a metric carried there rides through (probe-verified fix
+                # 2026-07-03: `Orth(Complete(WithInner_g, WithInner_g))` spans `WithInner(V,g)`
+                # per `_space_of_basis` but previously orthonormalized in the STANDARD product —
+                # the same class as audit round-4 #2). Parity: the complement's own Dual/Primal
+                # wrappers are counted by the continued peel, matching the space assignment.
+                b = complement
+            case (B.ScalarBasis() | B.BasisSum() | B.BasisProd() | B.BasisRep()
+                  | B.ImageBasis() | B.ProjectedBasis() | B.ListBasis()
+                  | B.BVar() | B.BLam() | B.BApp()):
+                return None, parity  # no carried metric ⇒ the standard product
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 def _realize_orthonormal(ctx: _Ctx, inner: B.Basis) -> pa.SymArray:
@@ -5381,8 +5429,20 @@ def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
             return reduce is not B.Reduce.ORTHONORMALIZE
         case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
             return _is_immersed_metric_basis(inner)
-        case _:
-            return False
+        case None:
+            return False  # orthonormal-default lowering stays byte-identical
+        case (B.ScalarBasis() | B.ProjectedBasis() | B.OrthonormalBasis() | B.BVar()
+              | B.BLam() | B.BApp()):
+            return False  # genuinely orthonormal / abstract ⇒ identity fast path
+        case B.BasisSum(bs) | B.BasisProd(bs):
+            # Gram of a composite = block-diag / Kron of factor Grams ⇒ non-orthonormal iff
+            # any factor is (probe-verified fix 2026-07-03: `Prod(ImageBasis, std)` previously
+            # kept the identity fast path — silently wrong Gram on e.g. Dagger's transpose path).
+            return any(_is_immersed_metric_basis(x) for x in bs)
+        case B.BasisRep(_, inner):
+            return _is_immersed_metric_basis(inner)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _peel_to_core(basis: B.Basis) -> B.Basis:
@@ -5390,7 +5450,7 @@ def _peel_to_core(basis: B.Basis) -> B.Basis:
     match basis:
         case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
             return _peel_to_core(inner)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — peel base-case: non-wrapper leaf is the core [approved Teo 2026-07-03]
             return basis
 
 
@@ -5460,8 +5520,12 @@ def _peel_dual(basis: B.Basis) -> bool:
             return not _peel_dual(inner)
         case B.WithInnerBasis(inner, _):
             return _peel_dual(inner)
-        case _:
-            return False
+        case (B.ScalarBasis() | B.BasisSum() | B.BasisProd() | B.BasisRep()
+              | B.ImageBasis() | B.ProjectedBasis() | B.ListBasis() | B.CompleteBasis()
+              | B.OrthonormalBasis() | B.BVar() | B.BLam() | B.BApp()):
+            return False  # even parity: no Dual/Primal wrapper at this level
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 
@@ -5491,7 +5555,7 @@ def _dimvar_of_space(space: S.Space) -> str | None:
     Used to size that axis by a canonical RUNTIME input-sourced atom instead of a static int, so a
     symbolic mcalc dimension lowers to dimension-generic numpy (``np.eye(n)``, ``A.shape[0]``)."""
     s = space.space if isinstance(space, S.Dual) else space
-    if isinstance(s, S.OPlusRep) and isinstance(s.count, S.DimVar) and isinstance(s.space, S.Scalar):
+    if isinstance(s, S.OPlusRep) and isinstance(s.count, S.DimVar) and isinstance(s.space, S.Scalar):  # audit: ok EX-ISINSTANCE-LADDER — structural pattern probe (OPlusRep(DimVar,Scalar)); None default [approved Teo 2026-07-03]
         return s.count.name
     return None
 
@@ -5506,7 +5570,7 @@ def _space_axes(space: S.Space) -> tuple[S.Space, ...]:
             return spaces
         case S.WithInner(s, _):
             return _space_axes(s)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — documented single-axis default (mirrors _shape_of_space) [approved Teo 2026-07-03]
             return (space,)
 
 
@@ -5537,7 +5601,7 @@ def _shape_of_space(space: S.Space) -> tuple[int, ...]:
             return (_static_dim(space),)
         case S.WithInner(s, _):
             return _shape_of_space(s)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — documented single-axis default (Dual(prod)/sum flatten) [approved Teo 2026-07-03]
             return (_static_dim(space),)
 
 
@@ -5569,7 +5633,7 @@ def _shape_of_space_dyn(
             return tuple(_dyn_dim(s, ctx) for s in spaces)   # ⊗ is multi-axis: one dim per factor
         case S.WithInner(s, _):
             return _shape_of_space_dyn(s, ctx)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — documented single-axis default, dyn mirror of static [approved Teo 2026-07-03]
             # every other value space is SINGLE-axis (the flattened total dim), matching
             # ``_shape_of_space``'s ``(_static_dim(space),)`` — ``Dual(⊗)``/``⊕`` flatten to one axis.
             return (_dyn_dim(space, ctx),)
@@ -5629,7 +5693,7 @@ def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
             if isinstance(count, S.DimLit):               # ⊕ᶜ inner ⇒ c copies of |inner|
                 return _combine_atom_dims(ctx, [_dyn_dim(inner, ctx)] * count.value, "sum")
             return _static_dim(space)                     # re-raise (symbolic count, non-ℝⁿ)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): wildcard = always-correct standard/general path [approved Teo 2026-07-03]
             dv = _dimvar_of_space(space)
             if dv is not None and dv in ctx.dimvar_atoms:
                 return ctx.dimvar_atoms[dv]
@@ -5736,9 +5800,10 @@ def _ffs_sibling_key(space: S.Space) -> tuple | None:
     map's ``(which, |dom|, |cod|)`` recognises alpha-equivalent ``Λᵏ`` spaces as one FFS
     (same ambient ⇒ same domain/codomain dims ⇒ same δ).  ``None`` for a non-FFS space.
     """
-    if not isinstance(space, (S.Img, S.Ker, S.CoImg, S.CoKer)):
+    from grassmann.infer.subspace import ffs_kind
+    which = ffs_kind(space)
+    if which is None:
         return None
-    which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
 
     dom, cod = map_domain_codomain(space.f)
     try:
@@ -6183,8 +6248,15 @@ def realize_basis(program: pa.Program, b: B.Basis) -> pa.SymArray:
                 f"realize_basis: {type(b).__name__} (term/completion/orthonormal) is realized "
                 "via represent.realize_basis_cols, not as a static matrix"
             )
-        case _:
-            raise CobError(f"realize_basis: cannot realize {b!r}")
+        case B.PrimalBasis(inner):
+            # PrimalBasis marks covariant parity without changing the realized matrix.
+            raise CobError(
+                f"realize_basis: cannot realize {b!r} (peel PrimalBasis via _strip_variance first)"
+            )
+        case B.BVar() | B.BLam() | B.BApp():
+            raise CobError(f"realize_basis: cannot realize an abstract basis {b!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _cob_prod(program, fs, ts) -> pa.SymArray:
@@ -6447,7 +6519,7 @@ def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
             except ValueError:
                 metrics_eq = False
             return metrics_eq and _basis_eq(x, y)
-        case _:
+        case _:  # audit: ok EX-WILDCARD — structural == is the conservative default [approved Teo 2026-07-03]
             try:
                 return bool(a == b)
             except ValueError:

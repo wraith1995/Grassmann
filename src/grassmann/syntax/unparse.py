@@ -88,12 +88,12 @@ def _collect(node: object, bound_uids: frozenset[int], bound_names: frozenset[st
                 nb_names.add(name)
         _collect(node.body, nb_uids, frozenset(nb_names), acc)
         return
-    if isinstance(node, T.Frame):
+    if isinstance(node, T.Frame):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): binder cases else generic child recursion [approved Teo 2026-07-03]
         _collect(node.var.space, bound_uids, bound_names, acc)
         nb = bound_uids | {node.var.uid}
         _collect(node.basis_body, nb, bound_names, acc)
         return
-    if isinstance(node, B.BLam):
+    if isinstance(node, B.BLam):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): binder cases else generic child recursion [approved Teo 2026-07-03]
         nb_uids = bound_uids | ({node.term_var.uid} if node.term_var else set())
         nb_names = set(bound_names)
         if node.basis_var is not None:

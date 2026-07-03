@@ -26,6 +26,8 @@ for the metric (``WithInner``) case — realized by :func:`realize_ffs_basis`.
 
 from __future__ import annotations
 
+from typing import assert_never
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -84,8 +86,39 @@ def default_basis(space: S.Space) -> B.Basis:
             raise S.SpaceError(
                 f"space_basis: cannot give a default basis for an unreduced App {space!r}"
             )
-        case _:  # pragma: no cover - defensive
-            raise S.SpaceError(f"space_basis: unknown space {space!r}")
+        case S.SpaceMeta():
+            raise S.SpaceError(f"space_basis: no default basis for an unsolved metavar {space!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def map_basis(space: S.Space, choice) -> B.Basis:
+    """Structure-mirroring basis functor (2026-07-03, fem audit #18): a general basis CHOICE
+    for ``space`` that mirrors the basis tower — ``choice(space) -> Basis | None`` is consulted
+    at EVERY node first (``None`` = no override there); un-overridden structural wrappers
+    (``Dual``/``OPlus``/``OProd``/``OPlusRep``/``WithInner``) mirror and recurse; every other
+    un-overridden node falls to :func:`default_basis`. Consumers supply ONLY their leaf policy
+    (e.g. pointwise's immersed-tangent ``ImageBasis`` pin) instead of hand-rolling the tower walk."""
+    picked = choice(space)
+    if picked is not None:
+        return picked
+    match space:
+        case S.Dual(s):
+            return B.dual_basis(map_basis(s, choice))
+        case S.OPlus(spaces):
+            return B.basis_sum(*(map_basis(s, choice) for s in spaces))
+        case S.OProd(spaces):
+            return B.basis_prod(*(map_basis(s, choice) for s in spaces))
+        case S.OPlusRep(count, s):
+            return B.basis_rep(count, map_basis(s, choice))
+        case S.WithInner(s, g):
+            return B.with_inner_basis(map_basis(s, choice), g)
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer() | S.Scalar() | S.SVar() | S.App() | S.SpaceMeta():
+            # FFS nodes are LEAVES for the tower walk (their internals are the map's business);
+            # Scalar/SVar take the standard default; App/SpaceMeta raise there, loudly.
+            return default_basis(space)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _maybe(s: S.Space | None) -> B.Basis | None:
@@ -124,7 +157,7 @@ def candidate_bases(space: S.Space) -> tuple[B.Basis, ...]:
         case S.CoKer(f, src, tgt):
             if tgt is not None:
                 _add(out, default_basis(tgt))
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): out[0]=default_basis; extras are optimization [approved Teo 2026-07-03]
             pass
     return tuple(out)
 

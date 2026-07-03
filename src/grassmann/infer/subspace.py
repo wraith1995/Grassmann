@@ -12,7 +12,10 @@ relation structurally (with dim-equality for the reflexive/leaf case).
 
 from __future__ import annotations
 
+from typing import Literal, TypeGuard, assert_never
+
 from grassmann.core.space import (
+    App,
     CoImg,
     CoKer,
     DimLit,
@@ -24,6 +27,9 @@ from grassmann.core.space import (
     OProd,
     Scalar,
     Space,
+    SpaceMeta,
+    SVar,
+    WithInner,
 )
 
 
@@ -45,7 +51,7 @@ def _norm(s: Space) -> Space:
             return ns[0] if len(ns) == 1 else OProd(tuple(ns))
         case Dual(inner):
             return Dual(_norm(inner))
-        case _:
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): canonicalize specific else passthrough [approved Teo 2026-07-03]
             return s
 
 
@@ -71,7 +77,7 @@ def is_subspace(sub: Space, amb: Space) -> bool:
         dom = _ffs_dom(sub)
         if dom is not None and is_subspace_or_eq(dom, amb):
             return True
-    if isinstance(sub, (Img, CoKer)):
+    if isinstance(sub, (Img, CoKer)):  # audit: ok EX-ISINSTANCE-LADDER — safe direction: False only blocks project/embed [approved Teo 2026-07-03]
         cod = _ffs_cod(sub)
         if cod is not None and is_subspace_or_eq(cod, amb):
             return True
@@ -86,25 +92,102 @@ def is_subspace_or_eq(a: Space, b: Space) -> bool:
 def _ffs_dom(node: Ker | CoImg) -> Space | None:
     if node.source is not None:
         return node.source
-    from .synth import map_domain_codomain
+    from .synth import InferError, map_domain_codomain
 
     try:
         dom, _ = map_domain_codomain(node.f)
         return dom
-    except Exception:
+    except InferError:
         return None
 
 
 def _ffs_cod(node: Img | CoKer) -> Space | None:
     if node.target is not None:
         return node.target
-    from .synth import map_domain_codomain
+    from .synth import InferError, map_domain_codomain
 
     try:
         _, cod = map_domain_codomain(node.f)
         return cod
-    except Exception:
+    except InferError:
         return None
 
 
-__all__ = ["is_subspace", "is_subspace_or_eq"]
+# ---------------------------------------------------------------------------
+# Canonical FFS / map-space probes (2026-07-03 consolidation — fem audit #18).
+# These replace the per-module hand-rolled copies (pullback._is_ffs/_ffs_superspace,
+# diff._subspace_defining_map/_ffs_kind/_map_dom_cod, choose._operator_of,
+# embed.ops._split_map_space, _dims' peel, represent's membership gates).
+# ---------------------------------------------------------------------------
+
+FfsKind = Literal["img", "ker", "coimg", "coker"]
+
+
+def is_ffs(s: Space) -> TypeGuard[Img | Ker | CoImg | CoKer]:
+    """Whether ``s`` is one of the four fundamental subspaces of a map."""
+    return isinstance(s, (Img, Ker, CoImg, CoKer))  # audit: ok EX-ISINSTANCE-LADDER — THE canonical FFS membership predicate (definitional 4-member subset) [approved Teo 2026-07-03]
+
+
+def ffs_defining_map(s: Space) -> object | None:
+    """The defining map ``f`` (a Term) of ``Img(f)/Ker(f)/CoImg(f)/CoKer(f)``, else ``None``."""
+    match s:
+        case Img(f, _, _) | Ker(f, _, _) | CoImg(f, _, _) | CoKer(f, _, _):
+            return f
+        case Scalar() | SVar() | Dual() | OPlus() | OProd() | OPlusRep() | WithInner() | App() | SpaceMeta():
+            return None
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def ffs_kind(s: Space) -> FfsKind | None:
+    """The FFS kind of ``s``, else ``None``."""
+    match s:
+        case Img():
+            return "img"
+        case Ker():
+            return "ker"
+        case CoImg():
+            return "coimg"
+        case CoKer():
+            return "coker"
+        case Scalar() | SVar() | Dual() | OPlus() | OProd() | OPlusRep() | WithInner() | App() | SpaceMeta():
+            return None
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def ffs_superspace(s: Space) -> Space | None:
+    """The ambient an FFS embeds into (``Ker``/``CoImg`` ⊑ dom f; ``Img``/``CoKer`` ⊑ cod f),
+    from the explicit endpoint or decoded from ``f`` — ``None`` if ``s`` is not an FFS or the
+    map space cannot be decoded."""
+    match s:
+        case Ker() | CoImg():
+            return _ffs_dom(s)
+        case Img() | CoKer():
+            return _ffs_cod(s)
+        case Scalar() | SVar() | Dual() | OPlus() | OProd() | OPlusRep() | WithInner() | App() | SpaceMeta():
+            return None
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def split_map_space(s: Space) -> tuple[Space, Space] | None:
+    """Strict one-step peel of the linear-map encoding: ``OProd(Dual(dom), cod)`` → ``(dom, cod)``,
+    else ``None``. (The general multi-factor decoder is :func:`grassmann.infer.synth._decode_map_space`
+    via :func:`map_domain_codomain`; this is the syntactic 2-factor case, no synthesis.)"""
+    if isinstance(s, OProd) and len(s.spaces) == 2 and isinstance(s.spaces[0], Dual):  # audit: ok EX-ISINSTANCE-LADDER — canonical syntactic peel: OProd(Dual, ·) or None by contract [approved Teo 2026-07-03]
+        return s.spaces[0].space, s.spaces[1]
+    return None
+
+
+__all__ = [
+    "is_subspace",
+    "is_subspace_or_eq",
+    "is_ffs",
+    "ffs_defining_map",
+    "ffs_kind",
+    "ffs_superspace",
+    "split_map_space",
+    "FfsKind",
+]
+

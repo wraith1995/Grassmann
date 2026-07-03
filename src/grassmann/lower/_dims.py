@@ -14,6 +14,8 @@ inference); it suffices for the substrate's static numeric tests and for sizing 
 
 from __future__ import annotations
 
+from typing import assert_never
+
 from grassmann.core import basis as B
 from grassmann.core import space as S
 
@@ -47,11 +49,13 @@ def dim_of(space: S.Space) -> int:
             return _ffs_dim(space)
         case S.SVar() | S.App():
             raise DynamicDim(f"space {space!r} has no static dimension")
-        case _:  # pragma: no cover - defensive
-            raise DynamicDim(f"cannot statically size {space!r}")
+        case S.SpaceMeta():
+            raise DynamicDim(f"space {space!r} has no static dimension (unsolved metavar)")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
-def _ffs_dim(space: S.Space) -> int:
+def _ffs_dim(space: S.Img | S.Ker | S.CoImg | S.CoKer) -> int:
     """Static dim of an FFS space when the map's props pin its rank (`20 §5`), else raise.
 
     Dimension laws: ``|Img| = |CoImg| = rank``, ``|Ker| = |dom| − rank``,
@@ -68,8 +72,8 @@ def _ffs_dim(space: S.Space) -> int:
             return dim_of(dom) - rank
         case S.CoKer():
             return dim_of(cod) - rank
-        case _:  # pragma: no cover - defensive
-            raise DynamicDim(f"not an FFS space: {space!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
@@ -84,9 +88,11 @@ def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
         return src, tgt
     f = getattr(space, "f", None)
     fs = getattr(f, "space", None)
-    if isinstance(fs, S.OProd) and len(fs.spaces) == 2 and isinstance(fs.spaces[0], S.Dual):
-        dom = src if src is not None else fs.spaces[0].space
-        cod = tgt if tgt is not None else fs.spaces[1]
+    from grassmann.infer.subspace import split_map_space
+    split = split_map_space(fs) if S.is_space(fs) else None
+    if split is not None:
+        dom = src if src is not None else split[0]
+        cod = tgt if tgt is not None else split[1]
         return dom, cod
     raise DynamicDim(f"FFS space {space!r} has no resolvable source/target")
 
@@ -129,10 +135,13 @@ def _dim_int(d: S.Dim) -> int:
             return _dim_int(term) % m
         case S.DimOf(s):
             return dim_of(s)
+        case S.DimNeg(term):
+            # ``-d`` (appears inside a DimSum for the FFS subtraction laws, `20 §5`).
+            return -_dim_int(term)
         case S.DimVar() | S.DimAtomRef():
             raise DynamicDim(f"dim {d!r} is symbolic / runtime")
-        case _:  # pragma: no cover - defensive
-            raise DynamicDim(f"cannot statically evaluate dim {d!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _list_basis_ambient(vectors: tuple) -> S.Space | None:
@@ -188,5 +197,5 @@ def basis_dim(b: B.Basis) -> int:
             return basis_dim(complement)
         case B.ImageBasis() | B.ProjectedBasis() | B.BVar() | B.BLam() | B.BApp():
             raise DynamicDim(f"basis {b!r} has a runtime/symbolic dimension")
-        case _:  # pragma: no cover - defensive
-            raise DynamicDim(f"cannot statically size basis {b!r}")
+        case _ as unreachable:
+            assert_never(unreachable)

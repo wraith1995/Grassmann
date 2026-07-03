@@ -51,7 +51,8 @@ from .properties import (
     is_surjective,
     map_props,
 )
-from .subspace import is_subspace
+from .subspace import (FfsKind, ffs_defining_map, ffs_kind, ffs_superspace, is_ffs,
+                       is_subspace, split_map_space)
 from .synth import Ctx, InferError, SynthResult, map_domain_codomain, synth, synth_space
 from .unify import MetaStore, SpaceMeta, UnifyError, fresh_meta, unify
 
@@ -65,6 +66,13 @@ __all__ = [
     "SynthResult",
     "InferError",
     "map_domain_codomain",
+    # FFS / map-space probes (canonical — audit #18)
+    "is_ffs",
+    "ffs_defining_map",
+    "ffs_kind",
+    "ffs_superspace",
+    "split_map_space",
+    "FfsKind",
     # unification
     "unify",
     "UnifyError",

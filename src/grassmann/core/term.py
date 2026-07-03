@@ -935,7 +935,7 @@ def _check_llam_linearity(vars: tuple[Var, ...], body: Term) -> None:
                         walk(a, True)
                     else:
                         walk(a, in_disallowed)
-            case _:
+            case _:  # audit: ok EX-WILDCARD — bail-default (§0): documented generic child recursion [approved Teo 2026-07-03]
                 # Generic structural recursion over child Terms/Spaces.
                 for child in _children(node):
                     walk(child, in_disallowed)

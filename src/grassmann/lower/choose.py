@@ -95,11 +95,9 @@ def score_basis(
 
 def _operator_of(space: S.Space) -> object | None:
     """The linear-map term whose structure ``space`` is built from (an FFS), or None."""
-    match space:
-        case S.Img(f, _, _) | S.Ker(f, _, _) | S.CoImg(f, _, _) | S.CoKer(f, _, _):
-            return f
-        case _:
-            return None
+    from grassmann.infer.subspace import ffs_defining_map
+
+    return ffs_defining_map(space)
 
 
 def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
@@ -108,7 +106,7 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
             return f is op or f == op
         case B.ProjectedBasis(f, _, _, _):
             return f is op or f == op
-        case _:
+        case _:  # audit: ok EX-WILDCARD — safe direction: False only skips a scoring bonus [approved Teo 2026-07-03]
             return False
 
 

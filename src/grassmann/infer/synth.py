@@ -286,7 +286,7 @@ def _synth_external(e: External, ctx: Ctx) -> Space:
     if _external_requires_standard(e.data):
         for a in e.args:
             sp = ctx.store.resolve(_synth_value(a, ctx))
-            if isinstance(sp, (SpaceMeta, SVar)):
+            if isinstance(sp, (SpaceMeta, SVar)):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: peels unresolved SVar/SpaceMeta to reject [approved Teo 2026-07-03]
                 raise InferError(
                     f"External {getattr(e.data, 'name', e.data)!r} requires standard "
                     f"coordinates (basis_req=STANDARD), but operand {a!r} has a "

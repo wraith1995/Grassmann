@@ -329,7 +329,7 @@ def _base_space_of_exterior(a: Expr, k: int) -> Expr:
     inner = f.vector if isinstance(f, _t.Scale) else f
     if isinstance(inner, _t.Lift):
         inner = inner.vector
-    if isinstance(inner, _t.LLam) and inner.vars:
+    if isinstance(inner, _t.LLam) and inner.vars:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one structural pattern; non-match raises [approved Teo 2026-07-03]
         return Expr(inner.vars[0].space)
     raise ValueError(
         "wedge: could not recover the base space V from the operand's Λᵏ; "
