@@ -17,6 +17,8 @@ performs the occurs-check.
 
 from __future__ import annotations
 
+from typing import assert_never
+
 from grassmann.core.space import (
     App,
     CoImg,
@@ -90,7 +92,7 @@ class MetaStore:
                 return OProd(tuple(self.resolve(c) for c in s.spaces))
             case OPlusRep():
                 return OPlusRep(s.count, self.resolve(s.space))
-            case _:
+            case _:  # audit: ok EX-WILDCARD — bail-default (§0): zonk recursion; wildcard returns node unchanged [approved Teo 2026-07-03]
                 return s
 
     def walk(self, s: Space) -> Space:
@@ -103,7 +105,12 @@ class MetaStore:
         return s
 
     def has_unsolved(self, s: Space) -> bool:
-        """True iff ``resolve(s)`` still mentions an unsolved metavar (`25 §5`)."""
+        """True iff ``resolve(s)`` still mentions an unsolved metavar (`25 §5`).
+
+        Descends into FFS defining maps / endpoints and ``App`` like
+        :func:`grassmann.infer.subst.subst_space` — a metavar hiding inside
+        ``Img(f, source=…)`` counts (2026-07-03 audit fix). ``WithInner.metric``
+        is skipped for parity with ``subst_space``; ``Dim``s carry no metavars."""
         s = self.walk(s)
         match s:
             case SpaceMeta():
@@ -114,12 +121,31 @@ class MetaStore:
                 return any(self.has_unsolved(c) for c in s.spaces)
             case OPlusRep():
                 return self.has_unsolved(s.space)
-            case _:
+            case Ker() | Img() | CoKer() | CoImg():
+                return (
+                    _space_pred_in_term(s.f, self.has_unsolved)
+                    or (s.source is not None and self.has_unsolved(s.source))
+                    or (s.target is not None and self.has_unsolved(s.target))
+                )
+            case App():
+                return _space_pred_in_term(s.g, self.has_unsolved) or any(
+                    self.has_unsolved(a) if is_space(a) else _space_pred_in_term(a, self.has_unsolved)
+                    for a in s.args
+                )
+            case Scalar() | SVar():
                 return False
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
+    """Occurs-check with the same FFS/``App`` descent as :meth:`MetaStore.has_unsolved`
+    (a cyclic ``m := Img(f, source=…m…)`` solution must be rejected — 2026-07-03 audit fix)."""
     s = store.walk(s)
+
+    def pred(sp: Space) -> bool:
+        return _occurs(store, m, sp)
+
     match s:
         case SpaceMeta():
             return s.uid == m.uid
@@ -129,8 +155,42 @@ def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
             return any(_occurs(store, m, c) for c in s.spaces)
         case OPlusRep():
             return _occurs(store, m, s.space)
-        case _:
+        case Ker() | Img() | CoKer() | CoImg():
+            return (
+                _space_pred_in_term(s.f, pred)
+                or (s.source is not None and _occurs(store, m, s.source))
+                or (s.target is not None and _occurs(store, m, s.target))
+            )
+        case App():
+            return _space_pred_in_term(s.g, pred) or any(
+                _occurs(store, m, a) if is_space(a) else _space_pred_in_term(a, pred)
+                for a in s.args
+            )
+        case Scalar() | SVar():
             return False
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _space_pred_in_term(term: object, pred) -> bool:
+    """True iff ``pred(space)`` holds for some Space embedded in ``term`` — the same
+    dataclass-field descent as :func:`grassmann.infer.subst._subst_space_in_term`
+    (binder var spaces, asserted spaces, nested FFS maps, ``App`` args)."""
+    from dataclasses import fields, is_dataclass
+
+    from grassmann.core.term import is_term
+
+    def in_node(node: object) -> bool:
+        for fld in fields(node):
+            val = getattr(node, fld.name)
+            for c in val if isinstance(val, tuple) else (val,):
+                if is_space(c) and pred(c):
+                    return True
+                if is_term(c) and in_node(c):
+                    return True
+        return False
+
+    return is_dataclass(term) and in_node(term)
 
 
 def unify(a: Space, b: Space, store: MetaStore) -> None:
@@ -234,10 +294,10 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
         case (Dual(), _) if isinstance(store.walk(a.space), Dual):
             unify(store.walk(a.space).space, b, store)
             return
-        case (_, Dual()) if isinstance(store.walk(b.space), Dual):
+        case (_, Dual()) if isinstance(store.walk(b.space), Dual):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: substructure guards inside exhaustive match [approved Teo 2026-07-03]
             unify(a, store.walk(b.space).space, store)
             return
-        case _:
+        case _:  # audit: ok EX-WILDCARD — unification-failure arm: no rule <=> not unifiable; the raise IS the algorithm's negative answer (pairs, not node dispatch) [approved Teo 2026-07-03]
             raise UnifyError(f"cannot unify {a!r} ~ {b!r}")
 
 
