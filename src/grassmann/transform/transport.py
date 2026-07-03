@@ -132,7 +132,7 @@ def transport_cobasis(
 _IRRATIONAL_NODES = (Sqrt, ProjectedBasis, OrthonormalBasis)
 
 
-def _walk(obj, seen: set) -> "object":
+def _walk(obj, seen: set) -> object:
     """Yield ``obj`` and every nested Term / Basis / Space dataclass field."""
     if id(obj) in seen:
         return

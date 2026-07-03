@@ -110,5 +110,5 @@ Adding a node to Space/Term/Basis/Dim touches, minimally: infer (`synth`/`unify`
 `lower/represent.py`, cob arms, `syntax/{parse,unparse}.py`, `printer/latex.py`, docs
 (`tools/gen_docs.py` from `docs/_authored/`), and the honesty sweep. The `assert_never`
 modules will flag themselves; the raise-fallthrough modules will NOT — grep them.
-Tests: repo `.venv`, `pytest -n auto`. Audit: `python3 fem/audit/run_audits.py --repos
+Tests: repo `.venv`, `pytest -n auto`. mypy: configured in pyproject; baseline 1102 errors (2026-07-03, systemic union-attr/arg-type over the sum types — its own campaign; shrink, don't grow). Audit: `python3 fem/audit/run_audits.py --repos
 grassmann`.
