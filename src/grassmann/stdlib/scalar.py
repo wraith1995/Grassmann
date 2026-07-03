@@ -74,7 +74,7 @@ def _is_euclidean(s: object) -> bool:
             return _is_euclidean(inner)
         case _S.OPlus(spaces=ss) | _S.OProd(spaces=ss):
             return all(_is_euclidean(t) for t in ss)
-        case _:  # WithInner, Img/Ker/CoImg/CoKer, App, SpaceMeta, …
+        case _:  # WithInner, Img/Ker/CoImg/CoKer, App, SpaceMeta, …  # audit: ok EX-WILDCARD — documented refuse-default; refusal is conservative [approved Teo 2026-07-03]
             return False
 
 

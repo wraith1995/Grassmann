@@ -21,6 +21,7 @@ from collections.abc import Hashable
 from typing import assert_never
 
 from grassmann.core.space import (
+    App,
     CoImg,
     CoKer,
     Dim,
@@ -40,10 +41,12 @@ from grassmann.core.space import (
     OProd,
     Scalar,
     Space,
+    SpaceMeta,
     SVar,
     WithInner,
     dim_prod,
     dim_sum,
+    is_dim,
     is_space,
 )
 
@@ -91,8 +94,10 @@ def dim_of(s: Space) -> Dim:
             # |CoKer f| = |cod f| − rank(f)
             cod = _ffs_target(s)
             return dim_diff(dim_of(cod), rank_of(s.f))
-        case _:
+        case App() | SpaceMeta():
             raise DimError(f"dim_of: unsupported space {s!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _ffs_source(node: Ker | Img | CoKer | CoImg) -> Space:
@@ -217,8 +222,8 @@ def _gen_key(d: DimVar | DimOf | DimAtomRef) -> Hashable:
             return ("dimof", d.space)
         case DimAtomRef():
             return ("atom", d.key)
-        case _:
-            raise DimError(f"_gen_key: not a generator {d!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _to_poly(d: Dim) -> _Poly:
@@ -363,6 +368,8 @@ def _gen_to_dim(gen: Hashable) -> Dim:
 
 def is_runtime_dim(d: object) -> bool:
     """True iff ``d`` mentions a runtime rank atom ``δ_f`` (`25 §1` F3 seam)."""
+    if not is_dim(d):
+        return False
     match d:
         case DimAtomRef():
             return True
@@ -372,8 +379,12 @@ def is_runtime_dim(d: object) -> bool:
             return is_runtime_dim(d.term)
         case DimMod():
             return is_runtime_dim(d.term) or is_runtime_dim(d.modulus)
-        case _:
+        case DimLit() | DimVar() | DimOf():
+            # No runtime atom: literals and static-opaque generators. A future Dim node
+            # that CAN carry one must be classified here explicitly (assert_never below).
             return False
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def space_mentions_runtime_dim(s: object) -> bool:

@@ -118,7 +118,7 @@ def _pb(v: Term, source: Space, target: Space, primitives=None) -> Term:
         return Eval(m, (0,), (v,))
     if isinstance(S, OPlus) and isinstance(T, OPlus) and len(S.spaces) == len(T.spaces):
         return _pb_oplus(v, S, T, primitives)
-    if isinstance(S, Dual) and isinstance(T, Dual):
+    if isinstance(S, Dual) and isinstance(T, Dual):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): exploit structure else _pb_fallback [approved Teo 2026-07-03]
         # a covector transports CONTRAVARIANTLY: precompose with the reversed PRIMAL map (`Compose` = the
         # metric-free adjoint action). The primal FFS leaf's map comes from `primitives` (the chart inclusion).
         inner = transport_map(T.space, S.space, primitives=primitives)
@@ -191,39 +191,41 @@ def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
     (opt-in), else raises :class:`PullbackError` — apply :func:`pullback` to a *value* instead."""
     S = _normalize(source)
     T = _normalize(target)
-    if isinstance(S, WithInner) or isinstance(T, WithInner):
-        return transport_map(_strip(S), _strip(T), primitives=primitives)
-    if S == T:
-        return Identity(S)
-    if isinstance(S, Dual) and isinstance(T, Dual):
-        # a covector-factor map (e.g. a `⊗`/`Λᵏ` factor) is the ADJOINT of the reversed primal map.
-        from grassmann.core.term import dagger
-        return dagger(transport_map(T.space, S.space, primitives=primitives))
-
     from grassmann.infer.subspace import is_subspace
 
-    if is_subspace(T, S):
-        i = _summand_index(T, S)
-        if i is not None:
-            return TupleProject(S, i)
-        return _leaf_primitive(S, T, primitives, "Project")
-    if is_subspace(S, T):
-        i = _summand_index(S, T)
-        if i is not None:
-            return TupleEmbed(T, i)
-        return _leaf_primitive(S, T, primitives, "Embed")
-    if isinstance(S, OProd) and isinstance(T, OProd) and len(S.spaces) == len(T.spaces):
-        return _tensor_map(S, T, primitives)
-    if isinstance(S, OPlus) and isinstance(T, OPlus) and len(S.spaces) == len(T.spaces):
-        # Block-diagonal map Σₖ embedₖ ∘ mₖ ∘ projectₖ — pure (dom,cod) map algebra.
-        from grassmann.core.term import chain
+    match (S, T):
+        case (WithInner(), _) | (_, WithInner()):
+            return transport_map(_strip(S), _strip(T), primitives=primitives)
+        case _ if S == T:
+            return Identity(S)
+        case (Dual(sd), Dual(td)):
+            # a covector-factor map (e.g. a `⊗`/`Λᵏ` factor) is the ADJOINT of the reversed primal map.
+            from grassmann.core.term import dagger
 
-        ms = [transport_map(s_k, t_k, primitives=primitives)
-              for s_k, t_k in zip(S.spaces, T.spaces, strict=True)]
-        return Sum(tuple(
-            chain(TupleEmbed(T, k), m_k, TupleProject(S, k)) for k, m_k in enumerate(ms)
-        ))
-    return _leaf_primitive(S, T, primitives, "no primitive map")
+            return dagger(transport_map(td, sd, primitives=primitives))
+        case _ if is_subspace(T, S):
+            i = _summand_index(T, S)
+            if i is not None:
+                return TupleProject(S, i)
+            return _leaf_primitive(S, T, primitives, "Project")
+        case _ if is_subspace(S, T):
+            i = _summand_index(S, T)
+            if i is not None:
+                return TupleEmbed(T, i)
+            return _leaf_primitive(S, T, primitives, "Embed")
+        case (OProd(ss), OProd(ts)) if len(ss) == len(ts):
+            return _tensor_map(S, T, primitives)
+        case (OPlus(ss), OPlus(ts)) if len(ss) == len(ts):
+            # Block-diagonal map Σₖ embedₖ ∘ mₖ ∘ projectₖ — pure (dom,cod) map algebra.
+            from grassmann.core.term import chain
+
+            ms = [transport_map(s_k, t_k, primitives=primitives)
+                  for s_k, t_k in zip(ss, ts, strict=True)]
+            return Sum(tuple(
+                chain(TupleEmbed(T, k), m_k, TupleProject(S, k)) for k, m_k in enumerate(ms)
+            ))
+        case _:  # audit: ok EX-WILDCARD — pair-dispatch negative answer: no structural rule => caller primitives or loud PullbackError (_leaf_primitive) [approved Teo 2026-07-03]
+            return _leaf_primitive(S, T, primitives, "no primitive map")
 
 
 def _leaf_primitive(S: Space, T: Space, primitives, why: str) -> Term:
@@ -272,7 +274,7 @@ def _normalize(s: Space) -> Space:
             f"pullback: symbolic-count direct sum {s!r} is not supported; give a concrete "
             f"count"
         )
-    if isinstance(s, OPlus):
+    if isinstance(s, OPlus):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): reject/expand specific else passthrough [approved Teo 2026-07-03]
         return oplus(*(_normalize(x) for x in s.spaces))
     return s
 
@@ -291,32 +293,10 @@ def _summand_index(component: Space, whole: Space) -> int | None:
     return None
 
 
-def _is_ffs(s: Space) -> bool:
-    return isinstance(s, (Ker, Img, CoImg, CoKer))
-
-
-def _ffs_superspace(s: Space) -> Space | None:
-    """The ambient a four-fundamental-subspace sits inside (``Ker``/``CoImg`` ⊑ dom;
-    ``Img``/``CoKer`` ⊑ cod), from the explicit endpoint or decoded from ``f``."""
-    from grassmann.infer.synth import map_domain_codomain
-
-    if isinstance(s, (Ker, CoImg)):
-        if s.source is not None:
-            return s.source
-        try:
-            dom, _ = map_domain_codomain(s.f)
-            return dom
-        except Exception:
-            return None
-    if isinstance(s, (Img, CoKer)):
-        if s.target is not None:
-            return s.target
-        try:
-            _, cod = map_domain_codomain(s.f)
-            return cod
-        except Exception:
-            return None
-    return None
+# Canonical FFS probes (fem audit #18) — the hand-rolled copies formerly here now live in
+# grassmann.infer.subspace.
+from grassmann.infer.subspace import ffs_superspace as _ffs_superspace
+from grassmann.infer.subspace import is_ffs as _is_ffs
 
 
 def euclidean_superspace(s: Space) -> Space:

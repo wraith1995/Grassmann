@@ -215,7 +215,7 @@ def _render_term(e: _t.Term) -> tuple[str, int]:  # noqa: C901,PLR0911,PLR0912 -
             return _render_binder(r"\Lambda", names, body)
         case _t.Frame(var=var):
             return rf"\operatorname{{frame}}({_escape(var.name)})", Prec.APP
-        case _:  # pragma: no cover - defensive; every Term node is handled above
+        case _:  # pragma: no cover - defensive; every Term node is handled above  # audit: ok EX-WILDCARD — bail-default (§0): defensive repr fallback render [approved Teo 2026-07-03]
             return rf"\mathtt{{{_escape(repr(e))}}}", Prec.ATOM
 
 
@@ -227,7 +227,7 @@ def _render_eval(f: _t.Term, pos: tuple[int, ...], args: tuple[_t.Term, ...]) ->
         # The covector r♭: a partially-applied metric (Flat, or Inner after rule_musical
         # canonicalizes ♭→Inner) — the advanced-η / Riesz output. Render r^♭, not ⟨·,·⟩(r).
         return f"{_sub(args[0], _PFX_BASE)}^{{\\flat}}", Prec.POSTFIX
-    if isinstance(f, _t.Sharp) and len(args) == 1:
+    if isinstance(f, _t.Sharp) and len(args) == 1:  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): pretty-cases else generic _render_app [approved Teo 2026-07-03]
         return f"{_sub(args[0], _PFX_BASE)}^{{\\sharp}}", Prec.POSTFIX
     return _render_app(f, pos, args), Prec.APP
 
@@ -317,7 +317,7 @@ def _render_space(s: _s.Space) -> tuple[str, int]:  # noqa: C901,PLR0911 - one a
             return _render_app(g, pos, args), Prec.APP
         case _s.SpaceMeta(uid=uid, hint=hint):
             return rf"{{?}}{_escape(hint)}_{{{uid}}}", Prec.ATOM
-        case _:  # pragma: no cover - defensive
+        case _:  # pragma: no cover - defensive  # audit: ok EX-WILDCARD — bail-default (§0): defensive repr fallback render [approved Teo 2026-07-03]
             return rf"\mathtt{{{_escape(repr(s))}}}", Prec.ATOM
 
 
@@ -344,7 +344,7 @@ def _render_dim(d: _s.Dim) -> tuple[str, int]:
             return f"-{_dim_sub(t, Prec.POSTFIX)}", Prec.PROD
         case _s.DimMod(term=t, modulus=m):
             return rf"{_dim_sub(t, Prec.PROD)} \bmod {_dim_sub(m, Prec.PROD)}", Prec.PROD
-        case _:  # pragma: no cover - defensive
+        case _:  # pragma: no cover - defensive  # audit: ok EX-WILDCARD — bail-default (§0): defensive repr fallback render [approved Teo 2026-07-03]
             return rf"\mathtt{{{_escape(repr(d))}}}", Prec.ATOM
 
 

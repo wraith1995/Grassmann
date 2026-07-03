@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
+from typing import assert_never
 
 from grassmann.core.kinds import NAT, SPACE, SpaceSort
 from grassmann.core.space import (
@@ -293,45 +294,49 @@ def alpha_canon(term: Term) -> Term:
         return Var(f"%{counter[0]}", v.space, v.props, uid=-counter[0])
 
     def go(node: Term, env: dict[int, Var]) -> Term:
-        if isinstance(node, Var):
-            return env.get(node.uid, node)
-        if isinstance(node, LLam):
-            env2 = dict(env)
-            nv = []
-            for v in node.vars:
-                cv = fresh(v)
-                env2[v.uid] = cv
-                nv.append(cv)
-            return LLam(tuple(nv), go(node.body, env2))
-        if isinstance(node, Lam):
-            env2 = dict(env)
-            new_binders: list[tuple[str, object]] = []
-            ntv: list[Var] = []
-            tv_iter = iter(node.term_vars)
-            body: object = node.body
-            for name, sort in node.binders:
-                counter[0] += 1
-                cname = f"%{counter[0]}"
-                new_binders.append((cname, sort))
-                if isinstance(sort, SpaceSort):
-                    v = next(tv_iter)
-                    env2[v.uid] = Var(cname, v.space, v.props, uid=-counter[0])
-                    ntv.append(env2[v.uid])
-                elif sort == SPACE:
-                    body = _rename_svar(body, name, cname)
-                elif sort == NAT:
-                    body = _rename_dimvar(body, name, cname)
-            body = go(body, env2) if is_term(body) else body  # type: ignore[arg-type]
-            return Lam(tuple(new_binders), body, tuple(ntv))  # type: ignore[arg-type]
-        return _rebuild(node, lambda c: go(c, env))
+        match node:
+            case Var():
+                return env.get(node.uid, node)
+            case LLam():
+                env2 = dict(env)
+                nv = []
+                for v in node.vars:
+                    cv = fresh(v)
+                    env2[v.uid] = cv
+                    nv.append(cv)
+                return LLam(tuple(nv), go(node.body, env2))
+            case Lam():
+                env2 = dict(env)
+                new_binders: list[tuple[str, object]] = []
+                ntv: list[Var] = []
+                tv_iter = iter(node.term_vars)
+                body: object = node.body
+                for name, sort in node.binders:
+                    counter[0] += 1
+                    cname = f"%{counter[0]}"
+                    new_binders.append((cname, sort))
+                    if isinstance(sort, SpaceSort):
+                        v = next(tv_iter)
+                        env2[v.uid] = Var(cname, v.space, v.props, uid=-counter[0])
+                        ntv.append(env2[v.uid])
+                    elif sort == SPACE:
+                        body = _rename_svar(body, name, cname)
+                    elif sort == NAT:
+                        body = _rename_dimvar(body, name, cname)
+                body = go(body, env2) if is_term(body) else body  # type: ignore[arg-type]
+                return Lam(tuple(new_binders), body, tuple(ntv))  # type: ignore[arg-type]
+            case _:  # audit: ok EX-WILDCARD — bail-default (§0): generic structural recursion [approved Teo 2026-07-03]
+                return _rebuild(node, lambda c: go(c, env))
 
     return go(term, {})
 
 
 def _has_binder(t: Term) -> bool:
-    if isinstance(t, (LLam, Lam, Frame)):
-        return True
-    return any(_has_binder(c) for c in _child_terms(t))
+    match t:
+        case LLam() | Lam() | Frame():
+            return True
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): generic structural recursion [approved Teo 2026-07-03]
+            return any(_has_binder(c) for c in _child_terms(t))
 
 
 # ===========================================================================
@@ -371,30 +376,37 @@ def normalize_space(s: Space) -> Space:
         Img,
         Ker,
         OPlus,
+        OPlusRep,
         OProd,
+        SpaceMeta,
+        SVar,
         WithInner,
         with_inner,
     )
 
-    if isinstance(s, OProd):
-        return OProd(tuple(sorted((normalize_space(f) for f in s.spaces), key=repr)))
-    if isinstance(s, OPlus):
-        return OPlus(tuple(sorted((normalize_space(c) for c in s.spaces), key=repr)))
-    if isinstance(s, Dual):
-        return Dual(normalize_space(s.space))
-    if isinstance(s, WithInner):
-        return with_inner(normalize_space(s.space), sum_of_products(s.metric))
-    if isinstance(s, (Ker, Img, CoKer, CoImg)):
-        src = normalize_space(s.source) if s.source is not None else None
-        tgt = normalize_space(s.target) if s.target is not None else None
-        return type(s)(sum_of_products(s.f), src, tgt)
-    if isinstance(s, App):
-        args = tuple(
-            normalize_space(a) if is_space(a) else (sum_of_products(a) if is_term(a) else a)
-            for a in s.args
-        )
-        return App(sum_of_products(s.g), s.positions, args)
-    return s  # Scalar / SVar / OPlusRep (base) / SpaceMeta — atomic
+    match s:
+        case OProd():
+            return OProd(tuple(sorted((normalize_space(f) for f in s.spaces), key=repr)))
+        case OPlus():
+            return OPlus(tuple(sorted((normalize_space(c) for c in s.spaces), key=repr)))
+        case Dual():
+            return Dual(normalize_space(s.space))
+        case WithInner():
+            return with_inner(normalize_space(s.space), sum_of_products(s.metric))
+        case Ker() | Img() | CoKer() | CoImg():
+            src = normalize_space(s.source) if s.source is not None else None
+            tgt = normalize_space(s.target) if s.target is not None else None
+            return type(s)(sum_of_products(s.f), src, tgt)
+        case App():
+            args = tuple(
+                normalize_space(a) if is_space(a) else (sum_of_products(a) if is_term(a) else a)
+                for a in s.args
+            )
+            return App(sum_of_products(s.g), s.positions, args)
+        case Scalar() | SVar() | OPlusRep() | SpaceMeta():
+            return s  # Scalar / SVar / OPlusRep (base) / SpaceMeta — atomic
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def space_key(s: Space) -> str:
@@ -412,39 +424,50 @@ def spaces_iso(a: Space, b: Space) -> bool:
 def _static_space_dim(s: Space) -> int | None:
     """The static (concrete) dimension of a space, or ``None`` if it is symbolic."""
     from grassmann.core.space import (
+        App,
+        CoImg,
+        CoKer,
         DimLit,
         Dual,
+        Img,
+        Ker,
         OPlus,
         OPlusRep,
         OProd,
         Scalar,
+        SpaceMeta,
+        SVar,
         WithInner,
     )
 
-    if isinstance(s, Scalar):
-        return 1
-    if isinstance(s, (Dual, WithInner)):
-        return _static_space_dim(s.space)
-    if isinstance(s, OPlusRep):
-        inner = _static_space_dim(s.space)
-        return s.count.value * inner if isinstance(s.count, DimLit) and inner is not None else None
-    if isinstance(s, OProd):
-        prod = 1
-        for f in s.spaces:
-            d = _static_space_dim(f)
-            if d is None:
-                return None
-            prod *= d
-        return prod
-    if isinstance(s, OPlus):
-        total = 0
-        for c in s.spaces:
-            d = _static_space_dim(c)
-            if d is None:
-                return None
-            total += d
-        return total
-    return None
+    match s:
+        case Scalar():
+            return 1
+        case Dual() | WithInner():
+            return _static_space_dim(s.space)
+        case OPlusRep():
+            inner = _static_space_dim(s.space)
+            return s.count.value * inner if isinstance(s.count, DimLit) and inner is not None else None
+        case OProd():
+            prod = 1
+            for f in s.spaces:
+                d = _static_space_dim(f)
+                if d is None:
+                    return None
+                prod *= d
+            return prod
+        case OPlus():
+            total = 0
+            for c in s.spaces:
+                d = _static_space_dim(c)
+                if d is None:
+                    return None
+                total += d
+            return total
+        case SVar() | Ker() | Img() | CoKer() | CoImg() | App() | SpaceMeta():
+            return None  # symbolic — no static (concrete) dimension
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _is_num(x: object) -> bool:
@@ -494,19 +517,20 @@ def rule_beta_eval(node: Term) -> Term | None:
     substitutes ``xₚ := args[k]``. Full application returns the substituted body; a partial
     one returns a residual ``LLam`` over the still-unapplied vars. Positions into the
     *codomain* (``p ≥ n``) are not var redexes and are left alone."""
-    if not isinstance(node, Eval) or not isinstance(node.f, LLam):
-        return None
-    vars_ = node.f.vars
-    n = len(vars_)
-    if any(p >= n for p in node.positions):
-        return None
-    mapping = {vars_[p].uid: a for p, a in zip(node.positions, node.args, strict=True)}
-    applied = set(node.positions)
-    new_body = subst(node.f.body, mapping)
-    remaining = tuple(vars_[i] for i in range(n) if i not in applied)
-    if not remaining:
-        return new_body
-    return LLam(remaining, new_body)
+    match node:
+        case Eval(f=LLam(vars=vars_, body=body)):
+            n = len(vars_)
+            if any(p >= n for p in node.positions):
+                return None
+            mapping = {vars_[p].uid: a for p, a in zip(node.positions, node.args, strict=True)}
+            applied = set(node.positions)
+            new_body = subst(body, mapping)
+            remaining = tuple(vars_[i] for i in range(n) if i not in applied)
+            if not remaining:
+                return new_body
+            return LLam(remaining, new_body)
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def _term_var_for_binder(lam: Lam, idx: int) -> Var | None:
@@ -529,52 +553,53 @@ def rule_beta_neval(node: Term) -> Term | None:
     by the argument Space throughout the body's spaces; a **nat** binder replaces
     ``DimVar(name)`` by the argument ``Dim`` throughout the body's dimensions. Unapplied
     binders survive as a residual ``Lam`` (partial application)."""
-    if not isinstance(node, NEval) or not isinstance(node.f, Lam):
-        return None
-    lam = node.f
-    n = len(lam.binders)
-    if any(p >= n for p in node.positions):
-        return None
-    supplied = dict(zip(node.positions, node.args, strict=True))
-
-    term_map: dict[int, Term] = {}
-    body: Term = lam.body  # type: ignore[assignment]
-    if not is_term(body):
-        return None  # SpaceFunction / TypeFunction body — not a term β redex here.
-    consumed: set[int] = set()
-    for p, arg in supplied.items():
-        name, sort = lam.binders[p]
-        if isinstance(sort, SpaceSort):
-            v = _term_var_for_binder(lam, p)
-            if v is None or not is_term(arg):
+    match node:
+        case NEval(f=Lam() as lam):
+            n = len(lam.binders)
+            if any(p >= n for p in node.positions):
                 return None
-            term_map[v.uid] = arg
-            consumed.add(p)
-        elif sort == SPACE and is_space(arg):
-            body = _subst_space_in_term(body, name, arg)
-            consumed.add(p)
-        elif sort == NAT and is_dim(arg):
-            body = _subst_nat_in_term(body, name, arg)
-            consumed.add(p)
-        else:
-            return None  # unsupported argument kind — leave for later.
-    if term_map:
-        body = subst(body, term_map)
+            supplied = dict(zip(node.positions, node.args, strict=True))
 
-    remaining = tuple(
-        (name, sort) for i, (name, sort) in enumerate(lam.binders) if i not in consumed
-    )
-    if not remaining:
-        return body
-    # Rebuild the residual Lam, keeping only the term vars of the surviving value binders.
-    rem_term_vars = tuple(
-        v
-        for i, (_n, sort) in enumerate(lam.binders)
-        if i not in consumed
-        and isinstance(sort, SpaceSort)
-        and (v := _term_var_for_binder(lam, i)) is not None
-    )
-    return Lam(remaining, body, rem_term_vars)
+            term_map: dict[int, Term] = {}
+            body: Term = lam.body  # type: ignore[assignment]
+            if not is_term(body):
+                return None  # SpaceFunction / TypeFunction body — not a term β redex here.
+            consumed: set[int] = set()
+            for p, arg in supplied.items():
+                name, sort = lam.binders[p]
+                if isinstance(sort, SpaceSort):
+                    v = _term_var_for_binder(lam, p)
+                    if v is None or not is_term(arg):
+                        return None
+                    term_map[v.uid] = arg
+                    consumed.add(p)
+                elif sort == SPACE and is_space(arg):
+                    body = _subst_space_in_term(body, name, arg)
+                    consumed.add(p)
+                elif sort == NAT and is_dim(arg):
+                    body = _subst_nat_in_term(body, name, arg)
+                    consumed.add(p)
+                else:
+                    return None  # unsupported argument kind — leave for later.
+            if term_map:
+                body = subst(body, term_map)
+
+            remaining = tuple(
+                (name, sort) for i, (name, sort) in enumerate(lam.binders) if i not in consumed
+            )
+            if not remaining:
+                return body
+            # Rebuild the residual Lam, keeping only the term vars of the surviving value binders.
+            rem_term_vars = tuple(
+                v
+                for i, (_n, sort) in enumerate(lam.binders)
+                if i not in consumed
+                and isinstance(sort, SpaceSort)
+                and (v := _term_var_for_binder(lam, i)) is not None
+            )
+            return Lam(remaining, body, rem_term_vars)
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 # ===========================================================================
@@ -584,60 +609,64 @@ def rule_beta_neval(node: Term) -> Term | None:
 
 def rule_scale(node: Term) -> Term | None:
     """Scalar laws: ``0·v → 0``, ``1·v → v``, ``r·0 → 0``, ``r·(s·w) → (r·s)·w``."""
-    if not isinstance(node, Scale):
-        return None
-    r, v = node.scalar, node.vector
-    if _is_num(r) and r == 0:
-        return Zero(_space(v))
-    if _is_num(r) and r == 1:
-        return v
-    if isinstance(v, Zero):
-        return v
-    if isinstance(v, Scale):
-        # Collapse a nested scale into one coefficient — but a *symbolic scalar product*
-        # (inner vector also Scalar-valued) is owned by rule_scalar_product, so defer it to
-        # avoid the two rules fighting over where the numeric coefficient nests.
-        if (_is_num(r) and _is_num(v.scalar)) or not isinstance(_space(v.vector), Scalar):
-            return Scale(_mul_scalar(r, v.scalar), v.vector)
-        return None
-    return None
+    match node:
+        case Scale(scalar=r, vector=v) if _is_num(r) and r == 0:
+            return Zero(_space(v))
+        case Scale(scalar=r, vector=v) if _is_num(r) and r == 1:
+            return v
+        case Scale(vector=Zero() as v):
+            return v
+        case Scale(scalar=r, vector=Scale() as v):
+            # Collapse a nested scale into one coefficient — but a *symbolic scalar product*
+            # (inner vector also Scalar-valued) is owned by rule_scalar_product, so defer it to
+            # avoid the two rules fighting over where the numeric coefficient nests.
+            if (_is_num(r) and _is_num(v.scalar)) or not isinstance(_space(v.vector), Scalar):
+                return Scale(_mul_scalar(r, v.scalar), v.vector)
+            return None
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_sum(node: Term) -> Term | None:
     """Flatten nested ``Sum``s and drop ``Zero`` summands; collapse to the single summand
     (or a ``Zero``) when that is all that remains."""
-    if not isinstance(node, Sum):
-        return None
-    flat: list[Term] = []
-    changed = False
-    for v in node.vectors:
-        if isinstance(v, Sum):
-            flat.extend(v.vectors)
-            changed = True
-        elif isinstance(v, Zero):
-            changed = True
-        else:
-            flat.append(v)
-    if not flat:
-        return Zero(_space(node.vectors[0]))
-    if len(flat) == 1:
-        return flat[0]
-    return Sum(tuple(flat)) if changed else None
+    match node:
+        case Sum(vectors=vectors):
+            flat: list[Term] = []
+            changed = False
+            for v in vectors:
+                match v:
+                    case Sum():
+                        flat.extend(v.vectors)
+                        changed = True
+                    case Zero():
+                        changed = True
+                    case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other summand is kept as-is [approved Teo 2026-07-03]
+                        flat.append(v)
+            if not flat:
+                return Zero(_space(vectors[0]))
+            if len(flat) == 1:
+                return flat[0]
+            return Sum(tuple(flat)) if changed else None
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def _gather_scalar_product(t: Term, num: float, syms: list[Term]) -> float:
     """Flatten a product of scalars (nested ``Scale`` whose operands are all ``Scalar``-valued)
     into a numeric coefficient ``num`` and a list of symbolic scalar-atom factors ``syms``."""
-    if isinstance(t, Lit):
-        return num * t.value
-    if isinstance(t, Scale) and isinstance(_space(t.vector), Scalar):
-        if _is_num(t.scalar):
-            num *= t.scalar
-        else:
-            num = _gather_scalar_product(t.scalar, num, syms)  # type: ignore[arg-type]
-        return _gather_scalar_product(t.vector, num, syms)
-    syms.append(t)  # an atomic scalar factor (a dot-product Eval, External scalar, scalar Var…)
-    return num
+    match t:
+        case Lit():
+            return num * t.value
+        case Scale() if isinstance(_space(t.vector), Scalar):
+            if _is_num(t.scalar):
+                num *= t.scalar
+            else:
+                num = _gather_scalar_product(t.scalar, num, syms)  # type: ignore[arg-type]
+            return _gather_scalar_product(t.vector, num, syms)
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other Term is an atomic scalar factor [approved Teo 2026-07-03]
+            syms.append(t)  # an atomic scalar factor (a dot-product Eval, External scalar, scalar Var…)
+            return num
 
 
 def rule_scalar_product(node: Term) -> Term | None:
@@ -696,14 +725,11 @@ def rule_collect(node: Term) -> Term | None:
 
 def rule_eval_identity(node: Term) -> Term | None:
     """``Identity(s)·v → v`` (applying the identity map to a single vector)."""
-    if (
-        isinstance(node, Eval)
-        and isinstance(node.f, Identity)
-        and node.positions == (0,)
-        and len(node.args) == 1
-    ):
-        return node.args[0]
-    return None
+    match node:
+        case Eval(f=Identity(), positions=(0,), args=(arg,)):
+            return arg
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def _mentions_vars(node: Term, uids: set[int]) -> bool:
@@ -717,20 +743,16 @@ def rule_eta(node: Term) -> Term | None:
     mention the bound vars and applies them at slots ``0..n-1`` in order. Now **sound** because an
     ``LLam`` lowers identically to the stored map it expands (the FFS re-orientation, plans/92).
     Collapses an η-expanded map back to the map itself."""
-    if not isinstance(node, LLam):
-        return None
-    vars_ = node.vars
-    n = len(vars_)
-    body = node.body
-    if not (
-        isinstance(body, Eval)
-        and body.positions == tuple(range(n))
-        and tuple(body.args) == vars_
-    ):
-        return None
-    if _mentions_vars(body.f, {v.uid for v in vars_}):
-        return None  # f must be closed w.r.t. the bound vars
-    return body.f
+    match node:
+        case LLam(vars=vars_, body=Eval() as body):
+            n = len(vars_)
+            if not (body.positions == tuple(range(n)) and tuple(body.args) == vars_):
+                return None
+            if _mentions_vars(body.f, {v.uid for v in vars_}):
+                return None  # f must be closed w.r.t. the bound vars
+            return body.f
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def _mentions(t: object, uid: int) -> bool:
@@ -746,25 +768,23 @@ def _peel_inner(arm: Term, r: Term, dvar: Var) -> Term | None:
     δ-slot moves its adjoint onto ``r`` (``⟨A(δ),r⟩ = ⟨δ, A†(r)⟩``). Metric symmetry makes the
     bare ``⟨δ, r⟩ → r♭`` arm Dagger-free."""
     uid = dvar.uid
-    if isinstance(arm, Var) and arm.uid == uid:
-        return Eval(Flat(dvar.space), (0,), (r,))  # ⟨δ, r⟩ → r♭
-    if isinstance(arm, Scale) and not _mentions(arm.scalar, uid):
-        return _peel_inner(arm.vector, Scale(arm.scalar, r), dvar)  # ⟨c·v, r⟩ = ⟨v, c·r⟩
-    if (
-        isinstance(arm, Eval)
-        and arm.positions == (0,)
-        and len(arm.args) == 1
-        and not _mentions(arm.f, uid)
-    ):
-        # ⟨A(δ), r⟩ = ⟨δ, A†(r)⟩ — peel the map, accumulate the adjoint onto the Riesz arm.
-        return _peel_inner(arm.args[0], Eval(Dagger(arm.f), (0,), (r,)), dvar)
-    if _is_hadamard(arm):
-        # ⟨c ⊙ δ, r⟩ = ⟨δ, c ⊙ r⟩ — the elementwise (diagonal) map is self-adjoint, so the
-        # δ-free factor moves onto the Riesz arm unchanged (matrix-calc elementwise chain rule).
-        c, v = _hadamard_split(arm, uid)
-        if v is not None:
-            return _peel_inner(v, External(arm.space, arm.data, (c, r)), dvar)
-    return None
+    match arm:
+        case Var(uid=u) if u == uid:
+            return Eval(Flat(dvar.space), (0,), (r,))  # ⟨δ, r⟩ → r♭
+        case Scale() if not _mentions(arm.scalar, uid):
+            return _peel_inner(arm.vector, Scale(arm.scalar, r), dvar)  # ⟨c·v, r⟩ = ⟨v, c·r⟩
+        case Eval(positions=(0,), args=(arg0,)) if not _mentions(arm.f, uid):
+            # ⟨A(δ), r⟩ = ⟨δ, A†(r)⟩ — peel the map, accumulate the adjoint onto the Riesz arm.
+            return _peel_inner(arg0, Eval(Dagger(arm.f), (0,), (r,)), dvar)
+        case External() if _is_hadamard(arm):
+            # ⟨c ⊙ δ, r⟩ = ⟨δ, c ⊙ r⟩ — the elementwise (diagonal) map is self-adjoint, so the
+            # δ-free factor moves onto the Riesz arm unchanged (matrix-calc elementwise chain rule).
+            c, v = _hadamard_split(arm, uid)
+            if v is not None:
+                return _peel_inner(v, External(arm.space, arm.data, (c, r)), dvar)
+            return None
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def _is_hadamard(t: object) -> bool:
@@ -818,12 +838,13 @@ def _factor_trace(node: Trace, dvar: Var) -> Term | None:
         return None
     k = idxs[0]
     fac = factors[k]
-    if isinstance(fac, Var) and fac.uid == uid:
-        daggered = False
-    elif isinstance(fac, Dagger) and isinstance(fac.f, Var) and fac.f.uid == uid:
-        daggered = True
-    else:
-        return None  # δ buried inside a non-bare factor — not a clean trace pairing
+    match fac:
+        case Var(uid=u) if u == uid:
+            daggered = False
+        case Dagger(f=Var(uid=u)) if u == uid:
+            daggered = True
+        case _:  # audit: ok EX-WILDCARD — rule probe: δ buried inside a non-bare factor — not a clean trace pairing [approved Teo 2026-07-03]
+            return None
     rest = factors[k + 1 :] + factors[:k]  # cyclic rotation: the factor after δ moves to front
     rmap = _compose_chain(rest, dvar.space)
     riesz = rmap if daggered else Dagger(rmap)  # ⟨δ, R⟩ for δ†, else ⟨δ, R†⟩
@@ -849,40 +870,32 @@ def _factor_llam_body(node: Term, dvar: Var) -> Term | None:
     covector that the seed-linear body ``node`` denotes. Returns ``None`` for any shape it
     cannot express lambda-free (strictly conservative — the ``LLam`` is then left intact)."""
     uid = dvar.uid
-    # λδ. δ  →  Id  (the identity Jacobian; the vector-regime base case, generalizing rule_eta).
-    if isinstance(node, Var) and node.uid == uid:
-        return Identity(dvar.space)
-    # λδ. c·v  →  c · M_v   (the coefficient c must be δ-closed).
-    if isinstance(node, Scale) and not _mentions(node.scalar, uid):
-        m = _factor_llam_body(node.vector, dvar)
-        return Scale(node.scalar, m) if m is not None else None
-    # λδ. Σ vᵢ  →  Σ Mᵢ   (covectors / maps add).
-    if isinstance(node, Sum):
-        ms = [_factor_llam_body(v, dvar) for v in node.vectors]
-        if any(m is None for m in ms):
+    match node:
+        # λδ. δ  →  Id  (the identity Jacobian; the vector-regime base case, generalizing rule_eta).
+        case Var(uid=u) if u == uid:
+            return Identity(dvar.space)
+        # λδ. c·v  →  c · M_v   (the coefficient c must be δ-closed).
+        case Scale() if not _mentions(node.scalar, uid):
+            m = _factor_llam_body(node.vector, dvar)
+            return Scale(node.scalar, m) if m is not None else None
+        # λδ. Σ vᵢ  →  Σ Mᵢ   (covectors / maps add).
+        case Sum():
+            ms = [_factor_llam_body(v, dvar) for v in node.vectors]
+            if any(m is None for m in ms):
+                return None
+            return Sum(tuple(ms))
+        # Scalar regime: an inner product ⟨a, b⟩ = Eval(Inner(s), (0,1), (a,b)).
+        case Eval(f=Inner(space=s), positions=(0, 1), args=(a, b)):
+            return _factor_inner(s, a, b, dvar)
+        # Scalar regime: a matrix-trace pairing tr(L ∘ δ ∘ R) — the Frobenius covector.
+        case Trace():
+            return _factor_trace(node, dvar)
+        # Vector regime: a δ-closed map applied to δ-stuff  →  A ∘ (δ ↦ arg).
+        case Eval(positions=(0,), args=(arg0,)) if not _mentions(node.f, uid):
+            m = _factor_llam_body(arg0, dvar)
+            return Compose(node.f, (0,), (m,)) if m is not None else None
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = shape not expressible lambda-free [approved Teo 2026-07-03]
             return None
-        return Sum(tuple(ms))
-    # Scalar regime: an inner product ⟨a, b⟩ = Eval(Inner(s), (0,1), (a,b)).
-    if (
-        isinstance(node, Eval)
-        and isinstance(node.f, Inner)
-        and node.positions == (0, 1)
-        and len(node.args) == 2
-    ):
-        return _factor_inner(node.f.space, node.args[0], node.args[1], dvar)
-    # Scalar regime: a matrix-trace pairing tr(L ∘ δ ∘ R) — the Frobenius covector.
-    if isinstance(node, Trace):
-        return _factor_trace(node, dvar)
-    # Vector regime: a δ-closed map applied to δ-stuff  →  A ∘ (δ ↦ arg).
-    if (
-        isinstance(node, Eval)
-        and node.positions == (0,)
-        and len(node.args) == 1
-        and not _mentions(node.f, uid)
-    ):
-        m = _factor_llam_body(node.args[0], dvar)
-        return Compose(node.f, (0,), (m,)) if m is not None else None
-    return None
 
 
 def rule_eta_advanced(node: Term) -> Term | None:
@@ -897,28 +910,28 @@ def rule_eta_advanced(node: Term) -> Term | None:
     to the stored map it denotes (the FFS re-orientation, plans/92): the rewrite is an equality
     of the coordinate-free algebra, verified value-identical by the suite. Opt-in
     (``SoPConfig.eta_advanced``); off in ``simplify``/``DEFAULT_SOP``."""
-    if not isinstance(node, LLam) or len(node.vars) != 1:
-        return None
-    (dvar,) = node.vars
-    body = node.body
-    # Defer the bare η shape λδ.f(δ) to rule_eta (it produces f directly; avoids f∘Id churn).
-    if (
-        isinstance(body, Eval)
-        and body.positions == (0,)
-        and tuple(body.args) == node.vars
-        and not _mentions_vars(body.f, {dvar.uid})
-    ):
-        return None
-    from grassmann.infer.linearity import LinearityError, check_llam_resources
+    match node:
+        case LLam(vars=(dvar,), body=body):
+            # Defer the bare η shape λδ.f(δ) to rule_eta (it produces f directly; avoids f∘Id churn).
+            if (
+                isinstance(body, Eval)
+                and body.positions == (0,)
+                and tuple(body.args) == node.vars
+                and not _mentions_vars(body.f, {dvar.uid})
+            ):
+                return None
+            from grassmann.infer.linearity import LinearityError, check_llam_resources
 
-    try:
-        check_llam_resources(node)  # exactly-once gate: rejects ⟨δ,δ⟩ and δ-unused bodies
-    except LinearityError:
-        return None
-    m = _factor_llam_body(body, dvar)
-    if m is None or _mentions_vars(m, {dvar.uid}):
-        return None  # not expressible lambda-free, or δ leaked — leave the LLam intact
-    return m
+            try:
+                check_llam_resources(node)  # exactly-once gate: rejects ⟨δ,δ⟩ and δ-unused bodies
+            except LinearityError:
+                return None
+            m = _factor_llam_body(body, dvar)
+            if m is None or _mentions_vars(m, {dvar.uid}):
+                return None  # not expressible lambda-free, or δ leaked — leave the LLam intact
+            return m
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_eval_compose_fold(node: Term) -> Term | None:
@@ -941,45 +954,52 @@ def rule_eval_compose_fold(node: Term) -> Term | None:
 def rule_eval_zero(node: Term) -> Term | None:
     """``0·… → 0`` and ``f(…,0,…) → 0`` — a linear application with a zero map or a zero
     argument vanishes."""
-    if isinstance(node, Eval) and (
-        isinstance(node.f, Zero) or any(isinstance(a, Zero) for a in node.args)
-    ):
-        return Zero(_space(node))
-    return None
+    match node:
+        case Eval() if isinstance(node.f, Zero) or any(isinstance(a, Zero) for a in node.args):
+            return Zero(_space(node))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_compose(node: Term) -> Term | None:
     """Identity / zero laws for composition: drop ``Identity`` operands, ``Identity ∘ g →
     g``, and ``0 ∘ … → 0`` / ``… ∘ 0 → 0``."""
-    if not isinstance(node, Compose):
-        return None
-    if isinstance(node.f, Identity) and node.positions == (0,) and len(node.gs) == 1:
-        return node.gs[0]
-    if isinstance(node.f, Zero) or any(isinstance(g, Zero) for g in node.gs):
-        return Zero(_space(node))
-    keep_pos: list[int] = []
-    keep_gs: list[Term] = []
-    dropped = False
-    for p, g in zip(node.positions, node.gs, strict=True):
-        if isinstance(g, Identity):
-            dropped = True
-        else:
-            keep_pos.append(p)
-            keep_gs.append(g)
-    if not dropped:
-        return None
-    if not keep_gs:
-        return node.f
-    return Compose(node.f, tuple(keep_pos), tuple(keep_gs))
+    match node:
+        case Compose(f=Identity(), positions=(0,), gs=(g,)):
+            return g
+        case Compose(f=Zero()):
+            return Zero(_space(node))
+        case Compose() if any(isinstance(g, Zero) for g in node.gs):
+            return Zero(_space(node))
+        case Compose(f=f, positions=positions, gs=gs):
+            keep_pos: list[int] = []
+            keep_gs: list[Term] = []
+            dropped = False
+            for p, g in zip(positions, gs, strict=True):
+                match g:
+                    case Identity():
+                        dropped = True
+                    case _:  # audit: ok EX-WILDCARD — bail-default (§0): a non-Identity operand is kept [approved Teo 2026-07-03]
+                        keep_pos.append(p)
+                        keep_gs.append(g)
+            if not dropped:
+                return None
+            if not keep_gs:
+                return f
+            return Compose(f, tuple(keep_pos), tuple(keep_gs))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_involution(node: Term) -> Term | None:
     """``(fᵀ)ᵀ → f`` (``Dagger``) and ``(f⁻¹)⁻¹ → f`` (``Solve``) — involutive operators."""
-    if isinstance(node, Dagger) and isinstance(node.f, Dagger):
-        return node.f.f
-    if isinstance(node, Solve) and isinstance(node.f, Solve):
-        return node.f.f
-    return None
+    match node:
+        case Dagger(f=Dagger(f=inner)):
+            return inner
+        case Solve(f=Solve(f=inner)):
+            return inner
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_dagger_push(node: Term) -> Term | None:
@@ -991,16 +1011,15 @@ def rule_dagger_push(node: Term) -> Term | None:
     Not done for ``Solve``/``Pinv``: ``Solve``'s argument must be a ``bij``-asserted *var* (it
     can never be a ``Compose``/``Kron``), and ``Pinv`` does **not** distribute over composition
     (the pseudo-inverse of a product is not the product of pseudo-inverses)."""
-    if not isinstance(node, Dagger):
-        return None
-    f = node.f
-    if isinstance(f, Identity):
-        return f
-    if isinstance(f, Kron):
-        return Kron(Dagger(f.f), Dagger(f.g))
-    if isinstance(f, Compose) and f.positions == (0,) and len(f.gs) == 1:
-        return Compose(Dagger(f.gs[0]), (0,), (Dagger(f.f),))
-    return None
+    match node:
+        case Dagger(f=Identity() as f):
+            return f
+        case Dagger(f=Kron(f=a, g=b)):
+            return Kron(Dagger(a), Dagger(b))
+        case Dagger(f=Compose(f=h, positions=(0,), gs=(g,))):
+            return Compose(Dagger(g), (0,), (Dagger(h),))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_musical(node: Term) -> Term | None:
@@ -1009,17 +1028,17 @@ def rule_musical(node: Term) -> Term | None:
     Pinv(Inner(s))`` (the inverse metric), and cancel an inverse-metric pair in a composition
     — ``g⁻¹∘g → Id(s)``, ``g∘g⁻¹ → Id(s*)`` (a metric is non-degenerate, so ``Pinv(Inner)`` is
     a true inverse). Direction: collapse musical maps toward ``Inner``/``Identity`` (value-exact)."""
-    if isinstance(node, Flat):
-        return Inner(node.space)
-    if isinstance(node, Sharp):
-        return Pinv(Inner(node.space))
-    if isinstance(node, Compose) and node.positions == (0,) and len(node.gs) == 1:
-        f, g = node.f, node.gs[0]
-        if isinstance(f, Pinv) and isinstance(f.f, Inner) and isinstance(g, Inner) and f.f.space == g.space:
-            return Identity(g.space)
-        if isinstance(f, Inner) and isinstance(g, Pinv) and isinstance(g.f, Inner) and f.space == g.f.space:
-            return Identity(dual(f.space))
-    return None
+    match node:
+        case Flat():
+            return Inner(node.space)
+        case Sharp():
+            return Pinv(Inner(node.space))
+        case Compose(f=Pinv(f=Inner(space=si)), positions=(0,), gs=(Inner(space=sg),)) if si == sg:
+            return Identity(sg)
+        case Compose(f=Inner(space=sf), positions=(0,), gs=(Pinv(f=Inner(space=sg)),)) if sf == sg:
+            return Identity(dual(sf))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_inverse_compose(node: Term) -> Term | None:
@@ -1034,21 +1053,20 @@ def rule_inverse_compose(node: Term) -> Term | None:
     cancels in the direction its rank condition guarantees (verified). The ``Eval``-applies-
     transpose convention does **not** intrude here — these are stored-matrix map identities.
     Direction: toward ``Identity``."""
-    if not (isinstance(node, Compose) and node.positions == (0,) and len(node.gs) == 1):
-        return None
     from grassmann.infer.properties import is_bijective, is_injective, is_surjective
     from grassmann.infer.synth import map_domain_codomain
 
-    f, g = node.f, node.gs[0]
-    if isinstance(f, Solve) and f.f == g and is_bijective(g):
-        return Identity(map_domain_codomain(g)[0])
-    if isinstance(g, Solve) and g.f == f and is_bijective(f):
-        return Identity(map_domain_codomain(f)[1])
-    if isinstance(f, Pinv) and f.f == g and is_injective(g):
-        return Identity(map_domain_codomain(g)[0])
-    if isinstance(g, Pinv) and g.f == f and is_surjective(f):
-        return Identity(map_domain_codomain(f)[1])
-    return None
+    match node:
+        case Compose(f=Solve(f=inner), positions=(0,), gs=(g,)) if inner == g and is_bijective(g):
+            return Identity(map_domain_codomain(g)[0])
+        case Compose(f=f, positions=(0,), gs=(Solve(f=inner),)) if inner == f and is_bijective(f):
+            return Identity(map_domain_codomain(f)[1])
+        case Compose(f=Pinv(f=inner), positions=(0,), gs=(g,)) if inner == g and is_injective(g):
+            return Identity(map_domain_codomain(g)[0])
+        case Compose(f=f, positions=(0,), gs=(Pinv(f=inner),)) if inner == f and is_surjective(f):
+            return Identity(map_domain_codomain(f)[1])
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_project_embed(node: Term) -> Term | None:
@@ -1057,16 +1075,17 @@ def rule_project_embed(node: Term) -> Term | None:
     space normalization** (`#3`) that the projection target is ``v``'s space up to iso
     (``spaces_iso``); only then is the round-trip valid. Value-exact. Direction: cancel the
     coercion pair toward the bare value."""
-    if not isinstance(node, Project) or not isinstance(node.vector, Embed):
-        return None
-    v = node.vector.vector
-    sv = _space(v)
-    if sv is None:
-        return None
-    target = node.space if node.space is not None else sv  # omitted target ⇒ inferred = sv
-    if spaces_iso(target, sv):
-        return v
-    return None
+    match node:
+        case Project(vector=Embed(vector=v)):
+            sv = _space(v)
+            if sv is None:
+                return None
+            target = node.space if node.space is not None else sv  # omitted target ⇒ inferred = sv
+            if spaces_iso(target, sv):
+                return v
+            return None
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_kron(node: Term) -> Term | None:
@@ -1075,31 +1094,24 @@ def rule_kron(node: Term) -> Term | None:
     collapses toward fewer ``Kron``/``Compose`` nodes (and toward ``Identity``)."""
     from grassmann.core.space import oprod
 
-    if isinstance(node, Kron):
-        if isinstance(node.f, Identity) and isinstance(node.g, Identity):
-            return Identity(oprod(node.f.space, node.g.space))
-        return None
-    if (
-        isinstance(node, Compose)
-        and node.positions == (0,)
-        and len(node.gs) == 1
-        and isinstance(node.f, Kron)
-        and isinstance(node.gs[0], Kron)
-    ):
-        (a, b), (c, d) = (node.f.f, node.f.g), (node.gs[0].f, node.gs[0].g)
-        return Kron(Compose(a, (0,), (c,)), Compose(b, (0,), (d,)))
-    return None
+    match node:
+        case Kron(f=Identity(space=sa), g=Identity(space=sb)):
+            return Identity(oprod(sa, sb))
+        case Compose(f=Kron(f=a, g=b), positions=(0,), gs=(Kron(f=c, g=d),)):
+            return Kron(Compose(a, (0,), (c,)), Compose(b, (0,), (d,)))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_trace_identity(node: Term) -> Term | None:
     """``tr(Id(s)) → |s|`` (the dimension), when ``s`` has a static dimension — the full trace of
     the 2-factor identity map."""
-    if not isinstance(node, Trace) or not isinstance(node.f, Identity):
-        return None
-    if {node.i, node.j} != {0, 1}:
-        return None
-    d = _static_space_dim(node.f.space)
-    return Lit(float(d)) if d is not None else None
+    match node:
+        case Trace(f=Identity(space=s), i=i, j=j) if {i, j} == {0, 1}:
+            d = _static_space_dim(s)
+            return Lit(float(d)) if d is not None else None
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def _map_arity(t: Term) -> int | None:
@@ -1116,14 +1128,13 @@ def rule_trace_kron(node: Term) -> Term | None:
     """``tr(f⊗g) → tr(f)·tr(g)`` — the full trace of a Kronecker product factors into the product
     of the full traces. Fires only on the full trace (``{i,j} == {0,1}``) of a ``Kron`` of two
     simple (2-factor) maps; value-exact."""
-    if not isinstance(node, Trace) or not isinstance(node.f, Kron):
-        return None
-    if {node.i, node.j} != {0, 1}:
-        return None
-    f, g = node.f.f, node.f.g
-    if _map_arity(f) != 2 or _map_arity(g) != 2:
-        return None
-    return Scale(Trace(f, 1, 0), Trace(g, 1, 0))
+    match node:
+        case Trace(f=Kron(f=f, g=g), i=i, j=j) if {i, j} == {0, 1}:
+            if _map_arity(f) != 2 or _map_arity(g) != 2:
+                return None
+            return Scale(Trace(f, 1, 0), Trace(g, 1, 0))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_invlift_noop(node: Term) -> Term | None:
@@ -1168,15 +1179,16 @@ def rule_tuple_roundtrip(node: Term) -> Term | None:
     ``Compose(TupleProject(s,i), TupleEmbed(s,j))`` is ``Identity(block_i)`` when ``i=j`` and the
     ``Zero`` map ``block_j ⊸ block_i`` otherwise. (Indices are concrete here, so the bracket
     folds immediately; symbolic-index spaces would keep it as ``δ[i=j]``.)"""
-    if not isinstance(node, Compose) or node.positions != (0,) or len(node.gs) != 1:
-        return None
-    f, g = node.f, node.gs[0]
-    if isinstance(f, TupleProject) and isinstance(g, TupleEmbed) and f.space == g.space:
-        comps = f.space.spaces
-        if f.i == g.i:
-            return Identity(comps[f.i])
-        return Zero(linear_map_space(comps[g.i], comps[f.i]))
-    return None
+    match node:
+        case Compose(
+            f=TupleProject(space=sf, i=i), positions=(0,), gs=(TupleEmbed(space=sg, i=j),)
+        ) if sf == sg:
+            comps = sf.spaces
+            if i == j:
+                return Identity(comps[i])
+            return Zero(linear_map_space(comps[j], comps[i]))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 # ===========================================================================
@@ -1192,24 +1204,23 @@ def _push_sum_then_scale(node: Term, slots: list[tuple[Term, Callable[[Term], Te
     scalar outward (``Scale``). Doing one slot per call lets the engine iterate to a
     fixpoint; trying sums across all slots first keeps the result a clean SoP."""
     for child, rebuild in slots:
-        if isinstance(child, Sum):
+        if isinstance(child, Sum):  # audit: ok EX-ISINSTANCE-LADDER — rule probe / two-phase slot scan (all Sums before any Scale) resists a single match [approved Teo 2026-07-03]
             return Sum(tuple(rebuild(c) for c in child.vectors))
     for child, rebuild in slots:
-        if isinstance(child, Scale):
+        if isinstance(child, Scale):  # audit: ok EX-ISINSTANCE-LADDER — rule probe / two-phase slot scan (all Sums before any Scale) resists a single match [approved Teo 2026-07-03]
             return Scale(child.scalar, rebuild(child.vector))
     return None
 
 
 def dist_scale(node: Term) -> Term | None:
     """``r·(a+b) → r·a + r·b`` and ``(p+q)·v → p·v + q·v`` — ``Scale`` is bilinear."""
-    if not isinstance(node, Scale):
-        return None
-    r, v = node.scalar, node.vector
-    if isinstance(v, Sum):
-        return Sum(tuple(Scale(r, x) for x in v.vectors))
-    if is_term(r) and isinstance(r, Sum):
-        return Sum(tuple(Scale(p, v) for p in r.vectors))
-    return None
+    match node:
+        case Scale(scalar=r, vector=Sum() as v):
+            return Sum(tuple(Scale(r, x) for x in v.vectors))
+        case Scale(scalar=Sum() as r, vector=v):
+            return Sum(tuple(Scale(p, v) for p in r.vectors))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def dist_eval(node: Term) -> Term | None:
@@ -1249,19 +1260,21 @@ def dist_compose(node: Term) -> Term | None:
 def dist_oprod(node: Term) -> Term | None:
     """``⊗`` is multilinear: distribute over a ``+`` in any factor, pull a scalar from any
     factor, and vanish if any factor is ``0``."""
-    if not isinstance(node, OProdV):
-        return None
-    if any(isinstance(v, Zero) for v in node.vectors):
-        return Zero(_space(node))
-    slots: list[tuple[Term, Callable[[Term], Term]]] = []
-    for k in range(len(node.vectors)):
-        def rb(x: Term, k: int = k) -> Term:
-            new = list(node.vectors)
-            new[k] = x
-            return OProdV(tuple(new))
+    match node:
+        case OProdV(vectors=vectors):
+            if any(isinstance(v, Zero) for v in vectors):
+                return Zero(_space(node))
+            slots: list[tuple[Term, Callable[[Term], Term]]] = []
+            for k in range(len(vectors)):
+                def rb(x: Term, k: int = k) -> Term:
+                    new = list(vectors)
+                    new[k] = x
+                    return OProdV(tuple(new))
 
-        slots.append((node.vectors[k], rb))
-    return _push_sum_then_scale(node, slots)
+                slots.append((vectors[k], rb))
+            return _push_sum_then_scale(node, slots)
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def dist_oplus(node: Term) -> Term | None:
@@ -1272,33 +1285,37 @@ def dist_oplus(node: Term) -> Term | None:
     The first addend keeps the original siblings; each further addend gets a copy with that
     slot's value and ``Zero`` everywhere else. Keeps ``⊕`` as a layer whose components are
     ``+``-free (the v2 ``+ > ⊕ > ⊗`` grammar)."""
-    if not isinstance(node, OPlusV):
-        return None
-    for k, v in enumerate(node.vectors):
-        if isinstance(v, Sum):
-            parts: list[Term] = []
-            first = list(node.vectors)
-            first[k] = v.vectors[0]
-            parts.append(OPlusV(tuple(first)))
-            for addend in v.vectors[1:]:
-                slot = [Zero(_space(s)) for s in node.vectors]
-                slot[k] = addend
-                parts.append(OPlusV(tuple(slot)))
-            return Sum(tuple(parts))
-    return None
+    match node:
+        case OPlusV(vectors=vectors):
+            for k, v in enumerate(vectors):
+                if isinstance(v, Sum):
+                    parts: list[Term] = []
+                    first = list(vectors)
+                    first[k] = v.vectors[0]
+                    parts.append(OPlusV(tuple(first)))
+                    for addend in v.vectors[1:]:
+                        slot = [Zero(_space(s)) for s in vectors]
+                        slot[k] = addend
+                        parts.append(OPlusV(tuple(slot)))
+                    return Sum(tuple(parts))
+            return None
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def dist_kron(node: Term) -> Term | None:
     """``Kron`` (map ⊗) is bilinear in its two maps; vanishes if either is ``0``."""
-    if not isinstance(node, Kron):
-        return None
-    if isinstance(node.f, Zero) or isinstance(node.g, Zero):
-        return Zero(_space(node))
-    slots = [
-        (node.f, lambda f: Kron(f, node.g)),
-        (node.g, lambda g: Kron(node.f, g)),
-    ]
-    return _push_sum_then_scale(node, slots)
+    match node:
+        case Kron(f=Zero()) | Kron(g=Zero()):
+            return Zero(_space(node))
+        case Kron():
+            slots = [
+                (node.f, lambda f: Kron(f, node.g)),
+                (node.g, lambda g: Kron(node.f, g)),
+            ]
+            return _push_sum_then_scale(node, slots)
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -1316,31 +1333,32 @@ def dist_eval_oprod(node: Term) -> Term | None:
     each selected factor fully (it is a single dual ⇒ a scalar ``gᵢ(argᵢ)``) and pulls it
     out as a coefficient — the ``Eval(x⊗y, c) → x(c)·y`` rule. Bails if a contracted factor
     does not reduce to a scalar (an atypical / untypable slot)."""
-    if not isinstance(node, Eval) or not isinstance(node.f, OProdV):
-        return None
-    gs = node.f.vectors
-    contracted = dict(zip(node.positions, node.args, strict=True))
-    if any(p >= len(gs) for p in contracted):
-        return None
-    coeffs: list[Term] = []
-    factors: list[Term] = []
-    for i, g in enumerate(gs):
-        if i in contracted:
-            cf = Eval(g, (0,), (contracted[i],))
-            if not isinstance(_space(cf), Scalar):
+    match node:
+        case Eval(f=OProdV(vectors=gs)):
+            contracted = dict(zip(node.positions, node.args, strict=True))
+            if any(p >= len(gs) for p in contracted):
                 return None
-            coeffs.append(cf)
-        else:
-            factors.append(g)
-    if not factors:  # every factor contracted → the product of the scalar coefficients
-        body: Term = coeffs[0]
-        for cf in coeffs[1:]:
-            body = Scale(cf, body)
-        return body
-    body = OProdV(tuple(factors)) if len(factors) > 1 else factors[0]
-    for cf in coeffs:
-        body = Scale(cf, body)
-    return body
+            coeffs: list[Term] = []
+            factors: list[Term] = []
+            for i, g in enumerate(gs):
+                if i in contracted:
+                    cf = Eval(g, (0,), (contracted[i],))
+                    if not isinstance(_space(cf), Scalar):
+                        return None
+                    coeffs.append(cf)
+                else:
+                    factors.append(g)
+            if not factors:  # every factor contracted → the product of the scalar coefficients
+                body: Term = coeffs[0]
+                for cf in coeffs[1:]:
+                    body = Scale(cf, body)
+                return body
+            body = OProdV(tuple(factors)) if len(factors) > 1 else factors[0]
+            for cf in coeffs:
+                body = Scale(cf, body)
+            return body
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def dist_trace_oprod(node: Term) -> Term | None:
@@ -1348,76 +1366,81 @@ def dist_trace_oprod(node: Term) -> Term | None:
     whole factor, so contracting primal slot ``i`` with dual slot ``j`` is a contraction
     *between* two atoms — represented as ``Eval(gⱼ, gᵢ)`` (the user's choice) — yielding a
     scalar coefficient times the remaining product: ``Trace(x⊗c⊗z, 0, 1) → ⟨c,x⟩·z``."""
-    if not isinstance(node, Trace) or not isinstance(node.f, OProdV):
-        return None
-    gs = node.f.vectors
-    i, j = node.i, node.j
-    if i >= len(gs) or j >= len(gs) or i == j:
-        return None
-    coeff = Eval(gs[j], (0,), (gs[i],))  # j is the dual slot, i the primal (Trace convention)
-    if not isinstance(_space(coeff), Scalar):
-        coeff = Eval(gs[i], (0,), (gs[j],))  # tolerate swapped primal/dual roles
-        if not isinstance(_space(coeff), Scalar):
+    match node:
+        case Trace(f=OProdV(vectors=gs), i=i, j=j):
+            if i >= len(gs) or j >= len(gs) or i == j:
+                return None
+            coeff = Eval(gs[j], (0,), (gs[i],))  # j is the dual slot, i the primal (Trace convention)
+            if not isinstance(_space(coeff), Scalar):
+                coeff = Eval(gs[i], (0,), (gs[j],))  # tolerate swapped primal/dual roles
+                if not isinstance(_space(coeff), Scalar):
+                    return None
+            rest = [g for k, g in enumerate(gs) if k not in (i, j)]
+            if not rest:
+                return coeff
+            body = OProdV(tuple(rest)) if len(rest) > 1 else rest[0]
+            return Scale(coeff, body)
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
             return None
-    rest = [g for k, g in enumerate(gs) if k not in (i, j)]
-    if not rest:
-        return coeff
-    body = OProdV(tuple(rest)) if len(rest) > 1 else rest[0]
-    return Scale(coeff, body)
 
 
 def dist_compose_oprod(node: Term) -> Term | None:
     """Push a composition into a tensor product: ``Compose(⊗(g₀,…,gₘ), pos, hs)`` precomposes
     each selected factor (a single dual input slot) with its map ``hₖ``, leaving the other
     factors untouched."""
-    if not isinstance(node, Compose) or not isinstance(node.f, OProdV):
-        return None
-    gs = node.f.vectors
-    composed = dict(zip(node.positions, node.gs, strict=True))
-    if any(p >= len(gs) for p in composed):
-        return None
-    factors = [
-        Compose(g, (0,), (composed[i],)) if i in composed else g for i, g in enumerate(gs)
-    ]
-    return OProdV(tuple(factors)) if len(factors) > 1 else factors[0]
+    match node:
+        case Compose(f=OProdV(vectors=gs), positions=positions, gs=hs):
+            composed = dict(zip(positions, hs, strict=True))
+            if any(p >= len(gs) for p in composed):
+                return None
+            factors = [
+                Compose(g, (0,), (composed[i],)) if i in composed else g for i, g in enumerate(gs)
+            ]
+            return OProdV(tuple(factors)) if len(factors) > 1 else factors[0]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def _unary_linear(node: Term, child: Term, rebuild: Callable[[Term], Term]) -> Term | None:
     """Distribution for a node **linear in one child**: ``L(a+b) → L(a)+L(b)``,
     ``L(r·v) → r·L(v)``, ``L(0) → 0``."""
-    if isinstance(child, Zero):
-        return Zero(_space(node))
-    if isinstance(child, Sum):
-        return Sum(tuple(rebuild(c) for c in child.vectors))
-    if isinstance(child, Scale):
-        return Scale(child.scalar, rebuild(child.vector))
-    return None
+    match child:
+        case Zero():
+            return Zero(_space(node))
+        case Sum():
+            return Sum(tuple(rebuild(c) for c in child.vectors))
+        case Scale():
+            return Scale(child.scalar, rebuild(child.vector))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def dist_unary(node: Term) -> Term | None:
     """Single-child linear operators: ``Dagger`` / ``Trace`` / the movement & reshape nodes
     (``Project``/``Embed``/``Assert``/``Lift``/``InvLift``/``Permute``/``Remetric``)."""
-    if isinstance(node, Dagger):
-        return _unary_linear(node, node.f, Dagger)
-    if isinstance(node, Trace):
-        return _unary_linear(node, node.f, lambda g: Trace(g, node.i, node.j))
-    if isinstance(node, Project):
-        return _unary_linear(node, node.vector, lambda v: Project(v, node.space))
-    if isinstance(node, Embed):
-        return _unary_linear(node, node.vector, lambda v: Embed(v, node.space))
-    if isinstance(node, Assert):
-        return _unary_linear(node, node.vector, lambda v: Assert(v, node.space))
-    if isinstance(node, Lift):
-        return _unary_linear(node, node.vector, lambda v: Lift(v, node.fused, node.k))
-    if isinstance(node, InvLift):
-        return _unary_linear(node, node.vector, lambda v: InvLift(v, node.fused, node.k))
-    if isinstance(node, Permute):
-        return _unary_linear(node, node.vector, lambda v: Permute(v, node.perm))
-    if isinstance(node, TuplePermute):
-        return _unary_linear(node, node.vector, lambda v: TuplePermute(v, node.perm))
-    if isinstance(node, Remetric):
-        return _unary_linear(node, node.vector, lambda v: Remetric(v, node.metric))
-    return None
+    match node:
+        case Dagger():
+            return _unary_linear(node, node.f, Dagger)
+        case Trace():
+            return _unary_linear(node, node.f, lambda g: Trace(g, node.i, node.j))
+        case Project():
+            return _unary_linear(node, node.vector, lambda v: Project(v, node.space))
+        case Embed():
+            return _unary_linear(node, node.vector, lambda v: Embed(v, node.space))
+        case Assert():
+            return _unary_linear(node, node.vector, lambda v: Assert(v, node.space))
+        case Lift():
+            return _unary_linear(node, node.vector, lambda v: Lift(v, node.fused, node.k))
+        case InvLift():
+            return _unary_linear(node, node.vector, lambda v: InvLift(v, node.fused, node.k))
+        case Permute():
+            return _unary_linear(node, node.vector, lambda v: Permute(v, node.perm))
+        case TuplePermute():
+            return _unary_linear(node, node.vector, lambda v: TuplePermute(v, node.perm))
+        case Remetric():
+            return _unary_linear(node, node.vector, lambda v: Remetric(v, node.metric))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = not a single-child linear operator [approved Teo 2026-07-03]
+            return None
 
 
 # ===========================================================================
@@ -1529,6 +1552,16 @@ def _top_arity(g: Term) -> int | None:
     return len(sp.spaces) if isinstance(sp, OProd) else 1
 
 
+def _has_additive_structure(t: Term) -> bool:
+    """``t`` still carries additive / scalar / zero structure (``Sum``/``Scale``/``Zero``)
+    that distribution and scalar-pull must dissolve before an ordering rule may fire."""
+    match t:
+        case Sum() | Scale() | Zero():
+            return True
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): membership predicate, any other head is clean [approved Teo 2026-07-03]
+            return False
+
+
 def rule_order_otimes(node: Term) -> Term | None:
     """Canonicalize the factor order of a tensor product **up to isomorphism**, restoring the
     original layout with a ``Permute`` correction (the ``𝒞`` of ``plans/90``):
@@ -1542,22 +1575,23 @@ def rule_order_otimes(node: Term) -> Term | None:
 
     Conservative: only fires for an unsorted product of **single-axis** factors that are
     already clean atoms (no ``Sum``/``Scale``/``Zero`` to distribute first)."""
-    if not isinstance(node, OProdV):
-        return None
-    facs = node.vectors
-    if any(isinstance(f, (Sum, Scale, Zero)) for f in facs):
-        return None  # let distribution/scalar-pull run first
-    keys = [term_key(f) for f in facs]
-    sigma = sorted(range(len(facs)), key=lambda i: keys[i])
-    if sigma == list(range(len(facs))):
-        return None  # already canonical
-    if any((_top_arity(f) or 2) != 1 for f in facs):
-        return None  # multi-axis factor — Permute-on-blocks deferred (Step C+)
-    sorted_facs = tuple(facs[i] for i in sigma)
-    inv = [0] * len(sigma)  # perm = σ⁻¹ : Permute(OProdV(sorted), inv) reconstructs the original
-    for position, i in enumerate(sigma):
-        inv[i] = position
-    return Permute(OProdV(sorted_facs), tuple(inv))
+    match node:
+        case OProdV(vectors=facs):
+            if any(_has_additive_structure(f) for f in facs):
+                return None  # let distribution/scalar-pull run first
+            keys = [term_key(f) for f in facs]
+            sigma = sorted(range(len(facs)), key=lambda i: keys[i])
+            if sigma == list(range(len(facs))):
+                return None  # already canonical
+            if any((_top_arity(f) or 2) != 1 for f in facs):
+                return None  # multi-axis factor — Permute-on-blocks deferred (Step C+)
+            sorted_facs = tuple(facs[i] for i in sigma)
+            inv = [0] * len(sigma)  # perm = σ⁻¹ : Permute(OProdV(sorted), inv) reconstructs the original
+            for position, i in enumerate(sigma):
+                inv[i] = position
+            return Permute(OProdV(sorted_facs), tuple(inv))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_order_oplus(node: Term) -> Term | None:
@@ -1570,20 +1604,21 @@ def rule_order_oplus(node: Term) -> Term | None:
     where ``sorted[k] = comps[σ[k]]`` (``σ`` = argsort by ``term_key``). Opt-in via
     ``order_oplus``; conservative — clean components only (no ``Sum``/``Scale``/``Zero`` to
     distribute first)."""
-    if not isinstance(node, OPlusV):
-        return None
-    comps = node.vectors
-    if any(isinstance(c, (Sum, Scale, Zero)) for c in comps):
-        return None
-    if any(_space(c) is None for c in comps):
-        return None
-    sigma = sorted(range(len(comps)), key=lambda i: term_key(comps[i]))
-    if sigma == list(range(len(comps))):
-        return None  # already canonical
-    inv = [0] * len(sigma)
-    for k, i in enumerate(sigma):
-        inv[i] = k
-    return TuplePermute(OPlusV(tuple(comps[i] for i in sigma)), tuple(inv))
+    match node:
+        case OPlusV(vectors=comps):
+            if any(_has_additive_structure(c) for c in comps):
+                return None
+            if any(_space(c) is None for c in comps):
+                return None
+            sigma = sorted(range(len(comps)), key=lambda i: term_key(comps[i]))
+            if sigma == list(range(len(comps))):
+                return None  # already canonical
+            inv = [0] * len(sigma)
+            for k, i in enumerate(sigma):
+                inv[i] = k
+            return TuplePermute(OPlusV(tuple(comps[i] for i in sigma)), tuple(inv))
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+            return None
 
 
 def rule_dissolve_oplus(node: Term) -> Term | None:
@@ -1640,9 +1675,11 @@ def _is_scalar_atom(a: Term) -> bool:
     is not an atom (additive/multiplicative structure the outer polynomial owns)."""
     if not isinstance(_space(a), Scalar):
         return False
-    if isinstance(a, (Lit, Sum, Scale, Zero)):
-        return False
-    return _is_atom_head(a)
+    match a:
+        case Lit() | Sum() | Scale() | Zero():
+            return False
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other scalar head defers to _is_atom_head [approved Teo 2026-07-03]
+            return _is_atom_head(a)
 
 
 def _is_canonical_scalar_product(a: Term) -> bool:
@@ -1673,15 +1710,17 @@ def _is_atom_head(a: Term, canon_scalars: bool = False) -> bool:
     normal form forbids (β or ``Id·v``). When ``canon_scalars`` is on, a **canonical scalar
     product** (a sorted right-nested ``Scale`` of scalar atoms) is also a legal atom head —
     the multiplicative monoid of opaque scalar atoms is the polynomial's variable set."""
-    if isinstance(a, Scale):
-        return canon_scalars and _is_canonical_scalar_product(a)
-    if isinstance(a, (Sum, Zero)):
-        return False
-    if isinstance(a, Eval) and isinstance(a.f, (LLam, Identity)):
-        return False
-    if isinstance(a, NEval) and isinstance(a.f, Lam):
-        return False
-    return True
+    match a:
+        case Scale():
+            return canon_scalars and _is_canonical_scalar_product(a)
+        case Sum() | Zero():
+            return False
+        case Eval(f=LLam() | Identity()):
+            return False
+        case NEval(f=Lam()):
+            return False
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other head is a legal atom head [approved Teo 2026-07-03]
+            return True
 
 
 def _is_monomial(mono: Term, canon_scalars: bool = False) -> bool:
@@ -1689,22 +1728,23 @@ def _is_monomial(mono: Term, canon_scalars: bool = False) -> bool:
     sum-free scalar term (symbolic), and ``atom`` a legal atom head. With ``canon_scalars``
     the atom may be a canonical scalar product, so ``Scale(2.0, Scale(a, b))`` (the scalar
     monomial ``2·a·b``) is a monomial."""
-    if isinstance(mono, (Sum, Zero)):
-        return False
-    if isinstance(mono, Scale):
-        c = mono.scalar
-        if _is_num(c):
-            if c == 0 or c == 1:
-                return False
+    match mono:
+        case Sum() | Zero():
+            return False
+        case Scale(scalar=c):
+            if _is_num(c):
+                if c == 0 or c == 1:
+                    return False
+                return _is_atom_head(mono.vector, canon_scalars)
+            if isinstance(c, Sum):
+                return False  # a distributable scalar sum must have been pushed out
+            # A symbolic scalar coefficient: the whole node must itself be a canonical scalar
+            # product (so its factors are sorted), else it is just a single scalar atom × atom.
+            if canon_scalars and isinstance(_space(mono), Scalar):
+                return _is_canonical_scalar_product(mono)
             return _is_atom_head(mono.vector, canon_scalars)
-        if isinstance(c, Sum):
-            return False  # a distributable scalar sum must have been pushed out
-        # A symbolic scalar coefficient: the whole node must itself be a canonical scalar
-        # product (so its factors are sorted), else it is just a single scalar atom × atom.
-        if canon_scalars and isinstance(_space(mono), Scalar):
-            return _is_canonical_scalar_product(mono)
-        return _is_atom_head(mono.vector, canon_scalars)
-    return _is_atom_head(mono, canon_scalars)
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): a bare atom is the coefficient-1 monomial [approved Teo 2026-07-03]
+            return _is_atom_head(mono, canon_scalars)
 
 
 def _fully_reduced(t: Term, rules: tuple[Rule, ...]) -> bool:
@@ -1730,20 +1770,20 @@ def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
     """
     if not is_term(t):
         return False
-    if isinstance(t, Zero):
-        return True
     cs = config.canon_scalars
-    if isinstance(t, Sum):
-        monos = t.vectors
-        if len(monos) < 2 or not all(_is_monomial(m, cs) for m in monos):
+    match t:
+        case Zero():
+            return True
+        case Sum(vectors=monos):
+            if len(monos) < 2 or not all(_is_monomial(m, cs) for m in monos):
+                return False
+            keys = [term_key(_atom_of(m)) for m in monos]
+            if config.collect and len(set(keys)) != len(keys):  # atoms not collected
+                return False
+            if config.order_sum and keys != sorted(keys):  # not in canonical order
+                return False
+        case _ if not _is_monomial(t, cs):  # audit: ok EX-WILDCARD — bail-default (§0): a non-Sum must be a lone monomial [approved Teo 2026-07-03]
             return False
-        keys = [term_key(_atom_of(m)) for m in monos]
-        if config.collect and len(set(keys)) != len(keys):  # atoms not collected
-            return False
-        if config.order_sum and keys != sorted(keys):  # not in canonical order
-            return False
-    elif not _is_monomial(t, cs):
-        return False
     if config.canon_binders and _has_binder(t) and alpha_canon(t) != t:
         return False  # bound variables are not in α-canonical form
     return _fully_reduced(t, _sop_rules(config))

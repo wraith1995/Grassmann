@@ -31,6 +31,8 @@ connection ``Γ`` built from ``∂g`` (see :func:`_covariant_correction`); a con
 
 from __future__ import annotations
 
+from typing import assert_never
+
 import itertools
 import math
 from dataclasses import dataclass, field
@@ -81,6 +83,7 @@ from grassmann.core.term import (
     Term,
     Trace,
     TupleEmbed,
+    TuplePermute,
     TupleProject,
     Var,
     Zero,
@@ -208,7 +211,7 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
     else:
         body = _dd(e, ctx)
         rspace = R
-    if isinstance(body, Zero):
+    if isinstance(body, Zero):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: Zero-derivative shape test, else LLam wrap [approved Teo 2026-07-03]
         # e is x-independent: the derivative is the zero map (an LLam over an unused seed
         # would violate the linear discipline, so emit the zero map directly).
         return Zero(linear_map_space(ctx.X, rspace))
@@ -301,8 +304,10 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
                 f"diff: cannot differentiate a higher-order construct ({type(e).__name__}); "
                 f"differentiation of SpaceFunctions / Lam-as-function / Frame is unsupported"
             )
-        case _:
-            raise DiffError(f"diff: no derivative rule for {type(e).__name__}")
+        case TuplePermute():
+            raise DiffError("diff: no derivative rule for TuplePermute")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _dd_var(e: Var, ctx: _DCtx) -> Term:
@@ -468,14 +473,14 @@ def _dd_compose(e: Compose, ctx: _DCtx) -> Term:
     return _sum(parts, e, ctx)
 
 
-def _subspace_defining_map(space: Space) -> Term | None:
-    """The defining map ``f`` of a term-dependent subspace ``Img(f)/CoImg(f)/Ker(f)/CoKer(f)``,
-    else ``None``."""
-    from grassmann.core.space import CoImg, CoKer, Img, Ker
+def _subspace_defining_map(space: object) -> Term | None:
+    """The defining map ``f`` of a term-dependent subspace, else ``None`` (canonical, audit #18).
+    Callers pass ``sub_or_J`` (a Space OR the map Term itself); a non-Space is simply not a
+    subspace node — the canonical probe is Space-strict."""
+    from grassmann.core.space import is_space
+    from grassmann.infer.subspace import ffs_defining_map
 
-    if isinstance(space, (Img, CoImg, Ker, CoKer)):
-        return space.f
-    return None
+    return ffs_defining_map(space) if is_space(space) else None
 
 
 # The four fundamental subspaces (FFS) of a linear map ``J : dom ⊸ cod`` and the AMBIENT space each
@@ -489,11 +494,13 @@ def _subspace_defining_map(space: Space) -> Term | None:
 _FFS_AMBIENT = {"img": "cod", "coimg": "dom", "ker": "dom", "coker": "cod"}
 
 
-def _ffs_kind(sub: Space) -> str | None:
-    """The FFS kind string (``"img"/"coimg"/"ker"/"coker"``) of a moving-subspace node, else ``None``."""
-    from grassmann.core.space import CoImg, CoKer, Img, Ker
+def _ffs_kind(sub: object) -> str | None:
+    """The FFS kind string of a moving-subspace node, else ``None`` (canonical, audit #18).
+    Tolerates a Term (callers pass ``sub_or_J``) — a Term has no FFS kind."""
+    from grassmann.core.space import is_space
+    from grassmann.infer.subspace import ffs_kind
 
-    return {Img: "img", CoImg: "coimg", Ker: "ker", CoKer: "coker"}.get(type(sub))
+    return ffs_kind(sub) if is_space(sub) else None
 
 
 def _ffs_ambient(kind: str, J: Term) -> Space:
@@ -1013,6 +1020,8 @@ def _dd_sqrt(e: Sqrt, ctx: _DCtx) -> Term:
     if isinstance(df, Zero):
         return _zero(e, ctx)
     _dom, cod = _map_dom_cod(synth_space(e.f))  # f : V ⊸ V ⇒ V = cod (= dom)
+    if cod is None:
+        raise DiffError(f"diff: sqrt derivative needs a simple map space; got {synth_space(e.f)!r}")
     v = cod
     s = e  # Sqrt(e.f) : V ⊸ V
     # The value lowers sqrt(sym(f)) (``_SqrtSpdOp`` symmetrizes), so the honest derivative sees the
@@ -1040,14 +1049,13 @@ def _pinv_map_grad(f: Term, df: Term) -> Term:
 
 
 def _map_dom_cod(space: Space):
-    """``(dom, cod)`` of a simple linear-map space ``Dual(dom) ⊗ cod``, else ``(None, None)``."""
-    from grassmann.core.space import Dual, OProd
+    """``(dom, cod)`` of a simple linear-map space ``OProd(Dual(dom), cod)``, else ``(None, None)``
+    (canonical strict peel, audit #18 — the old tolerance for a non-``Dual`` head silently read a
+    (2,0)-tensor as a map, the implicit-conversion class grassmann bans)."""
+    from grassmann.infer.subspace import split_map_space
 
-    if isinstance(space, OProd) and len(space.spaces) == 2:
-        dom_slot, cod = space.spaces
-        dom = dom_slot.space if isinstance(dom_slot, Dual) else dom_slot
-        return dom, cod
-    return None, None
+    split = split_map_space(space)
+    return split if split is not None else (None, None)
 
 
 def _dd_solve_apply(e: SolveApply, ctx: _DCtx) -> Term:
@@ -1193,7 +1201,7 @@ def _chart_jacobian_var(g: Term) -> Var | None:
         f, gg = g.f, g.gs[0]
         if isinstance(f, Dagger) and isinstance(f.f, Var) and gg == f.f:
             return f.f
-        if isinstance(gg, Dagger) and isinstance(gg.f, Var) and f == gg.f:
+        if isinstance(gg, Dagger) and isinstance(gg.f, Var) and f == gg.f:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one JtJ Compose/Dagger pattern, else None [approved Teo 2026-07-03]
             return f
     return None
 
@@ -1473,7 +1481,8 @@ def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None])
     differentiate it term→term — ``embed``/``project`` add the immersion-derivative term, and the
     musical maps raise their own specific error.  Only x flowing into a non-subspace space (an SVar
     / a space made to depend on x by a Frame/SpaceFunction) is genuinely higher-order."""
-    from grassmann.core.space import CoImg, CoKer, Img, Ker, is_space
+    from grassmann.core.space import is_space
+    from grassmann.infer.subspace import is_ffs
     from grassmann.infer.synth import InferError, synth_space
 
     try:
@@ -1489,7 +1498,7 @@ def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None])
     def walk(node: object, in_space: bool, in_subspace: bool) -> None:
         if isinstance(node, Frame):
             raise DiffError("diff: cannot differentiate through a Frame (basis binder)")
-        if in_space and not in_subspace and isinstance(node, Var) and is_xdep(node):
+        if in_space and not in_subspace and isinstance(node, Var) and is_xdep(node):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): Frame/x-dep rejections on generic recursion [approved Teo 2026-07-03]
             raise DiffError(
                 "diff: an x-dependent term flows into a non-subspace space position "
                 "(a space made to depend on x — e.g. a SpaceFunction); differentiating through a "
@@ -1497,7 +1506,7 @@ def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None])
             )
         for child in _children(node):
             walk(child, in_space or is_space(child),
-                 in_subspace or isinstance(child, (Img, CoImg, Ker, CoKer)))
+                 in_subspace or (is_space(child) and is_ffs(child)))
 
     walk(e, is_space(e), False)
 
@@ -1509,7 +1518,7 @@ def _mentions_space_meta(s: Space) -> bool:
 
     def walk(node: object) -> None:
         nonlocal found
-        if isinstance(node, (SpaceMeta, SVar)):
+        if isinstance(node, (SpaceMeta, SVar)):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): meta/SVar leaf detect else generic recursion [approved Teo 2026-07-03]
             found = True
             return
         for child in _children(node):

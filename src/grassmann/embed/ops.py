@@ -435,9 +435,7 @@ def _peel_map_space(node: object) -> tuple[list[object], object] | None:
 
 
 def _split_map_space(node: object) -> tuple[object, object] | None:
-    """``OProd(Dual(a), b)`` → ``(a, b)``; else ``None``."""
-    if isinstance(node, _s.OProd) and len(node.spaces) == 2:
-        head = node.spaces[0]
-        if isinstance(head, _s.Dual):
-            return head.space, node.spaces[1]
-    return None
+    """``OProd(Dual(a), b)`` → ``(a, b)``; else ``None`` (canonical peel, fem audit #18)."""
+    from grassmann.infer.subspace import split_map_space
+
+    return split_map_space(node) if _s.is_space(node) else None
