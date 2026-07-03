@@ -60,12 +60,18 @@ class PullbackError(Exception):
     """Raised when no transport between two spaces can be built."""
 
 
-def pullback(v: Term, target: Space) -> Term:
+def pullback(v: Term, target: Space, *, primitives=None) -> Term:
     """Transport the value ``v`` into ``target`` (the public entry point).
 
     Synthesizes ``v``'s source space and builds the transported value. An identity
     transport returns ``v`` unchanged. If ``target`` carries a metric (``WithInner``), the
     result is re-metricized so it lands in the metricized target.
+
+    ``primitives`` (opt-in; ``None`` ⇒ classic behaviour, byte-identical) is a callable
+    ``(source_space, target_space) -> Term | None`` consulted at an FFS leaf that the structural
+    recursion cannot build itself (e.g. one ``Img`` mapped into another by a caller-supplied
+    inclusion). It lets a caller supply the primitive maps grassmann can't infer, so the whole
+    functorial recursion (``Dual``/``⊗``/``⊕``/exterior powers) transports across them generally.
     """
     if not is_term(v):
         raise PullbackError(f"pullback: expected a Term value, got {v!r}")
@@ -74,13 +80,13 @@ def pullback(v: Term, target: Space) -> Term:
     from grassmann.infer.synth import synth_space
 
     source = synth_space(v)
-    out = _pb(v, source, target)
+    out = _pb(v, source, target, primitives)
     if isinstance(target, WithInner) and not isinstance(out, Remetric):
         out = Remetric(out, target.metric)
     return out
 
 
-def _pb(v: Term, source: Space, target: Space) -> Term:
+def _pb(v: Term, source: Space, target: Space, primitives=None) -> Term:
     """Build the transported value ``v : source ⤳ target`` (value-level recursion)."""
     S = _normalize(source)
     T = _normalize(target)
@@ -88,7 +94,7 @@ def _pb(v: Term, source: Space, target: Space) -> Term:
     # WithInner only re-metricizes; transport on the underlying space, the caller restores
     # the target metric via Remetric.
     if isinstance(S, WithInner) or isinstance(T, WithInner):
-        return _pb(v, _strip(S), _strip(T))
+        return _pb(v, _strip(S), _strip(T), primitives)
 
     if S == T:
         return v
@@ -108,32 +114,38 @@ def _pb(v: Term, source: Space, target: Space) -> Term:
 
     # --- structural recursion ---
     if isinstance(S, OProd) and isinstance(T, OProd) and len(S.spaces) == len(T.spaces):
-        m = _tensor_map(S, T)
+        m = _tensor_map(S, T, primitives)
         return Eval(m, (0,), (v,))
     if isinstance(S, OPlus) and isinstance(T, OPlus) and len(S.spaces) == len(T.spaces):
-        return _pb_oplus(v, S, T)
+        return _pb_oplus(v, S, T, primitives)
     if isinstance(S, Dual) and isinstance(T, Dual):
-        inner = transport_map(T.space, S.space)  # contravariant: reversed primal map
+        # a covector transports CONTRAVARIANTLY: precompose with the reversed PRIMAL map (`Compose` = the
+        # metric-free adjoint action). The primal FFS leaf's map comes from `primitives` (the chart inclusion).
+        inner = transport_map(T.space, S.space, primitives=primitives)
         return Compose(v, (0,), (inner,))
     if _is_ffs(S) and _is_ffs(T):
-        return _pb_ffs(v, S, T)
+        if primitives is not None:                        # a caller-supplied leaf map wins over the ambient route
+            m = primitives(S, T)
+            if m is not None:
+                return Eval(m, (0,), (v,))
+        return _pb_ffs(v, S, T, primitives)
 
     return _pb_fallback(v, S, T)
 
 
-def _pb_oplus(v: Term, S: OPlus, T: OPlus) -> Term:
+def _pb_oplus(v: Term, S: OPlus, T: OPlus, primitives=None) -> Term:
     """``⊕`` at the value level: slice block ``k`` out of ``v`` (``TupleProject``), transport
     it, re-pad into ``T`` (``TupleEmbed``), and sum the blocks. Recursing on the *value*
     lets each block use any transport (incl. generic ``Project``/``Embed``)."""
     blocks: list[Term] = []
     for k, (s_k, t_k) in enumerate(zip(S.spaces, T.spaces, strict=True)):
         sliced = Eval(TupleProject(S, k), (0,), (v,))
-        moved = _pb(sliced, s_k, t_k)
+        moved = _pb(sliced, s_k, t_k, primitives)
         blocks.append(Eval(TupleEmbed(T, k), (0,), (moved,)))
     return Sum(tuple(blocks))
 
 
-def _pb_ffs(v: Term, S: Space, T: Space) -> Term:
+def _pb_ffs(v: Term, S: Space, T: Space, primitives=None) -> Term:
     """FFS ``S`` to ``T`` via their ambients: ``project(convert(embed(v)))``."""
     sup_S = _ffs_superspace(S)
     sup_T = _ffs_superspace(T)
@@ -142,7 +154,7 @@ def _pb_ffs(v: Term, S: Space, T: Space) -> Term:
             f"pullback: cannot recover the ambient space of an FFS ({S!r} → {T!r})"
         )
     embedded = Embed(v, sup_S)
-    converted = _pb(embedded, sup_S, sup_T)
+    converted = _pb(embedded, sup_S, sup_T, primitives)
     return Project(converted, T)
 
 
@@ -172,17 +184,21 @@ def _pb_fallback(v: Term, S: Space, T: Space) -> Term:
 # ---------------------------------------------------------------------------
 
 
-def transport_map(source: Space, target: Space) -> Term:
+def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
     """A reusable transport map ``source ⊸ target`` as a *primitive* (``Eval``-applicable)
-    map term. Supports the structural cases expressible without an ``LLam``; a case that
-    needs a generic ``Project``/``Embed`` (FFS, an explicit-basis subspace) raises
-    :class:`PullbackError` — apply :func:`pullback` to a *value* there instead."""
+    map term. Supports the structural cases expressible without an ``LLam``; a leaf that the
+    structure cannot build is taken from the caller-supplied ``primitives(source, target)``
+    (opt-in), else raises :class:`PullbackError` — apply :func:`pullback` to a *value* instead."""
     S = _normalize(source)
     T = _normalize(target)
     if isinstance(S, WithInner) or isinstance(T, WithInner):
-        return transport_map(_strip(S), _strip(T))
+        return transport_map(_strip(S), _strip(T), primitives=primitives)
     if S == T:
         return Identity(S)
+    if isinstance(S, Dual) and isinstance(T, Dual):
+        # a covector-factor map (e.g. a `⊗`/`Λᵏ` factor) is the ADJOINT of the reversed primal map.
+        from grassmann.core.term import dagger
+        return dagger(transport_map(T.space, S.space, primitives=primitives))
 
     from grassmann.infer.subspace import is_subspace
 
@@ -190,37 +206,43 @@ def transport_map(source: Space, target: Space) -> Term:
         i = _summand_index(T, S)
         if i is not None:
             return TupleProject(S, i)
-        raise PullbackError(
-            f"transport_map: {T!r} ⊑ {S!r} is not a direct ⊕-summand; no primitive map "
-            f"form (apply pullback to a value, which can use a generic Project)"
-        )
+        return _leaf_primitive(S, T, primitives, "Project")
     if is_subspace(S, T):
         i = _summand_index(S, T)
         if i is not None:
             return TupleEmbed(T, i)
-        raise PullbackError(
-            f"transport_map: {S!r} ⊑ {T!r} is not a direct ⊕-summand; no primitive map "
-            f"form (apply pullback to a value, which can use a generic Embed)"
-        )
+        return _leaf_primitive(S, T, primitives, "Embed")
     if isinstance(S, OProd) and isinstance(T, OProd) and len(S.spaces) == len(T.spaces):
-        return _tensor_map(S, T)
+        return _tensor_map(S, T, primitives)
     if isinstance(S, OPlus) and isinstance(T, OPlus) and len(S.spaces) == len(T.spaces):
         # Block-diagonal map Σₖ embedₖ ∘ mₖ ∘ projectₖ — pure (dom,cod) map algebra.
         from grassmann.core.term import chain
 
-        ms = [transport_map(s_k, t_k) for s_k, t_k in zip(S.spaces, T.spaces, strict=True)]
+        ms = [transport_map(s_k, t_k, primitives=primitives)
+              for s_k, t_k in zip(S.spaces, T.spaces, strict=True)]
         return Sum(tuple(
             chain(TupleEmbed(T, k), m_k, TupleProject(S, k)) for k, m_k in enumerate(ms)
         ))
+    return _leaf_primitive(S, T, primitives, "no primitive map")
+
+
+def _leaf_primitive(S: Space, T: Space, primitives, why: str) -> Term:
+    """A leaf ``transport_map`` cannot build structurally: take the caller-supplied primitive map
+    (``primitives(S, T)``) if any, else raise. Keeps the classic error when no ``primitives`` given."""
+    if primitives is not None:
+        m = primitives(S, T)
+        if m is not None:
+            return m
     raise PullbackError(
-        f"transport_map: no primitive map for {S!r} → {T!r}; apply pullback to a value"
+        f"transport_map: {why} for {S!r} → {T!r}; supply a `primitives` map or apply pullback to a value"
     )
 
 
-def _tensor_map(S: OProd, T: OProd) -> Term:
+def _tensor_map(S: OProd, T: OProd, primitives=None) -> Term:
     """``⊗`` — the tensor product of the factor maps, as a right-nested ``Kron`` (a
     primitive ``(dom,cod)`` map)."""
-    ms = [transport_map(s_i, t_i) for s_i, t_i in zip(S.spaces, T.spaces, strict=True)]
+    ms = [transport_map(s_i, t_i, primitives=primitives)
+          for s_i, t_i in zip(S.spaces, T.spaces, strict=True)]
     out = ms[-1]
     for m in reversed(ms[:-1]):
         out = Kron(m, out)
@@ -295,6 +317,36 @@ def _ffs_superspace(s: Space) -> Space | None:
         except Exception:
             return None
     return None
+
+
+def euclidean_superspace(s: Space) -> Space:
+    """A tensor-product + direct-sum space that is a SUPERSPACE of ``s``, with every FFS (``Ker``/``Img``/
+    ``CoImg``/``CoKer``) replaced by its ambient, RECURSIVELY. So an exterior power ``Λᵏ(V) = Img(alt(V,k))``
+    resolves to the tensor power ``V⊗ᵏ`` (an ``OProd`` of ``k`` factors); a direct sum stays an ``OPlus``;
+    a ``Dual`` distributes; a ``WithInner`` drops its (non-structural) metric. Reading a form's DEGREE is
+    then just counting the tensor factors of this superspace (a ``k``-form ⊑ ``V⊗ᵏ``). Idempotent on
+    FFS-free (already-euclidean) spaces. Exhaustive over ``space._SPACE_TYPES`` (``assert_never`` backstop)."""
+    from typing import assert_never
+
+    from grassmann.core import space as S
+    match s:
+        case S.Scalar() | S.SVar() | S.App() | S.SpaceMeta():
+            return s                                              # euclidean leaves / opaque atoms
+        case S.Dual(space=inner):
+            return S.Dual(euclidean_superspace(inner))
+        case S.OProd(spaces=ss):
+            return S.OProd(tuple(euclidean_superspace(f) for f in ss))
+        case S.OPlus(spaces=ss):
+            return S.OPlus(tuple(euclidean_superspace(f) for f in ss))
+        case S.OPlusRep(count=c, space=b):
+            return S.OPlusRep(c, euclidean_superspace(b))
+        case S.WithInner(space=b):
+            return euclidean_superspace(b)                        # the metric is not structural — drop it
+        case S.Ker() | S.Img() | S.CoImg() | S.CoKer():
+            amb = _ffs_superspace(s)
+            return euclidean_superspace(amb) if amb is not None else s
+        case _:
+            assert_never(s)
 
 
 __all__ = ["pullback", "transport_map", "PullbackError"]

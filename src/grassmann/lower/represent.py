@@ -961,7 +961,10 @@ def _rep_oplus(
     # `106`: the concat's length is the SUM of the operand lengths — derive it from the realized
     # operands (a runtime sum atom when any is dynamic) so a symbolic ℝⁿ ⊕ ℝⁿ sizes correctly.
     _arrs = [r.array for r in reps]
-    _sum = _combined_dim(ctx, [_shape_of(a)[0] for a in _arrs], "sum", _arrs, 0, label="oplus")
+    # A 0-d SCALAR summand (e.g. euclidean built as ⊕ⁿ Scalar) contributes length 1 — consistent with
+    # `_ConcatOp`, which flattens every operand (`reshape(-1)`), so a scalar rides as a single element.
+    _dims = [(_shape_of(a)[0] if _shape_of(a) else 1) for a in _arrs]
+    _sum = _combined_dim(ctx, _dims, "sum", _arrs, 0, label="oplus")
     [out] = ctx.prog.emit_stmt(
         _ConcatOp(), _arrs, [pa.OutSpec("oplus", (_sum,))], note="oplus:concat",
     )
