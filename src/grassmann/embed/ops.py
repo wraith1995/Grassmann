@@ -125,8 +125,10 @@ class Expr:
             return wrap(_b.dual_basis(self.node))
         raise EmbedError("`~` (Dual) applies only to spaces and bases (27 Q7)")
 
-    # a * b : ⊗ OProd (space / vector / basis), level-poly.
+    # a * b : ⊗ OProd (space / vector / basis), level-poly. A Python NUMBER scalar-SCALES a vector.
     def __mul__(self, other: object) -> Expr:
+        if isinstance(other, (int, float)) and self.tower == TERM:
+            return wrap(_t.scale(float(other), self.node))     # scalar · vector
         o = _expr(other)
         if self.tower == SPACE and o.tower == SPACE:
             return wrap(_s.oprod(self.node, o.node))
@@ -135,6 +137,11 @@ class Expr:
         if self.tower == BASIS and o.tower == BASIS:
             return wrap(_b.basis_prod(self.node, o.node))
         raise EmbedError(f"`*` (⊗) needs same-tower operands, got {self.tower}/{o.tower}")
+
+    def __rmul__(self, other: object) -> Expr:                 # n * a  (scalar on the left)
+        if isinstance(other, (int, float)) and self.tower == TERM:
+            return wrap(_t.scale(float(other), self.node))
+        return _expr(other).__mul__(self)
 
     # a & b : ⊕ OPlus / stack (space / vector / basis), level-poly.
     def __and__(self, other: object) -> Expr:
@@ -147,12 +154,33 @@ class Expr:
             return wrap(_b.basis_sum(self.node, o.node))
         raise EmbedError(f"`&` (⊕) needs same-tower operands, got {self.tower}/{o.tower}")
 
-    # a + b : Sum (vectors).
+    # a + b : Sum (vectors). A Python NUMBER promotes to a scalar literal `_t.lit`.
     def __add__(self, other: object) -> Expr:
+        if self.tower == TERM and isinstance(other, (int, float)):
+            return wrap(_t.sum_(self.node, _t.lit(float(other))))
         o = _expr(other)
         if self.tower == TERM and o.tower == TERM:
             return wrap(_t.sum_(self.node, o.node))
         raise EmbedError("`+` (Sum) needs two vector (Term) operands")
+
+    def __radd__(self, other: object) -> Expr:                 # n + a
+        return self.__add__(other)
+
+    # a - b : Sum(a, −b) — `b` may be a vector or a promoted scalar constant.
+    def __sub__(self, other: object) -> Expr:
+        if self.tower != TERM:
+            raise EmbedError("`-` needs a vector (Term) operand")
+        on = _t.lit(float(other)) if isinstance(other, (int, float)) else _expr(other).node
+        return wrap(_t.sum_(self.node, _t.scale(-1.0, on)))
+
+    def __rsub__(self, other: object) -> Expr:                 # n - a
+        if self.tower != TERM:
+            raise EmbedError("`-` needs a vector (Term) operand")
+        on = _t.lit(float(other)) if isinstance(other, (int, float)) else _expr(other).node
+        return wrap(_t.sum_(on, _t.scale(-1.0, self.node)))
+
+    def __neg__(self) -> Expr:                                 # −a
+        return wrap(_t.scale(-1.0, self.node))
 
     # f @ g : Compose (maps), leading slots.
     def __matmul__(self, other: object) -> Expr:
