@@ -22,6 +22,8 @@ purely from primitive maps and value-level moves, never an ``LLam``-and-apply.
 
 from __future__ import annotations
 
+import itertools
+
 from grassmann.core.space import (
     CoImg,
     CoKer,
@@ -199,10 +201,15 @@ def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
         case _ if S == T:
             return Identity(S)
         case (Dual(sd), Dual(td)):
-            # a covector-factor map (e.g. a `⊗`/`Λᵏ` factor) is the ADJOINT of the reversed primal map.
-            from grassmann.core.term import dagger
-
-            return dagger(transport_map(td, sd, primitives=primitives))
+            # A covector-factor map (a `⊗`/`Λᵏ` factor) is the metric-free TRANSPOSE of the
+            # reversed primal map f = td⊸sd:  f* : Dual(sd) ⊸ Dual(td),  (f*ω)(x) = ω(f x).
+            # NOT `dagger` — the metric adjoint types PRIMAL (`B⊸A`), so `Eval(dagger(f), ω)`
+            # pairs a covector against a primal slot (the fem #15 F1 UnifyError), and a
+            # metric may not enter a metric-free trace at all. The transpose is DEFINED in
+            # the calculus (Teo): λω. ω∘f — an `LLam`/`Compose`, no new node; `Eval(LLam,·)`
+            # β-reduces to the same `Compose` the value-level Dual branch above builds.
+            f = transport_map(td, sd, primitives=primitives)
+            return _transpose_map(f, sd, td)
         case _ if is_subspace(T, S):
             i = _summand_index(T, S)
             if i is not None:
@@ -238,6 +245,19 @@ def _leaf_primitive(S: Space, T: Space, primitives, why: str) -> Term:
     raise PullbackError(
         f"transport_map: {why} for {S!r} → {T!r}; supply a `primitives` map or apply pullback to a value"
     )
+
+
+_TRANSPOSE_COUNTER = itertools.count()
+
+
+def _transpose_map(f: Term, sd: Space, td: Space) -> Term:
+    """The metric-free transpose ``f* : Dual(sd) ⊸ Dual(td)`` of ``f : td ⊸ sd``, as the
+    DERIVED form ``λω. ω ∘ f`` (LLam + Compose — definable in the calculus, no new node).
+    In any bases the stored matrix is exactly ``fᵀ``; no Gram is consulted anywhere."""
+    from grassmann.core.term import Compose, LLam, var
+
+    w = var(f"transp_w{next(_TRANSPOSE_COUNTER)}", Dual(sd))
+    return LLam((w,), Compose(w, (0,), (f,)))
 
 
 def _tensor_map(S: OProd, T: OProd, primitives=None) -> Term:

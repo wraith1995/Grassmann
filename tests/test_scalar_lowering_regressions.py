@@ -35,3 +35,31 @@ def test_scalar_product_plus_scalar_dot():
     term = u * v + G.dot(u, v)                     # 2·u·v once lowered
     prog = G.compile(term)
     assert np.allclose(_run(prog, {"u": 2.0, "v": 3.0}), 12.0)
+
+
+def test_transpose_map_types_dual_and_is_metric_free():
+    """fem #15 F1: the covector-factor transport is the metric-free TRANSPOSE
+    ``λω. ω∘f : Dual(B) ⊸ Dual(A)`` (LLam + Compose — defined in the calculus, Teo),
+    NOT ``dagger`` (the metric adjoint, typed PRIMAL ``B ⊸ A`` — pairing a covector
+    against it was the Dual(Img J) ~ Img J unify refusal). Applied to a covector it
+    computes exactly ``fᵀω`` with no Gram anywhere."""
+    from grassmann.core import term as T
+    from grassmann.core.space import Dual
+    from grassmann.embed.ops import Expr
+    from grassmann.infer.synth import synth_space
+    from grassmann.transform.pullback import _transpose_map
+
+    A = G.osum(*[G.R] * 2)
+    B = G.osum(*[G.R] * 3)
+    f = G.var("f", A >> B)                       # f : A ⊸ B (stored (2, 3))
+    tp = _transpose_map(f.node, B.node if hasattr(B, "node") else B,
+                        A.node if hasattr(A, "node") else A)
+    w = G.var("w", ~B)
+    applied = T.Eval(tp, (0,), (w.node,))
+    assert isinstance(synth_space(applied), Dual)     # lands in Dual(A)
+    prog = G.compile(Expr(applied))
+    F = np.arange(6, dtype=float).reshape(2, 3)
+    W = np.array([1.0, 2.0, 3.0])
+    feed = {i.name: (F if i.name.startswith("f") else W) for i in prog.inputs}
+    out = np.asarray(prog.run(feed)["result"])
+    assert np.allclose(out.ravel(), F @ W)            # fᵀω in stored-(dom,cod) convention
