@@ -57,6 +57,7 @@ from .space_basis import (
     realize_ffs_basis,
     realize_image_application,
     space_basis,
+    try_constant_ffs,
 )
 
 __all__ = ["represent", "Rep", "RepresentError", "ExternalOp", "BasisReq"]
@@ -4532,7 +4533,12 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     """
     which, f = _ffs_which_and_map(basis)
     imm = _ffs_immersion(ctx, basis)
-    u_d = _realize_ffs_by_which(ctx, which, f, source=None, target=None).cols
+    # A COVARIANT ProjectedBasis (both endpoints — the FEEC exterior-power `alt` readout) has a
+    # CONSTANT plain range basis `u_d` whose per-cell SVD null space is arbitrary (inconsistent
+    # cell-to-cell → P(T)≠I) and dynamic (unsummable symbolically); fold it to a build-time
+    # constant.  Scoped here (NOT general realize) — matches the covariant `A₀` fold.
+    fold = isinstance(basis, B.ProjectedBasis) and basis.source is not None and basis.target is not None
+    u_d = _realize_ffs_by_which(ctx, which, f, source=None, target=None, fold_constant=fold).cols
     r = _shape_of(u_d)[1]
     k = _shape_of(imm)[1]
     [out] = ctx.prog.emit_stmt(
@@ -5774,6 +5780,7 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
 def _realize_ffs_by_which(
     ctx: _Ctx, which: str, f: object,
     source: B.Basis | None = None, target: B.Basis | None = None,
+    *, fold_constant: bool = False,
 ) -> FfsRealization:
     """Realize the FFS basis ``which`` of map ``f`` via the SVD/QR/GSVD seam (`41 §1`).
 
@@ -5801,7 +5808,7 @@ def _realize_ffs_by_which(
     # `audit #4`), so key the memo on it ALONE: two requests with the same own-side metric but a
     # different irrelevant-side basis share one GSVD (audit round-3 E).
     own_metric_basis = target if cod_side else source
-    key = (norm, id(f), id(own_metric_basis))
+    key = (norm, id(f), id(own_metric_basis), fold_constant)
     cached = ctx.ffs_realizations.get(key)
     if cached is not None:
         return cached
@@ -5824,6 +5831,7 @@ def _realize_ffs_by_which(
         props=map_props(f), metric_dom=metric_dom, metric_cod=metric_cod,
         label=getattr(f, "name", "f"),
         dim_atom=ctx.ffs_dim_atoms.get(dim_key),
+        fold_constant=fold_constant,
     )
     # Record the canonical SUBSPACE atom (the column axis of ``cols``) the first time it is
     # minted, so later realizations of the same ``(which, id(f))`` reuse the very same atom.
@@ -5887,15 +5895,25 @@ def _realize_image_covariant(
         note="ffs-cov:A0=T⁻¹·F·S (endpoint coords)",
     )
     dim_key = ("img", id(f))
-    inner = realize_ffs_basis(
-        ctx.prog, "img", a0, dom_dim=n_dom, cod_dim=n_cod,
-        props=map_props(f), label=getattr(f, "name", "f") + ":cov",
-        dim_atom=ctx.ffs_dim_atoms.get(dim_key),
-    )
-    if dim_key not in ctx.ffs_dim_atoms:
-        col_dim = _shape_of(inner.cols)[1]
-        if isinstance(col_dim, pa.DimAtom):
-            ctx.ffs_dim_atoms[dim_key] = col_dim
+    # `A₀` is feed-INVARIANT (the constant antisymmetrizer — `test_covariant_ffs_equivariance`).
+    # Fold its SVD to a BUILD-TIME-CONSTANT range basis `Q₀` (verified via `evaluate_cone`,
+    # safe on the shared program).  Two payoffs: (1) a plain per-cell SVD of `A₀` has an
+    # ARBITRARY null space, so its range basis is INCONSISTENT cell-to-cell (~1e-15 noise
+    # amplified) — silently breaking `P(T)=I` numerically on the traced `k≥2` lanes; one
+    # constant `Q₀` is consistent.  (2) The dynamic SVD is a runtime bulk output the SYMBOLIC
+    # form-integrand lane can't sum; `cols = T·Q₀` (constant `Q₀`) is rational in the vertices.
+    # Scoped to the covariant (exterior-power `alt`) path — NOT general `realize_ffs_basis`.
+    inner = try_constant_ffs(ctx.prog, "img", a0, dom_dim=n_dom, cod_dim=n_cod)
+    if inner is None:
+        inner = realize_ffs_basis(
+            ctx.prog, "img", a0, dom_dim=n_dom, cod_dim=n_cod,
+            props=map_props(f), label=getattr(f, "name", "f") + ":cov",
+            dim_atom=ctx.ffs_dim_atoms.get(dim_key),
+        )
+        if dim_key not in ctx.ffs_dim_atoms:
+            col_dim = _shape_of(inner.cols)[1]
+            if isinstance(col_dim, pa.DimAtom):
+                ctx.ffs_dim_atoms[dim_key] = col_dim
     k_cols = _shape_of(inner.cols)[1]
     [cols] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp("ij,jk->ik"), [t_cols, inner.cols],

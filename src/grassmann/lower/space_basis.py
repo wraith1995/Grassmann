@@ -44,6 +44,7 @@ __all__ = [
     "FfsRealization",
     "realize_ffs_basis",
     "realize_image_application",
+    "try_constant_ffs",
 ]
 
 
@@ -221,6 +222,7 @@ def realize_ffs_basis(
     metric_cod: pa.SymArray | None = None,
     label: str = "f",
     dim_atom: pa.DimAtom | None = None,
+    fold_constant: bool = False,
 ) -> FfsRealization:
     """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``) (`41 §1`).
 
@@ -258,9 +260,61 @@ def realize_ffs_basis(
             program, which, f_matrix, dom_dim, cod_dim,
             metric_dom, metric_cod, label, dim_atom=dim_atom,
         )
+    # `fold_constant` (OPT-IN, the FEEC covariant / exterior-power readout only — NOT the
+    # general FFS realization, whose SVD-emission / memoization / dynamic-bulk contract other
+    # callers rely on): a value-INVARIANT `f_matrix` folds to a build-time-constant range
+    # basis.  See `try_constant_ffs`.
+    if fold_constant:
+        folded = try_constant_ffs(program, which, f_matrix, dom_dim, cod_dim)
+        if folded is not None:
+            return folded
     return _realize_via_svd(
         program, which, f_matrix, dom_dim, cod_dim, label, dim_atom=dim_atom,
     )
+
+
+def try_constant_ffs(
+    program: pa.Program, which: str, f_matrix: pa.SymArray,
+    dom_dim: int, cod_dim: int, *, probes: int = 3, atol: float = 1e-7,
+) -> FfsRealization | None:
+    """If ``f_matrix`` is value-INVARIANT under the program's inputs, its FFS ``which`` basis
+    as a BUILD-TIME CONSTANT, else ``None``.  Invariance is verified by evaluating ONLY
+    ``f_matrix``'s dependency cone (``polyarray.evaluate_cone`` — safe on a big/partially-built
+    shared program: only the cone runs, so an unrelated singular op / a dynamic input OUTSIDE
+    the cone is never touched) at ``probes`` generic feeds and checking the value is identical;
+    then the range/complement basis is the SVD of that constant, taken once at build.
+
+    A DYNAMIC (``DimAtom``-sized) input is bound with a size-1 placeholder along its dynamic
+    axes: ``build_runtime_bindings`` requires a value for every declared input, but one outside
+    the cone is never read — the placeholder just satisfies the binder (an FFS-typed value
+    input, sized by a runtime rank, sits OUTSIDE the ``f_matrix`` cone of a geometry-only
+    factorisation)."""
+    import numpy as np
+
+    from polyarray import evaluate_cone
+    try:
+        mats: list[np.ndarray] = []
+        for s in range(probes):
+            rng = np.random.default_rng(s)
+            binding: dict[str, np.ndarray] = {}
+            for inp in program.inputs:
+                shape = tuple(d if isinstance(d, int) else 1 for d in inp.shape)  # dynamic axis ⇒ placeholder 1
+                binding[inp.name] = rng.standard_normal(shape)
+            mats.append(np.asarray(evaluate_cone(program, f_matrix, binding), dtype=float))
+        m0 = mats[0]
+        if m0.ndim != 2 or not all(np.allclose(m0, m, atol=atol) for m in mats[1:]):
+            return None                                          # not feed-invariant
+        u, sv, vh = np.linalg.svd(m0, full_matrices=True)
+        r = int((sv > 1e-9 * max(1.0, float(sv.max()) if sv.size else 1.0)).sum())
+        if which in ("img", "coker"):
+            cols = u[:, :r] if which == "img" else u[:, r:]
+        else:                                                    # coimg / ker: right factor V = Vhᵀ
+            v = vh.T
+            cols = v[:, :r] if which == "coimg" else v[:, r:]
+        return FfsRealization(cols=pa.SymArray(np.ascontiguousarray(cols)),
+                              rank=None, rank_dim=None, op="const-svd")
+    except Exception:  # noqa: BLE001 — best-effort; the dynamic SVD is the fallback
+        return None
 
 
 def realize_image_application(
