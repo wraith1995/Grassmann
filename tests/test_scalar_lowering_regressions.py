@@ -63,3 +63,32 @@ def test_transpose_map_types_dual_and_is_metric_free():
     feed = {i.name: (F if i.name.startswith("f") else W) for i in prog.inputs}
     out = np.asarray(prog.run(feed)["result"])
     assert np.allclose(out.ravel(), F @ W)            # fᵀω in stored-(dom,cod) convention
+
+
+import pytest
+
+
+@pytest.mark.xfail(reason="fem #15 P(T) tail: dual-FFS STD readout delivers IN-SPACE "
+                          "(Q-dual, R^-T) coordinates under the ambient-STD label — "
+                          "basis-honesty bug; blocks Whitney P(T)=I (see FINDINGS-2026-07-03)",
+                   strict=True)
+def test_dual_image_pin_reads_out_ambient_std():
+    """A covector pinned to dual(ImageBasis(J)) read out at TargetBasis.STD must give the
+    AMBIENT standard coordinates of θ1 — the pinv(J) row (θ_i(J e_j) = δ_ij). It currently
+    gives R⁻ᵀ column 1 = θ1 in the in-space Q-dual frame, silently mislabeled as ambient.
+    Downstream, Embed's ImageBasis fast path consumes the mislabeled coordinates and the
+    Whitney edge-trace W picks up a spurious |J_edge| factor per edge (P(T) ≠ I)."""
+    from grassmann.core import basis as B
+    from grassmann.lower.represent import represent
+
+    R2 = G.osum(G.R, G.R)
+    jc = G.var("jc", R2 >> R2, props=G.inj)
+    w = G.var("w", ~G.img(jc))
+    pin = B.dual_basis(B.image_basis(jc.node))
+    prog = represent(w.node, basis_env={w.node.uid: pin}, target=B.TargetBasis.STD)
+    Jc = np.array([[2.0, -0.5], [1.0, 2.0]])
+    feed = {}
+    for i in prog.inputs:
+        feed[i.name] = {"jc": Jc.T, "w": np.array([1.0, 0.0])}[i.name.rsplit("_", 1)[0]]
+    out = np.asarray(prog.run(feed)["result"]).ravel()
+    assert np.allclose(out, np.linalg.pinv(Jc)[0], atol=1e-12), out
