@@ -5788,6 +5788,8 @@ def _realize_ffs_by_which(
     plain SVD/QR (byte-identical).
     """
     norm = "img" if which == "image" else which
+    if norm == "img" and source is not None and target is not None:
+        return _realize_image_covariant(ctx, f, source, target)
     # Only the subspace's OWN-side metric matters — cod (``target``) for image/coker, dom
     # (``source``) for ker/coimg.  The other side's metric would still rotate the GSVD frame (it
     # co-orthonormalizes both factors), so a metric that ought to be a no-op would change the
@@ -5829,6 +5831,79 @@ def _realize_ffs_by_which(
         col_dim = _shape_of(real.cols)[1]
         if isinstance(col_dim, pa.DimAtom):
             ctx.ffs_dim_atoms[dim_key] = col_dim
+    ctx.ffs_realizations[key] = real
+    return real
+
+
+def _realize_image_covariant(
+    ctx: _Ctx, f: object, source: B.Basis, target: B.Basis,
+) -> FfsRealization:
+    """The COVARIANT realization of ``ProjectedBasis(f, "image", source, target)`` (Teo
+    2026-07-05): realize ``f``'s matrix IN THE ENDPOINT COORDINATES — ``A₀ = T⁻¹·F·S``
+    with ``S``/``T`` the endpoint bases' std columns — factor THAT, and map the Q factor
+    back out: ``cols = T·Q₀``.
+
+    Correct for ANY ``f``: with ``G_tgt = (T·Tᵀ)⁻¹`` and ``T`` square-invertible,
+    ``(T·Q)ᵀ·G_tgt·(T·Q) = QᵀQ = I`` — the returned frame is orthonormal w.r.t. the
+    target basis's inner product and spans ``Img f`` (the Stage-B contract), delivered in
+    STANDARD ambient coordinates (the seam's output contract — every ``.cols`` consumer
+    is untouched).  The point of the strategy: when ``f`` is NATURAL w.r.t. the endpoint
+    transport (the exterior ``alt`` under the transported ⊗ᵏ frames — ``alt∘g⊗ᵏ =
+    g⊗ᵏ∘alt``), ``A₀`` is the CONSTANT reference matrix, so ``Q₀`` is reference-constant
+    and ``cols`` is an affine-EQUIVARIANT (transported) frame — the k ≥ 2 metric-free
+    readout / P(T) = I requirement.  The old strategy (std-coordinates GSVD against the
+    endpoint Gram) is correct-metric but algorithm-frame per cell — NOT equivariant —
+    which broke every traced k ≥ 2 lane.  Side benefit: the factorization runs on ``A₀``
+    (constant for the natural case ⇒ build-time-foldable; no symbolic SVD in the
+    symbolic lane — the cell dependence rides the two rational endpoint cobs).
+
+    The dynamic-δ atom is shared through the SAME ``(which, id(f))`` key as every other
+    realization of this FFS (the rank of ``A₀`` equals the rank of ``F`` — the endpoint
+    sandwich is invertible), so downstream ``rank_eq`` asserts and dim logic see one
+    canonical atom.
+    """
+    key = ("img-cov", id(f), id(source), id(target))
+    cached = ctx.ffs_realizations.get(key)
+    if cached is not None:
+        return cached
+    dom, cod = map_domain_codomain(f)
+    n_dom, n_cod = _static_dim(dom), _static_dim(cod)
+    f_rep = _rep(f, ctx)
+    f_rep = _coerce_rep_basis(ctx, f_rep, note="ffs-cov:f-to-default")
+    [f_cd] = ctx.prog.emit_stmt(
+        _TransposeOp(), [f_rep.array],
+        [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
+        note="ffs-cov:to-(cod,dom)",
+    )
+    s_cols = realize_basis_cols(ctx, source)                 # (n_dom, n_dom) std
+    t_cols = realize_basis_cols(ctx, target)                 # (n_cod, n_cod) std
+    [t_inv] = ctx.prog.emit_stmt(
+        pa.InvOp(), [t_cols], [pa.OutSpec("ffs-cov:T-inv", (n_cod, n_cod))],
+        note="ffs-cov:InvOp(T)",
+    )
+    [a0] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ij,jk,kl->il"), [t_inv, f_cd, s_cols],
+        [pa.OutSpec("ffs-cov:A0", (n_cod, n_dom))],
+        note="ffs-cov:A0=T⁻¹·F·S (endpoint coords)",
+    )
+    dim_key = ("img", id(f))
+    inner = realize_ffs_basis(
+        ctx.prog, "img", a0, dom_dim=n_dom, cod_dim=n_cod,
+        props=map_props(f), label=getattr(f, "name", "f") + ":cov",
+        dim_atom=ctx.ffs_dim_atoms.get(dim_key),
+    )
+    if dim_key not in ctx.ffs_dim_atoms:
+        col_dim = _shape_of(inner.cols)[1]
+        if isinstance(col_dim, pa.DimAtom):
+            ctx.ffs_dim_atoms[dim_key] = col_dim
+    k_cols = _shape_of(inner.cols)[1]
+    [cols] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ij,jk->ik"), [t_cols, inner.cols],
+        [pa.OutSpec("ffs-cov:cols", (n_cod, k_cols))],
+        note="ffs-cov:cols=T·Q₀ (std ambient out)",
+    )
+    real = FfsRealization(cols=cols, rank=inner.rank, rank_dim=inner.rank_dim,
+                          op=inner.op + "+cov")
     ctx.ffs_realizations[key] = real
     return real
 
