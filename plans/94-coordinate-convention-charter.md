@@ -8,9 +8,31 @@ delivered columns in one frame while its consumer assumed another, silently:
    (the Whitney `P(T) ≠ I` — fixed, `_ffs_immersion_std`);
 2. the sample surface hands frame-converted components where reference/image-basis
    coefficients were wanted (item-0 gap — open, rides Integrate-informs-basis);
-3. the covariant seam's `A₀ = T⁻¹·F·S` sandwich does not cancel because `F` (default
-   slots), `S`/`T` (`realize_basis_cols` on `BasisProd((DualBasis(ImageBasis(J)),)ᵏ)`)
-   do not share one convention (open — the (a) blocker).
+3. the covariant seam's `A₀ = T⁻¹·F·S` sandwich — **RESOLVED (verified 2026-07-04)**.
+
+## ⚠ Corrected diagnosis (2026-07-04) — READ BEFORE EXECUTING
+
+Bullet 3 above was the plan's premise, and it is **STALE**.  A two-feed probe of the
+seam ingredients (`F`, `S`, `T`) shows `A₀ = T⁻¹·F·S` is **IDENTICAL across `J` feeds**
+(‖ΔA₀‖ ~ 1e-16) for every `(n, k)` tested — and `A₀` is exactly `alt`'s reference
+antisymmetrizer (idempotent, rank `C(n,k)`).  The sandwich already cancels; the
+committed `_coerce_rep_basis(f_rep, …)` in `_realize_image_covariant` was the fix.  The
+covariant frame `cols = T·Q₀` is affine-equivariant (cell dependence rides only in `T`).
+This is now a permanent guard: `tests/test_covariant_ffs_equivariance.py` (green).
+
+So **Phase 1's "known offender" no longer exists**, and the covariant-seam fix that
+Phases 1–3 were built to deliver is DONE.  The remaining `TET Λ²` `P(T) ≠ I` is a
+DIFFERENT, downstream blocker, localized by the family grid:
+
+* TRI `k=2` (cell top-form, `d=n`) — PASSES, and **never touches the covariant arm**;
+* TET `k=1` (proper edge/face trace) — PASSES, via the literal square `image_basis`;
+* TET `k≥2` (proper 2-face trace, `d<n`) — FAILS (‖Ws−Wr‖≈3.7).
+
+The lone failing configuration is the **`k≥2` trace onto a PROPER sub-face** — the
+sub-entity trace geometry, NOT the covariant frame.  That is Phase 4 (b)/(c) territory
+(form-valued weights on proper faces + sub-entity moment integration), which this plan
+already flags as needing unbuilt subsystems.  **Do not re-derive the covariant seam;
+it is correct.**  The next real work on this lane is Phase 4 (b)/(c).
 
 The class dies when the convention is STATED per seam, MECHANICALLY probed, and the
 seams are audited against it once.
@@ -61,17 +83,24 @@ matches behavior — this phase is alignment, not redesign.
 Acceptance: Phase-1 sweep green; grassmann full suite green; NO behavior change on
 endpoint-free paths (golden-program tests byte-stable).
 
-## Phase 3 — covariant-seam acceptance (closes FEEC (a))
+## Phase 3 — covariant-seam acceptance (closes FEEC (a)) — **DONE (2026-07-04)**
 
-With shared conventions, `A₀ = T⁻¹·F·S` cancels and `_realize_image_covariant` is
-equivariant by the naturality of `alt`:
+`A₀ = T⁻¹·F·S` already cancels and `_realize_image_covariant` is equivariant by the
+naturality of `alt`:
 
-1. the seam probe (FINDINGS 2026-07-05: cols vs analytic wedge frame at two `J`s)
-   gives CONSTANT `K` → promote it into the honesty sweep;
-2. TET `Λ²` xfails XPASS → promote (`test_feec_family`); TRI grid re-verified;
-3. extend the structural symbolic gate (`test_symbolic_pti`) to k ≥ 2 — constant
-   `A₀` means no symbolic SVD: the k ≥ 2 lanes stay rational and
-   `partial_eval_numeric` folds them like k = 1.
+1. **DONE** — the seam probe gives CONSTANT `A₀` (‖ΔA₀‖ ~ 1e-16); promoted into
+   `tests/test_covariant_ffs_equivariance.py` (the two-feed guard + the "`A₀` is the
+   reference antisymmetrizer" assertion). The honesty sweep proper (Phase 1) can absorb
+   it later, but the seam is guarded now.
+2. **NOT unblocked by (1)** — the TET `Λ²` xfails do NOT XPASS from the seam fix; they
+   are blocked on the proper-face `k≥2` trace (Phase 4 (b)/(c)), not the covariant
+   frame. The corrected diagnosis (top of doc) localizes this: TRI `k=2`/cell passes
+   without the covariant arm; TET `k=1`/proper-face passes; only TET `k≥2`/proper-face
+   fails. Keep the xfails strict until (b)/(c) lands.
+3. the structural symbolic gate (`test_symbolic_pti`) extends to k ≥ 2 **for the
+   configurations that already give numeric `P(T)=I`** (TRI `k=2`): constant `A₀` means
+   no symbolic SVD, so those lanes stay rational and `partial_eval_numeric` folds them
+   like k = 1. The proper-face `k≥2` gate waits on (b)/(c).
 
 ## Phase 4 — the remaining FEEC frontiers (in order)
 
