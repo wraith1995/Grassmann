@@ -3390,7 +3390,7 @@ def _rep_embed(
     # basis (List/Complete/Projected/default) through ``_subspace_cols`` (the sub↪ambient immersion)
     # + a cob of the operand to its default basis — correct for sub==ambient and sub⊊ambient alike.
     if isinstance(_peel_to_core(v_rep.basis), B.ImageBasis):
-        P = _ffs_immersion(ctx, v_rep.basis)  # P = the ImageBasis f-cols in ambient …
+        P = _ffs_immersion_std(ctx, v_rep.basis)  # P = the f-cols in the STANDARD ambient frame (never target-re-expressed)
         v_arr = v_rep.array                    # … so v's in-space coords are already consistent
     else:
         _sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
@@ -4477,10 +4477,18 @@ def _ffs_which_and_map(basis: B.Basis) -> tuple[str, object]:
 def _ffs_immersion(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     """The **ambient immersion** columns of an FFS basis (`51 §FFS-δ`).
 
-    The ambient (``n×k``) frame ``U``/``V``/``J`` — the separate seam used only by
-    ``embed``/``project``/the metric (NOT by cob).  An ``ImageBasis`` is the literal
-    map-application ``J`` (in its ``target`` codomain frame when given); a ``ProjectedBasis``
-    is the (metric-)orthonormal range ``U``; anything else realizes its columns directly.
+    The ambient (``n×k``) frame ``U``/``V``/``J``.  An ``ImageBasis`` is the literal
+    map-application ``J``, RE-EXPRESSED in its ``target`` codomain basis when one is set
+    (``target`` is a pure REPRESENTATION feature — the FRAME is ``{f(sᵢ)}`` regardless);
+    a ``ProjectedBasis`` is the (metric-)orthonormal range ``U`` (its ``source``/``target``
+    are FRAME-DEFINING and its realization stays in the standard ambient frame).
+
+    CONSUMER CONTRACT (fem #15 seam fix 2026-07-04): anything that CONTRACTS these
+    columns against arrays in the ambient's default coordinates — ``embed``,
+    ``CompleteBasis``, the backup path — must use :func:`_ffs_immersion_std` instead,
+    which never honors an ``ImageBasis.target``.  Honoring it there delivered
+    frame-mislabeled columns into ``embed`` (a covector pinned to a dual-image basis
+    embedded as identity), the Whitney ``P(T) ≠ I`` bug.
     """
     match basis:
         case B.ProjectedBasis(f, which, src, tgt):
@@ -4494,9 +4502,9 @@ def _ffs_immersion(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
 def _ffs_immersion_std(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     """The ambient immersion in the **standard ambient frame** (`51 §FFS-δ`).
 
-    Like :func:`_ffs_immersion` but an ``ImageBasis``'s ``target`` is dropped (the
-    in-space realization projects onto the canonical metric-free range ``U_d``, which lives
-    in the standard ambient frame; ``target`` is embed-only).
+    Like :func:`_ffs_immersion` but an ``ImageBasis``'s ``target`` is dropped — the
+    variant every AMBIENT-CONTRACT consumer (``embed``/``CompleteBasis``/backup) must
+    use (see the consumer contract on :func:`_ffs_immersion`).
     """
     match basis:
         case B.ProjectedBasis(f, which, src, tgt):
@@ -4523,7 +4531,7 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     non-injective / over-determined-source ``ImageBasis`` has ``k > δ`` ⇒ rectangular.
     """
     which, f = _ffs_which_and_map(basis)
-    imm = _ffs_immersion_std(ctx, basis)
+    imm = _ffs_immersion(ctx, basis)
     u_d = _realize_ffs_by_which(ctx, which, f, source=None, target=None).cols
     r = _shape_of(u_d)[1]
     k = _shape_of(imm)[1]
@@ -4794,7 +4802,7 @@ def _realize_list_basis(
         ):
             bcols = realize_basis_cols(ctx, eff_backup)
         else:
-            bcols = _ffs_immersion(ctx, eff_backup)
+            bcols = _ffs_immersion_std(ctx, eff_backup)
         if reduce is B.Reduce.ORTHONORMALIZE:
             bcols = _orthonormalize_cols(ctx, bcols)
         n = _shape_of(bcols)[0]  # ambient dim (may be a runtime DimAtom for a dynamic FFS ambient)
@@ -4909,8 +4917,8 @@ def _realize_complete_basis(
       n``).  An over-complete (or short) ``NONE`` is rectangular and never round-trips — the
       static assert below rejects the statically-known over/under-complete case.
     """
-    sub_cols = _ffs_immersion(ctx, sub)
-    comp_cols = _ffs_immersion(ctx, complement)
+    sub_cols = _ffs_immersion_std(ctx, sub)
+    comp_cols = _ffs_immersion_std(ctx, complement)
     n_rows = _shape_of(sub_cols)[0]
     if reduce is B.Reduce.RREF:
         [out] = ctx.prog.emit_stmt(
@@ -5055,6 +5063,12 @@ def _metric_matrix_of(ctx: _Ctx, metric: object, n: int) -> pa.SymArray:
     return out
 
 
+def _coerce_rep_basis(ctx: _Ctx, rep: Rep, *, note: str) -> Rep:
+    """Coerce ``rep`` to its space's default basis (identity when already default)."""
+    arr = _coerce_basis(ctx, rep, default_basis(rep.space), note=note)
+    return Rep(arr, default_basis(rep.space), rep.space)
+
+
 def _realize_image_basis(
     ctx: _Ctx, f: object, source: B.Basis | None = None, target: B.Basis | None = None,
 ) -> pa.SymArray:
@@ -5067,6 +5081,11 @@ def _realize_image_basis(
     """
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
+    # HONESTY (fem #15 seam fix): the columns below are formed as f_cd·S with S in the
+    # dom-standard frame, so f's matrix must be in the (dom,cod) DEFAULT slot bases — an
+    # AUTO-realized composite operand (e.g. `alt` over an FFS-built domain) may arrive in
+    # a non-default basis and would silently mislabel every column.
+    f_rep = _coerce_rep_basis(ctx, f_rep, note="ffs-basis:f-to-default")
     [f_cd] = ctx.prog.emit_stmt(
         _TransposeOp(), [f_rep.array],
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
