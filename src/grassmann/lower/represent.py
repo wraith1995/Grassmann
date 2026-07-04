@@ -2247,7 +2247,26 @@ def _fuse_arg_to_slot(
     slot = fshape[pos]
     n_free = len(arg_rep.free_labels)
     n_space = len(ashape) - n_free
-    if n_space <= 1:
+    if n_space == 0:
+        # The EMPTY-product case of the fused-slot law: a Scalar-space value is 0-d,
+        # but Eval contracts the arg's leading coordinate axis. R ≅ R¹ canonically —
+        # the coordinate vector of x ∈ R in the standard basis {1} is [x] — so a
+        # dim-1 slot takes the unsqueezed arg (∏ of zero space dims = 1 = slot).
+        # A slot ≠ 1 is a genuine mismatch; fall through so the dim assert reports it.
+        if slot != 1:
+            return arg_rep
+        new_shape = (1, *ashape)
+        if _rational_lane():
+            lifted = pa.SymArray(
+                np.asarray(arg_rep.array.cells).reshape(new_shape), program=ctx.prog,
+                name="scalar-as-R1")
+        else:
+            [lifted] = ctx.prog.emit_stmt(
+                _ReshapeOp(tuple(new_shape)), [arg_rep.array],
+                [pa.OutSpec("scalar-as-R1", new_shape)], note=f"eval:scalar-as-R1@{pos}",
+            )
+        return Rep(lifted, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
+    if n_space == 1:
         return arg_rep
     space_dims = ashape[:n_space]
     if not all(isinstance(d, int) for d in space_dims):
@@ -3993,12 +4012,14 @@ def _rep_llam_vmap(
     # FIRST, then one var (basis-index) axis per bound var.  This is the TRANSPOSE of the space's
     # ``(dom…, cod…)`` factor order — but it is exactly what the eye path emits, so the value is
     # byte-identical for a default body (and the honest tag below describes THIS physical order).
-    try:
-        cod_shape = _shape_of_space(body_rep.space)
-    except RepresentError:
-        # dynamic-rank (FFS) body codomain ⇒ read the actual lowered array's shape (the per-slice
-        # body carries no batch axis, so its shape IS the codomain shape, δ axes and all).
-        cod_shape = _shape_of(body_rep.array)
+    # The body ARRAY is the layout authority (fem #13 G2): a nested-map body value can be
+    # laid out FUSED — an inner ``X⊸R`` produced by this same lowering is stored ``(d,)``
+    # (its scalar cod contributes no axis), while ``_shape_of_space(X⊸R)`` says ``(d, 1)``
+    # — so the space-derived count over-states the vmap's ``out_axes`` and the stack dies.
+    # The per-slice body carries no batch axis, so its actual shape IS the codomain shape
+    # (δ axes and all — this also subsumes the old dynamic-FFS fallback). Byte-identical
+    # whenever the space and array shapes agree, i.e. every non-nested body.
+    cod_shape = _shape_of(body_rep.array)
     n_cod_axes = len(cod_shape)          # ARRAY axes of the body (0 for a scalar body)
     fn = _nested_vmap(sub, n_vars, n_shared, n_cod_axes)
     # Each bound var's domain axis is the basis-index axis of its eye (``eye.shape[0]``) — a plain
@@ -4121,6 +4142,22 @@ def _coerce_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> pa.SymA
     if _basis_eq(rep.basis, target):
         return rep.array
     M = _basis_cob_matrix(ctx, rep.basis, target)
+    if len(_shape_of(rep.array)) == 0:
+        # R ≅ R¹ (the empty-product law, as in `_fuse_arg_to_slot`): a Scalar-space
+        # value is 0-d while its basis is 1-dimensional — apply the 1×1 cob on the
+        # coordinate vector [x] and hand the 0-d scalar back.
+        [lifted] = ctx.prog.emit_stmt(
+            _ReshapeOp((1,)), [rep.array], [pa.OutSpec("scalar-as-R1", (1,))],
+            note=note + ":scalar-as-R1",
+        )
+        [out1] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("ij,j->i"), [M, lifted],
+            [pa.OutSpec("cobv", (1,))], note=note,
+        )
+        [out] = ctx.prog.emit_stmt(
+            _ReshapeOp(()), [out1], [pa.OutSpec("cobv0", ())], note=note + ":as-scalar",
+        )
+        return out
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp("ij,j->i"), [M, rep.array],
         [pa.OutSpec("cobv", _shape_of(rep.array))], note=note,
