@@ -19,7 +19,7 @@ Public surface
 
 from __future__ import annotations
 
-from .exterior import alt, exterior_power, tensor_power, wedge
+from .exterior import alt, exterior_power, interior, tensor_power, wedge
 from .linalg import dot, least_squares, norm_sq, orthogonal_projection
 from .scalar import (
     absval,
@@ -50,6 +50,7 @@ __all__ = [
     "alt",
     "exterior_power",
     "tensor_power",
+    "interior",
     "wedge",
     # linear-algebra conveniences
     "dot",

@@ -200,6 +200,27 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
     return result.with_note(base_space=V, exterior_k=k + l)
 
 
+def interior(omega: Expr, v: Expr, k: int) -> Expr:  # noqa: E741
+    """``ι_v(ω) : Λᵏ(W) × Dual(W) → Λ^{k-1}(W)`` — the **interior product** (contract the FIRST slot of a
+    ``k``-form ``ω`` with a covector-eating vector ``v ∈ Dual(W)``).
+
+    ``embed → eval → project``: a bare ``ω(v)`` fails because a ``k``-form's space ``Img(alt(W,k))`` is not
+    decomposed into factors (``synth`` finds no dual slot); embedding ``ω ⊑ W⊗ᵏ`` exposes the factors, then
+    the ordinary application ``·(v)`` contracts slot 0 ⇒ ``W⊗ᵏ⁻¹``, and ``project`` lands it on ``Λ^{k-1}``.
+    Generalizes the dual pairing: ``k = 1`` is exactly ``⟨ω, v⟩`` (a scalar). No rescale needed — this is
+    the textbook ``ι_v`` (validated on the Leibniz identity ``ι_v(a∧b) = ⟨a,v⟩b − ⟨b,v⟩a``)."""
+    if k < 1:
+        raise ValueError(f"interior: k must be >= 1, got k={k}")
+    W = _base_space_of_exterior(omega, k)
+    contracted = G.embed(omega, tensor_power(W, k))(v)   # apply v at slot 0 ⇒ W⊗ᵏ⁻¹  (k=1 ⇒ scalar)
+    if k - 1 <= 1:
+        # ``Λ⁰ = Scalar`` (k=1) / ``Λ¹(W) = W`` (k=2) — the result is ALREADY the answer; skip the
+        # (identity) antisymmetric projection so a 1-form stays a PLAIN covector ``W`` (not the wrapped
+        # ``Img(alt₁)``), matching a plain field value so downstream ``inner``/``dot`` unifies.
+        return contracted
+    return G.project(contracted, exterior_power(W, k - 1)).with_note(base_space=W, exterior_k=k - 1)
+
+
 def _ambient_dim(V: Expr) -> int:
     """The (static) dimension ``n`` of the ambient space ``V = ℝⁿ``."""
     from grassmann.lower._dims import dim_of
@@ -319,19 +340,22 @@ def _base_space_of_exterior(a: Expr, k: int) -> Expr:
     # The operand may be a derived node (a ``Scale``/``Project`` result) whose ``.space`` is
     # ``None``; recover its synthesized space instead of reading the (possibly absent) field.
     space = synth_space(node)
-    img = space if isinstance(space, _s.Img) else None
-    if img is None:
-        raise ValueError(
-            "wedge: operand is not a value of an exterior power Λᵏ(V); "
-            "build it via stdlib.exterior_power / a var of that space"
-        )
-    f = img.f  # the projector term (Scale(.., Lift(LLam(..))) for alt(V, k))
-    inner = f.vector if isinstance(f, _t.Scale) else f
-    if isinstance(inner, _t.Lift):
-        inner = inner.vector
-    if isinstance(inner, _t.LLam) and inner.vars:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one structural pattern; non-match raises [approved Teo 2026-07-03]
-        return Expr(inner.vars[0].space)
+    # Structural recovery from an ``Img(alt(V, k))`` exterior power: ``V`` is the ``alt`` ``LLam``'s
+    # first bound variable's space (``f = Scale(.., Lift(LLam([v:V, …], …)))``).
+    if isinstance(space, _s.Img):
+        f = space.f
+        inner = f.vector if isinstance(f, _t.Scale) else f
+        if isinstance(inner, _t.Lift):
+            inner = inner.vector
+        if isinstance(inner, _t.LLam) and inner.vars:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one structural pattern; non-match raises [approved Teo 2026-07-03]
+            return Expr(inner.vars[0].space)
+    # ``Λ¹(V) = V``: a one-form may be a PLAIN value — a covector ``Dual(W)``, or an ``Img(J)`` tangent
+    # that is NOT an ``alt`` exterior power — so it also pairs with a vector (``ι_X``). Its base space IS
+    # its own space (the embed ``Λ¹ ⊑ V⊗¹`` is the identity). Only ``k = 1`` gets this fallback; a
+    # ``k ≥ 2`` form MUST be an antisymmetrized ``Img(alt)``.
+    if k == 1:
+        return Expr(space)
     raise ValueError(
-        "wedge: could not recover the base space V from the operand's Λᵏ; "
-        "ensure it was built with stdlib.exterior_power(V, k)"
+        "wedge: operand is not a value of an exterior power Λᵏ(V) (k ≥ 2); "
+        "build it via stdlib.exterior_power(V, k) (a plain value is only a Λ¹ = V)"
     )
