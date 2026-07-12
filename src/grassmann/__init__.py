@@ -146,6 +146,7 @@ from .stdlib import (
     tan,
     tanh,
     tensor_power,
+    interior,
     wedge,
 )
 
@@ -276,6 +277,7 @@ __all__ = [
     "dim_ker",
     "dim_img",
     # stdlib helpers
+    "interior",
     "wedge",
     "alt",
     "exterior_power",
