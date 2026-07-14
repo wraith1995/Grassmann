@@ -5708,12 +5708,21 @@ def _combine_atom_dims(
     ``DimAtom`` sourced from a tiny 0-d Stmt reading the atoms' source-input shape axes (`106`).
     Raises if a dim is a non-input-sourced dynamic atom (caller falls back to static)."""
     static = 0 if op == "sum" else 1
-    refs: list[pa.SymArray] = []
-    axes: list[int] = []
+    atoms: list[pa.DimAtom] = [d for d in dims if not isinstance(d, int)]
     for d in dims:
         if isinstance(d, int):
             static = static + d if op == "sum" else static * d
-        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "in":
+    # A single atom combined with the op-IDENTITY is just that atom: the exterior power Λᵏ realizes
+    # as `OProd((Scalar(), Img(alt∘J)))`, so `prod([1 (the ⊗-unit Scalar), rank:f (the Λᵏ Img rank)])
+    # == rank:f`. Return it directly — no shape-read is needed, and this admits a STMT-sourced
+    # (FFS-realized) rank atom, which the input-shape path below cannot read (a bare Λ¹ = `Img(J)`
+    # already flows such an atom through as a single-space dim; the Λ²/Λ³ product hit this raise).
+    if static == (0 if op == "sum" else 1) and len(atoms) == 1:
+        return atoms[0]
+    refs: list[pa.SymArray] = []
+    axes: list[int] = []
+    for d in atoms:
+        if isinstance(d, pa.DimAtom) and d.source and d.source[0] == "in":
             _, in_name, axis = d.source
             ref = ctx.prog.input_arrays.get(in_name)
             if ref is None:
@@ -5773,6 +5782,16 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     the very same Stmt outputs the first call produced); only the redundant *recomputation*
     is removed.
     """
+    if isinstance(space, S.OProd):
+        # An exterior power Λᵏ (k≥2) realizes as `OProd((Scalar(), Img(alt∘J)))` — a product of the
+        # ⊗-unit Scalar (dim 1) and the single alternating-image FFS. Its runtime rank (hence the
+        # orthonormal identity size) is that FFS's rank, so realize the lone non-trivial FFS factor
+        # (the dim-1 Scalar factors are kron-identity no-ops). Only the single-FFS product is
+        # structured here; a genuine multi-FFS product falls through to the standard raise (invariant 3).
+        ffs = [s for s in space.spaces if isinstance(s, (S.Img, S.Ker, S.CoImg, S.CoKer))]
+        trivial = [s for s in space.spaces if not isinstance(s, (S.Img, S.Ker, S.CoImg, S.CoKer))]
+        if len(ffs) == 1 and all(_static_dim(s) == 1 for s in trivial):
+            return _realize_ffs_for_space(ctx, ffs[0])
     which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
     return _realize_ffs_by_which(ctx, which, space.f)
 
