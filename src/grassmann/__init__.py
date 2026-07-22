@@ -117,6 +117,7 @@ from .embed import (
     zero,
 )
 from .embed.ops import EmbedError
+from .lower.represent import _shape_of_space as shape_of_space
 from .lower.represent import represent
 from .stdlib import (
     absval,
