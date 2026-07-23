@@ -221,8 +221,8 @@ def represent(
 
 
 def _post_pass(prog: pa.Program) -> pa.Program:
-    """`41 §5`: ``analyze`` (report), the uniform numeric constant-fold (RATIONAL lane), then
-    (non-rational lane) aggressive ``partial_eval`` (collapse).
+    """`41 §5`: ``analyze`` (report), the uniform numeric constant-fold (BOTH lanes), then
+    (non-rational lane only) aggressive ``partial_eval`` (collapse).
 
     ``pa.fold_numeric`` is the ONE uniform, general constant-fold that folds any value-invariant
     (dataflow-numeric) Stmt — crucially a CONSTANT SVD/GSVD/QR/pinv (e.g. the metric-free
@@ -237,23 +237,28 @@ def _post_pass(prog: pa.Program) -> pa.Program:
     ``A₀`` antisymmetrizer) is still folded separately by ``try_constant_ffs`` (probe-based), which
     ``fold_numeric`` cannot reach.
 
-    SEAM NOTE — why the fold is RATIONAL-lane-only, not both lanes.  Applying ``pa.fold_numeric``
-    to the NON-rational (numeric / ``GrassmannBackend``) lane corrupts the FEEC κ-Koszul kernel:
-    the reference κ drop-Vandermonde (``pointwise KernelOfDofs``, ``Ker(drop-Vandermonde)``) comes
-    out RANK-DEFICIENT (drop-DOF rows zeroed), so the trimmed ``P⁻ᵣΛᵏ`` picks up the wrong
-    dimension and the element Vandermonde is non-square (``LinAlgError``).  This is INDEPENDENT of
-    the δ-resolution above (it reproduces with the pre-existing ``fold_numeric`` and resolves NO
-    δ) — an unresolved interaction between the numeric-lane fold and the FEEC trimming
-    construction.  The numeric lane does not NEED the fold: it samples a single reference cell
-    consistently, and the speedup target is the symbolic (rational) lane.  Folding the numeric
-    lane is deliberately withheld pending that investigation (see the handoff report)."""
+    UNIFORM ACROSS LANES (both).  The fold now runs in the NON-rational (numeric /
+    ``GrassmannBackend``) lane too.  The earlier FEEC κ-Koszul corruption (the reference drop-
+    Vandermonde coming out rank-deficient → a non-square element Vandermonde → ``LinAlgError``) was
+    NOT a fold miscomputation: ``fold_numeric`` is value-exact per ``Program.run``.  It was a
+    STRUCTURAL read downstream — pointwise's post-represent quadrature-degree walker
+    (``estimate_degree`` → ``polyarray.program_degree``) links a Stmt's producer to its consumer by
+    ``id(cell-array)`` and, on a miss, scores cells by generator NAME (a fallback that knows field
+    degrees but NOT the geometry/position generators).  ``fold_numeric`` used to rebuild every
+    non-bulk cell ref with a FRESH array even when it substituted nothing, breaking that identity
+    link for the position-carrying refs (the Koszul ``κ = x·`` factor), so the walker lost the
+    position's degree-1, under-estimated the quadrature order, and under-integrated the moment
+    DOFs (drop rows → 0).  Fixed at the source: ``polyarray.simplify._fold_cells`` is now
+    identity-transparent on a no-op fold (returns the SAME array object when no folded generator is
+    touched), so the degree walk is unperturbed and the drop-Vandermonde keeps full rank."""
     pa.analyze(prog)  # structural cost report (side-effect-free; keeps the seam explicit)
+    folded = pa.fold_numeric(prog)  # BOTH lanes: fold constant SVD/GSVD/pinv + resolve δ.
     if _REPRESENT_BUDGET.get() is not None:
-        # RATIONAL lane: keep closed-form RF cells (statement-free / inlinable); the general
-        # constant-fold folds constant SVD/GSVD/pinv + resolves δ (the Hodge/Argyris speedup).
-        return pa.fold_numeric(prog)
-    # NON-rational (numeric) lane: NO fold_numeric here (corrupts the FEEC κ kernel — see above).
-    return pa.partial_eval(prog, max_cell_size=_MAX_CELL_SIZE)
+        # RATIONAL lane: keep closed-form RF cells (statement-free / inlinable) — the fold is the
+        # whole post-pass (no ``partial_eval`` collapse).
+        return folded
+    # NON-rational (numeric) lane: the aggressive cell-collapse still runs, now on the folded prog.
+    return pa.partial_eval(folded, max_cell_size=_MAX_CELL_SIZE)
 
 
 def _attach_provenance(prog: pa.Program) -> None:

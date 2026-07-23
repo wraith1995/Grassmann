@@ -247,7 +247,15 @@ def test_wedge_provenance_distinguishes_the_two_bases() -> None:
     ``project:drop-complement`` onto ``Λ^{k+l}``); the standard-basis lowering takes the
     *same* projected element and additionally *embeds* it back into the ambient standard
     basis (``embed:pad-zeros``) — the auditable mark that distinguishes the two basis
-    choices. Both realize the FFS image basis via the SVD seam (``ffs-basis:img=…``).
+    choices.
+
+    The FFS image basis (``ImageBasis(Alt)``) is realized via the SVD seam
+    (``ffs-basis:img=…``), but ``Alt`` is a CONSTANT operator so the ONE uniform
+    ``pa.fold_numeric`` in ``_post_pass`` — now applied in BOTH lanes — folds that constant
+    SVD AWAY entirely; its ``ffs-basis:img`` note therefore does not survive to the final
+    program.  What DOES distinguish the two basis choices is the algebra that operates on the
+    (folded) image coordinates: the shared ``project:drop-complement`` plus the standard
+    path's ONE extra ``embed:pad-zeros`` off ``ImageBasis(Alt)`` into the ambient basis.
     """
     V = G.space("V", 3)
     prog_image, prog_std = _lower_two_bases(V, 1, 1)
@@ -257,10 +265,10 @@ def test_wedge_provenance_distinguishes_the_two_bases() -> None:
     # every Stmt carries a non-empty algebra-centric note (`41 §6b`).
     assert all(notes_image) and all(notes_std)
 
-    # the FFS image basis (ImageBasis(Alt)) is realized via the SVD seam in both
-    # (the wedge projects onto it; the standard path then changes basis off it).
-    assert any(n.startswith("ffs-basis:img") for n in notes_image)
-    assert any(n.startswith("ffs-basis:img") for n in notes_std)
+    # the constant ImageBasis(Alt) SVD folds away in both lanes (uniform fold_numeric), so no
+    # `ffs-basis:img` statement survives — the wedge algebra rides folded image coordinates.
+    assert not any(n.startswith("ffs-basis:img") for n in notes_image)
+    assert not any(n.startswith("ffs-basis:img") for n in notes_std)
     assert "project:drop-complement" in notes_image
     assert "project:drop-complement" in notes_std
 
