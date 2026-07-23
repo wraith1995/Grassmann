@@ -275,10 +275,25 @@ def hodge_star(omega: Expr, k: int) -> Expr:
         return _pair(Ln, omega, vol_unit)
     Lk = exterior_power(V, k)
     Lnk = exterior_power(V, n - k)
+    # A bare Λ¹ operand — a PLAIN covector/vector whose space is V itself (e.g. a gradient
+    # `du ∈ V*`), NOT the wrapped `Img(alt(V,1))` — must be lifted into Λ¹(V) before the
+    # metric lower `♭` on Λᵏ can consume it (`♭` is typed on `Lk = Img(alt(V,1))`, and a
+    # bare value does not unify with it). `alt`-project it; idempotent on an already wrapped
+    # Λ¹, so k=1 wrapped operands are unchanged. Mirrors how `wedge`/`interior` coerce their
+    # bare Λ¹ operands (there via the tensor-power embed) — hodge_star was the one Λ¹ door
+    # that rejected a plain covector.
+    omega_k = G.project(omega, Lk) if k == 1 else omega
     # the wedge-into-volume pairing M : Λⁿ⁻ᵏ → (Λᵏ)*  (curried so pinv sees Λⁿ⁻ᵏ ⊸ Dual(Λᵏ)).
     pairing = G.llam(Lnk, lambda g: G.llam(
         Lk, lambda a: _pair(Ln, wedge(a, g, k, n - k), vol_unit)))
-    return G.pinv(pairing)(G.flat(Lk)(omega)).with_note(base_space=V, exterior_k=n - k)
+    star = G.pinv(pairing)(G.flat(Lk)(omega_k))
+    # The result stays in its CANONICAL exterior-power space `Λⁿ⁻ᵏ(V) = Img(alt(V, n-k))` — even
+    # when `n-k == 1`. Keeping it wrapped is what lets `⋆⋆` feed one `⋆`'s output straight into the
+    # next and lets the defining-property pairing `⟨α∧⋆β, vol⟩` / `⟨⋆⋆β, γ⟩` consume it via `inner(Λᵏ)`.
+    # A consumer that instead wants to APPLY a Λ¹ result to a vector (the `(⋆ω)(v)` dual pairing) must
+    # expose the tensor slot itself — `interior(⋆ω, v, 1)` or an `embed` into `V⊗¹` — exactly as the
+    # `interior` product does for any wrapped form; `hodge_star` does not pre-bare its output.
+    return star.with_note(base_space=V, exterior_k=n - k)
 
 
 def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:

@@ -221,13 +221,38 @@ def represent(
 
 
 def _post_pass(prog: pa.Program) -> pa.Program:
-    """`41 §5`: ``analyze`` (report) then aggressive ``partial_eval`` (collapse).
+    """`41 §5`: ``analyze`` (report), the uniform numeric constant-fold (RATIONAL lane), then
+    (non-rational lane) aggressive ``partial_eval`` (collapse).
 
-    In the RATIONAL lane the whole point is to KEEP closed-form RF cells (statement-free,
-    so the program is inlinable), so the collapse-to-Stmts step is skipped."""
+    ``pa.fold_numeric`` is the ONE uniform, general constant-fold that folds any value-invariant
+    (dataflow-numeric) Stmt — crucially a CONSTANT SVD/GSVD/QR/pinv (e.g. the metric-free
+    exterior-power ``alt`` readout, whose operator matrix is a numeric antisymmetrizer, and the
+    euclidean Hodge ``pinv(pairing)``) — AND resolves the runtime dimension δ (``DimAtom``) that
+    Stmt created to its concrete rank, substituting it across every downstream shape so no
+    dynamic δ lingers.  It is the general replacement for the old narrow ``fold_constant`` opt-in
+    (dropped from ``space_basis.realize_ffs_basis`` / ``_realize_ffs_by_which``): in the RATIONAL
+    lane it folds the constant ``alt`` SVD to a single consistent build-time constant and keeps
+    the symbolic ``W`` statement-free — this is what speeds up the symbolic ``P(T)`` build (Argyris
+    ~47s→~36s, Morley ~0.72s→~0.45s).  A FEED-invariant but dataflow-SYMBOLIC map (the covariant
+    ``A₀`` antisymmetrizer) is still folded separately by ``try_constant_ffs`` (probe-based), which
+    ``fold_numeric`` cannot reach.
+
+    SEAM NOTE — why the fold is RATIONAL-lane-only, not both lanes.  Applying ``pa.fold_numeric``
+    to the NON-rational (numeric / ``GrassmannBackend``) lane corrupts the FEEC κ-Koszul kernel:
+    the reference κ drop-Vandermonde (``pointwise KernelOfDofs``, ``Ker(drop-Vandermonde)``) comes
+    out RANK-DEFICIENT (drop-DOF rows zeroed), so the trimmed ``P⁻ᵣΛᵏ`` picks up the wrong
+    dimension and the element Vandermonde is non-square (``LinAlgError``).  This is INDEPENDENT of
+    the δ-resolution above (it reproduces with the pre-existing ``fold_numeric`` and resolves NO
+    δ) — an unresolved interaction between the numeric-lane fold and the FEEC trimming
+    construction.  The numeric lane does not NEED the fold: it samples a single reference cell
+    consistently, and the speedup target is the symbolic (rational) lane.  Folding the numeric
+    lane is deliberately withheld pending that investigation (see the handoff report)."""
     pa.analyze(prog)  # structural cost report (side-effect-free; keeps the seam explicit)
     if _REPRESENT_BUDGET.get() is not None:
-        return prog
+        # RATIONAL lane: keep closed-form RF cells (statement-free / inlinable); the general
+        # constant-fold folds constant SVD/GSVD/pinv + resolves δ (the Hodge/Argyris speedup).
+        return pa.fold_numeric(prog)
+    # NON-rational (numeric) lane: NO fold_numeric here (corrupts the FEEC κ kernel — see above).
     return pa.partial_eval(prog, max_cell_size=_MAX_CELL_SIZE)
 
 
@@ -2760,6 +2785,21 @@ class _SqrtSpdOp:
             raise ValueError(f"Sqrt: operator is not SPD (min eigenvalue {w.min():.3e})")
         return (V * np.sqrt(w)) @ V.T
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: the SPD square root ``(V·√w)·Vᵀ`` from ``eigh`` of the
+        symmetrized ``G`` (twin of the ``_sqrt_spd`` numpy renderer / :meth:`__call__`).  The SPD
+        guard is a runtime assert that does not change the returned data, so (like ``AssertOp``) it
+        is omitted from the emitted data path; ``torch.vmap`` batches the plain 2-D eigh."""
+        c = low.core
+        g = args[0]
+        sym = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=c.FloatLit(value=0.5),
+                           rhs=c.BinaryExpr(op=c.BinaryOp.ADD, lhs=g, rhs=c.TransposeExpr(a=g, axes=None)))
+        sym = builder.assign_new(sym, base="symG")
+        wv, vv = (builder.fresh_var(base=nm) for nm in ("w_spd", "V_spd"))
+        builder.assign(c.TupleExpr(elts=(wv, vv)), low._ns_call("linalg.eigh", (sym,)))
+        vscaled = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=vv, rhs=low._ns_call("sqrt", (wv,)))
+        return [c.BinaryExpr(op=c.BinaryOp.MATMUL, lhs=vscaled, rhs=c.TransposeExpr(a=vv, axes=None))]
+
 
 def _rep_sqrt(
     e: T.Sqrt, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
@@ -4533,12 +4573,12 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     """
     which, f = _ffs_which_and_map(basis)
     imm = _ffs_immersion(ctx, basis)
-    # A COVARIANT ProjectedBasis (both endpoints — the FEEC exterior-power `alt` readout) has a
-    # CONSTANT plain range basis `u_d` whose per-cell SVD null space is arbitrary (inconsistent
-    # cell-to-cell → P(T)≠I) and dynamic (unsummable symbolically); fold it to a build-time
-    # constant.  Scoped here (NOT general realize) — matches the covariant `A₀` fold.
-    fold = isinstance(basis, B.ProjectedBasis) and basis.source is not None and basis.target is not None
-    u_d = _realize_ffs_by_which(ctx, which, f, source=None, target=None, fold_constant=fold).cols
+    # The metric-free plain range basis `u_d` of a value-INVARIANT map (e.g. the FEEC
+    # exterior-power `alt` — its operator matrix is a numeric antisymmetrizer) is a CONSTANT.
+    # No opt-in fold here: the SVD is emitted uniformly and the ONE general constant-fold in
+    # `_post_pass` (`pa.fold_numeric`) folds that constant SVD ONCE (a single consistent range
+    # basis — no arbitrary per-cell null space) and resolves its dynamic δ to a static rank.
+    u_d = _realize_ffs_by_which(ctx, which, f, source=None, target=None).cols
     r = _shape_of(u_d)[1]
     k = _shape_of(imm)[1]
     [out] = ctx.prog.emit_stmt(
@@ -5149,6 +5189,13 @@ class _ColStackOp:
     def __call__(self, *cols: np.ndarray) -> np.ndarray:
         return np.stack([np.asarray(c, dtype=float).reshape(-1) for c in cols], axis=1)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: flatten each operand then stack as columns on axis 1 (twin of
+        the ``_col_stack`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        flat = [c.ReshapeExpr(a=x, shape=(c.IntLit(value=-1),)) for x in args]
+        return [c.StackExpr(arrays=tuple(flat), axis=1)]
+
 
 @dataclass(frozen=True)
 class _CompleteColsOp:
@@ -5191,6 +5238,15 @@ class _RankOp:
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(int(np.linalg.matrix_rank(np.asarray(A, dtype=float), tol=self.tol)))
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: the numeric column rank of ``A`` as a 0-d int (twin of the
+        ``_rank_op`` numpy renderer / :meth:`__call__`).  ``matrix_rank`` has the same name in numpy
+        and torch; the absolute-tol kwarg (``tol=`` numpy / ``atol=`` torch) is passed per namespace."""
+        c = low.core
+        kw = (c.KwArg(name="tol" if low.opts.target != "torch" else "atol",
+                      value=c.FloatLit(value=float(self.tol))),)
+        return [low._ns_call("linalg.matrix_rank", (args[0],), kw)]
+
 
 @dataclass(frozen=True)
 class _RrefSelectColsOp:
@@ -5231,6 +5287,20 @@ class _QrColsOp:
         q, r = np.linalg.qr(np.asarray(A, dtype=float))
         return q * _qr_diag_signs(r)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: sign-fixed reduced-QR orthonormal columns ``Q·s`` with
+        ``s = sign(diag R)`` (0 → +1) (twin of the ``_qr_cols`` numpy renderer / :meth:`__call__`;
+        mirrors chartlib's ``QrSignFixOp`` hook but returns only ``Q``).  ``torch.vmap`` batches the
+        plain 2-D QR."""
+        c = low.core
+        q_raw, r_raw = (builder.fresh_var(base=nm) for nm in ("Q_qc", "R_qc"))
+        builder.assign(c.TupleExpr(elts=(q_raw, r_raw)),
+                       low._ns_call("linalg.qr", (args[0],),
+                                    (c.KwArg(name="mode", value=c.StringLit(value="reduced")),)))
+        raw = low._ns_call("sign", (low._ns_call("diag", (r_raw,)),))
+        signs = builder.assign_new(_signs_zero_to_one(low, raw), base="s_qc")
+        return [c.BinaryExpr(op=c.BinaryOp.MUL, lhs=q_raw, rhs=signs)]
+
 
 def _qr_diag_signs(r: np.ndarray) -> np.ndarray:
     """The per-column signs that make ``R``'s diagonal positive (zeros ⇒ +1)."""
@@ -5248,6 +5318,20 @@ class _MetricOrthonormalOp:
         gram = a.T @ np.asarray(G, dtype=float) @ a
         L = np.linalg.cholesky(gram)
         return a @ np.linalg.inv(L).T
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``A · L⁻ᵀ`` with ``L Lᵀ = AᵀGA`` (Cholesky) — metric
+        orthonormalization (twin of the ``_metric_orthonormal`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+
+        def mm(x: object, y: object) -> object:
+            return c.BinaryExpr(op=c.BinaryOp.MATMUL, lhs=x, rhs=y)
+        a, g = args
+        at = c.TransposeExpr(a=a, axes=None)
+        gram = builder.assign_new(mm(mm(at, g), a), base="gram_mo")
+        lchol = low._ns_call("linalg.cholesky", (gram,))
+        linvt = c.TransposeExpr(a=low._ns_call("linalg.inv", (lchol,)), axes=None)
+        return [mm(a, linvt)]
 
 
 # ===========================================================================
@@ -5799,7 +5883,6 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
 def _realize_ffs_by_which(
     ctx: _Ctx, which: str, f: object,
     source: B.Basis | None = None, target: B.Basis | None = None,
-    *, fold_constant: bool = False,
 ) -> FfsRealization:
     """Realize the FFS basis ``which`` of map ``f`` via the SVD/QR/GSVD seam (`41 §1`).
 
@@ -5827,7 +5910,7 @@ def _realize_ffs_by_which(
     # `audit #4`), so key the memo on it ALONE: two requests with the same own-side metric but a
     # different irrelevant-side basis share one GSVD (audit round-3 E).
     own_metric_basis = target if cod_side else source
-    key = (norm, id(f), id(own_metric_basis), fold_constant)
+    key = (norm, id(f), id(own_metric_basis))
     cached = ctx.ffs_realizations.get(key)
     if cached is not None:
         return cached
@@ -5850,7 +5933,6 @@ def _realize_ffs_by_which(
         props=map_props(f), metric_dom=metric_dom, metric_cod=metric_cod,
         label=getattr(f, "name", "f"),
         dim_atom=ctx.ffs_dim_atoms.get(dim_key),
-        fold_constant=fold_constant,
     )
     # Record the canonical SUBSPACE atom (the column axis of ``cols``) the first time it is
     # minted, so later realizations of the same ``(which, id(f))`` reuse the very same atom.
@@ -6093,6 +6175,41 @@ class _ConstOp:
         return [low._const_expr(np.asarray(arr, dtype=float))]
 
 
+def _shape_axis_expr(low: object, arg: object, axis: int) -> object:
+    """The runtime length of ``arg``'s axis ``axis`` as a pyab int expr — ``arg.shape[axis]``.
+
+    Mirrors :meth:`_AxisLenOp.__pyab_lower__`: under ``torch.vmap`` the batch axis is hidden, so
+    ``ShapeExpr`` yields the logical (un-batched) shape and this is a plain per-trace int — the
+    sanctioned way the dynamic-shape FFS ops read a runtime dimension."""
+    c = low.core
+    return c.AccessExpr(base=c.ShapeExpr(x=arg), index=(c.IntLit(value=int(axis)),))
+
+
+def _dyn_eye_expr(low: object, n_expr: object) -> object:
+    """A runtime ``n×n`` f64 identity as a pyab expr, ``n = n_expr`` (a runtime int expr).
+
+    Built with only ``low.core`` + ``low._dtype_f64`` as
+    ``where(arange(n)[:,None] == arange(n)[None,:], 1.0, 0.0)`` — the vmap-safe, dtype-exact
+    construction of ``np.eye(n)`` (no namespace ``eye`` whose torch default is float32)."""
+    c = low.core
+    r = c.ArangeExpr(start=c.IntLit(value=0), stop=n_expr)
+    ri = c.AccessExpr(base=r, index=(c.Slice(), c.NewAxisTok()))
+    rj = c.AccessExpr(base=r, index=(c.NewAxisTok(), c.Slice()))
+    eq = c.BinaryExpr(op=c.BinaryOp.EQ, lhs=ri, rhs=rj)
+    one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
+    zero = c.ArrayExpr(obj=c.FloatLit(value=0.0), dtype=low._dtype_f64())
+    return c.WhereExpr(cond=eq, x=one, y=zero)
+
+
+def _signs_zero_to_one(low: object, signs: object) -> object:
+    """``where(signs == 0, 1.0, signs)`` — the QR positive-diagonal sign convention (0 ⇒ +1),
+    as a pyab expr (mirrors ``_qr_diag_signs`` / ``_QrColsOp``/``_QrSignConventionOp``)."""
+    c = low.core
+    zero = c.ArrayExpr(obj=c.FloatLit(value=0.0), dtype=low._dtype_f64())
+    one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
+    return c.WhereExpr(cond=c.BinaryExpr(op=c.BinaryOp.EQ, lhs=signs, rhs=zero), x=one, y=signs)
+
+
 @dataclass(frozen=True)
 class _DynEyeOp:
     """A runtime identity sized by a reference array's axis (default the FFS rank column ``δ_f`` at
@@ -6103,6 +6220,18 @@ class _DynEyeOp:
 
     def __call__(self, ref: np.ndarray) -> np.ndarray:
         return np.eye(int(np.asarray(ref).shape[self.axis]))
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``np.eye(ref.shape[axis])`` sized by a RUNTIME axis of the
+        reference operand (twin of the ``_dyn_eye`` numpy renderer / :meth:`__call__`).
+
+        ``ShapeExpr`` reads ``ref``'s logical (un-batched) axis length — mirrors the
+        ``_AxisLenOp`` hook, so it is correct under ``torch.vmap`` (the batch axis is hidden, so
+        the axis size is a plain int per trace).  The identity is materialized f64-exactly as
+        ``where(arange(n)[:,None] == arange(n)[None,:], 1.0, 0.0)`` — using only ``low.core`` and
+        ``low._dtype_f64`` (no namespace ``eye`` dtype-guessing)."""
+        return [_dyn_eye_expr(
+            low, _shape_axis_expr(low, args[0], int(self.axis)))]
 
 
 @dataclass(frozen=True)
@@ -6117,6 +6246,16 @@ class _ProdShapeOp:
         return np.asarray(int(self.static * int(np.prod(
             [int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)] or [1]))))
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``static · ∏ refs[i].shape[axes[i]]`` as a runtime 0-d int
+        (twin of the ``_prod_shape`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        out = c.IntLit(value=int(self.static))
+        for i, ax in enumerate(self.axes):
+            out = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=out,
+                               rhs=_shape_axis_expr(low, args[i], int(ax)))
+        return [out]
+
 
 @dataclass(frozen=True)
 class _SumShapeOp:
@@ -6129,6 +6268,16 @@ class _SumShapeOp:
     def __call__(self, *refs: np.ndarray) -> np.ndarray:
         return np.asarray(int(self.static + int(sum(
             int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)))))
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``static + Σ refs[i].shape[axes[i]]`` as a runtime 0-d int
+        (twin of the ``_sum_shape`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        out = c.IntLit(value=int(self.static))
+        for i, ax in enumerate(self.axes):
+            out = c.BinaryExpr(op=c.BinaryOp.ADD, lhs=out,
+                               rhs=_shape_axis_expr(low, args[i], int(ax)))
+        return [out]
 
 
 @dataclass(frozen=True)
@@ -6144,6 +6293,19 @@ class _DynEyeTensorOp:
         prod = int(np.prod(dims)) if dims else 1
         return np.eye(prod).reshape(prod, *dims)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``eye(∏dᵢ).reshape(∏dᵢ, d₀, …)`` with each ``dᵢ`` a runtime
+        axis of ``refs[i]`` (twin of the ``_dyn_eye_tensor`` numpy renderer / :meth:`__call__`).
+        ``eye`` is built f64-exactly (see :meth:`_DynEyeOp.__pyab_lower__`)."""
+        c = low.core
+        dims = [_shape_axis_expr(low, args[i], int(ax)) for i, ax in enumerate(self.axes)]
+        prod: object = c.IntLit(value=1)
+        for d in dims:
+            prod = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=prod, rhs=d)
+        prod = builder.assign_new(prod, base="eyeT_prod")   # reuse in eye size AND reshape
+        eye = _dyn_eye_expr(low, prod)
+        return [c.ReshapeExpr(a=eye, shape=(prod, *dims))]
+
 
 @dataclass(frozen=True)
 class _DynZerosOp:
@@ -6154,6 +6316,13 @@ class _DynZerosOp:
     def __call__(self, *refs: np.ndarray) -> np.ndarray:
         return np.zeros(tuple(int(np.asarray(refs[i]).shape[a]) for i, a in enumerate(self.axes)))
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``zeros((d₀, d₁, …))`` with each ``dᵢ`` a runtime axis of
+        ``refs[i]`` (twin of the ``_dyn_zeros`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        shape = tuple(_shape_axis_expr(low, args[i], int(ax)) for i, ax in enumerate(self.axes))
+        return [c.ZerosExpr(shape=shape, dtype=low._dtype_f64())]
+
 
 @dataclass(frozen=True)
 class _HStackOp:
@@ -6161,6 +6330,12 @@ class _HStackOp:
 
     def __call__(self, *mats: np.ndarray) -> np.ndarray:
         return np.hstack([np.asarray(m, dtype=float) for m in mats])
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``[A | B | …]`` — concat 2-D matrices along axis 1 (twin of
+        the ``_hstack`` numpy renderer / :meth:`__call__`; every FFS-assembly use stacks matrices)."""
+        c = low.core
+        return [c.ConcatExpr(arrays=tuple(args), axis=1)]
 
 
 @dataclass(frozen=True)
@@ -6180,6 +6355,12 @@ class _ScaleOp:
 class _ScaleByOp:
     def __call__(self, x: np.ndarray, s: np.ndarray) -> np.ndarray:
         return np.asarray(s, dtype=float) * np.asarray(x, dtype=float)
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``s * x`` (twin of the ``_scale_by_op`` numpy renderer /
+        :meth:`__call__`; the runtime-scalar sibling of ``_ScaleOp``)."""
+        c = low.core
+        return [c.BinaryExpr(op=c.BinaryOp.MUL, lhs=args[1], rhs=args[0])]
 
 
 @dataclass(frozen=True)
@@ -6207,17 +6388,33 @@ class _ConcatOp:
     def __call__(self, *xs: np.ndarray) -> np.ndarray:
         return np.concatenate([np.asarray(x, dtype=float).reshape(-1) for x in xs])
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: flatten each operand then concatenate on axis 0 (twin of the
+        ``_concat_op`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        flat = [c.ReshapeExpr(a=x, shape=(c.IntLit(value=-1),)) for x in args]
+        return [c.ConcatExpr(arrays=tuple(flat), axis=0)]
+
 
 @dataclass(frozen=True)
 class _TransposeOp:
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A, dtype=float).T
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``A.T`` (``axes=None`` ⇒ full reverse; twin of ``_transpose_op``)."""
+        c = low.core
+        return [c.TransposeExpr(a=args[0], axes=None)]
+
 
 @dataclass(frozen=True)
 class _IdentityArrOp:
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A, dtype=float)
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: value passthrough (twin of the ``_passthrough`` numpy renderer)."""
+        return [args[0]]
 
 
 @dataclass(frozen=True)
@@ -6329,6 +6526,28 @@ class _KronFreeOp:
         gr = G.reshape(1, dg, 1, cg, *([1] * self.nf_free), *gg)
         return (fr * gr).reshape(df * dg, cf * cg, *ff, *gg)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: block-Kron on the two space axes with an outer product on the
+        (disjoint) trailing free axes (twin of the ``_kron_free`` numpy renderer / :meth:`__call__`).
+        Reshapes read the runtime ``df/cf/dg/cg`` and free axes off ``ShapeExpr`` (vmap-safe)."""
+        c = low.core
+        f, g = args
+        one = c.IntLit(value=1)
+
+        def ax(x: object, i: int) -> object:
+            return _shape_axis_expr(low, x, i)
+        df, cf = ax(f, 0), ax(f, 1)
+        dg, cg = ax(g, 0), ax(g, 1)
+        ff = [ax(f, 2 + i) for i in range(self.nf_free)]
+        gg = [ax(g, 2 + i) for i in range(self.ng_free)]
+        fr = c.ReshapeExpr(a=f, shape=(df, one, cf, one, *ff, *([one] * self.ng_free)))
+        gr = c.ReshapeExpr(a=g, shape=(one, dg, one, cg, *([one] * self.nf_free), *gg))
+        prod = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=fr, rhs=gr)
+        mul = c.BinaryOp.MUL
+        out_shape = (c.BinaryExpr(op=mul, lhs=df, rhs=dg),
+                     c.BinaryExpr(op=mul, lhs=cf, rhs=cg), *ff, *gg)
+        return [c.ReshapeExpr(a=prod, shape=out_shape)]
+
 
 @dataclass(frozen=True)
 class _ExternalOp:
@@ -6344,6 +6563,44 @@ class _ExternalOp:
 
     def __call__(self, *xs: np.ndarray) -> np.ndarray:
         return np.asarray(self.fn(*[np.asarray(x, dtype=float) for x in xs]), dtype=float)
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: the named scalar nonlinearity by NAME (twin of the
+        ``_external_op`` numpy renderer / :meth:`__call__`).
+
+        An argument-less External is a compile-time CONSTANT (e.g. a Hodge volume-form basis
+        vector) → materialize it via ``low._const_expr``.  The elementwise unary math ops route
+        through the array namespace (``low._ns_call`` — identical function names in numpy and
+        torch); ``div``/``hadamard``/``reciprocal``/``sigmoid`` build from ``low.core`` so no
+        namespace name-mismatch can bite.  Unknown names raise (mirroring the numpy renderer's own
+        fall-through) — the numpy lane is untouched."""
+        c = low.core
+        if not args:                                          # argument-less ⇒ constant array
+            return [low._const_expr(np.asarray(self.fn(), dtype=float))]
+        if self.name == "div":
+            return [c.BinaryExpr(op=c.BinaryOp.TRUEDIV, lhs=args[0], rhs=args[1])]
+        if self.name == "hadamard":
+            return [c.BinaryExpr(op=c.BinaryOp.MUL, lhs=args[0], rhs=args[1])]
+        if self.name == "reciprocal":
+            one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
+            return [c.BinaryExpr(op=c.BinaryOp.TRUEDIV, lhs=one, rhs=args[0])]
+        if self.name == "sigmoid":                            # 1 / (1 + exp(-x))
+            negx = c.BinaryExpr(op=c.BinaryOp.MUL,
+                                lhs=c.ArrayExpr(obj=c.FloatLit(value=-1.0), dtype=low._dtype_f64()),
+                                rhs=args[0])
+            one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
+            denom = c.BinaryExpr(op=c.BinaryOp.ADD, lhs=one, rhs=low._ns_call("exp", (negx,)))
+            return [c.BinaryExpr(op=c.BinaryOp.TRUEDIV, lhs=one, rhs=denom)]
+        # elementwise unary math whose function name is identical in numpy and torch.
+        _NS_UNARY = {
+            "sqrt", "abs", "sign", "exp", "log", "square",
+            "sin", "cos", "tan", "sinh", "cosh", "tanh",
+        }
+        if self.name in _NS_UNARY:
+            return [low._ns_call(self.name, (args[0],))]
+        if self.name == "ones":
+            return [low._ns_call("ones_like", (args[0],))]
+        raise NotImplementedError(f"_ExternalOp.__pyab_lower__: no pyab lowering for {self.name!r}")
 
 
 @dataclass(frozen=True)
@@ -6505,17 +6762,34 @@ class _IdentityMatOp:
     def __call__(self) -> np.ndarray:
         return np.eye(self.n)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: the static ``n×n`` identity (twin of the ``_identity_mat`` numpy
+        renderer / :meth:`__call__`; built f64-exactly like ``_EyeOp``/``_DynEyeOp``)."""
+        return [_dyn_eye_expr(low, low.core.IntLit(value=int(self.n)))]
+
 
 @dataclass(frozen=True)
 class _InvTransposeOp:
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.linalg.inv(np.asarray(A, dtype=float)).T
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``inv(A).T`` (twin of the ``_inv_transpose`` numpy renderer /
+        :meth:`__call__`).  ``linalg.inv`` goes through the array namespace (as in pyab's own
+        ``_gsvd``); ``torch.vmap`` supplies the batch axis around the plain 2-D inverse."""
+        c = low.core
+        return [c.TransposeExpr(a=low._ns_call("linalg.inv", (args[0],)), axes=None)]
+
 
 @dataclass(frozen=True)
 class _ComposeViaStdOp:
     def __call__(self, R_to: np.ndarray, R_from: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.linalg.solve(np.asarray(R_to, dtype=float), np.asarray(R_from, dtype=float))
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``solve(R_to, R_from)`` (twin of the ``_compose_via_std`` numpy
+        renderer / :meth:`__call__`)."""
+        return [low._ns_call("linalg.solve", (args[0], args[1]))]
 
 
 @dataclass(frozen=True)
@@ -6527,6 +6801,15 @@ class _KronOp:
         for m in mats[1:]:
             out = np.kron(out, np.asarray(m, dtype=float))
         return out
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: chained Kronecker product (twin of the ``_kron`` numpy renderer
+        / :meth:`__call__`).  ``kron`` has the same name in numpy and torch; ``torch.vmap`` batches
+        the plain 2-D products."""
+        acc = args[0]
+        for m in args[1:]:
+            acc = low._ns_call("kron", (acc, m))
+        return [acc]
 
 
 @dataclass(frozen=True)
@@ -6542,6 +6825,48 @@ class _BlockDiagOp:
             r += a.shape[0]
             c += a.shape[1]
         return out
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: block-diagonal assembly ``diag(A, B, …)`` (twin of
+        :meth:`__call__`).  Built portably (no ``block_diag`` namespace primitive) from row-blocks:
+        each ``mat_i`` is zero-padded left/right to the full width and the padded rows are
+        concatenated on axis 0 — ``ZerosExpr`` sizes off runtime ``ShapeExpr`` reads, so it is
+        vmap-safe and dynamic-shape correct."""
+        c = low.core
+        f64 = low._dtype_f64()
+
+        def rows_of(x: object) -> object:
+            return _shape_axis_expr(low, x, 0)
+
+        def cols_of(x: object) -> object:
+            return _shape_axis_expr(low, x, 1)
+
+        col_widths = [cols_of(x) for x in args]
+
+        def add(a: object, b: object) -> object:
+            return c.BinaryExpr(op=c.BinaryOp.ADD, lhs=a, rhs=b)
+
+        row_blocks = []
+        for i, x in enumerate(args):
+            ri = rows_of(x)
+            pieces = []
+            left = col_widths[:i]
+            right = col_widths[i + 1:]
+            if left:
+                w = left[0]
+                for extra in left[1:]:
+                    w = add(w, extra)
+                pieces.append(c.ZerosExpr(shape=(ri, w), dtype=f64))
+            pieces.append(x)
+            if right:
+                w = right[0]
+                for extra in right[1:]:
+                    w = add(w, extra)
+                pieces.append(c.ZerosExpr(shape=(ri, w), dtype=f64))
+            row_blocks.append(
+                pieces[0] if len(pieces) == 1 else c.ConcatExpr(arrays=tuple(pieces), axis=1))
+        return [row_blocks[0] if len(row_blocks) == 1
+                else c.ConcatExpr(arrays=tuple(row_blocks), axis=0)]
 
 
 @dataclass(frozen=True)
@@ -6578,6 +6903,15 @@ class _SumDimOp:
     def __call__(self, *mats: np.ndarray) -> np.ndarray:
         return np.asarray(sum(int(np.asarray(m).shape[self.axis]) for m in mats))
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``Σ mats[i].shape[axis]`` as a runtime 0-d int (twin of the
+        ``_sum_dim`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        out = c.IntLit(value=0)
+        for x in args:
+            out = c.BinaryExpr(op=c.BinaryOp.ADD, lhs=out, rhs=_shape_axis_expr(low, x, int(self.axis)))
+        return [out]
+
 
 @dataclass(frozen=True)
 class _ProdDimOp:
@@ -6591,6 +6925,15 @@ class _ProdDimOp:
             out *= int(np.asarray(m).shape[self.axis])
         return np.asarray(out)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``∏ mats[i].shape[axis]`` as a runtime 0-d int (twin of the
+        ``_prod_dim`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        out = c.IntLit(value=1)
+        for x in args:
+            out = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=out, rhs=_shape_axis_expr(low, x, int(self.axis)))
+        return [out]
+
 
 @dataclass(frozen=True)
 class _ScaleAxisDimOp:
@@ -6602,6 +6945,13 @@ class _ScaleAxisDimOp:
     def __call__(self, mat: np.ndarray) -> np.ndarray:
         return np.asarray(self.n * int(np.asarray(mat).shape[self.axis]))
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``n · mat.shape[axis]`` as a runtime 0-d int (twin of the
+        ``_scale_axis_dim`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        return [c.BinaryExpr(op=c.BinaryOp.MUL, lhs=c.IntLit(value=int(self.n)),
+                             rhs=_shape_axis_expr(low, args[0], int(self.axis)))]
+
 
 @dataclass(frozen=True)
 class _MulAxisDimOp:
@@ -6611,6 +6961,13 @@ class _MulAxisDimOp:
 
     def __call__(self, n: np.ndarray, mat: np.ndarray) -> np.ndarray:
         return np.asarray(int(np.asarray(n)) * int(np.asarray(mat).shape[self.axis]))
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``int(n) · mat.shape[axis]`` as a runtime 0-d int (twin of the
+        ``_mul_axis_dim`` numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        n = c.CallExpr(fn=c.Var(name="int"), args=(args[0],))
+        return [c.BinaryExpr(op=c.BinaryOp.MUL, lhs=n, rhs=_shape_axis_expr(low, args[1], int(self.axis)))]
 
 
 # --- pure-cob emitters ------------------------------------------------------

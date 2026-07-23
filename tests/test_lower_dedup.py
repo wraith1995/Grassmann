@@ -27,7 +27,12 @@ import polyarray as pa
 import grassmann.core as C
 import grassmann.core.props as P
 import grassmann.embed as G
-from grassmann.lower.represent import _Ctx, _realize_ffs_for_space, represent
+from grassmann.lower.represent import (
+    _Ctx,
+    _realize_ffs_for_space,
+    rational_lane,
+    represent,
+)
 from grassmann.stdlib import exterior_power, tensor_power, wedge
 
 
@@ -50,24 +55,46 @@ def _var_key(v: C.Var) -> str:
 
 
 def test_embed_bare_ffs_emits_single_svd() -> None:
-    """``embed(a : Λᵏ, V⊗ᵏ)`` realizes ``Img(alt)`` thrice but emits ONE ``SvdOp`` (D2).
+    """``embed(a : Λᵏ, V⊗ᵏ)`` realizes ``Img(alt)`` thrice; the memo collapses the three
+    requests to ONE factorization, which — being the CONSTANT ``alt`` operator SVD — the ONE
+    uniform ``pa.fold_numeric`` in ``_post_pass`` folds AWAY entirely (SvdOp → 0) in the
+    RATIONAL lane, its runtime rank δ resolved to a static int so no dynamic output shape
+    lingers.  This is the general fold that replaced the narrow ``fold_constant`` opt-in.
 
-    The bare ``Λᵏ`` input needs the ``alt`` SVD for (i) its dynamic-δ shape, (ii) the
-    rank-consistency ``AssertOp``, and (iii) the embed's ``_subspace_cols`` columns.  The
-    memo collapses the three to a single ``SvdOp`` (and a single ``(cod,dom)`` transpose).
+    The fold runs in the RATIONAL lane only (the symbolic-``W`` / Hodge-``P(T)`` lane, where the
+    speedup lives); the NON-rational numeric lane is deliberately left unfolded (it corrupts the
+    FEEC κ-Koszul kernel — see ``represent._post_pass``), so this test exercises the fold under
+    ``rational_lane()``.
+
+    NOTE: the D2 dedup memo (one factorization per distinct ``(which, id(f))``) is verified
+    DIRECTLY by ``test_realize_ffs_memoized_same_outputs`` /
+    ``test_distinct_maps_keep_separate_factorizations`` /
+    ``test_injective_image_memoized_single_qr`` (which run ``_realize_ffs_for_space`` under a
+    ``force_stmts`` budget, before the post-pass fold).  This end-to-end variant instead pins
+    that the constant ``alt`` SVD folds to a build-time constant and leaves the program static.
     """
+    from polyarray.ir import is_dynamic
+
     n, k = 4, 2
     V = G.space("V", n)
     a = G.var("a", exterior_power(V, k))
     w_std = G.embed(a, tensor_power(V, k))
-    prog = represent(w_std.node)
+    with rational_lane():
+        prog = represent(w_std.node)
 
     counts = _op_counts(prog)
-    assert counts["SvdOp"] == 1, f"expected one SvdOp, got {counts['SvdOp']}"
+    # The constant alt SVD (and its (cod,dom) transpose) fold away completely.
+    assert counts["SvdOp"] == 0, f"expected the constant SVD folded, got {counts['SvdOp']}"
     assert counts["QrOp"] == 0
     assert counts["GSvdOp"] == 0
-    # The shared (cod,dom) transpose prelude is emitted once too (was once per request).
-    assert counts["_TransposeOp"] == 1
+    assert counts["_TransposeOp"] == 0
+    # δ was resolved: no Stmt output keeps a dynamic (DimAtom) shape.
+    assert not any(
+        o._bulk is not None and is_dynamic(o._bulk.shape)
+        for sub in pa.forward.iter_programs(prog)
+        for st in sub.statements
+        for o in st.out
+    )
 
 
 def test_embed_bare_ffs_numeric_unchanged() -> None:
@@ -190,13 +217,26 @@ def test_injective_image_memoized_single_qr() -> None:
 def test_wedge_keeps_one_svd_per_distinct_power() -> None:
     """``embed(wedge(a:Λ², b:Λ¹))`` factorizes Λ², Λ¹, Λ³ once each — three distinct maps.
 
-    Confirms the memo neither over-collapses (each distinct ``alt`` keeps its own SvdOp)
-    nor under-dedups (no power is factored twice despite multiple internal consumers).
+    Each ``alt`` operator is a CONSTANT, so all three factorizations fold away under the ONE
+    uniform ``pa.fold_numeric`` in the RATIONAL lane (SvdOp → 0), δ's resolved to static ranks —
+    no dynamic output shape survives.  (The numeric lane is deliberately left unfolded — see
+    ``represent._post_pass`` — so the fold is exercised under ``rational_lane()``.)  The memo's
+    non-over-collapse / non-under-dedup (three distinct maps → three separate factorizations,
+    before folding) is verified directly by ``test_distinct_maps_keep_separate_factorizations``.
     """
+    from polyarray.ir import is_dynamic
+
     V = G.space("V", 4)
     a = G.var("a", exterior_power(V, 2))
     b = G.var("b", exterior_power(V, 1))
     w = wedge(a, b, 2, 1)
     w_std = G.embed(w, tensor_power(V, 3))
-    prog = represent(w_std.node)
-    assert _op_counts(prog)["SvdOp"] == 3
+    with rational_lane():
+        prog = represent(w_std.node)
+    assert _op_counts(prog)["SvdOp"] == 0
+    assert not any(
+        o._bulk is not None and is_dynamic(o._bulk.shape)
+        for sub in pa.forward.iter_programs(prog)
+        for st in sub.statements
+        for o in st.out
+    )
