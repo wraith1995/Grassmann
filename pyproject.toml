@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-xdist>=3.5",
     "mypy>=1.13",
 ]
 # chartlib is the modern geometry/manifold oracle used to cross-check Grassmann's
@@ -23,6 +24,7 @@ dev = [
 # (charts, tangent frames, Jacobian volume). Test-only — never a runtime dep.
 test = [
     "pytest>=8.0",
+    "pytest-xdist>=3.5",
     "chartlib",
     # scipy.linalg.expm builds the closed-form geodesic frame Q(x)=expm((c·x)·A)·Q₀ used by
     # tests/test_diff_analytic.py as an EXACT (non-FD) reference for the gauge-aware FFS AD.
@@ -50,6 +52,7 @@ chartlib = { path = "../chartlib", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto"          # parallel by default (pytest-xdist); ~5.5min serial → ~1min. Override with `-n0`.
 markers = [
     "network: test hits a live external service (matrixcalculus.org); opt-in, off by default",
 ]
