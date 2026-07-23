@@ -30,7 +30,6 @@ import grassmann.embed as G
 from grassmann.lower.represent import (
     _Ctx,
     _realize_ffs_for_space,
-    rational_lane,
     represent,
 )
 from grassmann.stdlib import exterior_power, tensor_power, wedge
@@ -57,14 +56,13 @@ def _var_key(v: C.Var) -> str:
 def test_embed_bare_ffs_emits_single_svd() -> None:
     """``embed(a : Λᵏ, V⊗ᵏ)`` realizes ``Img(alt)`` thrice; the memo collapses the three
     requests to ONE factorization, which — being the CONSTANT ``alt`` operator SVD — the ONE
-    uniform ``pa.fold_numeric`` in ``_post_pass`` folds AWAY entirely (SvdOp → 0) in the
-    RATIONAL lane, its runtime rank δ resolved to a static int so no dynamic output shape
-    lingers.  This is the general fold that replaced the narrow ``fold_constant`` opt-in.
+    uniform ``pa.fold_numeric`` in ``_post_pass`` folds AWAY entirely (SvdOp → 0), its runtime
+    rank δ resolved to a static int so no dynamic output shape lingers.  This is the general
+    fold that replaced the narrow ``fold_constant`` opt-in.
 
-    The fold runs in the RATIONAL lane only (the symbolic-``W`` / Hodge-``P(T)`` lane, where the
-    speedup lives); the NON-rational numeric lane is deliberately left unfolded (it corrupts the
-    FEEC κ-Koszul kernel — see ``represent._post_pass``), so this test exercises the fold under
-    ``rational_lane()``.
+    The fold now runs UNIFORMLY in BOTH lanes (the earlier FEEC κ-Koszul corruption was a
+    downstream degree-walker identity bug, fixed in ``polyarray.simplify._fold_cells`` — see
+    ``represent._post_pass``), so this end-to-end test exercises the fold in the DEFAULT lane.
 
     NOTE: the D2 dedup memo (one factorization per distinct ``(which, id(f))``) is verified
     DIRECTLY by ``test_realize_ffs_memoized_same_outputs`` /
@@ -79,8 +77,7 @@ def test_embed_bare_ffs_emits_single_svd() -> None:
     V = G.space("V", n)
     a = G.var("a", exterior_power(V, k))
     w_std = G.embed(a, tensor_power(V, k))
-    with rational_lane():
-        prog = represent(w_std.node)
+    prog = represent(w_std.node)
 
     counts = _op_counts(prog)
     # The constant alt SVD (and its (cod,dom) transpose) fold away completely.
@@ -218,11 +215,11 @@ def test_wedge_keeps_one_svd_per_distinct_power() -> None:
     """``embed(wedge(a:Λ², b:Λ¹))`` factorizes Λ², Λ¹, Λ³ once each — three distinct maps.
 
     Each ``alt`` operator is a CONSTANT, so all three factorizations fold away under the ONE
-    uniform ``pa.fold_numeric`` in the RATIONAL lane (SvdOp → 0), δ's resolved to static ranks —
-    no dynamic output shape survives.  (The numeric lane is deliberately left unfolded — see
-    ``represent._post_pass`` — so the fold is exercised under ``rational_lane()``.)  The memo's
-    non-over-collapse / non-under-dedup (three distinct maps → three separate factorizations,
-    before folding) is verified directly by ``test_distinct_maps_keep_separate_factorizations``.
+    uniform ``pa.fold_numeric`` (SvdOp → 0), δ's resolved to static ranks — no dynamic output
+    shape survives.  (The fold now runs in BOTH lanes — see ``represent._post_pass`` — so it is
+    exercised here in the DEFAULT lane.)  The memo's non-over-collapse / non-under-dedup (three
+    distinct maps → three separate factorizations, before folding) is verified directly by
+    ``test_distinct_maps_keep_separate_factorizations``.
     """
     from polyarray.ir import is_dynamic
 
@@ -231,8 +228,7 @@ def test_wedge_keeps_one_svd_per_distinct_power() -> None:
     b = G.var("b", exterior_power(V, 1))
     w = wedge(a, b, 2, 1)
     w_std = G.embed(w, tensor_power(V, 3))
-    with rational_lane():
-        prog = represent(w_std.node)
+    prog = represent(w_std.node)
     assert _op_counts(prog)["SvdOp"] == 0
     assert not any(
         o._bulk is not None and is_dynamic(o._bulk.shape)
