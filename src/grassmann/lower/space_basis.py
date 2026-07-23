@@ -222,7 +222,6 @@ def realize_ffs_basis(
     metric_cod: pa.SymArray | None = None,
     label: str = "f",
     dim_atom: pa.DimAtom | None = None,
-    fold_constant: bool = False,
 ) -> FfsRealization:
     """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``) (`41 §1`).
 
@@ -260,14 +259,12 @@ def realize_ffs_basis(
             program, which, f_matrix, dom_dim, cod_dim,
             metric_dom, metric_cod, label, dim_atom=dim_atom,
         )
-    # `fold_constant` (OPT-IN, the FEEC covariant / exterior-power readout only — NOT the
-    # general FFS realization, whose SVD-emission / memoization / dynamic-bulk contract other
-    # callers rely on): a value-INVARIANT `f_matrix` folds to a build-time-constant range
-    # basis.  See `try_constant_ffs`.
-    if fold_constant:
-        folded = try_constant_ffs(program, which, f_matrix, dom_dim, cod_dim)
-        if folded is not None:
-            return folded
+    # A value-INVARIANT `f_matrix` (e.g. a numeric antisymmetrizer) is NOT special-cased here
+    # anymore: the SVD is emitted uniformly with its runtime rank δ, and the ONE general
+    # constant-fold (`polyarray.fold_numeric`, run in `represent._post_pass`) folds the constant
+    # SVD once and resolves δ to a static rank downstream.  `try_constant_ffs` survives only for
+    # the covariant `A₀` seam (`_realize_image_covariant`), where `f_matrix` is FEED-invariant
+    # but dataflow-SYMBOLIC (vertex atoms cancel) — a case the dataflow fold cannot reach.
     return _realize_via_svd(
         program, which, f_matrix, dom_dim, cod_dim, label, dim_atom=dim_atom,
     )
@@ -342,6 +339,20 @@ class _IdentityMatrixOp:
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A, dtype=float)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: value passthrough (twin of the ``_passthrough`` numpy renderer
+        / :meth:`__call__`)."""
+        return [args[0]]
+
+
+def _sb_signs_zero_to_one(low: object, signs: object) -> object:
+    """``where(signs == 0, 1.0, signs)`` — the +diagonal-R sign convention (0 ⇒ +1) as a pyab expr
+    (space_basis-local twin of the numeric ``s[s == 0] = 1.0``)."""
+    c = low.core
+    zero = c.ArrayExpr(obj=c.FloatLit(value=0.0), dtype=low._dtype_f64())
+    one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
+    return c.WhereExpr(cond=c.BinaryExpr(op=c.BinaryOp.EQ, lhs=signs, rhs=zero), x=one, y=signs)
+
 
 def _realize_via_qr(
     program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, label: str,
@@ -377,6 +388,19 @@ class _QrSignConventionOp:
         s = np.sign(np.diag(R))
         s[s == 0] = 1.0
         return Q * s, s[:, None] * R
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: the +diagonal-R sign convention ``(Q·s, s[:,None]·R)`` with
+        ``s = sign(diag R)`` (0 ⇒ +1) (twin of the ``_qr_sign_convention`` numpy renderer /
+        :meth:`__call__`; same math as chartlib's ``QrSignFixOp`` but on given ``(Q, R)``)."""
+        c = low.core
+        q, r = args
+        raw = low._ns_call("sign", (low._ns_call("diag", (r,)),))
+        signs = builder.assign_new(_sb_signs_zero_to_one(low, raw), base="s_qrsc")
+        q_out = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=q, rhs=signs)
+        s_col = c.ReshapeExpr(a=signs, shape=(c.IntLit(value=-1), c.IntLit(value=1)))
+        r_out = c.BinaryExpr(op=c.BinaryOp.MUL, lhs=s_col, rhs=r)
+        return [q_out, r_out]
 
 
 def _qr_q_shape(f_matrix: pa.SymArray, dom_dim: int) -> tuple[int, ...]:
@@ -554,6 +578,13 @@ class _LastColsOp:
     def __call__(self, A: np.ndarray, rank: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A)[:, int(rank):]
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``A[:, int(rank):]`` — the complementary (trailing) columns
+        (twin of the ``_last_cols`` numpy renderer / :meth:`__call__`; mirror of ``_FirstColsOp``)."""
+        c = low.core
+        rank = c.CallExpr(fn=c.Var(name="int"), args=(args[1],))
+        return [c.AccessExpr(base=args[0], index=(c.Slice(), c.Slice(start=rank)))]
+
 
 @dataclass(frozen=True)
 class _CompRankOp:
@@ -568,6 +599,13 @@ class _CompRankOp:
 
     def __call__(self, rank: np.ndarray) -> np.ndarray:
         return np.asarray(self.ambient - int(rank))
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``ambient − int(rank)`` as a 0-d int (twin of the ``_comp_rank``
+        numpy renderer / :meth:`__call__`)."""
+        c = low.core
+        rank = c.CallExpr(fn=c.Var(name="int"), args=(args[0],))
+        return [c.BinaryExpr(op=c.BinaryOp.SUB, lhs=c.IntLit(value=int(self.ambient)), rhs=rank)]
 
 
 @dataclass(frozen=True)
@@ -595,6 +633,21 @@ class _EyeOp:
 
     def __call__(self) -> np.ndarray:
         return np.eye(self.n)
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: the static ``n×n`` identity (twin of the ``_eye_op`` numpy
+        renderer / :meth:`__call__`).  Built f64-exactly as
+        ``where(arange(n)[:,None] == arange(n)[None,:], 1.0, 0.0)`` (no namespace ``eye`` whose torch
+        default is float32) — mirrors ``_DynEyeOp``'s construction."""
+        c = low.core
+        n = c.IntLit(value=int(self.n))
+        r = c.ArangeExpr(start=c.IntLit(value=0), stop=n)
+        ri = c.AccessExpr(base=r, index=(c.Slice(), c.NewAxisTok()))
+        rj = c.AccessExpr(base=r, index=(c.NewAxisTok(), c.Slice()))
+        eq = c.BinaryExpr(op=c.BinaryOp.EQ, lhs=ri, rhs=rj)
+        one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
+        zero = c.ArrayExpr(obj=c.FloatLit(value=0.0), dtype=low._dtype_f64())
+        return [c.WhereExpr(cond=eq, x=one, y=zero)]
 
 
 def _eye(program: pa.Program, n: int, name: str) -> pa.SymArray:
