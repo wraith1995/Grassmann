@@ -542,6 +542,12 @@ class _FirstColsOp:
     def __call__(self, A: np.ndarray, rank: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A)[:, : int(rank)]
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``A[:, :int(rank)]`` (twin of ``numpy_source``'s hook)."""
+        c = low.core
+        rank = c.CallExpr(fn=c.Var(name="int"), args=(args[1],))
+        return [c.AccessExpr(base=args[0], index=(c.Slice(), c.Slice(stop=rank)))]
+
 
 @dataclass(frozen=True)
 class _LastColsOp:

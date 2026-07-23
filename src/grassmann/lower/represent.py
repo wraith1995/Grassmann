@@ -6084,6 +6084,14 @@ class _ConstOp:
     def __call__(self) -> np.ndarray:
         return np.frombuffer(self.data_bytes, dtype=self.dtype).reshape(self.shape).copy()
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering (twin of ``numpy_source``'s ``__numpy_source__``).
+
+        Rematerialize the frozen constant as a pyab f64 array literal via the lowerer's
+        ``_const_expr`` — pyab discovers this hook by ``getattr`` (``pyab._render_op``)."""
+        arr = np.frombuffer(self.data_bytes, dtype=self.dtype).reshape(self.shape)
+        return [low._const_expr(np.asarray(arr, dtype=float))]
+
 
 @dataclass(frozen=True)
 class _DynEyeOp:
@@ -6162,6 +6170,11 @@ class _ScaleOp:
     def __call__(self, x: np.ndarray) -> np.ndarray:
         return self.factor * np.asarray(x, dtype=float)
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``factor * x`` (twin of ``__numpy_source__``)."""
+        c = low.core
+        return [c.BinaryExpr(op=c.BinaryOp.MUL, lhs=c.FloatLit(value=float(self.factor)), rhs=args[0])]
+
 
 @dataclass(frozen=True)
 class _ScaleByOp:
@@ -6178,6 +6191,15 @@ class _AddOp:
         for x in xs[1:]:
             out = out + np.asarray(x, dtype=float)
         return out
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: left-fold ``x0 + x1 + …`` over the ``n`` operands
+        (matches :meth:`__call__`; twin of ``__numpy_source__``)."""
+        c = low.core
+        out = args[0]
+        for x in args[1:]:
+            out = c.BinaryExpr(op=c.BinaryOp.ADD, lhs=out, rhs=x)
+        return [out]
 
 
 @dataclass(frozen=True)
@@ -6207,6 +6229,11 @@ class _AxisLenOp:
     def __call__(self, x: np.ndarray) -> np.ndarray:
         return np.asarray(int(np.asarray(x).shape[self.axis]))
 
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``x.shape[axis]`` as a 0-d int (twin of ``__numpy_source__``)."""
+        c = low.core
+        return [c.AccessExpr(base=c.ShapeExpr(x=args[0]), index=(c.IntLit(value=int(self.axis)),))]
+
 
 @dataclass(frozen=True)
 class _ReshapeOp:
@@ -6214,6 +6241,11 @@ class _ReshapeOp:
 
     def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(A, dtype=float).reshape(self.shape)
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``A.reshape(shape)`` (twin of ``__numpy_source__``)."""
+        c = low.core
+        return [c.ReshapeExpr(a=args[0], shape=tuple(c.IntLit(value=int(d)) for d in self.shape))]
 
 
 @dataclass(frozen=True)
@@ -6226,6 +6258,13 @@ class _ProjectOp:
 
     def __call__(self, P: np.ndarray, v: np.ndarray) -> np.ndarray:  # noqa: N803
         return np.asarray(P, dtype=float).T @ np.asarray(v, dtype=float).reshape(-1)
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``P.T @ v.reshape(-1)`` (twin of ``__numpy_source__``)."""
+        c = low.core
+        p_t = c.TransposeExpr(a=args[0], axes=None)
+        v_flat = c.ReshapeExpr(a=args[1], shape=(c.IntLit(value=-1),))
+        return [c.BinaryExpr(op=c.BinaryOp.MATMUL, lhs=p_t, rhs=v_flat)]
 
 
 @dataclass(frozen=True)
@@ -6241,6 +6280,14 @@ class _EmbedOp:
     def __call__(self, P: np.ndarray, vsub: np.ndarray) -> np.ndarray:  # noqa: N803
         out = np.asarray(P, dtype=float) @ np.asarray(vsub, dtype=float)
         return out.reshape(self.shape) if self.shape else out
+
+    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
+        """pyab op-carried lowering: ``(P @ vsub).reshape(shape)`` (twin of ``__numpy_source__``)."""
+        c = low.core
+        mm = c.BinaryExpr(op=c.BinaryOp.MATMUL, lhs=args[0], rhs=args[1])
+        if self.shape:
+            return [c.ReshapeExpr(a=mm, shape=tuple(c.IntLit(value=int(d)) for d in self.shape))]
+        return [mm]
 
 
 @dataclass(frozen=True)
