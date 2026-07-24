@@ -5772,6 +5772,20 @@ def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
             return _static_dim(space)                     # re-raise
 
 
+def _is_ffs_space(s: S.Space) -> bool:
+    """Is ``s`` one of the four fundamental-subspace spaces (``Img``/``Ker``/``CoImg``/
+    ``CoKer``) — the ones :func:`_realize_ffs_for_space` factorizes via the SVD/QR/GSVD seam?
+    Exhaustive ``match`` over ``Space`` (invariant 5: no partial isinstance ladder)."""
+    match s:
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():
+            return True
+        case (S.Scalar() | S.SVar() | S.Dual() | S.OPlus() | S.OProd() | S.OPlusRep()
+              | S.WithInner() | S.App() | S.SpaceMeta()):
+            return False
+        case _:
+            assert_never(s)
+
+
 def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     """Realize the FFS basis of an ``Img``/``Ker``/``CoImg``/``CoKer`` space (`41 §1`).
 
@@ -5783,18 +5797,33 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     the very same Stmt outputs the first call produced); only the redundant *recomputation*
     is removed.
     """
-    if isinstance(space, S.OProd):
-        # An exterior power Λᵏ (k≥2) realizes as `OProd((Scalar(), Img(alt∘J)))` — a product of the
-        # ⊗-unit Scalar (dim 1) and the single alternating-image FFS. Its runtime rank (hence the
-        # orthonormal identity size) is that FFS's rank, so realize the lone non-trivial FFS factor
-        # (the dim-1 Scalar factors are kron-identity no-ops). Only the single-FFS product is
-        # structured here; a genuine multi-FFS product falls through to the standard raise (invariant 3).
-        ffs = [s for s in space.spaces if isinstance(s, (S.Img, S.Ker, S.CoImg, S.CoKer))]
-        trivial = [s for s in space.spaces if not isinstance(s, (S.Img, S.Ker, S.CoImg, S.CoKer))]
-        if len(ffs) == 1 and all(_static_dim(s) == 1 for s in trivial):
-            return _realize_ffs_for_space(ctx, ffs[0])
-    which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
-    return _realize_ffs_by_which(ctx, which, space.f)
+    match space:
+        case S.OProd(spaces=spaces):
+            # A transported top-form Λⁿ (k=n) lowers to `OProd((Scalar(), Img(alt∘J)))` — the ⊗-unit
+            # Scalar (dim 1) tensored with the single alternating-image FFS (verified 2026-07-24: the
+            # k=3 tet / P⁻Λ³ families reach here). Its runtime rank (hence the orthonormal identity
+            # size) is that FFS's rank, so realize the lone non-trivial FFS factor (dim-1 Scalar
+            # factors are kron-identity no-ops); a genuine multi-FFS product bails (invariant 3).
+            # TODO (Teo 2026-07-24, PLAN §A3): grassmann should expose an "eliminate Scalars from
+            # OProd" operator (𝟙⊗λ≅λ) and the top-form BUILD site apply it — then this realizer never
+            # sees an OProd and this arm drops out. Until then it stays (removing it breaks k=n forms).
+            ffs = [s for s in spaces if _is_ffs_space(s)]
+            trivial = [s for s in spaces if not _is_ffs_space(s)]
+            if len(ffs) == 1 and all(_static_dim(s) == 1 for s in trivial):
+                return _realize_ffs_for_space(ctx, ffs[0])
+            raise NotImplementedError(
+                f"_realize_ffs_for_space: a genuine multi-FFS product {space!r} has no structured "
+                "factorization (invariant-3 bail)")
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():
+            which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
+            return _realize_ffs_by_which(ctx, which, space.f)
+        case (S.Scalar() | S.SVar() | S.Dual() | S.OPlus() | S.OPlusRep() | S.WithInner()
+              | S.App() | S.SpaceMeta()):
+            raise NotImplementedError(
+                f"_realize_ffs_for_space: {type(space).__name__} is not a fundamental-subspace space "
+                "(only Img/Ker/CoImg/CoKer, or a single-FFS OProd)")
+        case _:
+            assert_never(space)
 
 
 def _realize_ffs_by_which(
