@@ -555,6 +555,42 @@ def oprod(*spaces: Space) -> OProd:
     return OProd(tuple(spaces))
 
 
+def drop_unit_factors(s: Space) -> Space:
+    """The tensor-unit law ``𝟙 ⊗ λ ≅ λ`` as an explicit, opt-in canonicalizer (`25 §1`).
+
+    Drops the ⊗-unit ``Scalar`` factors of an ``OProd`` (``𝟙`` is the monoidal unit of ⊗,
+    ``|𝟙| = 1``), returning the canonical space they multiply to:
+
+    - ``OProd((𝟙, λ)) → λ``          — a single non-unit survivor is UNWRAPPED (``𝟙⊗λ ≅ λ``);
+    - ``OProd((𝟙, λ, μ)) → OProd((λ, μ))``   — units dropped, ≥2 survivors stay a product;
+    - ``OProd((𝟙, 𝟙)) → 𝟙``          — an all-unit product ``≅`` the unit itself;
+    - a unit-free ``OProd`` is returned UNCHANGED (identity), **including** the deliberate
+      1-ary ``OProd((V,))`` that ``tensor_power(V, 1)`` keeps for ``Λ¹`` codomain agreement —
+      it has no unit factor, so nothing is dropped;
+    - any non-``OProd`` space is returned unchanged.
+
+    Only the literal ⊗-unit ``Scalar()`` is eliminated: a *coincidental* dimension-1 factor
+    (a rank-1 ``Img``, an ``SVar`` of dim 1, …) is NOT the unit object, so ``V ⊗ W`` with
+    ``|W| = 1`` is left intact (there is no canonical ``V ⊗ W ≅ V`` unless ``W = 𝟙``).
+
+    This is a PURE space operator, applied by the consumer that wants the reduced form (grassmann
+    does not fold it silently anywhere): e.g. a transported top-form whose codomain is built as
+    ``OProd((𝟙, Img(alt∘J)))`` applies it to hand the FFS realizer a plain ``Λⁿ = Img`` (`§A3`).
+    """
+    match s:
+        case OProd(spaces=spaces):
+            survivors = tuple(f for f in spaces if f != Scalar())
+            if not survivors:
+                return Scalar()
+            if len(survivors) == len(spaces):
+                return s                 # unit-free (incl. OProd((V,))) — identity, no churn
+            if len(survivors) == 1:
+                return survivors[0]      # 𝟙 ⊗ λ ≅ λ — unwrap the lone non-unit factor
+            return OProd(survivors)
+        case _:
+            return s
+
+
 def oplus_rep(count: object, space: Space) -> OPlusRep:
     return OPlusRep(as_dim(count), space)
 
@@ -630,6 +666,7 @@ __all__ = [
     "dual",
     "oplus",
     "oprod",
+    "drop_unit_factors",
     "oplus_rep",
     "ker",
     "img",

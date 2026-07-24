@@ -5412,12 +5412,36 @@ def _dyn_identity(ctx: _Ctx, space: S.Space, *, note: str) -> pa.SymArray:
                 pa.DynEyeOp(axis=axis), [ref], [pa.OutSpec("dyn-eye", (atom, atom))], note=note,
             )
             return out
+    # A tensor-product space's orthonormal metric is the Kron of its factor metrics: `G(A⊗B) = G(A) ⊗
+    # G(B)` (`41 §3`). Build each factor's identity — a static `eye` for a fixed-dim factor, a recursive
+    # `_dyn_identity` for a dynamic (FFS / nested-⊗) factor — and Kron them. The ⊗-unit `Scalar` factors
+    # carry the 1×1 identity (a Kron no-op, `I₁ ⊗ G = G`), so drop them: a scalar-weighted form
+    # `Scalar ⊗ Λᵏ` yields exactly the `Λᵏ` FFS δ-identity (byte-identical to a bare `Λᵏ` metric), while a
+    # genuine multi-FFS product Krons the two dynamic δ-identities (no bail). `41 §3`.
+    # Only the literal ⊗-UNIT `Scalar()` is dropped (the tensor-unit law `𝟙⊗λ≅λ`), NOT any coincidental
+    # dim-1 factor: a non-unit dim-1 factor keeps its `eye(1)` in the Kron (still exact, `kron(I₁,X)=X`).
+    if isinstance(space, S.OProd):
+        factors = [s for s in space.spaces if s != S.Scalar()]
+        if not factors:                                  # an all-⊗-unit product ≅ 𝟙 — the 1×1 identity
+            return _const(ctx, np.eye(1), note=note + ":unit")
+        return _kron_cols(ctx, [_factor_metric(ctx, s, note=note) for s in factors])
     real = _realize_ffs_for_space(ctx, space)
     delta = _shape_of(real.cols)[1]
     [out] = ctx.prog.emit_stmt(
         pa.DynEyeOp(), [real.cols], [pa.OutSpec("dyn-eye", (delta, delta))], note=note,
     )
     return out
+
+
+def _factor_metric(ctx: _Ctx, s: S.Space, *, note: str) -> pa.SymArray:
+    """The orthonormal identity metric of a single ⊗-factor (`41 §3`): a static ``np.eye`` when the
+    factor's dimension is fixed, else the dynamic ``_dyn_identity`` (an FFS δ-identity, or a nested
+    tensor product's Kron)."""
+    try:
+        d = _static_dim(s)
+    except RepresentError:
+        return _dyn_identity(ctx, s, note=note)
+    return _const(ctx, np.eye(d), note=note + ":factor-eye")
 
 
 def _dyn_zeros(
@@ -5772,20 +5796,6 @@ def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
             return _static_dim(space)                     # re-raise
 
 
-def _is_ffs_space(s: S.Space) -> bool:
-    """Is ``s`` one of the four fundamental-subspace spaces (``Img``/``Ker``/``CoImg``/
-    ``CoKer``) — the ones :func:`_realize_ffs_for_space` factorizes via the SVD/QR/GSVD seam?
-    Exhaustive ``match`` over ``Space`` (invariant 5: no partial isinstance ladder)."""
-    match s:
-        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():
-            return True
-        case (S.Scalar() | S.SVar() | S.Dual() | S.OPlus() | S.OProd() | S.OPlusRep()
-              | S.WithInner() | S.App() | S.SpaceMeta()):
-            return False
-        case _:
-            assert_never(s)
-
-
 def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     """Realize the FFS basis of an ``Img``/``Ker``/``CoImg``/``CoKer`` space (`41 §1`).
 
@@ -5798,30 +5808,21 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     is removed.
     """
     match space:
-        case S.OProd(spaces=spaces):
-            # A transported top-form Λⁿ (k=n) lowers to `OProd((Scalar(), Img(alt∘J)))` — the ⊗-unit
-            # Scalar (dim 1) tensored with the single alternating-image FFS (verified 2026-07-24: the
-            # k=3 tet / P⁻Λ³ families reach here). Its runtime rank (hence the orthonormal identity
-            # size) is that FFS's rank, so realize the lone non-trivial FFS factor (dim-1 Scalar
-            # factors are kron-identity no-ops); a genuine multi-FFS product bails (invariant 3).
-            # TODO (Teo 2026-07-24, PLAN §A3): grassmann should expose an "eliminate Scalars from
-            # OProd" operator (𝟙⊗λ≅λ) and the top-form BUILD site apply it — then this realizer never
-            # sees an OProd and this arm drops out. Until then it stays (removing it breaks k=n forms).
-            ffs = [s for s in spaces if _is_ffs_space(s)]
-            trivial = [s for s in spaces if not _is_ffs_space(s)]
-            if len(ffs) == 1 and all(_static_dim(s) == 1 for s in trivial):
-                return _realize_ffs_for_space(ctx, ffs[0])
-            raise NotImplementedError(
-                f"_realize_ffs_for_space: a genuine multi-FFS product {space!r} has no structured "
-                "factorization (invariant-3 bail)")
         case S.Img() | S.Ker() | S.CoImg() | S.CoKer():
             which = {S.Img: "img", S.Ker: "ker", S.CoImg: "coimg", S.CoKer: "coker"}[type(space)]
             return _realize_ffs_by_which(ctx, which, space.f)
-        case (S.Scalar() | S.SVar() | S.Dual() | S.OPlus() | S.OPlusRep() | S.WithInner()
-              | S.App() | S.SpaceMeta()):
+        case (S.Scalar() | S.SVar() | S.Dual() | S.OProd() | S.OPlus() | S.OPlusRep()
+              | S.WithInner() | S.App() | S.SpaceMeta()):
+            # NOT a fundamental-subspace space. An `OProd` in particular is a genuine ⊗-product, not an
+            # FFS: it has no single SVD/QR factorization. Its orthonormal metric is instead built
+            # factor-wise as the Kron of the factor metrics in `_dyn_identity` (`G(A⊗B)=G(A)⊗G(B)`), so a
+            # transported scalar-weighted top-form `OProd((Scalar, Img(alt∘J)))` never reaches here — the
+            # former "strip the Scalar and realize the lone FFS" hack (which also bailed on multi-FFS
+            # products) is gone. An `OProd` arriving here now is a real mis-modeling, not something to
+            # un-tensor.
             raise NotImplementedError(
                 f"_realize_ffs_for_space: {type(space).__name__} is not a fundamental-subspace space "
-                "(only Img/Ker/CoImg/CoKer, or a single-FFS OProd)")
+                "(only Img/Ker/CoImg/CoKer)")
         case _:
             assert_never(space)
 
