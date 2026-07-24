@@ -84,7 +84,7 @@ def test_embed_bare_ffs_emits_single_svd() -> None:
     assert counts["SvdOp"] == 0, f"expected the constant SVD folded, got {counts['SvdOp']}"
     assert counts["QrOp"] == 0
     assert counts["GSvdOp"] == 0
-    assert counts["_TransposeOp"] == 0
+    assert counts["TransposeOp"] == 0
     # δ was resolved: no Stmt output keeps a dynamic (DimAtom) shape.
     assert not any(
         o._bulk is not None and is_dynamic(o._bulk.shape)

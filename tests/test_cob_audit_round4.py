@@ -217,7 +217,7 @@ def test_4_cob_to_default_basis_uses_transpose_not_inv() -> None:
     ctx = _RM._Ctx(prog=prog, basis_env={}, inputs={})
     prog.add_output("M", _RM._cob_via_standard(ctx, lb, std))  # to = default_basis (BasisRep)
     kinds = {type(s.fn).__name__ for s in prog.statements}
-    assert "_TransposeOp" in kinds
+    assert "TransposeOp" in kinds
     assert not (kinds & {"InvOp", "PinvOp"}), "default_basis to-leg must not need Inv/Pinv"
     out = np.asarray(prog.run(feeds).get("M"), float)
     assert np.allclose(out, M), "cob(list → default_basis) == realize(list) (the columns)"

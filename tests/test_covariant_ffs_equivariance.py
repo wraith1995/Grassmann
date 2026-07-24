@@ -34,7 +34,6 @@ from grassmann.lower.represent import (
     _coerce_rep_basis,
     _rep,
     _shape_of,
-    _TransposeOp,
     _transpose_shape,
     realize_basis_cols,
 )
@@ -58,7 +57,7 @@ def _ingredients(n: int, k: int, feed_dom_cod: np.ndarray):
     ctx = _Ctx(prog=prog, basis_env={}, inputs={})
     f_rep = _coerce_rep_basis(ctx, _rep(Alt.node, ctx), note="probe:f-to-default")
     [f_cd] = prog.emit_stmt(
-        _TransposeOp(), [f_rep.array],
+        pa.TransposeOp(), [f_rep.array],
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))], note="to-(cod,dom)",
     )
     prog.add_output("F", f_cd)

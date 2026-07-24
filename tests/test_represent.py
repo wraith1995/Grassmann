@@ -460,9 +460,7 @@ def test_provenance_survives_post_pass_partial_eval() -> None:
 
 
 def _axis_len_op():  # noqa: ANN202 - test helper
-    from grassmann.lower.represent import _AxisLenOp
-
-    return _AxisLenOp
+    return pa.AxisLenOp
 
 
 def test_static_contraction_emits_runtime_rank_eq_assert() -> None:

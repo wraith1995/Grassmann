@@ -327,22 +327,11 @@ def realize_image_application(
     basis vector); ``rank``/``rank_dim`` are ``None`` (no SVD δ).
     """
     [cols] = program.emit_stmt(
-        _IdentityMatrixOp(), [f_matrix],
+        pa.IdentityOp(), [f_matrix],
         [pa.OutSpec("imgapp_" + label, (cod_dim, dom_dim))],
         note=f"ffs-basis:ImageBasis({label}):map-application",
     )
     return FfsRealization(cols=cols, rank=None, rank_dim=None, op="MapApply")
-
-
-@dataclass(frozen=True)
-class _IdentityMatrixOp:
-    def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
-        return np.asarray(A, dtype=float)
-
-    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
-        """pyab op-carried lowering: value passthrough (twin of the ``_passthrough`` numpy renderer
-        / :meth:`__call__`)."""
-        return [args[0]]
 
 
 def _sb_signs_zero_to_one(low: object, signs: object) -> object:
@@ -453,7 +442,7 @@ def _realize_via_gsvd(
     # via a thin wrapper, then SLICE the runtime-δ block in a second Stmt that consumes
     # the now-prior rank output.
     Ufull, Vfull, _S, rank = program.emit_stmt(
-        _GSvdFullOp(),
+        pa.GSvdFullOp(),
         [f_matrix, m_v, m_w],
         [pa.OutSpec("Ufull_" + label, (cod_dim, cod_dim)),
          pa.OutSpec("Vfull_" + label, (dom_dim, dom_dim)),
@@ -473,14 +462,14 @@ def _realize_via_gsvd(
     factor, ambient = (Ufull, cod_dim) if which in ("img", "coker") else (Vfull, dom_dim)
     if which in ("img", "coimg"):
         [block] = program.emit_stmt(
-            _FirstColsOp(), [factor, rank],
+            pa.FirstColsOp(), [factor, rank],
             [pa.OutSpec("ffs_" + which + "_" + label, (ambient, delta))],
             note=f"ffs-basis(metric):{which}=first-δ({label})",
         )
     else:
         comp = dim_atom if dim_atom is not None else _comp_dim(program, rank, ambient, label)
         [block] = program.emit_stmt(
-            _LastColsOp(), [factor, rank],
+            pa.LastColsOp(), [factor, rank],
             [pa.OutSpec("ffs_" + which + "_" + label, (ambient, comp))],
             note=f"ffs-basis(metric):{which}=last-(n-δ)({label})",
         )
@@ -502,7 +491,7 @@ def _take_ffs_block(
     # build V = Vhᵀ for the right-factor cases.
     if which in ("coimg", "ker"):
         [V] = program.emit_stmt(
-            _TransposeOp(),
+            pa.TransposeOp(),
             [Vh],
             [pa.OutSpec("V_" + label, (dom_dim, dom_dim))],
             note=f"ffs-basis:transpose(Vh)({label})",
@@ -512,7 +501,7 @@ def _take_ffs_block(
     if which in ("img", "coimg"):
         out_shape: tuple[int | pa.DimAtom, ...] = (factor_rows(factor, ambient), delta)
         [cols] = program.emit_stmt(
-            _FirstColsOp(),
+            pa.FirstColsOp(),
             [factor, rank],
             [pa.OutSpec("ffs_" + which + "_" + label, out_shape)],
             note=f"ffs-basis:{which}=first-δ({label})",
@@ -520,7 +509,7 @@ def _take_ffs_block(
     else:  # coker / ker: last (ambient - δ) cols
         comp = comp_atom if comp_atom is not None else _comp_dim(program, rank, ambient, label)
         [cols] = program.emit_stmt(
-            _LastColsOp(),
+            pa.LastColsOp(),
             [factor, rank],
             [pa.OutSpec("ffs_" + which + "_" + label,
                         (factor_rows(factor, ambient), comp))],
@@ -542,7 +531,7 @@ def _comp_dim(
     program: pa.Program, rank: pa.SymArray, ambient: int, label: str,
 ) -> pa.DimAtom:
     [comp_rank] = program.emit_stmt(
-        _CompRankOp(ambient), [rank],
+        pa.CompRankOp(ambient), [rank],
         [pa.OutSpec(f"comp_rank_{label}", ())],
         note=f"ffs-basis:comp-rank({ambient}−δ)({label})",
     )
@@ -555,104 +544,9 @@ def _comp_dim(
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class _TransposeOp:
-    def __call__(self, A: np.ndarray) -> np.ndarray:  # noqa: N803
-        return np.asarray(A).T
-
-
-@dataclass(frozen=True)
-class _FirstColsOp:
-    def __call__(self, A: np.ndarray, rank: np.ndarray) -> np.ndarray:  # noqa: N803
-        return np.asarray(A)[:, : int(rank)]
-
-    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
-        """pyab op-carried lowering: ``A[:, :int(rank)]`` (twin of ``numpy_source``'s hook)."""
-        c = low.core
-        rank = c.CallExpr(fn=c.Var(name="int"), args=(args[1],))
-        return [c.AccessExpr(base=args[0], index=(c.Slice(), c.Slice(stop=rank)))]
-
-
-@dataclass(frozen=True)
-class _LastColsOp:
-    def __call__(self, A: np.ndarray, rank: np.ndarray) -> np.ndarray:  # noqa: N803
-        return np.asarray(A)[:, int(rank):]
-
-    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
-        """pyab op-carried lowering: ``A[:, int(rank):]`` — the complementary (trailing) columns
-        (twin of the ``_last_cols`` numpy renderer / :meth:`__call__`; mirror of ``_FirstColsOp``)."""
-        c = low.core
-        rank = c.CallExpr(fn=c.Var(name="int"), args=(args[1],))
-        return [c.AccessExpr(base=args[0], index=(c.Slice(), c.Slice(start=rank)))]
-
-
-@dataclass(frozen=True)
-class _CompRankOp:
-    """The complement rank ``ambient − δ`` as a 0-d int — sizes the FFS complement axis.
-
-    A ``DimAtom`` resolves from its ``source`` Stmt's run-time value, so the complement
-    (Ker/CoKer) axis must be sourced from a Stmt that produces ``ambient − δ`` rather than
-    the SVD ``rank`` (which produces δ).  This op is that Stmt (`41 §1`).
-    """
-
-    ambient: int
-
-    def __call__(self, rank: np.ndarray) -> np.ndarray:
-        return np.asarray(self.ambient - int(rank))
-
-    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
-        """pyab op-carried lowering: ``ambient − int(rank)`` as a 0-d int (twin of the ``_comp_rank``
-        numpy renderer / :meth:`__call__`)."""
-        c = low.core
-        rank = c.CallExpr(fn=c.Var(name="int"), args=(args[0],))
-        return [c.BinaryExpr(op=c.BinaryOp.SUB, lhs=c.IntLit(value=int(self.ambient)), rhs=rank)]
-
-
-@dataclass(frozen=True)
-class _GSvdFullOp:
-    """Run :class:`~polyarray.GSvdOp` and return full-width metric-orthonormal factors.
-
-    Returns ``(Ufull=[U|UI], Vfull=[V|VI], S, rank)`` with *static* widths (cod×cod and
-    dom×dom), so the runtime-δ block slice happens in a downstream Stmt (which can
-    reference this op's rank output). Image/coimg blocks are the leading ``rank`` columns;
-    coker/ker the trailing complement — the FFS block↔subspace correspondence (`50 §A1`).
-    """
-
-    rcond: float | None = None
-
-    def __call__(self, A: np.ndarray, M_V: np.ndarray, M_W: np.ndarray):  # noqa: N803
-        U, UI, V, VI, S, rank = pa.GSvdOp(rcond=self.rcond)(A, M_V, M_W)
-        Ufull = np.concatenate([np.asarray(U), np.asarray(UI)], axis=1)
-        Vfull = np.concatenate([np.asarray(V), np.asarray(VI)], axis=1)
-        return Ufull, Vfull, np.asarray(S), np.asarray(rank)
-
-
-@dataclass(frozen=True)
-class _EyeOp:
-    n: int
-
-    def __call__(self) -> np.ndarray:
-        return np.eye(self.n)
-
-    def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
-        """pyab op-carried lowering: the static ``n×n`` identity (twin of the ``_eye_op`` numpy
-        renderer / :meth:`__call__`).  Built f64-exactly as
-        ``where(arange(n)[:,None] == arange(n)[None,:], 1.0, 0.0)`` (no namespace ``eye`` whose torch
-        default is float32) — mirrors ``_DynEyeOp``'s construction."""
-        c = low.core
-        n = c.IntLit(value=int(self.n))
-        r = c.ArangeExpr(start=c.IntLit(value=0), stop=n)
-        ri = c.AccessExpr(base=r, index=(c.Slice(), c.NewAxisTok()))
-        rj = c.AccessExpr(base=r, index=(c.NewAxisTok(), c.Slice()))
-        eq = c.BinaryExpr(op=c.BinaryOp.EQ, lhs=ri, rhs=rj)
-        one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
-        zero = c.ArrayExpr(obj=c.FloatLit(value=0.0), dtype=low._dtype_f64())
-        return [c.WhereExpr(cond=eq, x=one, y=zero)]
-
-
 def _eye(program: pa.Program, n: int, name: str) -> pa.SymArray:
     [eye] = program.emit_stmt(
-        _EyeOp(n), [], [pa.OutSpec(name, (n, n))], note=f"metric:identity({n})",
+        pa.EyeOp(n), [], [pa.OutSpec(name, (n, n))], note=f"metric:identity({n})",
     )
     return eye
 
