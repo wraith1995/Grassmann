@@ -17,6 +17,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-xdist>=3.5",
+    "pytest-timeout>=2.1",
     "mypy>=1.13",
 ]
 # chartlib is the modern geometry/manifold oracle used to cross-check Grassmann's
@@ -25,6 +26,7 @@ dev = [
 test = [
     "pytest>=8.0",
     "pytest-xdist>=3.5",
+    "pytest-timeout>=2.1",
     "chartlib",
     # scipy.linalg.expm builds the closed-form geodesic frame Q(x)=expm((c·x)·A)·Q₀ used by
     # tests/test_diff_analytic.py as an EXACT (non-FD) reference for the gauge-aware FFS AD.
@@ -53,6 +55,14 @@ chartlib = { path = "../chartlib", editable = true }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-n auto"          # parallel by default (pytest-xdist); ~5.5min serial → ~1min. Override with `-n0`.
+# Per-test wall-clock budget (pytest-timeout; §E1 blow-up blocker-avoidance): a symbolic/IR blow-up
+# then FAILS FAST at the budget instead of hanging/OOMing the suite. `thread` method (no SIGALRM —
+# avoids clashing with the torch 1-rank / MASTER_PORT setup, per polyarray). 300 s is generous (≫ any
+# legit single test — the whole suite is ~1 min under xdist — ≪ a real blow-up, which is OOM/40 min);
+# TIGHTEN to ~2× the slowest with `--durations` data (the oracle pattern) as a follow-up. Override ad
+# hoc with `--timeout=N`; a genuinely-heavier test raises its own bar with `@pytest.mark.timeout(N)`.
+timeout = 300
+timeout_method = "thread"
 markers = [
     "network: test hits a live external service (matrixcalculus.org); opt-in, off by default",
 ]
