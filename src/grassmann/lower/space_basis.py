@@ -259,12 +259,21 @@ def realize_ffs_basis(
             program, which, f_matrix, dom_dim, cod_dim,
             metric_dom, metric_cod, label, dim_atom=dim_atom,
         )
-    # A value-INVARIANT `f_matrix` (e.g. a numeric antisymmetrizer) is NOT special-cased here
-    # anymore: the SVD is emitted uniformly with its runtime rank δ, and the ONE general
-    # constant-fold (`polyarray.fold_numeric`, run in `represent._post_pass`) folds the constant
-    # SVD once and resolves δ to a static rank downstream.  `try_constant_ffs` survives only for
-    # the covariant `A₀` seam (`_realize_image_covariant`), where `f_matrix` is FEED-invariant
-    # but dataflow-SYMBOLIC (vertex atoms cancel) — a case the dataflow fold cannot reach.
+    # SOUND STRUCTURAL constant-fold (dependency, NOT sampling): if `f_matrix`'s dependency
+    # cone is a closed constant subprogram (no live input ref, only `stmt_out` generators — see
+    # `_cone_is_structurally_constant`), its plain-SVD frame is a PROVABLE build-time constant.
+    # Fold it once here — emitting the constant `cols` directly — instead of deferring an SvdOp
+    # whose downstream `fold_numeric` chokes on the dynamic rank-δ axis (the Argyris `∫u·v`
+    # blow-up: ~480 realizations of 2 structurally-constant operators, the 2×2 reference
+    # tangent-frame identity and the 4×4 Λ² `alt` antisymmetrizer, OOM-ing codegen).  Only the
+    # PLAIN-SVD path is folded (the metric GSVD and the sign-fixed injective QR produce a
+    # DIFFERENT orthonormalization — a Euclidean-SVD constant would be the wrong frame there),
+    # so the folded `cols` is byte-identical to what `_realize_via_svd` would produce for this
+    # `M`.  `try_constant_ffs` (sampling) stays as-is for the covariant `A₀` seam, where
+    # `f_matrix` is feed-invariant but dataflow-symbolic (vertex atoms cancel) — a case this
+    # dependency check deliberately reports NON-constant (its cone reads vertex generators).
+    if _cone_is_structurally_constant(program, f_matrix):
+        return _fold_constant_ffs(program, which, f_matrix)
     return _realize_via_svd(
         program, which, f_matrix, dom_dim, cod_dim, label, dim_atom=dim_atom,
     )
@@ -303,15 +312,175 @@ def try_constant_ffs(
             return None                                          # not feed-invariant
         u, sv, vh = np.linalg.svd(m0, full_matrices=True)
         r = int((sv > 1e-9 * max(1.0, float(sv.max()) if sv.size else 1.0)).sum())
-        if which in ("img", "coker"):
-            cols = u[:, :r] if which == "img" else u[:, r:]
-        else:                                                    # coimg / ker: right factor V = Vhᵀ
-            v = vh.T
-            cols = v[:, :r] if which == "coimg" else v[:, r:]
-        return FfsRealization(cols=pa.SymArray(np.ascontiguousarray(cols)),
-                              rank=None, rank_dim=None, op="const-svd")
+        return _const_ffs_from_svd(u, vh, r, which, op="const-svd")
     except Exception:  # noqa: BLE001 — best-effort; the dynamic SVD is the fallback
         return None
+
+
+# ---------------------------------------------------------------------------
+# Constant-fold of a structurally-constant FFS realization (dependency-based,
+# NOT sampling).  Shared "given a numeric matrix's SVD, emit the constant frame
+# for ``which``" core is :func:`_const_ffs_from_svd` (reused by the sampling
+# ``try_constant_ffs`` above and the structural fold below).
+# ---------------------------------------------------------------------------
+
+
+def _const_ffs_from_svd(
+    u: np.ndarray, vh: np.ndarray, r: int, which: str, *, op: str,
+) -> FfsRealization:
+    """Given a numeric matrix ``M``'s full SVD ``M = U·diag(S)·Vh`` and its rank ``r``,
+    emit the BUILD-TIME-CONSTANT :class:`FfsRealization` for ``which`` — the SAME range/
+    complement column convention :func:`_realize_via_svd` slices from the runtime SVD
+    factors (`41 §1`):
+
+    * ``img``   = first ``r`` columns of ``U``   (the orthonormal range basis);
+    * ``coker`` = last  ``cod−r`` columns of ``U`` (its orthogonal complement);
+    * ``coimg`` = first ``r`` columns of ``V = Vhᵀ`` (the right factor);
+    * ``ker``   = last  ``dom−r`` columns of ``V``.
+
+    ``cols`` is a build-time-constant numeric SymArray; ``rank``/``rank_dim`` are ``None``
+    (the axis is static — the numeric rank is known at build).  Shared by the sampling
+    (:func:`try_constant_ffs`) and structural (:func:`realize_ffs_basis`) constant paths so
+    both produce an IDENTICAL frame for the same numeric ``M``."""
+    if which in ("img", "coker"):
+        cols = u[:, :r] if which == "img" else u[:, r:]
+    else:                                                        # coimg / ker: right factor V = Vhᵀ
+        v = vh.T
+        cols = v[:, :r] if which == "coimg" else v[:, r:]
+    return FfsRealization(cols=pa.SymArray(np.ascontiguousarray(cols)),
+                          rank=None, rank_dim=None, op=op)
+
+
+def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -> bool:
+    """Is ``f_matrix``'s value a PROVABLE build-time constant — soundly, by DEPENDENCY
+    (not by sampling)?
+
+    Walks ``f_matrix``'s dependency cone (:func:`polyarray.dependency_cone` — the set of
+    Stmts feeding ``f_matrix``) and returns ``True`` iff the cone is a *closed constant
+    subprogram*:
+
+    1. **No Stmt input is an** :class:`~polyarray.ir.InputRef` (a reference to a declared
+       program input) — nor an :class:`~polyarray.ir.IntAtomRef` (a runtime-bound integer),
+       both of which are values supplied at run time; and
+    2. **no cell generator anywhere in the cone** (nor in ``f_matrix`` itself) has a
+       provenance ``kind`` other than ``"stmt_out"`` — i.e. no ``vertex`` / ``point`` /
+       ``coeff`` / ``param_dof`` / ``per_point`` (feed) atom is read.
+
+    **Soundness.**  A cone with no live-input reference and only ``stmt_out`` generators
+    depends on nothing outside itself: its leaves are nullary constant ops (``ConstOp`` /
+    ``EyeOp`` …), every intermediate atom is produced by a prior Stmt *in the cone*, and no
+    generator traces to a program feed.  Its value is therefore identical under every
+    binding — a build-time constant that folds without any sampling.  This is EXACT, not
+    heuristic: it never mistakes a feed-varying operator for a constant.
+
+    **Conservative.**  Any ref type that cannot be positively classified as constant-safe
+    (:class:`~polyarray.ir.OutputRef` — a prior in-cone Stmt output — or a
+    :class:`~polyarray.ir.Const` literal), or any generator whose provenance cannot be
+    looked up, forces ``False``.  We never fold when we cannot prove constancy, so a frame
+    with any live input dependency is left to the SVD/QR/GSVD seam."""
+    from polyarray import dependency_cone
+    from polyarray.ir import (
+        Const, InputRef, IntAtomRef, OutputRef, RationalRef, SymArrayRef,
+    )
+
+    def _gens_ok(atoms: set[str]) -> bool:
+        for name in atoms:
+            try:
+                prov = program.env.of(name)
+            except KeyError:
+                return False                         # unknown generator ⇒ can't prove ⇒ conservative
+            if prov.kind != "stmt_out":
+                return False                         # a feed atom (vertex/point/coeff/…) ⇒ NOT constant
+        return True
+
+    # ``f_matrix`` itself must carry no feed generator (a value whose cells directly reference
+    # a vertex/point atom depends on the feed even if no Stmt produces it).
+    if not _gens_ok(_symarray_generators(f_matrix)):
+        return False
+
+    try:
+        cone = dependency_cone(program, f_matrix)
+    except Exception:  # noqa: BLE001 — can't enumerate the cone ⇒ don't fold
+        return False
+
+    for i in cone:
+        stmt = program.statements[i]
+        for ref in stmt.in_:
+            if isinstance(ref, OutputRef):
+                continue                             # a prior IN-CONE Stmt output ⇒ constant-safe
+            if isinstance(ref, Const):
+                continue                             # a frozen numeric literal ⇒ constant-safe
+            if isinstance(ref, InputRef):
+                return False                         # references a declared program INPUT ⇒ live
+            if isinstance(ref, IntAtomRef):
+                return False                         # a runtime-bound integer ⇒ live
+            if isinstance(ref, (SymArrayRef, RationalRef)):
+                if not _gens_ok(_ref_generators(ref)):
+                    return False
+                continue
+            return False                             # unknown ref type ⇒ conservative
+    return True
+
+
+def _symarray_generators(sa: pa.SymArray) -> set[str]:
+    """The RationalFunction generator names a SymArray reads: its bulk handle's name, or
+    the generators of its per-cell RationalFunctions (twin of polyarray's ``_symarray_atoms``)."""
+    from polyarray.rational import RationalFunction
+    bulk = getattr(sa, "_bulk", None)
+    if bulk is not None:
+        return {bulk.name}
+    cells = np.asarray(sa._cells, dtype=object)
+    out: set[str] = set()
+    for c in (np.ravel(cells) if cells.shape else [cells[()]]):
+        if isinstance(c, RationalFunction):
+            out.update(c.gens)
+    return out
+
+
+def _ref_generators(ref: object) -> set[str]:
+    """The generator names a ``SymArrayRef`` / ``RationalRef`` input reads (twin of the
+    generator half of polyarray's ``_ref_deps``)."""
+    from polyarray.ir import RationalRef, SymArrayRef
+    from polyarray.rational import RationalFunction
+    if isinstance(ref, RationalRef):
+        return set(ref.rf.gens)
+    if isinstance(ref, SymArrayRef):
+        bulk = ref._bulk
+        if bulk is not None:
+            return {bulk.name}
+        cells = np.asarray(ref._cells, dtype=object)
+        out: set[str] = set()
+        for c in (np.ravel(cells) if cells.shape else [cells[()]]):
+            if isinstance(c, RationalFunction):
+                out.update(c.gens)
+        return out
+    return set()
+
+
+def _fold_constant_ffs(
+    program: pa.Program, which: str, f_matrix: pa.SymArray,
+) -> FfsRealization:
+    """Fold a PROVABLY-constant ``f_matrix`` (see :func:`_cone_is_structurally_constant`) to
+    its build-time-constant FFS ``which`` frame.  Evaluates ``f_matrix``'s cone ONCE at build
+    (:func:`polyarray.evaluate_cone` — the cone has no live inputs, so any binding gives the
+    same matrix; a zero binding is used) → the numeric operator ``M``, then emits the constant
+    range/complement basis via the SHARED :func:`_const_ffs_from_svd` core using ``M``'s SVD.
+    The result is byte-for-byte the frame :func:`_realize_via_svd` would produce for this ``M``
+    (same full SVD, same ``matrix_rank`` tolerance as :class:`~polyarray.SvdOp`, same column
+    convention) — but as a constant, with NO SvdOp/rank Stmt emitted."""
+    from polyarray import evaluate_cone
+    binding: dict[str, np.ndarray] = {}
+    for inp in program.inputs:
+        shape = tuple(d if isinstance(d, int) else 1 for d in inp.shape)  # dynamic axis ⇒ size-1 placeholder
+        binding[inp.name] = np.zeros(shape)
+    m0 = np.asarray(evaluate_cone(program, f_matrix, binding), dtype=float)
+    u, sv, vh = np.linalg.svd(m0, full_matrices=True)
+    # Numeric rank with numpy's ``matrix_rank`` rule — IDENTICAL to ``SvdOp``'s default
+    # (``rcond=None``) tolerance, so the folded constant equals what the runtime SVD path
+    # (``_realize_via_svd``) would slice for this same ``M``.
+    tol = float(sv.max()) * max(m0.shape) * float(np.finfo(float).eps) if sv.size else 0.0
+    r = int((sv > tol).sum())
+    return _const_ffs_from_svd(u, vh, r, which, op="const")
 
 
 def realize_image_application(

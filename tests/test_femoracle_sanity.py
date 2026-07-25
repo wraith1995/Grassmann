@@ -101,19 +101,23 @@ def _realize_ffs(space: C.Space, feed: dict[str, np.ndarray]):
 def test_antisymmetrizer_image_basis_rank_and_orthonormal() -> None:
     """``Img(alt(V, 2))`` — rank 1 (antisymmetric part), orthonormal columns (n = 2).
 
-    The positive half of the ``test_basisKern`` port: the antisymmetrizer's FFS basis is
-    realized through the SVD seam, with the expected numerical rank and orthonormality (the
-    old eigh/svd sanity check).  ``alt(V, 2)`` is fully concrete ⇒ no program inputs.
+    The positive half of the ``test_basisKern`` port.  ``alt(V, 2)`` is a build-time-CONSTANT
+    operator, so its FFS basis now FOLDS to a constant (the structural constant-fold on the
+    general realization path): ``op == "const"``, a STATIC rank (``real.rank is None`` — no
+    deferred SVD, no runtime ``rank`` output).  The numerical content is unchanged — the same
+    rank-1 antisymmetric line with orthonormal columns.  ``alt(V, 2)`` is fully concrete ⇒ no
+    program inputs.
     """
     import grassmann.embed as G
 
     V = G.space("V", 2)
     Alt = alt(V, 2)  # V⊗² ⊸ V⊗²; rank 1 for n = 2 (the antisymmetric line)
     out, real = _realize_ffs(G.img(Alt).node, {})
-    assert real.op == "SvdOp"
+    assert real.op == "const"        # constant operator ⇒ folded, not the SVD seam
+    assert real.rank is None         # static rank ⇒ no runtime rank output emitted
+    assert "rank" not in out
     cols = out["cols"]
-    assert int(out["rank"]) == 1
-    assert cols.shape == (4, 1)  # |Img| = r = 1 in V⊗² (dim 4)
+    assert cols.shape == (4, 1)  # |Img| = r = 1 in V⊗² (dim 4) — the static folded rank
     np.testing.assert_allclose(cols.T @ cols, np.eye(1), atol=1e-9)
 
 

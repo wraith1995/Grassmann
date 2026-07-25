@@ -118,7 +118,7 @@ from .embed import (
 )
 from .embed.ops import EmbedError
 from .lower.represent import _shape_of_space as shape_of_space
-from .lower.represent import represent
+from .lower.represent import frame_cols_program, represent
 from .stdlib import (
     absval,
     acos,
