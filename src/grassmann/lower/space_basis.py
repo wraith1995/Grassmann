@@ -355,106 +355,19 @@ def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -
     """Is ``f_matrix``'s value a PROVABLE build-time constant — soundly, by DEPENDENCY
     (not by sampling)?
 
-    Walks ``f_matrix``'s dependency cone (:func:`polyarray.dependency_cone` — the set of
-    Stmts feeding ``f_matrix``) and returns ``True`` iff the cone is a *closed constant
-    subprogram*:
+    Thin delegate to :func:`polyarray.is_structurally_constant` (the check moved to
+    polyarray, since it uses ONLY polyarray machinery — ``dependency_cone``, the ref
+    types, and ``program.env`` provenance).  Returns ``True`` iff ``f_matrix``'s
+    dependency cone is a *closed constant subprogram*: no Stmt input is a live feed
+    (:class:`~polyarray.ir.InputRef` / :class:`~polyarray.ir.IntAtomRef`) and no cell
+    generator anywhere in the cone (nor in ``f_matrix`` itself) has provenance ``kind``
+    other than ``"stmt_out"``.
 
-    1. **No Stmt input is an** :class:`~polyarray.ir.InputRef` (a reference to a declared
-       program input) — nor an :class:`~polyarray.ir.IntAtomRef` (a runtime-bound integer),
-       both of which are values supplied at run time; and
-    2. **no cell generator anywhere in the cone** (nor in ``f_matrix`` itself) has a
-       provenance ``kind`` other than ``"stmt_out"`` — i.e. no ``vertex`` / ``point`` /
-       ``coeff`` / ``param_dof`` / ``per_point`` (feed) atom is read.
-
-    **Soundness.**  A cone with no live-input reference and only ``stmt_out`` generators
-    depends on nothing outside itself: its leaves are nullary constant ops (``ConstOp`` /
-    ``EyeOp`` …), every intermediate atom is produced by a prior Stmt *in the cone*, and no
-    generator traces to a program feed.  Its value is therefore identical under every
-    binding — a build-time constant that folds without any sampling.  This is EXACT, not
-    heuristic: it never mistakes a feed-varying operator for a constant.
-
-    **Conservative.**  Any ref type that cannot be positively classified as constant-safe
-    (:class:`~polyarray.ir.OutputRef` — a prior in-cone Stmt output — or a
-    :class:`~polyarray.ir.Const` literal), or any generator whose provenance cannot be
-    looked up, forces ``False``.  We never fold when we cannot prove constancy, so a frame
-    with any live input dependency is left to the SVD/QR/GSVD seam."""
-    from polyarray import dependency_cone
-    from polyarray.ir import (
-        Const, InputRef, IntAtomRef, OutputRef, RationalRef, SymArrayRef,
-    )
-
-    def _gens_ok(atoms: set[str]) -> bool:
-        for name in atoms:
-            try:
-                prov = program.env.of(name)
-            except KeyError:
-                return False                         # unknown generator ⇒ can't prove ⇒ conservative
-            if prov.kind != "stmt_out":
-                return False                         # a feed atom (vertex/point/coeff/…) ⇒ NOT constant
-        return True
-
-    # ``f_matrix`` itself must carry no feed generator (a value whose cells directly reference
-    # a vertex/point atom depends on the feed even if no Stmt produces it).
-    if not _gens_ok(_symarray_generators(f_matrix)):
-        return False
-
-    try:
-        cone = dependency_cone(program, f_matrix)
-    except Exception:  # noqa: BLE001 — can't enumerate the cone ⇒ don't fold
-        return False
-
-    for i in cone:
-        stmt = program.statements[i]
-        for ref in stmt.in_:
-            if isinstance(ref, OutputRef):
-                continue                             # a prior IN-CONE Stmt output ⇒ constant-safe
-            if isinstance(ref, Const):
-                continue                             # a frozen numeric literal ⇒ constant-safe
-            if isinstance(ref, InputRef):
-                return False                         # references a declared program INPUT ⇒ live
-            if isinstance(ref, IntAtomRef):
-                return False                         # a runtime-bound integer ⇒ live
-            if isinstance(ref, (SymArrayRef, RationalRef)):
-                if not _gens_ok(_ref_generators(ref)):
-                    return False
-                continue
-            return False                             # unknown ref type ⇒ conservative
-    return True
-
-
-def _symarray_generators(sa: pa.SymArray) -> set[str]:
-    """The RationalFunction generator names a SymArray reads: its bulk handle's name, or
-    the generators of its per-cell RationalFunctions (twin of polyarray's ``_symarray_atoms``)."""
-    from polyarray.rational import RationalFunction
-    bulk = getattr(sa, "_bulk", None)
-    if bulk is not None:
-        return {bulk.name}
-    cells = np.asarray(sa._cells, dtype=object)
-    out: set[str] = set()
-    for c in (np.ravel(cells) if cells.shape else [cells[()]]):
-        if isinstance(c, RationalFunction):
-            out.update(c.gens)
-    return out
-
-
-def _ref_generators(ref: object) -> set[str]:
-    """The generator names a ``SymArrayRef`` / ``RationalRef`` input reads (twin of the
-    generator half of polyarray's ``_ref_deps``)."""
-    from polyarray.ir import RationalRef, SymArrayRef
-    from polyarray.rational import RationalFunction
-    if isinstance(ref, RationalRef):
-        return set(ref.rf.gens)
-    if isinstance(ref, SymArrayRef):
-        bulk = ref._bulk
-        if bulk is not None:
-            return {bulk.name}
-        cells = np.asarray(ref._cells, dtype=object)
-        out: set[str] = set()
-        for c in (np.ravel(cells) if cells.shape else [cells[()]]):
-            if isinstance(c, RationalFunction):
-                out.update(c.gens)
-        return out
-    return set()
+    EXACT, not heuristic: never mistakes a feed-varying operator for a constant.
+    Conservative: any ref/generator that cannot be positively classified constant-safe —
+    or a cone that fails to enumerate — forces ``False``, so a frame with any live input
+    dependency is left to the SVD/QR/GSVD seam."""
+    return pa.is_structurally_constant(program, f_matrix)
 
 
 def _fold_constant_ffs(
