@@ -178,23 +178,36 @@ def test_wedge_basis_invariance_bare_ffs_inputs(n: int, k: int, l: int) -> None:
     np.testing.assert_allclose(coords_image, coords_proj, atol=1e-9)
 
 
-def test_bare_ffs_input_is_dynamic_bulk() -> None:
-    """A bare FFS-typed input lowers to a dynamic bulk Program input (`42 §C1`)."""
+def test_bare_ffs_input_is_static_rank() -> None:
+    """A bare FFS-typed input whose frame operator FOLDS to a build-time constant lowers to a
+    STATIC-rank Program input with a STATIC-DIM AssertOp (`42 §C`, Option B).
+
+    ``Λ¹(ℝ⁴)`` is a constant-rank subspace (its alt operator is the 4×4 identity), so its
+    input is a plain static ``(4,)`` array — NOT a dynamic bulk input — and the C4
+    rank-consistency assert is now the STATIC-dim ``assert:ffs-input-static-rank-consistency``
+    (the runtime-bound input's subspace axis must equal the folded static rank).
+    """
     V = G.space("V", 4)
     prog_image, _ = _lower_two_bases_bare(V, 1, 1)
-    # the two operand inputs are present and dynamic (bulk, DimAtom-sized).
-    dyn_inputs = [i for i in prog_image.inputs if pa.is_dynamic(i.shape)]
-    assert len(dyn_inputs) == 2
-    for inp in dyn_inputs:
-        sa = prog_image.input(inp.name)
-        assert sa._bulk is not None
-    # a rank-consistency AssertOp (rank_eq) was emitted for the FFS inputs.
+    # the constant-rank FFS operands are STATIC (folded) — no dynamic bulk input remains.
+    assert [i for i in prog_image.inputs if pa.is_dynamic(i.shape)] == []
+    ffs_inputs = [i for i in prog_image.inputs]
+    assert len(ffs_inputs) == 2
+    for inp in ffs_inputs:
+        assert inp.shape == (4,)  # Λ¹(ℝ⁴) has static dim 4
+        assert prog_image.input(inp.name)._bulk is None  # static per-cell input, no bulk
+    # the STATIC-DIM rank-consistency AssertOp replaced the dynamic one.
     notes = [s.note for s in prog_image.statements]
-    assert any("ffs-input-rank-consistency" in n for n in notes)
+    assert any("ffs-input-static-rank-consistency" in n for n in notes)
 
 
 def test_bare_ffs_sibling_mismatch_trips_assert() -> None:
-    """Two Λᵏ siblings fed mismatched δ trips the sibling-agreement AssertOp (`42 §C4`)."""
+    """Two Λᵏ siblings fed mismatched δ trips a runtime assert (`42 §C4`).
+
+    ``Λ¹(ℝ⁴)`` folds to a static-rank input; the sibling-agreement AssertOp is preserved on
+    the static path, and the static-dim rank-consistency assert additionally guards each
+    input's subspace axis — so a mismatched-length feed still trips.
+    """
     V = G.space("V", 4)
     prog_image, _ = _lower_two_bases_bare(V, 1, 1)
     notes = [s.note for s in prog_image.statements]

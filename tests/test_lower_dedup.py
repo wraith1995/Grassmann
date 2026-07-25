@@ -130,10 +130,12 @@ def test_embed_bare_ffs_numeric_unchanged() -> None:
 
 
 def test_realize_ffs_memoized_same_outputs() -> None:
-    """Two ``_realize_ffs_for_space`` calls (same space) ⇒ one ``SvdOp``, identical outputs.
+    """Two ``_realize_ffs_for_space`` calls (same space) ⇒ ONE realization, reused.
 
-    The second call must return the cached :class:`FfsRealization` (same object, same
-    ``cols`` SymArray) without emitting a second ``SvdOp`` or transpose.
+    ``alt(V, 2)`` is a build-time-CONSTANT operator, so its FFS basis now FOLDS to a constant
+    (``op == "const"``, no ``SvdOp`` emitted at all) rather than a deferred SVD.  The
+    memoization contract is unchanged: the second call returns the SAME cached
+    :class:`FfsRealization` (same object, same ``cols`` SymArray) without re-realizing.
     """
     V = G.space("V", 4)
     space = exterior_power(V, 2).node
@@ -144,17 +146,18 @@ def test_realize_ffs_memoized_same_outputs() -> None:
     second = _realize_ffs_for_space(ctx, space)
 
     assert second is first  # same cached realization
-    assert second.cols is first.cols  # same Stmt output SymArray reused
-    assert _op_counts(prog)["SvdOp"] == 1
+    assert second.cols is first.cols  # same cols SymArray reused
+    assert first.op == "const"  # the constant alt operator folded (not the SVD seam)
+    assert _op_counts(prog)["SvdOp"] == 0  # folded ⇒ no SvdOp emitted
 
 
 def test_distinct_maps_keep_separate_factorizations() -> None:
-    """Two *different* maps each get their own ``SvdOp`` — the key never over-collapses.
+    """Two *different* maps get *distinct* realizations — the key never over-collapses.
 
-    ``Img(alt(V,2))`` and ``Img(alt(V,1))`` are distinct factorizations; the memo must
-    keep them separate (one ``SvdOp`` each), so numerics for either stay correct.  The key
-    is the map node's identity, so the SAME space object re-requested reuses the cache,
-    while a different map is never collapsed onto it.
+    ``Img(alt(V,2))`` and ``Img(alt(V,1))`` are distinct factorizations.  Both alt operators
+    are build-time CONSTANTS, so each now FOLDS to a constant (0 ``SvdOp``s) rather than a
+    deferred SVD — but the memo must still keep them SEPARATE (distinct cached realizations
+    with distinct ``cols``), while re-requesting the SAME space object reuses its cache.
     """
     V = G.space("V", 4)
     space2 = exterior_power(V, 2).node  # one Img(alt(V,2)) node, shared by consumers
@@ -162,12 +165,16 @@ def test_distinct_maps_keep_separate_factorizations() -> None:
     prog = pa.Program("two", budget=pa.SymbolicBudget.force_stmts())
     ctx = _Ctx(prog=prog, basis_env={}, inputs={})
 
-    _realize_ffs_for_space(ctx, space2)
-    _realize_ffs_for_space(ctx, space1)
-    # re-requesting the SAME space object reuses, not re-emits.
-    _realize_ffs_for_space(ctx, space2)
+    r2 = _realize_ffs_for_space(ctx, space2)
+    r1 = _realize_ffs_for_space(ctx, space1)
+    # re-requesting the SAME space object reuses, not re-realizes.
+    r2b = _realize_ffs_for_space(ctx, space2)
 
-    assert _op_counts(prog)["SvdOp"] == 2
+    assert r2b is r2  # same cached realization for the same map node
+    assert r1 is not r2  # distinct maps ⇒ distinct realizations (never over-collapsed)
+    assert r1.cols is not r2.cols
+    assert r1.op == "const" and r2.op == "const"  # both constant operators folded
+    assert _op_counts(prog)["SvdOp"] == 0
 
 
 # ===========================================================================

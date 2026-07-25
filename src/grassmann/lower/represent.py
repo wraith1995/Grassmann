@@ -172,6 +172,7 @@ def represent(
     *,
     basis_env: dict[int, B.Basis] | None = None,
     target: B.TargetBasis | B.Basis = B.AUTO,
+    supplied_frames: dict[tuple[str, int], tuple[str, int, int]] | None = None,
 ) -> pa.Program:
     """Lower a typed core ``term`` to a :class:`polyarray.Program` (`41 §3`).
 
@@ -190,11 +191,22 @@ def represent(
     * a concrete :class:`~grassmann.core.basis.Basis` — pin the result to it (must be a basis
       of the result's space).
 
+    ``supplied_frames`` (optional) is a caller-supplied FFS-frame table
+    ``(which, id(f)) -> (input_name, n_rows, n_cols)`` (``which`` ∈ ``img/ker/coimg/coker``,
+    ``"image"`` normalized to ``"img"``).  For each keyed ``(which, id(f))``, the orthonormal
+    frame of that fundamental subspace of map ``f`` is realized as a DECLARED Program INPUT
+    named ``input_name`` (of shape ``(n_rows, n_cols)``) instead of factorizing ``f`` (the
+    SvdOp/QrOp/GSvdOp seam) — the consumer half of the "frame becomes a kernel argument"
+    design (an external caller who already computed the frame supplies it, collapsing every
+    re-factorization to an input reference).  ``None`` (the default) ⇒ no supplied frames ⇒
+    byte-identical to the historical lowering.
+
     The program is built under polyarray's ``force_stmts`` budget (`42 §A4`) and the
     `41 §5` post-pass (``partial_eval``) is applied before returning.
     """
     prog = pa.Program("represent", budget=_lowering_budget())
-    ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={})
+    ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={},
+               supplied_frames=supplied_frames or {})
 
     # `106`: pre-REALIZE every free input var that carries a symbolic ``DimVar('n')``, so its
     # canonical runtime atom AND its input array both exist before any node needs an ℝⁿ shape (e.g.
@@ -217,6 +229,66 @@ def represent(
     # program (after the post-pass, which copies Stmts + appends its own).
     _attach_provenance(out)
     return out
+
+
+def frame_cols_program(
+    f: T.Term,
+    which: str = "img",
+    *,
+    source: B.Basis | None = None,
+    target: B.Basis | None = None,
+    output_name: str | None = None,
+) -> tuple[pa.Program, str]:
+    """Build a standalone "frame-prep" :class:`~polyarray.Program` for map ``f``'s frame.
+
+    The producer half of the "frame becomes a kernel argument" design (Phase 1b; the
+    consumer half is ``represent(..., supplied_frames=...)``).  Returns a program whose
+    INPUTS are ``f``'s own free term variables (e.g. the Jacobian ``J`` var's input array)
+    and whose single OUTPUT — its name returned as the tuple's 2nd element — is the
+    orthonormal frame columns ``Q``: **exactly** the ``FfsRealization.cols`` that
+    :func:`_realize_ffs_by_which` produces for the fundamental subspace ``which`` of ``f``
+    inside a full :func:`represent`.  Pointwise runs this once per cell to obtain the
+    numeric ``Q`` and feeds it to the Phase-1a ``supplied_frames`` short-circuit, collapsing
+    the per-integrand re-factorization of ``f`` to an input reference.
+
+    ``which`` ∈ ``img/image/ker/coimg/coker`` (``"image"`` normalized to ``"img"``); the
+    optional ``source``/``target`` (bases of ``f``'s domain/codomain) select the metric
+    (GSVD / covariant) realization exactly as in :func:`_realize_ffs_by_which` — both
+    ``None`` (the default) is the plain SVD/QR seam.  ``output_name`` overrides the default
+    output name ``f"frame_{which}"``.
+
+    This is a minimal :func:`represent`-like driver: it builds a fresh :class:`_Ctx` on a
+    new program, pre-realizes any ``DimVar``-carrying free input of ``f`` (mirroring
+    :func:`represent`, so an n-generic frame sizes its ℝⁿ shapes off the input), then reuses
+    the EXISTING realization machinery — :func:`_realize_ffs_by_which` (which itself lowers
+    ``f`` via :func:`_rep`, declaring ``f``'s input vars as program inputs, and emits the
+    single SvdOp/QrOp/GSvdOp factorization) — and adds its ``cols`` as the program output,
+    finishing with the same `41 §5` :func:`_post_pass` fold + provenance attach as
+    :func:`represent`.  No QR/SVD is re-implemented.
+    """
+    norm = "img" if which == "image" else which
+    prog = pa.Program("frame_cols", budget=_lowering_budget())
+    ctx = _Ctx(prog=prog, basis_env={}, inputs={}, supplied_frames={})
+
+    # `106` (mirrors `represent`): pre-REALIZE every free input var of ``f`` that carries a
+    # symbolic ``DimVar('n')``, so its canonical runtime atom + input array exist before the
+    # realization needs an ℝⁿ shape.  A fully-static frame map is untouched (byte-identical).
+    for v in _free_term_vars(f):
+        try:
+            vs = _synth(v)
+            if any(_dimvar_of_space(ax) for ax in _space_axes(vs)):
+                _rep_var(v, ctx)
+        except Exception:  # noqa: BLE001 - best-effort pre-realize; the realization still mints
+            pass
+
+    real = _realize_ffs_by_which(ctx, norm, f, source=source, target=target)
+    name = output_name if output_name is not None else f"frame_{norm}"
+    prog.add_output(name, real.cols)
+
+    # 41 §5 — the same build-then-simplify post-pass `represent` applies before returning.
+    out = _post_pass(prog)
+    _attach_provenance(out)  # 41 §6b — structured provenance on the final program's Stmts.
+    return out, name
 
 
 def _post_pass(prog: pa.Program) -> pa.Program:
@@ -378,7 +450,20 @@ class _Ctx:
     # ``id(f)`` never collapses two genuinely-distinct map nodes), the first realization is
     # cached and its :class:`FfsRealization` outputs (cols, rank, δ DimAtom) are reused by
     # every later consumer — so each distinct factorization is emitted exactly once.
-    ffs_realizations: dict[tuple[str, int], FfsRealization] = field(default_factory=dict)
+    # (The concrete key is a heterogeneous tuple — ``(norm, id(f), id(own_metric_basis))``
+    # for the direct seam, ``("img-cov", id(f), id(source), id(target))`` for the covariant
+    # one — so the annotation is the widened ``tuple[str | int, ...]``.)
+    ffs_realizations: dict[tuple[str | int, ...], FfsRealization] = field(default_factory=dict)
+    # A caller-supplied frame table: ``(which, id(f)) -> (input_name, n_rows, n_cols)``.
+    # When a key is present, ``_realize_ffs_by_which`` realizes that FFS frame of ``f`` as a
+    # DECLARED Program INPUT named ``input_name`` (shape ``(n_rows, n_cols)``) instead of
+    # factorizing ``f`` (the SvdOp/QrOp/GSvdOp seam) — this is the consumer half of the
+    # "frame becomes a kernel argument" design: an external caller who has already computed
+    # the orthonormal frame supplies it once, collapsing every re-factorization to an input
+    # reference.  A pure read-only lookup table: shared by reference across every sub-``_Ctx``
+    # (like ``basis_env``), keyed on the SAME ``(which, id(f))`` normalization the memo uses
+    # (``"image"`` → ``"img"``).  Empty by default ⇒ the lowering is byte-identical.
+    supplied_frames: dict[tuple[str, int], tuple[str, int, int]] = field(default_factory=dict)
     # Canonical per-``(which, id(f))`` subspace-dimension ``DimAtom`` (`51 §FFS-δ`).
     # The dynamic FFS dimension of a map ``f`` is metric-INDEPENDENT (the rank, or its
     # complement for ker/coker), so the metric-free SVD and the metric GSVD of one
@@ -669,7 +754,19 @@ def _rep_var(e: T.Var, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> R
     _ensure_dimvar_atoms(ctx, e, space)          # `106`: symbolic ℝⁿ axes → canonical runtime atoms
     shape = _shape_of_space_dyn(space, ctx)
     if _is_static(shape):
-        arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
+        from grassmann.infer.subspace import is_ffs
+        # An FFS-typed input whose subspace dim is STATIC ONLY because its frame operator
+        # folded to a build-time constant (`space_basis._cone_is_structurally_constant`) —
+        # i.e. the dim is NOT derivable from the type (``dim_of`` raises), yet the realized
+        # frame has a static column count.  It is a STATIC-rank Program input (not a dynamic
+        # bulk one), and its runtime-bound subspace axis is guarded by a STATIC-DIM AssertOp
+        # (Teo: "input dims asserted to be these static ones") — the replacement for the
+        # dynamic C4 rank-consistency assert.  A type-static FFS dim (the injective ``QrOp``
+        # image, ``dim Img = |dom|``) keeps the plain static path below, byte-identical.
+        if is_ffs(space) and not _ffs_dim_is_type_static(space):
+            arr = _make_static_ffs_input(ctx, e, space, shape)
+        else:
+            arr = _make_input(ctx, _var_name(e), shape, note=f"var:{e.name}")
         rep = Rep(arr, basis, space)
         ctx.inputs[e.uid] = rep
         return rep
@@ -738,10 +835,84 @@ def _make_dynamic_ffs_input(
                 note=f"assert:ffs-input-rank-consistency({e.name})",
             )
 
-    # (ii) sibling agreement: inputs that must share a δ (e.g. ``a, b : Λᵏ``) match shapes.
-    #      Keyed structurally by the defining FFS map's (which, |dom|, |cod|) so that two
-    #      *alpha-equivalent* spaces (whose binder uids differ ⇒ raw space objects are
-    #      unequal) are still recognised as the same FFS ⇒ same δ.
+    # (ii) sibling agreement (shared with the static-rank path).
+    _emit_ffs_sibling_assert(ctx, e, space, arr, tuple(in_shape))
+    return arr
+
+
+def _ffs_dim_is_type_static(space: S.Space) -> bool:
+    """Is the FFS space's subspace dimension known STATICALLY FROM THE TYPE (`51 §FFS-δ`)?
+
+    ``True`` for a type-static FFS dim — the injective ``QrOp`` image, ``dim Img = |dom|`` —
+    whose input is a plain static array with no rank AssertOp (byte-identical, unchanged).
+    ``False`` when ``dim_of`` raises (a generic ``Img``/``Ker`` whose rank is not derivable
+    from the type): such a space is static ONLY because its frame operator folded to a
+    build-time constant, and takes the static-rank-with-static-dim-assert path."""
+    try:
+        _static_dim(space)
+        return True
+    except RepresentError:
+        return False
+
+
+def _make_static_ffs_input(
+    ctx: _Ctx, e: T.Var, space: S.Space, shape: tuple[int, ...],
+) -> pa.SymArray:
+    """Allocate a bare FFS-typed Var whose frame operator FOLDED to a build-time constant
+    (so its subspace rank is statically known) as a STATIC-rank Program input — NOT a dynamic
+    bulk one (`42 §C`, Option B).
+
+    The dynamic C4 rank-consistency assert is replaced by a **static-dim** ``AssertOp``: the
+    runtime-bound input's subspace axis must equal the folded rank ``r`` (= the realized
+    frame's static column count).  The sibling-agreement assert is preserved (shared with the
+    dynamic path).  Teo: "the correct thing is for input dims to be asserted to be these
+    static ones"."""
+    name = _var_name(e)
+    arr = _make_input(ctx, name, shape, note=f"var:{e.name}")
+
+    # (i) static-dim consistency: the bound input's subspace axis (0) must equal the folded
+    #     subspace dim = the realized (constant) frame's column count — a static int now, so
+    #     ``real.rank`` is ``None`` (the dynamic-δ guard would skip it) and we key off the
+    #     STATIC ``real.cols`` column axis instead.  ``AxisLenOp(1)`` of the constant frame
+    #     evaluates to ``r`` at run time, giving the same ``rank_eq`` shape as the dynamic path.
+    from grassmann.infer.subspace import is_ffs
+    if is_ffs(space):
+        real = _realize_ffs_for_space(ctx, space)
+        [delta_in] = ctx.prog.emit_stmt(
+            pa.AxisLenOp(axis=0), [arr],
+            [pa.OutSpec("delta_in", ())],
+            note=f"ffs-input:δ({e.name})",
+        )
+        [delta_sub] = ctx.prog.emit_stmt(
+            pa.AxisLenOp(axis=1), [real.cols],
+            [pa.OutSpec("delta_sub", ())],
+            note=f"ffs-input:δ-subspace-static({space!r})",
+        )
+        ctx.prog.emit_stmt(
+            pa.AssertOp(
+                kind="rank_eq",
+                msg=f"FFS input {e.name!r}: δ must equal static dim({space!r})",
+            ),
+            [arr, delta_sub, delta_in],
+            [pa.OutSpec("rank_ok", shape)],
+            note=f"assert:ffs-input-static-rank-consistency({e.name})",
+        )
+
+    # (ii) sibling agreement (shared with the dynamic path).
+    _emit_ffs_sibling_assert(ctx, e, space, arr, shape)
+    return arr
+
+
+def _emit_ffs_sibling_assert(
+    ctx: _Ctx, e: T.Var, space: S.Space, arr: pa.SymArray,
+    out_shape: tuple[int | pa.DimAtom, ...],
+) -> None:
+    """Emit the `42 §C4` sibling-agreement ``shape_eq`` AssertOp: FFS inputs that must share a
+    δ (e.g. ``a, b : Λᵏ``) match shapes.  Keyed structurally by the defining FFS map's
+    ``(which, |dom|, |cod|)`` so two *alpha-equivalent* spaces (whose binder uids differ ⇒ raw
+    space objects compare unequal) are still recognised as the same FFS ⇒ same δ.  Shared by
+    the dynamic (:func:`_make_dynamic_ffs_input`) and static (:func:`_make_static_ffs_input`)
+    input paths."""
     key = _ffs_sibling_key(space)
     sibling = ctx.ffs_input_siblings.get(key) if key is not None else None
     if key is not None and sibling is None:
@@ -753,10 +924,9 @@ def _make_dynamic_ffs_input(
                 msg=f"FFS sibling inputs in {space!r} must share δ",
             ),
             [arr, sibling],
-            [pa.OutSpec("sibling_ok", tuple(in_shape))],
+            [pa.OutSpec("sibling_ok", out_shape)],
             note=f"assert:ffs-input-sibling({e.name})",
         )
-    return arr
 
 
 def _rep_external(
@@ -2707,7 +2877,8 @@ def _build_lam_subprogram(
     # longer depends on the parent ``basis_env``, which the cache key does not capture (`41 §3`).
     input_uids = {v.uid for v in sub_inputs}
     sub_env = {k: val for k, val in parent.basis_env.items() if k not in input_uids}
-    sub_ctx = _Ctx(prog=sub, basis_env=sub_env, inputs={})
+    sub_ctx = _Ctx(prog=sub, basis_env=sub_env, inputs={},
+                   supplied_frames=parent.supplied_frames)
     # Force each sub-input to be allocated as a sub-Program input, in the declared order
     # (so the parent's operand list lines up positionally with sub.inputs).
     in_bases = [_rep_var(v, sub_ctx).basis for v in sub_inputs]
@@ -3927,7 +4098,8 @@ def _rep_llam_vmap(
 
     # 1. Build the body sub-Program (mirror ``_build_lam_subprogram``'s structure).
     sub = pa.Program("llam_body", budget=_lowering_budget())
-    sub_ctx = _Ctx(prog=sub, basis_env=ctx.basis_env, inputs={})
+    sub_ctx = _Ctx(prog=sub, basis_env=ctx.basis_env, inputs={},
+                   supplied_frames=ctx.supplied_frames)
     # 2. Inputs IN ORDER: the bound vars FIRST (each a rank-1 input in its binding basis), then the
     #    body's free vars.  Lowering the body may ALSO pull in extra inputs (e.g. the abstract
     #    vectors of a pinned ``ListBasis`` frame), which appear AFTER in ``sub.inputs`` order.
@@ -5861,6 +6033,18 @@ def _realize_ffs_by_which(
     cached = ctx.ffs_realizations.get(key)
     if cached is not None:
         return cached
+    # "frame becomes a kernel argument": if the caller supplied a pre-computed frame for this
+    # ``(which, id(f))``, realize it as a DECLARED Program INPUT instead of factorizing ``f``
+    # (skip the ``_rep(f)`` + (cod,dom) transpose + realize_ffs_basis SVD/QR/GSVD below).  Keyed
+    # on the 2-tuple ``(norm, id(f))`` — the metric-independent identity of the subspace — while
+    # still stored under the full metric-keyed ``key`` so the within-program memo dedups repeats.
+    supplied = ctx.supplied_frames.get((norm, id(f)))
+    if supplied is not None:
+        name, nrow, ncol = supplied
+        cols = _make_input(ctx, name, (nrow, ncol), note=f"ffs-supplied:{name}")
+        real = FfsRealization(cols=cols, rank=None, rank_dim=None, op="supplied")
+        ctx.ffs_realizations[key] = real
+        return real
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
     [f_cd] = ctx.prog.emit_stmt(
