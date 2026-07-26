@@ -115,3 +115,82 @@ def test_unused_kwarg_is_byte_identical() -> None:
 
     # Sanity: the baseline really did factorize (so the guard is meaningful, not vacuous).
     assert any(name == "QrOp" for (name, _n, _o) in base[0])
+
+
+# ---------------------------------------------------------------------------
+# Seam gaps surfaced by the POINTWISE producer (P2): one input per supplied
+# frame per Program, and a frame realized only inside a vmap body.
+# ---------------------------------------------------------------------------
+
+
+def _supplied_ctx(f, name="frame_img", nrow=4, ncol=2):
+    ctx_cls = _RM._Ctx
+    return ctx_cls(prog=pa.Program("t"), basis_env={}, inputs={},
+                   supplied_frames={("img", id(f)): (name, nrow, ncol)})
+
+
+def test_one_input_per_supplied_frame_per_program() -> None:
+    """The SAME supplied frame requested twice under DIFFERENT metric keys declares ONE input.
+
+    ``_realize_ffs_by_which``'s memo is keyed on the own-side metric basis, so a second request
+    with a different (or absent) metric misses the memo and re-enters the supplied branch. It must
+    reuse the already-declared input: two same-named inputs would give the second one de-duplicated
+    ATOMS, and every statement reading the first would have no binding at run (the failure the
+    pointwise producer hit on a FEEC face chart)."""
+    _term, f, _W = _build()
+    ctx = _supplied_ctx(f)
+    r_first = _RM._realize_ffs_by_which(ctx, "img", f)
+    ctx.ffs_realizations.clear()                             # a MISS on the metric-keyed memo
+    r_again = _RM._realize_ffs_by_which(ctx, "img", f)
+
+    names = [i.name for i in ctx.prog.inputs]
+    assert names.count("frame_img") == 1, names
+    assert r_first.op == r_again.op == "supplied"
+    assert r_first.cols is r_again.cols                      # the SAME input array, not a twin
+    assert not any(isinstance(s.fn, _FRAME_OPS) for s in ctx.prog.statements)
+
+
+def test_metric_realization_is_not_stood_in_for_by_a_supplied_frame() -> None:
+    """A supplied frame is the PLAIN (Euclidean) orthonormalization. A request carrying a METRIC
+    basis wants the G-orthonormal GSVD frame — a DIFFERENT frame — so the supply must be declined
+    there and the factorization emitted as usual."""
+    _term, f, W = _build()
+    ctx = _supplied_ctx(f)
+    real = _RM._realize_ffs_by_which(ctx, "img", f, target=_SB.default_basis(W))
+    assert real.op != "supplied", "a metric frame must NOT be replaced by the Euclidean one"
+    assert "frame_img" not in [i.name for i in ctx.prog.inputs]
+    # (WHICH realization it is instead is the metric seam's business: the GSVD, or — when the whole
+    # cone is structurally constant, as it is for a constant metric — its build-time-constant fold.)
+
+
+def test_frame_realized_inside_a_vmap_body_is_declared_on_the_parent() -> None:
+    """A supplied frame reached ONLY through a body-internal realization (the `LLam` vmap sub-
+    Program) is declared on the PARENT too, and the parent's array is passed down as the shared
+    operand — the by-name channel free vars use (`41 §7`). Without it the lowering raised
+    "LLam vmap body needs sub-input 'frame_…', but the parent has no matching input"."""
+    V, W = C.base("V", 2), C.base("W", 4)
+    f = C.var("f", C.linear_map_space(V, W), props=P.inj)
+    imgf = C.img(f, source=V, target=W)
+    x = C.var("x", W)
+    term = C.llam(x, body=C.project(x, imgf))                # the projection AS A MAP (vmap'd body)
+
+    prog = represent(term, supplied_frames={("img", id(f)): ("frame_img", 4, 2)})
+
+    names = [i.name for i in prog.inputs]
+    assert names.count("frame_img") == 1, names              # declared on the parent, exactly once
+    # `f` itself may still be an input (the vmap lowering reads the map for its own coordinate
+    # bookkeeping) — what must be gone is its FACTORIZATION, which the supplied frame replaces.
+    assert not any(isinstance(s.fn, _FRAME_OPS) for s in prog.statements)
+
+    # …and it RUNS: the map's matrix is Qᵀ (project onto Img f in the supplied frame's coords).
+    rng = np.random.default_rng(1)
+    Fm = rng.standard_normal((2, 4))
+    Q, _ = np.linalg.qr(Fm.T)
+    binding = {"frame_img": Q}
+    f_name = _var_key(f)
+    if f_name in names:                                      # f itself is still read by the vmap
+        binding[f_name] = Fm
+    out = np.asarray(prog.run(binding)["result"], float)
+    # The LLam's matrix is stored (dom, cod) = (4, 2): column j of Qᵀ is row j here.
+    assert out.shape == (4, 2)
+    np.testing.assert_allclose(out, Q, atol=1e-12)

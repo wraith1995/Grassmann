@@ -4176,6 +4176,13 @@ def _rep_llam_vmap(
     for spec in sub.inputs:
         if spec.name in bound_names:
             continue
+        # A caller-SUPPLIED frame is a kernel argument identified by NAME — never a Var, so it must
+        # be matched BEFORE the ``_var_name`` uid parse below: a supplied name may itself end in
+        # ``_<digits>`` (e.g. pointwise's per-chart ``frame_c1_0``), which that parse would read as
+        # ``uid = 0`` and silently feed the operand of the var with that uid instead of the frame.
+        if _supplied_frame_shape(ctx, spec.name) is not None:
+            shared_arrays.append(_declare_supplied_frame(ctx, spec.name))
+            continue
         uid = _uid_of_var_name(spec.name)
         want_b = sub_basis_by_uid.get(uid)
         cur = ctx.inputs.get(uid)
@@ -4189,6 +4196,8 @@ def _rep_llam_vmap(
         # A sub-only input not realized in the parent above (a frame vector reached only through a
         # body-internal basis realization) — fall back to the parent's matching input array by name.
         parent_arr = ctx.prog.input_arrays.get(spec.name)
+        if parent_arr is None:
+            parent_arr = _declare_supplied_frame(ctx, spec.name)
         if parent_arr is None:
             raise RepresentError(
                 f"represent: LLam vmap body needs sub-input {spec.name!r}, but the parent has no "
@@ -6038,10 +6047,20 @@ def _realize_ffs_by_which(
     # (skip the ``_rep(f)`` + (cod,dom) transpose + realize_ffs_basis SVD/QR/GSVD below).  Keyed
     # on the 2-tuple ``(norm, id(f))`` — the metric-independent identity of the subspace — while
     # still stored under the full metric-keyed ``key`` so the within-program memo dedups repeats.
-    supplied = ctx.supplied_frames.get((norm, id(f)))
+    # A supplied frame is the PLAIN (metric-free) orthonormalization of ``f`` — the Euclidean
+    # SVD/QR frame this seam emits when no metric enters.  A METRIC realization (the GSVD below,
+    # and the covariant branch above) produces a DIFFERENT, G-orthonormal frame, so the supply
+    # must NOT stand in for it: take the offer only on the metric-free path.  (Same rule the
+    # constant-frame fold uses in ``space_basis.realize_ffs_basis``.)
+    supplied = (ctx.supplied_frames.get((norm, id(f)))
+                if metric_dom is None and metric_cod is None else None)
     if supplied is not None:
-        name, nrow, ncol = supplied
-        cols = _make_input(ctx, name, (nrow, ncol), note=f"ffs-supplied:{name}")
+        # ONE input per supplied frame per Program: the memo key carries the metric basis, so the
+        # same frame is requested again with a different (irrelevant) metric — declaring it afresh
+        # each time would put two same-named inputs on the program (the second with de-duplicated
+        # atoms), and the statements reading the first would have no binding at run.
+        cols = _declare_supplied_frame(ctx, supplied[0])
+        assert cols is not None                              # `supplied[0]` IS a supplied-frame name
         real = FfsRealization(cols=cols, rank=None, rank_dim=None, op="supplied")
         ctx.ffs_realizations[key] = real
         return real
@@ -6236,6 +6255,36 @@ def _uid_of_var_name(name: str) -> int | None:
     head, _sep, tail = name.rpartition("_")
     if head and tail.isdigit():
         return int(tail)
+    return None
+
+
+def _supplied_frame_shape(ctx: _Ctx, name: str) -> tuple[int, int] | None:
+    """The ``(n_rows, n_cols)`` of the caller-supplied frame named ``name`` — ``None`` if ``name``
+    is not one of ``ctx.supplied_frames``' input names.  The frame table is keyed by the map, so
+    this is the reverse lookup (by input NAME), which is how the lowering recognizes a supplied
+    frame wherever it meets one as a bare Program-input name."""
+    for supplied_name, nrow, ncol in ctx.supplied_frames.values():
+        if supplied_name == name:
+            return (nrow, ncol)
+    return None
+
+
+def _declare_supplied_frame(ctx: _Ctx, name: str) -> pa.SymArray | None:
+    """Declare a caller-SUPPLIED frame (``supplied_frames``) as an input of ``ctx``'s program, if
+    ``name`` is one — else ``None``.
+
+    A supplied frame is a KERNEL ARGUMENT, not a value derived inside the program, so any lowering
+    level that needs it may declare it: when a body sub-Program realized the frame but the parent
+    never did (the frame is reached only through a body-internal basis realization), the parent
+    declares the SAME named input here and passes its array down as the shared operand — exactly
+    the by-name fallback free vars use (`41 §7`).  Idempotent: an already-declared input is
+    returned as is."""
+    existing = ctx.prog.input_arrays.get(name)
+    if existing is not None:
+        return existing
+    for supplied_name, nrow, ncol in ctx.supplied_frames.values():
+        if supplied_name == name:
+            return _make_input(ctx, name, (nrow, ncol), note=f"ffs-supplied:{name}")
     return None
 
 
