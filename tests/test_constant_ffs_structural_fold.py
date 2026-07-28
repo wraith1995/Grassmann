@@ -112,11 +112,23 @@ def test_constant_operator_folds_no_svd(M, dim, which):
     assert real.op == "const"
     assert real.rank is None and real.rank_dim is None
 
-    # (c) cols numerically equals the SVD range/complement basis of the same M.
+    # (c) cols is an orthonormal basis of THE SAME SUBSPACE the SVD which-slice spans.
+    #
+    # Asserted as "same subspace", NOT "same columns as `_svd_cols`". The which-slice fixes the
+    # subspace, but its individual columns are only determined up to a rotation INSIDE each
+    # degenerate singular subspace — and `_ANTISYM4`'s nonzero singular values ARE degenerate, so
+    # `u[:, :r]` is a discontinuous function of `M` there and pinning it would be pinning
+    # arbitrary rounding. grassmann now realizes the frame canonically from the range PROJECTOR
+    # (`_canonical_subspace_basis`), which is continuous in the subspace; the equal-projector test
+    # below is the strongest statement that is actually well-posed, and
+    # `test_constant_fold_frame_is_canonical_per_subspace` adds the property the old byte-identity
+    # assertion was standing in for.
     got = np.asarray(real.cols.cells, dtype=float)
     expected = _svd_cols(M, which)
     assert got.shape == expected.shape
-    assert np.allclose(got, expected)
+    assert np.allclose(got.T @ got, np.eye(got.shape[1]), atol=1e-12), "columns not orthonormal"
+    assert np.allclose(got @ got.T, expected @ expected.T, atol=1e-12), (
+        "folded frame spans a different subspace than the SVD which-slice")
 
 
 def test_eye_via_eyeop_folds():
@@ -181,6 +193,35 @@ def test_constant_chain_folds():
     assert _cone_is_structurally_constant(program, ct) is True
     real = realize_ffs_basis(program, "img", ct, 4, 4)
     assert not _has_factorization(program)
-    assert np.allclose(
-        np.asarray(real.cols.cells, dtype=float), _svd_cols(_ANTISYM4.T, "img")
-    )
+    got = np.asarray(real.cols.cells, dtype=float)
+    expected = _svd_cols(_ANTISYM4.T, "img")            # same SUBSPACE, not the same columns
+    assert np.allclose(got @ got.T, expected @ expected.T, atol=1e-12)
+
+
+def test_constant_fold_frame_is_canonical_per_subspace():
+    """ONE subspace ⇒ ONE realized frame, whatever operator presented it.
+
+    This is the property the old ``cols == _svd_cols(M)`` assertion was standing in for, stated so
+    that it is well-posed. Two operators with the SAME range must fold to the IDENTICAL frame —
+    otherwise a change of basis composed across two ``Space`` nodes naming one subspace comes out a
+    rotation, which is the σ defect recorded in ``.claude/NOTES-sigma-plumbing.md``: for a
+    reoriented facet, ``Img(alt_canonical)`` and ``Img(alt_permuted)`` are different nodes for the
+    same subspace, and no memo can tie them because their keys legitimately differ.
+
+    ``_ANTISYM4`` is the operator that exposed it: its nonzero singular values are DEGENERATE, so
+    ``u[:, :r]`` moves by O(1) under 1e-15 of rounding. Here the two presentations are ``M`` and
+    ``M·G`` for an invertible ``G`` — same range by construction, unrelated SVD factors.
+    """
+    rng = np.random.default_rng(0)
+    g = rng.standard_normal((4, 4))
+    assert abs(np.linalg.det(g)) > 1e-6
+
+    frames = []
+    for name, op in (("plain", _ANTISYM4), ("regauged", _ANTISYM4 @ g)):
+        program = pa.Program("t")
+        real = realize_ffs_basis(program, "img", _const_matrix(program, op, name), 4, 4)
+        frames.append(np.asarray(real.cols.cells, dtype=float))
+
+    assert frames[0].shape == frames[1].shape
+    assert np.allclose(frames[0], frames[1], atol=1e-9), (
+        f"one subspace realized two frames:\n{frames[0]}\nvs\n{frames[1]}")
