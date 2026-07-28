@@ -707,10 +707,40 @@ def _synth_remetric(e: Remetric, ctx: Ctx) -> Space:
     return with_inner(s, e.metric)
 
 
+def _spliced_oprod(*parts: Space) -> Space:
+    """⊗ of ``parts`` with any PRODUCT operand spliced in — ``X ⊗ (Y ⊗ Z) ↦ X ⊗ Y ⊗ Z``.
+
+    ⊗ is associative, so a nested and a flat product denote one space; but they are different
+    NODES, and `unify`'s ``(OProd, OProd)`` arm compares arities, so the two spellings of ``V⊗³``
+    could not be unified at all (there is no rewrite between them that makes progress — it recursed
+    until the stack blew before that arm was guarded).
+
+    ``Kron`` is where the nested spelling was minted: ``kron(f, kron(g, h))`` built its domain as
+    ``oprod(a0, oprod(a1, a2))``, so a ``kron`` CHAIN right-nests while ``tensor_power(V, k)`` builds
+    the same space FLAT. They then met — the Λᵏ ambient against the antisymmetrizer's domain — and
+    ``P⁻₁Λ³(TET)`` could not be assembled. ``k = 2`` escaped only because a two-factor chain has no
+    nesting to disagree about.
+
+    Splicing HERE is layout-neutral, which is why it is done here rather than in ``oprod`` itself:
+    the nesting sits INSIDE the ``Dual(dom)`` / ``cod`` factor of a map space, and ``shape_of_space``
+    counts that factor as ONE axis whatever its interior, so the map keeps its ``(dom, cod)`` matrix
+    shape either way. Splicing inside ``oprod`` globally does NOT have that property — it flattens a
+    map space's ``Dual(dom) ⊗ cod`` into its component axes, and the FFS/SVD seam then receives a
+    rank-6 array where it expects an ``(n^k, n^k)`` matrix (measured).
+    """
+    flat: list[Space] = []
+    for p in parts:
+        if isinstance(p, OProd) and len(p.spaces) > 1:
+            flat.extend(p.spaces)
+        else:
+            flat.append(p)
+    return oprod(*flat)
+
+
 def _synth_kron(e: Kron, ctx: Ctx) -> Space:
     a0, b0 = _map_dom_cod_resolved(e.f, ctx)
     a1, b1 = _map_dom_cod_resolved(e.g, ctx)
-    return linear_map_space(oprod(a0, a1), oprod(b0, b1))
+    return linear_map_space(_spliced_oprod(a0, a1), _spliced_oprod(b0, b1))
 
 
 def _synth_lift(e: Lift | InvLift, ctx: Ctx) -> Space:

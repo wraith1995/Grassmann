@@ -232,8 +232,38 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             if (isinstance(na, OProd) and isinstance(nb, OProd)
                     and len(na.spaces) == len(nb.spaces)):
                 _unify_seq(na.spaces, nb.spaces, store, "⊗")
-            else:  # dropping the tensor-unit (Scalar) changed the arity ⇒ re-dispatch
+            elif na is not a or nb is not b:
+                # dropping the tensor-unit (Scalar) changed a side ⇒ re-dispatch. Guarded on ACTUAL
+                # progress: `_drop_scalar_factors` returns its argument UNCHANGED when there is no
+                # unit to drop, so re-dispatching unconditionally re-entered `unify` on the IDENTICAL
+                # pair and recursed until the stack blew (measured: still `RecursionError` at a
+                # 20000-frame limit, the same pair observed at depth 100 and 300).
                 unify(na, nb, store)
+            else:
+                # Two unit-free products of DIFFERENT arity. Mathematically these can still denote one
+                # space, because ⊗ is associative and this model encodes a map as a tensor
+                # (`A ⊸ (B ⊸ C) ≅ A*⊗B*⊗C`): `tensor_power(V, k)` builds the FLAT product while
+                # `linear_map_space(cod, dom) = oprod(dual(dom), cod)` RIGHT-NESTS as soon as the
+                # codomain is compound, so `V*⊗V*⊗V*` meets `V*⊗(V*⊗V*)`. Λ³ is the first degree at
+                # which that is observable (for k = 2 both sides are arity 2), and it is what blocks
+                # `P⁻₁Λ³(TET)`.
+                #
+                # Deciding it HERE would be wrong: `shape_of_space` makes ⊗ factors SEPARATE AXES, so
+                # the two spellings realize as `(3,3,3)` and `(3,9)`; unifying them would let
+                # mismatched layouts meet silently. Splicing at construction (in `oprod`) is likewise
+                # not a drop-in — it flattens a map space's `Dual(dom) ⊗ cod` into its component axes,
+                # so `Alt_3 : V⊗³ ⊸ V⊗³` stops being the `(27,27)` MATRIX the SVD seam expects
+                # (measured). Resolving it needs the value-tensor / map-space distinction settled in
+                # the representation. Until then, FAIL LOUDLY rather than hang.
+                raise UnifyError(
+                    f"⊗ arity mismatch: {len(a.spaces)} ≢ {len(b.spaces)} factors, and neither side "
+                    "has a Scalar (⊗-unit) factor to drop, so there is no rewrite that makes "
+                    "progress.\nThis is usually ONE space spelled two ways — a flat "
+                    "`tensor_power(V, k)` product meeting a right-nested map space "
+                    "`linear_map_space` builds by currying. They are isomorphic under the tensor "
+                    "encoding of maps but have different AXIS structure, so they must be made to "
+                    "agree at construction, not here.\n"
+                    f"  a = {a!r}\n  b = {b!r}")
             return
         # Scalar is the ⊗-unit (``X ⊗ ℝ ≅ X``) and a single-factor product is its factor
         # (``OProd((X,)) ≅ X`` — a k=1 exterior/tensor power ``V⊗¹``). So an ``A ⊸ ℝ`` (≡ ``A* ⊗
