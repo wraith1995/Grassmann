@@ -226,6 +226,8 @@ def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
             if m is not None:
                 return m
             return _leaf_primitive(S, T, primitives, "Embed")
+        case _ if _ffs_chart_to_chart(S, T) is not None:
+            return _ffs_chart_to_chart(S, T)
         case (OProd(ss), OProd(ts)) if len(ss) == len(ts):
             return _tensor_map(S, T, primitives)
         case (OPlus(ss), OPlus(ts)) if len(ss) == len(ts):
@@ -284,6 +286,45 @@ def _ffs_immersion(S: Space, T: Space) -> Term | None:
     if isinstance(S, Img) and _normalize(_img_ambient(S)) == _normalize(T):
         return S.f                             # EMBED  `Img(f) ⊸ cod(f)` (`Img(f) ≅ dom(f)` via `f`)
     return None
+
+
+def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
+    """The `Img(f_A) ⊸ Img(f_B)` MAP for two immersions of the SAME ambient — the chart-to-chart convert,
+    ``f_B⁺ ∘ f_A`` (out of A through the ambient, into B).
+
+    The VALUE level already had this (``_pb_ffs``: embed to the ambient, convert, project). The MAP level
+    did not: ``transport_map`` is reached from the ``Dual`` branch — a covector transports by the
+    *reversed primal map*, so a `Dual(Img(f_A)) → Dual(Img(f_B))` needs `transport_map(Img(f_B), Img(f_A))`
+    as a TERM — and no arm matched, so it fell to `_leaf_primitive` and raised for a relation the spaces
+    fully determine. That asymmetry is why a form-valued DOF could be transported but a covector-valued
+    one could not.
+
+    This is also the map that carries a σ ORIENTATION. Two parameterizations of one edge (canonical and
+    permuted) are two `Img` spaces over one ambient, and the convert between them is exactly `−1` on a
+    reversed edge — the sign living in the composite `f_B⁺ f_A`, so it survives the frames' sign-fixed QR
+    (`diag R > 0`), which cancels the sign out of either realized basis on its own.
+
+    BOTH sides must be STRICT sub-ambient immersions. A full-dimensional `Img` (a cell's own `J`, where
+    `Img(J) == Rᵉ`) is not a chart-to-chart pair: the face-into-cell inclusion `Img(J_face) ⊸ Img(J_cell)`
+    has its own honest spelling in the consumer (built inside the calculus, with the constant reference
+    `ι_std` this cannot know), and answering it here mistypes that path. Consumers supply it through
+    `primitives`, which is consulted first.
+    """
+    from grassmann.core.space import Img
+    from grassmann.core.term import Pinv, chain
+    from grassmann.lower._dims import DynamicDim, dim_of
+
+    if not (isinstance(S, Img) and isinstance(T, Img)) or S.f is T.f:
+        return None
+    if _normalize(_img_ambient(S)) != _normalize(_img_ambient(T)):
+        return None
+    try:
+        for space in (S, T):
+            if dim_of(space) >= dim_of(_img_ambient(space)):
+                return None
+    except DynamicDim:
+        return None
+    return chain(Pinv(T.f), S.f)                          # apply S.f first, then project into T
 
 
 def _img_ambient(img: Space) -> Space:
