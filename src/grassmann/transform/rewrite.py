@@ -184,6 +184,59 @@ def subst(term: Term, mapping: dict[int, Term]) -> Term:
     return go(term)
 
 
+def map_spaces_in_term(term: Term, on_space) -> Term:
+    """Apply a :func:`~grassmann.lower.space_basis.map_space` rewrite to EVERY space the term embeds.
+
+    The general form of :func:`_subst_space_in_term`, which does this traversal but is hardwired to
+    ``SVar(name) := repl``. ``on_space`` is any ``Space -> Space`` rewrite (typically a
+    :func:`~grassmann.lower.space_basis.map_space` closure), so ONE rewrite can be applied to a space
+    AND to a term's embedded spaces without being written twice.
+
+    Why it is needed: a space rewrite reaches only the spaces you hand it, and an immersion can live in
+    a term's TYPE ANNOTATIONS rather than in its value positions. `Λᵏ(Img J) = Img(alt)` keeps its
+    `Img(J)` inside the binder `Var('x', Dual(Img(J)))` of `alt`'s `LLam` — so
+    :func:`subst` (value ``Var``s only) does not see it, and rewriting the value SPACE does not either.
+    Without this, a σ-permuted readout worked for a 1-form (immersion is a leaf of the value space) and
+    silently did nothing for a k ≥ 2 form.
+
+    Structural and unconditional: it does not know what the caller is swapping. Returns ``term``
+    unchanged (identity, not a copy) when no embedded space is rewritten.
+    """
+    return _map_spaces(term, on_space)
+
+
+def _map_spaces(term: Term, on_space) -> Term:
+    """The shared traversal: rebuild `term`, applying `on_space` to every Space-typed field and
+    recursing into every Term-typed one. Identity-preserving when nothing changes."""
+    def go(node: Term) -> Term:
+        new_fields: dict[str, object] = {}
+        changed = False
+        for fld in fields(node):
+            val = getattr(node, fld.name)
+            if isinstance(val, tuple):
+                new = tuple(
+                    go(c) if is_term(c) else (on_space(c) if is_space(c) else c) for c in val
+                )
+                if any(a is not b for a, b in zip(new, val, strict=True)):
+                    changed = True
+                new_fields[fld.name] = new
+            elif is_term(val):
+                nv = go(val)
+                if nv is not val:
+                    changed = True
+                new_fields[fld.name] = nv
+            elif is_space(val):
+                nv = on_space(val)
+                if nv is not val:
+                    changed = True
+                new_fields[fld.name] = nv
+            else:
+                new_fields[fld.name] = val
+        return replace(node, **new_fields) if changed else node
+
+    return go(term)
+
+
 def _subst_space_in_term(term: Term, name: str, repl: Space) -> Term:
     """Substitute the rigid space variable ``SVar(name) := repl`` through every space that
     ``term`` embeds (used by space-binder β). Recurses into Term children and applies
