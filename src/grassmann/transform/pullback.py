@@ -214,11 +214,17 @@ def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
             i = _summand_index(T, S)
             if i is not None:
                 return TupleProject(S, i)
+            m = _ffs_immersion(S, T)
+            if m is not None:
+                return m
             return _leaf_primitive(S, T, primitives, "Project")
         case _ if is_subspace(S, T):
             i = _summand_index(S, T)
             if i is not None:
                 return TupleEmbed(T, i)
+            m = _ffs_immersion(S, T)
+            if m is not None:
+                return m
             return _leaf_primitive(S, T, primitives, "Embed")
         case (OProd(ss), OProd(ts)) if len(ss) == len(ts):
             return _tensor_map(S, T, primitives)
@@ -233,6 +239,53 @@ def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
             ))
         case _:  # audit: ok EX-WILDCARD — pair-dispatch negative answer: no structural rule => caller primitives or loud PullbackError (_leaf_primitive) [approved Teo 2026-07-03]
             return _leaf_primitive(S, T, primitives, "no primitive map")
+
+
+def _ffs_immersion(S: Space, T: Space) -> Term | None:
+    """The `Img(f) ↔ ambient` transport, built from the map that DEFINES the image — the canonical
+    BAIL for a subspace pair where neither side is a direct ⊕-summand.
+
+    `Img(f)` is a subspace of `cod(f)` but not a *summand* of it, so `_summand_index` returns `None`
+    and both subspace arms used to fall straight to `_leaf_primitive` — i.e. they demanded a
+    CALLER-SUPPLIED map for something the space already determines. But `Img` CARRIES `f`
+    (`Img.f: Term`), so the maps are ours to build:
+
+        project  `cod(f) ⊸ Img(f)` :  `f ∘ f†`   — the projector onto the image
+        embed    `Img(f) ⊸ cod(f)` :  `f ∘ f†`   — the SAME term; on the image it is the identity,
+                                                    and its codomain is already the ambient
+
+    `f†` is the Moore–Penrose `Pinv`; on an INJECTIVE `f` it is the exact corestriction inverse on
+    the image and is metric-independent there (the same fact `pointwise`'s `restrict` relies on when
+    it uses `Pinv(J_face)`). So one composite serves both directions, and `pullback` then recurses
+    `Dual`/`⊗`/`⊕`/`Λᵏ` over it for free — a covector transports by the metric-free transpose of this
+    very map.
+
+    Why this belongs HERE and not in the caller: it is a **bail** in the canonical-arm sense (docs/
+    auditing.md §0) — the arm handles the case itself, always available and always correct, needing
+    nothing from outside. `primitives` (like `supplied_frames`) is a caller-supplied ESCAPE HATCH and
+    an OPTIMIZATION; correctness must never depend on one. A consumer supplying this leaf by hand was
+    re-deriving what `Img` already knows, and had to wrap it in an `LLam` whose free map then failed
+    to realize in a vmap sub-body (`41 §7`).
+
+    Returns `None` when neither side is an `Img` with a usable ambient, leaving the existing
+    `primitives`/`PullbackError` path exactly as it was.
+    """
+    from grassmann.core.space import Img
+    from grassmann.core.term import Pinv, chain
+
+    for space, other in ((S, T), (T, S)):
+        if isinstance(space, Img) and _normalize(_img_ambient(space)) == _normalize(other):
+            return chain(space.f, Pinv(space.f))
+    return None
+
+
+def _img_ambient(img: Space) -> Space:
+    """The ambient space an `Img(f)` sits inside — its declared `target`, else `cod(f)`."""
+    from grassmann.infer.synth import map_domain_codomain
+
+    if img.target is not None:
+        return img.target
+    return map_domain_codomain(img.f)[1]
 
 
 def _leaf_primitive(S: Space, T: Space, primitives, why: str) -> Term:
