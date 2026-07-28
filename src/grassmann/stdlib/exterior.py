@@ -147,7 +147,20 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
         result = G.img(alt(V, k))
     else:
         Vk = tensor_power(V, k)
-        projector = G.var(f"Alt_{k}", Vk >> Vk, props=G.rank(rank))
+        # `G.tensor(G.dual(Vk), Vk)` — the map space `Vk ⊸ Vk` spelled DIRECTLY, NOT via `Vk >> Vk`.
+        # `>>` deliberately re-associates (`27 Q1`: `V >> W >> R == V >> (W >> R)`): when its LEFT
+        # operand looks like a map space `~a ⊗ b` it peels the domain and curries. For a FORM base
+        # (`V = Dual(...)`, every FEEC k-form) `Vk = V*⊗…⊗V*` has a `Dual` FIRST FACTOR, so
+        # `_peel_map_space` mistakes the Λᵏ AMBIENT for a curried map and curries it — and
+        # `Vk >> Vk` never builds `Dual(Vk) ⊗ Vk` at all. The projector's space then came out
+        # RIGHT-NESTED while `tensor_power` builds the ambient FLAT, so one space had two spellings
+        # (`V*⊗V*⊗V*` vs `V*⊗(V*⊗V*)`) and `unify` had no rewrite that made progress between them.
+        # That blocked `P⁻₁Λ³(TET)`; k = 2 escaped only because both spellings land at arity 2.
+        # Spelling it directly also keeps `Alt_k` the 2-axis `(n^k, n^k)` MATRIX the SVD/FFS seam
+        # expects — which is why the alternative (splicing nested products inside `oprod`) is NOT a
+        # fix: it flattens `Dual(dom) ⊗ cod` into its component axes and the factorization seam then
+        # receives a rank-6 array instead of a matrix (measured).
+        projector = G.var(f"Alt_{k}", G.tensor(G.dual(Vk), Vk), props=G.rank(rank))
         result = G.img(projector)
     # F1: record the base space V as an OPTIONAL side note so derived ops (``wedge``) can
     # read it directly instead of structurally re-deriving it from the Img/Alt term. The
