@@ -395,6 +395,64 @@ def try_constant_ffs(
 # ---------------------------------------------------------------------------
 
 
+def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
+    """A CANONICAL orthonormal basis of ``span(q)`` — a function of the SUBSPACE (and the ambient
+    index order) alone, not of the factorization that produced ``q``.
+
+    Why this exists (`73 Topic 2`; measured 2026-07-28).  ``U[:, :r]`` is only determined up to a
+    rotation *inside* each degenerate singular subspace, so it is a **discontinuous** function of
+    the operator: the Λᵏ antisymmetrizer's nonzero singular values are degenerate (measured
+    ``σ = 1, 1, 1, 0…`` for the 3-dim ``Λ²`` case) and the operator we factor is invariant only
+    BY CANCELLATION (~1e-15, not bitwise), so 1e-15 of rounding rotated the realized frame by
+    O(1).  Two ``Space`` nodes naming the same subspace — ``Img(alt_canonical)`` and
+    ``Img(alt_permuted)`` for a reoriented facet — then got unrelated frames, and the change of
+    basis composed across them came out a rotation instead of the signed permutation a σ-oriented
+    DOF owes.  No memo can tie those two: their keys are legitimately different (measured: 564 FFS
+    realizations, 140 id-keys vs 137 structural keys — keying structurally buys ~3 duplicate
+    factorizations and nothing else), and the memo cannot span compilations anyway.
+
+    The fix is to stop asking the factorization for the frame.  The orthogonal **projector**
+    ``P = q·qᵀ`` is unique for a given subspace and CONTINUOUS in it (unlike ``q`` itself), so a
+    basis read off ``P`` in a fixed ambient order is stable at ~1e-15 where the SVD basis was
+    stable at O(1).  This is pivoted Cholesky of a projector in index order: greedily orthogonalize
+    ``P``'s columns ``P·e_j``, ``j = 0…n-1``, keeping those with a non-negligible residual.
+
+    It is SELF-SIGN-FIXING, which is why no ad-hoc sign convention appears here: after
+    orthogonalizing against the accepted columns, ``w = P'·e_j`` with ``P'`` still an orthogonal
+    projector, so ``w[j] = e_jᵀP'ᵀP'e_j = ‖w‖² ≥ 0`` — the accepted column's own coordinate is
+    positive by construction, and ``‖w‖² = w[j]`` exactly (used as the acceptance test).
+
+    NOTE this deliberately does NOT carry orientation, and must not: a 3-cycle and a transposition
+    of a facet's vertices span the SAME plane, so ``Λᵏ`` of it is the same subspace and any
+    subspace-keyed rule returns the same vector for both.  The σ sign rides on the ambient
+    chart-to-chart ``convert`` in the middle of ``_pb_ffs`` (``Project ∘ convert ∘ Embed``), where
+    it belongs and where it was measured correct (single-factor convert, ``det = −1``): with
+    ``P_S = P_T = p`` the composite is ``pᵀ(det M · p) = det M = ±1``.  Making the two endpoints
+    agree is exactly what turns that into a clean sign."""
+    n, r = q.shape
+    if r <= 0:
+        return np.zeros((n, 0))
+    p = q @ q.T
+    tol = float(np.sqrt(np.finfo(float).eps))              # ‖w‖² = w[j]; accept well above rounding
+    cols: list[np.ndarray] = []
+    for j in range(n):
+        w = np.array(p[:, j], dtype=float)
+        for c in cols:                                     # modified Gram–Schmidt, twice for stability
+            w -= float(c @ w) * c
+        for c in cols:
+            w -= float(c @ w) * c
+        nrm = float(np.linalg.norm(w))
+        if nrm > tol:
+            cols.append(w / nrm)
+            if len(cols) == r:
+                break
+    if len(cols) != r:                                     # cannot happen for a rank-r projector
+        raise AssertionError(
+            f"_canonical_subspace_basis: recovered {len(cols)} of {r} columns from a rank-{r} "
+            "projector — the greedy acceptance tolerance is mis-scaled for this operator.")
+    return np.ascontiguousarray(np.stack(cols, axis=1))
+
+
 def _const_ffs_from_svd(
     u: np.ndarray, vh: np.ndarray, r: int, which: str, *, op: str,
 ) -> FfsRealization:
@@ -417,6 +475,10 @@ def _const_ffs_from_svd(
     else:                                                        # coimg / ker: right factor V = Vhᵀ
         v = vh.T
         cols = v[:, :r] if which == "coimg" else v[:, r:]
+    # The SLICE fixes the SUBSPACE; the slice's own columns do not fix a frame (they are arbitrary
+    # inside a degenerate singular subspace). Re-derive the frame canonically from that subspace so
+    # one subspace has ONE frame everywhere — see `_canonical_subspace_basis`.
+    cols = _canonical_subspace_basis(np.ascontiguousarray(cols))
     return FfsRealization(cols=pa.SymArray(np.ascontiguousarray(cols)),
                           rank=None, rank_dim=None, op=op)
 
