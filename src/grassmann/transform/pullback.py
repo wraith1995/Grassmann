@@ -273,9 +273,16 @@ def _ffs_immersion(S: Space, T: Space) -> Term | None:
     from grassmann.core.space import Img
     from grassmann.core.term import Pinv, chain
 
-    for space, other in ((S, T), (T, S)):
-        if isinstance(space, Img) and _normalize(_img_ambient(space)) == _normalize(other):
-            return chain(space.f, Pinv(space.f))
+    # DIRECTION MATTERS — see the `f ∘ f†` note above. `transport_map(S, T)` promises a map whose
+    # CODOMAIN IS `T`, and `f ∘ f†` has codomain `cod(f)` (the ambient) in BOTH directions. Into an
+    # `Img(f)` that is the wrong space: it typechecks loosely, since `Img(f) ⊆ cod(f)`, but the
+    # transported value then carries AMBIENT coordinates instead of the image's own. A consumer that
+    # reads coordinates OFF the result — the metric-free k-form integrate lane sums output COORDINATES
+    # against reference weights — silently gets `edim` of them where the image has `rank(f)`.
+    if isinstance(T, Img) and _normalize(_img_ambient(T)) == _normalize(S):
+        return Pinv(T.f)                       # PROJECT `cod(f) ⊸ Img(f)`, in the image's own coords
+    if isinstance(S, Img) and _normalize(_img_ambient(S)) == _normalize(T):
+        return S.f                             # EMBED  `Img(f) ⊸ cod(f)` (`Img(f) ≅ dom(f)` via `f`)
     return None
 
 
