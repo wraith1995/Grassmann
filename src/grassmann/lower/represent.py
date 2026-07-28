@@ -1201,6 +1201,15 @@ def _rep_oprod(
     einsum labels and stack into the output; any *free* (basis-index) labels a factor
     carries — the ``LLam``→coordinate-tensor binding (`41 §3`) — ride through verbatim to
     the output, so the outer product of LLam-bound matrix operands is the full map tensor.
+
+    A ``Scalar`` factor is PRESENT in the output as its own singleton axis (Teo 2026-07-28):
+    ``_shape_of_space``'s ⊗ contract is one axis per factor, and a bare ``Var`` of the same
+    ``OProd`` space already declares that way — so a value REDUCED from an ``OProdV`` must
+    match, else the same space lowers to two shapes depending on the term's syntactic form
+    (measured: the σ readout's ``Eval(Kron(Identity(Scalar()), …))`` produced ``(1, 1)``
+    where the canonical weighted body produced ``(1,)``, and the two rows could not stack).
+    The scalar's array is 0-axis, so the einsum cannot mint the axis; a bulk-preserving
+    ``ReshapeOp`` inserts the singletons after the fold.
     """
     space = _synth(e)
     # (B) structural split: a BasisProd target of matching arity ⇒ build each factor in its
@@ -1216,7 +1225,8 @@ def _rep_oprod(
     space_labels = ""
     free_labels = ""
     space_dims: list[int] = []
-    for r in reps:
+    canonical_dims: list[int] = []                    # per-factor axes WITH Scalar singletons present
+    for v, r in zip(vectors, reps):
         ashape = _shape_of(r.array)
         n_space = len(ashape) - len(r.free_labels)
         these_space = "".join(chr(next_label + i) for i in range(n_space))
@@ -1227,13 +1237,24 @@ def _rep_oprod(
         space_labels += these_space
         free_labels += r.free_labels
         space_dims.extend(ashape[:n_space])
+        if n_space == 0 and isinstance(_synth(v), S.Scalar):
+            canonical_dims.append(1)                  # the ⊗-unit still owns an output axis
+        else:
+            canonical_dims.extend(ashape[:n_space])
     out_labels = space_labels + free_labels
     spec = ",".join(operand_specs) + "->" + out_labels
-    out_shape = tuple(space_dims) + tuple(_dim_of_free(reps))
+    free_dims = tuple(_dim_of_free(reps))
+    out_shape = tuple(space_dims) + free_dims
     [out] = ctx.prog.emit_stmt(
         pa.EinsumStmtOp(spec), [r.array for r in reps],
         [pa.OutSpec("oprod", out_shape)], note="oprod:outer-einsum",
     )
+    if canonical_dims != space_dims:                  # some Scalar factor lacked its axis ⇒ insert it
+        [out] = ctx.prog.emit_stmt(
+            pa.ReshapeOp(tuple(canonical_dims) + free_dims), [out],
+            [pa.OutSpec("oprod", tuple(canonical_dims) + free_dims)],
+            note="oprod:scalar-factor-axes",
+        )
     rep = Rep(out, basis, space, free_labels=free_labels)
     if subs is not None:
         return rep  # already in `want`
@@ -2476,8 +2497,12 @@ def _fuse_arg_to_slot(
     prod = 1
     for d in space_dims:
         prod *= d
-    if space_dims[0] == slot or prod != slot:
-        return arg_rep
+    if prod != slot:
+        return arg_rep                                # genuine mismatch → the dim assert reports it
+    # NOTE no `space_dims[0] == slot` early-out: with n_space ≥ 2 the arg gets ONE einsum label for
+    # the slot, so leaving it unfused can only ever be a label/rank mismatch. The case that guard
+    # excluded — trailing singleton axes, e.g. a `(1, 1)` value of `OProd((Scalar, Dual V₁))` against
+    # a fused dim-1 slot — is exactly the ⊗-unit-axes convention (Teo 2026-07-28) and must fuse.
     new_shape = (slot, *ashape[n_space:])
     if _rational_lane():
         fused = pa.SymArray(
@@ -3158,6 +3183,33 @@ def _rep_solve_apply(
     return _rep(T.Eval(T.Solve(f), (0,), (v,)), ctx, target)
 
 
+def _fused_matvec(ctx: _Ctx, fp, v_arr, space: S.Space, out_name: str, note: str):
+    """The ``ab,a->b`` matvec against a 2-axis fused map array ``fp`` (``(|cod|, |dom|)``), with the
+    VALUE convention reconciled: a value mirrors ``_shape_of_space`` (one axis per ⊗ factor, ``Scalar``
+    factors included — Teo 2026-07-28), while the map's dom/cod axes are FUSED. So a multi-axis value
+    is reshaped (bulk-preserving) onto the map's dom axis before contracting, and the rank-1 result is
+    unfused to the result space's canonical shape. A rank-1 value with a rank-1 result space takes
+    exactly the historical single-einsum path (byte-identical). Dynamic (``DimAtom``) axes are left
+    alone — they were never fusable here."""
+    vshape = _shape_of(v_arr)
+    if len(vshape) != 1 and all(isinstance(d, int) for d in vshape):
+        fused = (int(np.prod(vshape)) if len(vshape) else 1,)
+        [v_arr] = ctx.prog.emit_stmt(
+            pa.ReshapeOp(fused), [v_arr], [pa.OutSpec(out_name, fused)], note=note + ":fuse-v")
+    sshape = _shape_of_space(space)
+    if len(sshape) == 1:
+        [out] = ctx.prog.emit_stmt(
+            pa.EinsumStmtOp("ab,a->b"), [fp, v_arr], [pa.OutSpec(out_name, sshape)], note=note)
+        return out
+    flat = (int(np.prod([int(d) for d in sshape])) if len(sshape) else 1,)
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("ab,a->b"), [fp, v_arr], [pa.OutSpec(out_name, flat)], note=note)
+    [out] = ctx.prog.emit_stmt(
+        pa.ReshapeOp(tuple(sshape)), [out], [pa.OutSpec(out_name, tuple(sshape))],
+        note=note + ":unfuse")
+    return out
+
+
 def _rep_pinv_apply(
     e: T.PinvApply, f: T.Term, v: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
@@ -3192,10 +3244,7 @@ def _rep_pinv_apply(
             v_arr = _coerce_rep_to_target(
                 ctx, v_rep, cod_slot, note="pinvapply:cob-v→cod-slot",
             ).array
-        [out] = ctx.prog.emit_stmt(
-            pa.EinsumStmtOp("ab,a->b"), [fp, v_arr],
-            [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
-        )
+        out = _fused_matvec(ctx, fp, v_arr, space, "pinvapply", "pinvapply:matvec")
         rep = Rep(out, _inverse_apply_basis(f_rep.basis, space), space)
         match target:
             case B.TargetBasis.STD:
@@ -3234,10 +3283,7 @@ def _rep_pinv_apply(
     )
     # fp is the pinv map cod⊸dom stored (|cod|,|dom|); applying to v[cod] contracts the
     # input (cod) axis 0, mirroring the Eval contraction convention (`41 §3`).
-    [out] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("ab,a->b"), [fp, v_arr],
-        [pa.OutSpec("pinvapply", _shape_of_space(space))], note="pinvapply:matvec",
-    )
+    out = _fused_matvec(ctx, fp, v_arr, space, "pinvapply", "pinvapply:matvec")
     # Honest tag: ``x = f⁺ v`` lives in f's domain-slot primal basis (PinvOp acts in whatever
     # basis ``f``/``v`` arrived in).
     rep = Rep(out, _inverse_apply_basis(f_rep.basis, space), space)
