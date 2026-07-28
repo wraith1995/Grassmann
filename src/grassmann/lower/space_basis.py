@@ -122,6 +122,39 @@ def map_basis(space: S.Space, choice) -> B.Basis:
             assert_never(unreachable)
 
 
+def map_space(space: S.Space, choice) -> S.Space:
+    """Structure-mirroring SPACE functor — the `Space -> Space` sibling of :func:`map_basis`.
+
+    ``choice(space) -> Space | None`` is consulted at EVERY node first (``None`` = no override
+    there); un-overridden structural wrappers (``Dual``/``OPlus``/``OProd``/``OPlusRep``/
+    ``WithInner``) mirror and recurse; every other un-overridden node is returned unchanged.
+    Consumers supply ONLY their leaf policy instead of hand-rolling the tower walk — the same
+    argument that produced ``map_basis`` (fem audit #18).
+
+    Written for swapping ONE immersion for another inside a value space: a form-valued DOF read
+    against a σ-PERMUTED chart is the same space with ``Img(J_canon)`` replaced by ``Img(J_perm)``
+    everywhere it occurs, however deep it sits under ``Dual``/``⊗``/``⊕``.
+    """
+    picked = choice(space)
+    if picked is not None:
+        return picked
+    match space:
+        case S.Dual(s):
+            return S.dual(map_space(s, choice))
+        case S.OPlus(spaces):
+            return S.OPlus(tuple(map_space(s, choice) for s in spaces))
+        case S.OProd(spaces):
+            return S.OProd(tuple(map_space(s, choice) for s in spaces))
+        case S.OPlusRep(count, s):
+            return S.OPlusRep(count, map_space(s, choice))
+        case S.WithInner(s, g):
+            return S.WithInner(map_space(s, choice), g)
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer() | S.Scalar() | S.SVar() | S.App() | S.SpaceMeta():
+            return space                                  # FFS/leaf nodes are the walk's leaves
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def _maybe(s: S.Space | None) -> B.Basis | None:
     return None if s is None else default_basis(s)
 
