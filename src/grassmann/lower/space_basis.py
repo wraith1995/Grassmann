@@ -122,7 +122,7 @@ def map_basis(space: S.Space, choice) -> B.Basis:
             assert_never(unreachable)
 
 
-def map_space(space: S.Space, choice) -> S.Space:
+def map_space(space: S.Space, choice, *, map_choice=None) -> S.Space:
     """Structure-mirroring SPACE functor — the `Space -> Space` sibling of :func:`map_basis`.
 
     ``choice(space) -> Space | None`` is consulted at EVERY node first (``None`` = no override
@@ -131,28 +131,65 @@ def map_space(space: S.Space, choice) -> S.Space:
     Consumers supply ONLY their leaf policy instead of hand-rolling the tower walk — the same
     argument that produced ``map_basis`` (fem audit #18).
 
+    ``map_choice(f) -> Term | None`` (optional) is applied to an FFS node's DEFINING MAP, so a consumer
+    can rewrite ``Img(f)`` by rewriting ``f`` itself — without matching over ``Space`` in its own code
+    (which would be a partial ladder over a closed sum type). ``None`` = leave the map alone.
+
     Written for swapping ONE immersion for another inside a value space: a form-valued DOF read
     against a σ-PERMUTED chart is the same space with ``Img(J_canon)`` replaced by ``Img(J_perm)``
-    everywhere it occurs, however deep it sits under ``Dual``/``⊗``/``⊕``.
+    everywhere it occurs, however deep it sits under ``Dual``/``⊗``/``⊕`` — or inside the map that
+    DEFINES an FFS node, which is where ``Λᵏ(Img J) = Img(alt)`` keeps it.
     """
     picked = choice(space)
     if picked is not None:
         return picked
+    mc = map_choice
     match space:
         case S.Dual(s):
-            return S.dual(map_space(s, choice))
+            return S.dual(map_space(s, choice, map_choice=mc))
         case S.OPlus(spaces):
-            return S.OPlus(tuple(map_space(s, choice) for s in spaces))
+            return S.OPlus(tuple(map_space(s, choice, map_choice=mc) for s in spaces))
         case S.OProd(spaces):
-            return S.OProd(tuple(map_space(s, choice) for s in spaces))
+            return S.OProd(tuple(map_space(s, choice, map_choice=mc) for s in spaces))
         case S.OPlusRep(count, s):
-            return S.OPlusRep(count, map_space(s, choice))
+            return S.OPlusRep(count, map_space(s, choice, map_choice=mc))
         case S.WithInner(s, g):
-            return S.WithInner(map_space(s, choice), g)
-        case S.Img() | S.Ker() | S.CoImg() | S.CoKer() | S.Scalar() | S.SVar() | S.App() | S.SpaceMeta():
-            return space                                  # FFS/leaf nodes are the walk's leaves
+            return S.WithInner(map_space(s, choice, map_choice=mc), g)
+        case S.Img(f, src, tgt):
+            return S.Img(_map_f(f, map_choice), _map_opt(src, choice, map_choice),
+                         _map_opt(tgt, choice, map_choice))
+        case S.Ker(f, src, tgt):
+            return S.Ker(_map_f(f, map_choice), _map_opt(src, choice, map_choice),
+                         _map_opt(tgt, choice, map_choice))
+        case S.CoImg(f, src, tgt):
+            return S.CoImg(_map_f(f, map_choice), _map_opt(src, choice, map_choice),
+                         _map_opt(tgt, choice, map_choice))
+        case S.CoKer(f, src, tgt):
+            return S.CoKer(_map_f(f, map_choice), _map_opt(src, choice, map_choice),
+                         _map_opt(tgt, choice, map_choice))
+        case S.Scalar() | S.SVar() | S.App() | S.SpaceMeta():
+            return space                                  # true leaves
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def _map_f(f, map_choice):
+    """An FFS node's defining map under the optional `map_choice`; unchanged when it declines."""
+    if map_choice is None:
+        return f
+    out = map_choice(f)
+    return f if out is None else out
+
+
+def _map_opt(s: S.Space | None, choice, map_choice=None) -> S.Space | None:
+    """`map_space` on an FFS node's optional ENDPOINT space.
+
+    An FFS node is not a leaf of the walk: a buried immersion reaches the tower only through the
+    `source`/`target` of the map that defines it. `Λᵏ(Img J) = Img(alt)` keeps its `Img(J)` in `alt`'s
+    endpoints, so treating `Img` as a leaf made a σ readout on a FACE (a 2-form moment) find nothing to
+    substitute — `tgt == src`, no transport, and every `O_σ` came back `I`. `_immersed_basis`/
+    `_immersed_endpoints` already recurse this way on the BASIS side; this is the Space-side match."""
+    return None if s is None else map_space(s, choice, map_choice=map_choice)
 
 
 def _maybe(s: S.Space | None) -> B.Basis | None:

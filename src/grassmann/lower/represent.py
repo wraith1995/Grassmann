@@ -3601,6 +3601,13 @@ def _rep_project(
     v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space), note="project:operand-to-default")
     # projected dim = #columns of the sub-basis (may be a runtime δ_f DimAtom, `42 §B`).
     out_dim = _shape_of(P)[1]
+    # NOTE (measured 2026-07-28, do not re-attempt without new evidence): `ProjectOp` is `Pᵀ·v`, which
+    # gives coordinates in `sub_basis` only when `P` is ORTHONORMAL, and `docs/basis-honesty-handoff.md`
+    # records `Project(v, Img(J))` as silent-wrong under a pinned `J` for exactly that reason — so a
+    # `P⁺ = (PᵀP)⁻¹Pᵀ` branch gated on a non-orthonormal sub-basis looks like the fix. It is NOT the
+    # cause of the σ face defect: instrumenting `_subspace_cols` on that path shows every sub-basis is
+    # an endpoint-free `ProjectedBasis` with `PᵀP = I` exactly, and the pinv branch changed the result
+    # bit-for-bit not at all. Left unwritten rather than shipped inert and untested.
     [out] = ctx.prog.emit_stmt(
         pa.ProjectOp(), [P, v_arr],
         [pa.OutSpec("project", (out_dim,))],
@@ -6125,6 +6132,17 @@ def _realize_ffs_by_which(
         return real
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
+    # HONESTY: the same `fem #15` seam fix the sibling `_realize_image_basis` already applies, and
+    # `docs/basis-honesty-handoff.md` records as this seam's outstanding bug. `_rep(f)` is realized at
+    # `AUTO`, so pinning `f`'s own operands to a non-default basis lands the realized frame in THOSE
+    # coordinates while it is still tagged `default_basis(Img f)` — two routes, two frames, one tag, no
+    # cob between. `Project(v, Img(J))` was silent-wrong under a pinned `J` for exactly this reason.
+    #
+    # Scope, measured: this is the METRIC-FREE / single-endpoint path. An `img` request carrying BOTH
+    # endpoints routes above to `_realize_image_covariant`, which already coerces — so this does NOT
+    # change the σ face case (verified: bit-identical before and after). It closes the recorded bug
+    # where it was actually open.
+    f_rep = _coerce_rep_basis(ctx, f_rep, note="ffs-by-which:f-to-default")
     [f_cd] = ctx.prog.emit_stmt(
         pa.TransposeOp(), [f_rep.array],
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
