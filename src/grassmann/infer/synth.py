@@ -33,6 +33,7 @@ from grassmann.core.space import (
 from grassmann.core.term import (
     Assert,
     Compose,
+    Corestrict,
     Dagger,
     Det,
     Embed,
@@ -203,6 +204,8 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
             return _synth_solve(e, ctx)
         case Pinv():
             return _synth_pinv(e, ctx)
+        case Corestrict():
+            return _synth_corestrict(e, ctx)
         case SolveApply():
             return _synth_solve_apply(e, ctx)
         case PinvApply():
@@ -564,6 +567,32 @@ def _synth_pinv(e: Pinv, ctx: Ctx) -> Space:
     # inj/surj sharpen the realization (lowering); the space is cod ⊸ dom regardless.
     _ = (is_injective(e.f), is_surjective(e.f))
     return linear_map_space(cod, dom)
+
+
+def _synth_corestrict(e: Corestrict, ctx: Ctx) -> Space:
+    """``Corestrict(f) ⇒ dom(f) ⊸ Img(f)`` — the first-isomorphism-theorem iso (`25 §3`).
+
+    **Injective-only.**  ``f~`` is an isomorphism exactly when ``ker f = 0``; without that
+    it is only well defined out of ``CoImg(f)``, a different (and out-of-scope) domain.  So a
+    map that is not asserted ``inj`` is REFUSED here rather than silently typed — the
+    corestriction's whole purpose is to make the identification ``dom(f) ≅ Img(f)`` explicit,
+    and that identification is simply false for a non-injective ``f``.
+
+    The codomain is the *bare* ``Img(f)`` (endpoints left unset): that is the space
+    ``G.img(f)`` builds, and FFS unification keys on the defining map alone (`25 §2`), so an
+    ``Img(f, source=…, target=…)`` written by a caller still unifies with it.
+    """
+    from grassmann.core.space import Img
+
+    if not is_injective(e.f):
+        raise InferError(
+            "Corestrict requires the map to be asserted `inj` (props=inj): the corestriction "
+            "f~ : dom(f) ⊸ Img(f) is the first-isomorphism-theorem isomorphism only when "
+            "ker f = 0.  For a general map the induced iso is CoImg(f) ⊸ Img(f), which this "
+            f"node deliberately does NOT cover.  Got {e.f!r} (25 §3/§7)"
+        )
+    dom, _cod = _map_dom_cod_resolved(e.f, ctx)
+    return linear_map_space(dom, Img(e.f))
 
 
 def _synth_sqrt(e: Sqrt, ctx: Ctx) -> Space:

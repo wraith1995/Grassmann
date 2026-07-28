@@ -48,6 +48,7 @@ from grassmann.core.space import (
 )
 from grassmann.core.term import (
     Assert,
+    Corestrict,
     Compose,
     Dagger,
     Det,
@@ -306,6 +307,14 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             )
         case TuplePermute():
             raise DiffError("diff: no derivative rule for TuplePermute")
+        case Corestrict():
+            # ``Corestrict(f) : dom(f) ⊸ Img(f)`` has a MOVING codomain: perturbing ``f``
+            # moves the subspace ``Img(f)`` itself, so the difference quotient does not live
+            # in a fixed space and there is no linear-map derivative to hand back.  Refuse
+            # loudly (differentiate the ambient ``f`` and corestrict afterwards instead).
+            raise DiffError(
+                "diff: no derivative rule for Corestrict — its codomain Img(f) moves with f"
+            )
         case _ as unreachable:
             assert_never(unreachable)
 

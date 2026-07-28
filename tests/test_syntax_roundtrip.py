@@ -96,6 +96,7 @@ TERMS = [
     f @ g, C.compose(f.node, (0, 2), g.node, g.node),
     g.trace(0, 1),
     f.dagger, f.solve, f.pinv, C.term.Sqrt(g.node),
+    C.term.Corestrict(C.var("jinj", VtoW.node, C.props.inj)),
     f.solve(w), f.pinv(w),
     G.dot(x, y),
     G.inner(V), G.flat(V), G.sharp(V),

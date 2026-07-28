@@ -76,13 +76,24 @@ The sweep multiplies several **axes of variation**, each of which has caught a d
 - **Nested hard arms**, **var aliasing**, **multi-arg contractions**, **edge dims (4)**, and **FFS
   operands** (`test_ffs_operand_two_route`) — all probed, all honest (the vein has converged).
 
+`Corestrict` (`f~ : dom(f) ⊸ Img(f)`, the corestriction) is covered by `corestrict_apply` in `CASES`
+(the DOMAIN-side operand pinned) plus the FFS cases `ffs_corestrict_pinv` / `ffs_embed_map` /
+`ffs_project_map` / `ffs_embed_map_scalar` (an `Img(J)`-space operand pinned, through the rewired
+`transform/pullback.py` transports). Its own operand — the FFS's **defining map** `J` — is fed FIXED in
+both, for a pre-existing reason worth recording: `_realize_ffs_by_which` factorizes `_rep(f)` at `AUTO`,
+so pinning `J` to a non-default basis makes the realized image frame land in *those* coordinates while
+still being tagged `default_basis(Img f)` — two routes, two different frames, one tag, no cob between
+them. `Project(v, Img(J))` is silent-wrong under a pinned `J` today for exactly this reason (verified by
+probe, 2026-07-28); the corestrict arm inherits it rather than adding it. Fixing it means coercing `f`
+to default inside the seam (as the sibling `_realize_image_basis` already does) — untried, own arc.
+
 FFS coverage: the **immersed Gram** is exercised by the non-ortho `list_basis` flavor (it *is* an
 immersed-metric basis), AND directly by **`test_ffs_operand_two_route`** — a var of an `Img(J)` space
 pinned to a list basis in img(J) coords (embed / embed+eval / sum-in-FFS / dot / flat), all honest.
 `WithInner` (changes the metric ⇒ different value) is the one structure that doesn't fit a two-route
 (covered by `test_pinv_gsvd` / `test_algorithm_corpus`).
 
-The sweep has **48 two-route cases** + a **concrete-target** test + a **pinned-operands×concrete-target** test; **0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
+The sweep has **49 two-route cases** (+ 9 bespoke FFS cases) + a **concrete-target** test + a **pinned-operands×concrete-target** test; **0 xfail**. Run: `pytest tests/test_basis_honesty_sweep.py` (and once
 with `GRASSMANN_LLAM_INDEX=eye`).
 
 ## Remaining work (prioritized — resume here)

@@ -250,17 +250,26 @@ def _ffs_immersion(S: Space, T: Space) -> Term | None:
     `Img(f)` is a subspace of `cod(f)` but not a *summand* of it, so `_summand_index` returns `None`
     and both subspace arms used to fall straight to `_leaf_primitive` — i.e. they demanded a
     CALLER-SUPPLIED map for something the space already determines. But `Img` CARRIES `f`
-    (`Img.f: Term`), so the maps are ours to build:
+    (`Img.f: Term`), so the maps are ours to build, out of `f`, its pseudo-inverse, and the
+    CORESTRICTION `f~ : dom(f) ⊸ Img(f)` (:class:`~grassmann.core.term.Corestrict` — the
+    first-isomorphism-theorem iso, injective-only):
 
-        project  `cod(f) ⊸ Img(f)` :  `f ∘ f†`   — the projector onto the image
-        embed    `Img(f) ⊸ cod(f)` :  `f ∘ f†`   — the SAME term; on the image it is the identity,
-                                                    and its codomain is already the ambient
+        project  `cod(f) ⊸ Img(f)` :  `f~ ∘ f⁺`   — land in the image's OWN coordinates
+        embed    `Img(f) ⊸ cod(f)` :  `f  ∘ f~⁺`  — read out of them, back into the ambient
 
-    `f†` is the Moore–Penrose `Pinv`; on an INJECTIVE `f` it is the exact corestriction inverse on
+    HISTORY (load-bearing — this is what previous attempts got wrong). The arm used to return the
+    BARE `Pinv(T.f)` / `S.f`, whose *values* are right but whose *types* are `cod(f) ⊸ dom(f)` and
+    `dom(f) ⊸ cod(f)`: the `Img` endpoint was silently replaced by `dom(f)`. `Project`/`Embed` are
+    VALUE-level ops (they take a value `v`), so they never check a map endpoint and the substitution
+    went unnoticed — until a consumer that checks the endpoint STRICTLY (`Compose`, hence the
+    contravariant `Dual` arm of `_pb`) rejected it with a `UnifyError` `Img(f) ~ dom(f)`. There was
+    no way to type a map INTO an `Img` at all; `Corestrict` is exactly that missing primitive, and
+    with it the two directions are ordinary well-typed composites — no `LLam`, no coercion.
+
+    `f⁺` is the Moore–Penrose `Pinv`; on an INJECTIVE `f` it is the exact corestriction inverse on
     the image and is metric-independent there (the same fact `pointwise`'s `restrict` relies on when
-    it uses `Pinv(J_face)`). So one composite serves both directions, and `pullback` then recurses
-    `Dual`/`⊗`/`⊕`/`Λᵏ` over it for free — a covector transports by the metric-free transpose of this
-    very map.
+    it uses `Pinv(J_face)`). `pullback` then recurses `Dual`/`⊗`/`⊕`/`Λᵏ` over these for free — a
+    covector transports by the metric-free transpose of this very map.
 
     Why this belongs HERE and not in the caller: it is a **bail** in the canonical-arm sense (docs/
     auditing.md §0) — the arm handles the case itself, always available and always correct, needing
@@ -269,28 +278,43 @@ def _ffs_immersion(S: Space, T: Space) -> Term | None:
     re-deriving what `Img` already knows, and had to wrap it in an `LLam` whose free map then failed
     to realize in a vmap sub-body (`41 §7`).
 
-    Returns `None` when neither side is an `Img` with a usable ambient, leaving the existing
-    `primitives`/`PullbackError` path exactly as it was.
+    Returns `None` when neither side is an `Img` with a usable ambient, or when the defining map is
+    not asserted `inj` (`Corestrict`'s scope) — leaving the existing `primitives`/`PullbackError`
+    path exactly as it was.
     """
     from grassmann.core.space import Img
-    from grassmann.core.term import Pinv, chain
+    from grassmann.core.term import Corestrict, Pinv, chain
 
-    # DIRECTION MATTERS — see the `f ∘ f†` note above. `transport_map(S, T)` promises a map whose
-    # CODOMAIN IS `T`, and `f ∘ f†` has codomain `cod(f)` (the ambient) in BOTH directions. Into an
-    # `Img(f)` that is the wrong space: it typechecks loosely, since `Img(f) ⊆ cod(f)`, but the
-    # transported value then carries AMBIENT coordinates instead of the image's own. A consumer that
-    # reads coordinates OFF the result — the metric-free k-form integrate lane sums output COORDINATES
-    # against reference weights — silently gets `edim` of them where the image has `rank(f)`.
+    # DIRECTION MATTERS — `transport_map(S, T)` promises a map whose CODOMAIN IS `T`. `f ∘ f⁺` has
+    # codomain `cod(f)` (the ambient) in BOTH directions; used as the map into an `Img(f)` it
+    # typechecks loosely, since `Img(f) ⊆ cod(f)`, but the transported value then carries AMBIENT
+    # coordinates instead of the image's own. A consumer that reads coordinates OFF the result — the
+    # metric-free k-form integrate lane sums output COORDINATES against reference weights — silently
+    # gets `edim` of them where the image has `rank(f)`. The corestriction fixes the type AND the
+    # coordinates in one move.
     if isinstance(T, Img) and _normalize(_img_ambient(T)) == _normalize(S):
-        return Pinv(T.f)                       # PROJECT `cod(f) ⊸ Img(f)`, in the image's own coords
+        if not _corestrictable(T.f):
+            return None
+        return chain(Corestrict(T.f), Pinv(T.f))    # PROJECT `cod(f) ⊸ Img(f)`, image's own coords
     if isinstance(S, Img) and _normalize(_img_ambient(S)) == _normalize(T):
-        return S.f                             # EMBED  `Img(f) ⊸ cod(f)` (`Img(f) ≅ dom(f)` via `f`)
+        if not _corestrictable(S.f):
+            return None
+        return chain(S.f, Pinv(Corestrict(S.f)))    # EMBED  `Img(f) ⊸ cod(f)`
     return None
+
+
+def _corestrictable(f: Term) -> bool:
+    """May `Corestrict(f)` be formed? (`f` asserted `inj` — the node's injective-only scope.)"""
+    from grassmann.infer.properties import is_injective
+
+    return is_injective(f)
 
 
 def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
     """The `Img(f_A) ⊸ Img(f_B)` MAP for two immersions of the SAME ambient — the chart-to-chart convert,
-    ``f_B⁺ ∘ f_A`` (out of A through the ambient, into B).
+    out of A's own coordinates, through the ambient, into B's:
+
+        ``f~_B ∘ f_B⁺ ∘ f_A ∘ f~_A⁺``   :   `Img(f_A) → dom(f_A) → ambient → dom(f_B) → Img(f_B)`
 
     The VALUE level already had this (``_pb_ffs``: embed to the ambient, convert, project). The MAP level
     did not: ``transport_map`` is reached from the ``Dual`` branch — a covector transports by the
@@ -299,9 +323,25 @@ def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
     fully determine. That asymmetry is why a form-valued DOF could be transported but a covector-valued
     one could not.
 
+    HISTORY (load-bearing). The first fix here answered with the bare middle of that chain,
+    ``chain(Pinv(f_B), f_A)``, which synthesizes as `dom(f_A) ⊸ dom(f_B)` — NOT `Img(f_A) ⊸ Img(f_B)`.
+    It survived only because the consumers of the day were value-level (`Project`/`Embed` never check a
+    map endpoint); `Compose` — the very node the `Dual` arm needs — rejects it. Wrapping the whole thing
+    in an `LLam` to force the endpoints was the other attempt, and that is worse: an `LLam`-built map
+    lowers TRANSPOSED (its inputs ride as trailing axes), which is exactly what the module docstring
+    warns against, and its free map failed to realize inside a vmap sub-body. The real gap was the
+    missing primitive — a map whose endpoint IS an `Img`. That is
+    :class:`~grassmann.core.term.Corestrict`, and with the two corestrictions in place the chain above is
+    an ordinary well-typed primitive composite: no `LLam`, no coercion, and `Pinv(f~_A)`/`f~_B` are exact
+    (each `f~` is an isomorphism).
+
+    The corestrictions are not decoration: `f~_A⁺` divides out A's image-frame `R` factor and `f~_B`
+    multiplies in B's, so the composite is a genuine change of coordinates between the two realized
+    image frames rather than between the two parameter domains (which agree only when |R_A| = |R_B|).
+
     This is also the map that carries a σ ORIENTATION. Two parameterizations of one edge (canonical and
     permuted) are two `Img` spaces over one ambient, and the convert between them is exactly `−1` on a
-    reversed edge — the sign living in the composite `f_B⁺ f_A`, so it survives the frames' sign-fixed QR
+    reversed edge — the sign living in the composite, so it survives the frames' sign-fixed QR
     (`diag R > 0`), which cancels the sign out of either realized basis on its own.
 
     BOTH sides must be STRICT sub-ambient immersions. A full-dimensional `Img` (a cell's own `J`, where
@@ -311,12 +351,14 @@ def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
     `primitives`, which is consulted first.
     """
     from grassmann.core.space import Img
-    from grassmann.core.term import Pinv, chain
+    from grassmann.core.term import Corestrict, Pinv, chain
     from grassmann.lower._dims import DynamicDim, dim_of
 
     if not (isinstance(S, Img) and isinstance(T, Img)) or S.f is T.f:
         return None
     if _normalize(_img_ambient(S)) != _normalize(_img_ambient(T)):
+        return None
+    if not (_corestrictable(S.f) and _corestrictable(T.f)):
         return None
     try:
         for space in (S, T):
@@ -324,7 +366,9 @@ def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
                 return None
     except DynamicDim:
         return None
-    return chain(Pinv(T.f), S.f)                          # apply S.f first, then project into T
+    # applied right-to-left: out of A's image frame, into A's domain, into the ambient, into B's
+    # domain, into B's image frame.
+    return chain(Corestrict(T.f), Pinv(T.f), S.f, Pinv(Corestrict(S.f)))
 
 
 def _img_ambient(img: Space) -> Space:

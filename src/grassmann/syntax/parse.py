@@ -670,6 +670,8 @@ class _Resolver:
             return T.Solve(self.term(args[0], env))
         if h == "Pinv":
             return T.Pinv(self.term(args[0], env))
+        if h == "corestrict":
+            return T.Corestrict(self.term(args[0], env))
         if h == "Dagger":
             return T.Dagger(self.term(args[0], env))
         if h == "sqrtm":

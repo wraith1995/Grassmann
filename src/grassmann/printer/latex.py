@@ -175,6 +175,9 @@ def _render_term(e: _t.Term) -> tuple[str, int]:  # noqa: C901,PLR0911,PLR0912 -
             return f"{_sub(f, _PFX_BASE)}^{{-1}}", Prec.POSTFIX
         case _t.Pinv(f=f):
             return f"{_sub(f, _PFX_BASE)}^{{+}}", Prec.POSTFIX
+        case _t.Corestrict(f=f):
+            # f~ : dom(f) ⊸ Img(f) — the first-isomorphism-theorem corestriction.
+            return rf"\widetilde{{{_sub(f, _PFX_BASE)}}}", Prec.POSTFIX
         case _t.Dagger(f=f):
             return f"{_sub(f, _PFX_BASE)}^{{\\dagger}}", Prec.POSTFIX
         case _t.Sqrt(f=f):

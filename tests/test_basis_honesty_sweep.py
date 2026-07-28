@@ -557,6 +557,30 @@ def _c_embed():
     return C.embed(v, V), {v: (V, np.array([1.0, 2, 3]))}
 
 
+# ---------------------------------------------------------------------------
+# Corestrict — ``f~ : dom(f) ⊸ Img(f)``.  Its operand is the FFS's OWN defining map, which is
+# feed-only: pinning ``J`` moves the realized image FRAME itself (``_realize_ffs_by_which``
+# factorizes ``_rep(J)``), so the two routes end up with two different frames both tagged
+# ``default_basis(Img J)`` and no cob can reconcile them.  That is a PRE-EXISTING property of the FFS
+# seam, not of this arm — ``Project(v, Img(J))``/``Embed`` behave identically under a pinned ``J`` —
+# and it is why ``test_ffs_operand_two_route`` also feeds ``J`` fixed.  The pinnable operands here are
+# therefore the values on either side of the map.
+# ---------------------------------------------------------------------------
+MWV = C.linear_map_space(W, V)                       # injective 2 → 3, stored (dom, cod) = (2, 3)
+_CJ = np.array([[2.0, 0, 1], [1, 3, 0.0]])
+
+
+def _c_corestrict_apply():  # f~·x — result lives in Img(J) (the arm's own tag)
+    J, x = C.var("Jc", MWV, C.props.inj), C.var("x", W)
+    return C.eval_(C.corestrict(J), (0,), x), {J: (MWV, _CJ, False), x: (W, np.array([1.0, 2]))}
+
+
+# An operand whose SPACE is ``Img(J)`` cannot ride this generic harness at all: ``_machine_coords``
+# represents the bare operand var on its own, and realizing an ``Img(J)`` space needs ``J`` fed.  Those
+# (the ``f~⁺`` direction, and the unsteered scalar wrappers over the rewired transports) are covered by
+# the bespoke ``test_ffs_operand_two_route`` below, which feeds ``J`` explicitly.
+
+
 def _case(name, builder, xfail=None):
     marks = [pytest.mark.xfail(reason=xfail, strict=True)] if xfail else []
     return pytest.param(name, builder, marks=marks, id=name)
@@ -597,6 +621,8 @@ CASES = [
     # aliasing / multi-arg / edge dim
     _case("quad", _c_quad), _case("self_oprod", _c_self_oprod), _case("trilinear", _c_trilinear),
     _case("eval_dim4", _c_eval_dim4), _case("dagger_dim4", _c_dagger_dim4), _case("pinv_dim4", _c_pinv_dim4),
+    # corestrict f~ : dom(f) ⊸ Img(f)  (f~⁺ and the rewired transports: test_ffs_operand_two_route)
+    _case("corestrict_apply", _c_corestrict_apply),
 ]
 
 
@@ -729,8 +755,20 @@ def _ffs_cases():
     imgJ = C.img(J)
     a, b, w = C.var("a", imgJ), C.var("b", imgJ), C.var("w", C.dual(R3))
     av, bv, wv = np.array([1.0, 2]), np.array([0.0, 1]), np.array([1.0, 1, 1])
+    from grassmann.transform.pullback import transport_map
     cases = [
         ("ffs_embed", C.embed(a, R3), {a: av}),
+        # the REWIRED transports (built from Corestrict): the Img(J)→ambient embed map and the
+        # ambient→Img(J) project map, plus f~⁺ on its own — all fed an Img(J) operand pinned to a
+        # list basis in img(J) coordinates.
+        ("ffs_corestrict_pinv", C.eval_(C.pinv(C.corestrict(J)), (0,), a), {a: av}),
+        ("ffs_embed_map", C.eval_(transport_map(imgJ, R3), (0,), a), {a: av}),
+        ("ffs_project_map",
+         C.eval_(transport_map(R3, imgJ), (0,), C.eval_(transport_map(imgJ, R3), (0,), a)),
+         {a: av}),
+        # UNSTEERED (scalar wrapper — a scalar result cannot be steered, so a reconcile bug shows)
+        ("ffs_embed_map_scalar",
+         C.eval_(w, (0,), C.eval_(transport_map(imgJ, R3), (0,), a)), {a: av, w: wv}),
         ("ffs_embed_eval", C.eval_(w, (0,), C.embed(a, R3)), {a: av, w: wv}),
         ("ffs_sum", C.embed(C.sum_(a, b), R3), {a: av, b: bv}),
         ("ffs_dot", C.eval_(C.inner(imgJ), (0, 1), a, b), {a: av, b: bv}),

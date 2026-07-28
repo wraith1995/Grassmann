@@ -29,6 +29,7 @@ from .builders import (
     coker,
     complete,
     compose,
+    corestrict,
     dagger,
     det,
     diff,
@@ -131,6 +132,7 @@ __all__ = [
     "ostack",
     # application / composition / trace
     "compose",
+    "corestrict",
     "chain",
     "tr",
     "det",
