@@ -22,8 +22,9 @@ soft — they drift, and the audit harness derives the live sets from source):
   `inner` is usually already right, at most up to a rescale (the exterior inner was a
   rescale, never a hand-built replacement). Euclidean ℝⁿ is concrete `⊕ⁿScalar`.
   `Dim` (8): symbolic dimension arithmetic.
-- **Term** (~39, `core/term.py`): **the adjoint exists — `Dagger`**. Also `Solve`/`Pinv`
-  (+`SolveApply`/`PinvApply`), `Inner`, musical isos `Flat`/`Sharp`, `Project`/`Embed`
+- **Term** (~40, `core/term.py`): **the adjoint exists — `Dagger`**. Also `Solve`/`Pinv`
+  (+`SolveApply`/`PinvApply`), `Corestrict` (`f~ : dom(f) ⊸ Img(f)`, injective-only),
+  `Inner`, musical isos `Flat`/`Sharp`, `Project`/`Embed`
   (subspaces), `Remetric`, `Lift`/`InvLift`, `Permute`/`Kron`, `Trace`, lambdas
   `LLam`/`Lam`, `Frame`, `NEval` (nonlinear). stdlib: `exterior.py`, `linalg.py`,
   `scalar.py` (see the table below).
@@ -51,6 +52,7 @@ Linear algebra (all importable as `G.<name>`; builders in `embed/builders.py`):
 | raise / lower an index | `sharp` / `flat` |
 | orthogonal projection onto a subspace | `orthogonal_projection` (stdlib.linalg); or `project`/`embed` on `img/ker/...` |
 | kernel, image, cokernel, coimage | `ker(f)`, `img(f)`, `coker(f)`, `coimg(f)` — first-class SPACES |
+| a MAP whose endpoint is `Img(f)` | `corestrict(f)` = `f~ : dom(f) ⊸ Img(f)` (1st-iso-thm iso, **`inj` only**); `pinv` of it is exact |
 | quotient; orthogonal complement | `coker(f)`; `ker(dagger(i))` for an inclusion `i` |
 | attach / change a metric | `with_inner` (**override only**), `remetric` |
 | scalar nonlinearities | stdlib.scalar: `sqrt exp log sin … sigmoid hadamard` |

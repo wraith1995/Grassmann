@@ -84,6 +84,7 @@ TERMS = [
     ("Trace", "trace", "tr"),
     ("Solve", "solve", "solve"),
     ("Pinv", "pinv", "pinv"),
+    ("Corestrict", "corestrict", "corestrict"),
     ("SolveApply", "solve_apply", "solve()"),
     ("PinvApply", "pinv_apply", "pinv()"),
     ("Dagger", "dagger", "dagger / .T"),

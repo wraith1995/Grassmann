@@ -38,7 +38,6 @@ nav:
   - Testing: testing.md
   - Auditing: auditing.md
   - Design problems: design-problems.md
-  - Unicode syntax: unicode-syntax.md
   - Spaces:
     - Overview: spaces/index.md
     - scalar: spaces/scalar.md
@@ -78,6 +77,7 @@ nav:
     - trace: terms/trace.md
     - solve: terms/solve.md
     - pinv: terms/pinv.md
+    - corestrict: terms/corestrict.md
     - solve-apply: terms/solve-apply.md
     - pinv-apply: terms/pinv-apply.md
     - dagger: terms/dagger.md

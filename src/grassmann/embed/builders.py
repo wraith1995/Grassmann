@@ -246,6 +246,12 @@ def pinv(f: object) -> Expr:
     return wrap(_t.pinv(_term(f)))
 
 
+def corestrict(f: object) -> Expr:
+    """``G.corestrict(f)`` — the corestriction ``f~ : dom(f) ⊸ Img(f)`` of an INJECTIVE ``f``
+    (the first-isomorphism-theorem iso; ``G.pinv(G.corestrict(f))`` is its exact inverse)."""
+    return wrap(_t.corestrict(_term(f)))
+
+
 def dagger(f: object) -> Expr:
     return wrap(_t.dagger(_term(f)))
 

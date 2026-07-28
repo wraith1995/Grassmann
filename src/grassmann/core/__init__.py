@@ -122,6 +122,7 @@ from .space import (
 from .term import (
     Assert,
     Compose,
+    Corestrict,
     Dagger,
     Embed,
     Eval,
@@ -160,6 +161,7 @@ from .term import (
     assert_,
     chain,
     compose,
+    corestrict,
     dagger,
     embed,
     eval_,

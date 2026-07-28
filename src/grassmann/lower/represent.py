@@ -663,6 +663,8 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_solve(e, f, ctx, target)
         case T.Pinv(f):
             return _rep_pinv(e, f, ctx, target)
+        case T.Corestrict(f):
+            return _rep_corestrict(e, f, ctx, target)
         case T.Sqrt(f):
             return _rep_sqrt(e, f, ctx, target)
         case T.SolveApply(f, v):
@@ -1296,7 +1298,7 @@ def _metric_node_kind(f: T.Term) -> str | None:
             return "flat"
         case T.Sharp():
             return "sharp"
-        case (T.Assert() | T.Compose() | T.Dagger() | T.Det()
+        case (T.Assert() | T.Compose() | T.Corestrict() | T.Dagger() | T.Det()
               | T.Embed() | T.Eval() | T.External() | T.Frame()
               | T.Identity() | T.InvLift() | T.Kron() | T.LLam()
               | T.Lam() | T.Lift() | T.Lit() | T.LogDet()
@@ -3076,6 +3078,63 @@ def _rep_pinv(
     if f_target is not None:
         # Steered: _dual_swap_map_basis(f_target) == want by construction.
         return Rep(out, want, space)
+    # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
+    match target:
+        case B.TargetBasis.STD:
+            return _std_result(ctx, rep)
+        case B.TargetBasis.AUTO:
+            return rep
+        case _:
+            return _match_result(ctx, rep, target)
+
+
+def _rep_corestrict(
+    e: T.Corestrict, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
+) -> Rep:
+    """``Corestrict(f) = f~ : dom(f) ⊸ Img(f)`` — ``f`` read in the image's OWN frame (`41 §3`).
+
+    ``f~`` sends ``x`` to ``f(x)``; only the *codomain* differs from ``f``, being the image
+    rather than the ambient.  The image's realized frame ``U`` (the SVD/QR seam's ambient
+    columns, `41 §1`) is orthonormal, so the image-coordinate readout of an ambient vector is
+    ``Uᵀ·``; with ``f`` stored ``(dom, cod)`` the corestriction is therefore
+
+        ``f~[d, r] = Σₙ f[d, n] · U[n, r]``   — an ``|dom| × |Img f|`` (square, ``f`` injective) matrix.
+
+    BASIS HONESTY: ``U`` is delivered in the STANDARD ambient frame (the FFS seam's output
+    contract — see :func:`_ffs_immersion_std`), so ``f`` is coerced to the ``(dom, cod)``
+    DEFAULT slot bases before the contraction (a no-op for a default operand; the same
+    coercion :func:`_realize_image_basis` and :func:`_rep_project` make).  Having actually
+    coerced its operand, the arm may honestly tag ``default_basis(space)`` — whose codomain
+    factor IS ``img_basis``.
+
+    STRUCTURE (docs/auditing.md §0 — known, NOT exploited; the bail is what runs): in the
+    LITERAL image frame :class:`~grassmann.core.basis.ImageBasis` ``(f)``, whose columns *are*
+    the ``f(eᵢ)``, ``f~`` is by definition the IDENTITY matrix.  A concrete-target request for
+    that basis currently goes through the generic ``_match_result`` cob
+    (``ProjectedBasis → ImageBasis``, i.e. the ``R`` factor of ``J = U·R``) — always correct,
+    but a direct ``eye`` would be minimal.
+    """
+    space = _synth(e)
+    img = S.Img(f)
+    f_rep = _coerce_rep_basis(ctx, _rep(f, ctx), note="corestrict:f-to-default")
+    img_basis, cols = _subspace_cols(ctx, img, note="corestrict:image-frame")
+    n_dom = _shape_of(f_rep.array)[0]
+    n_img = _shape_of(cols)[1]
+    [out] = ctx.prog.emit_stmt(
+        pa.EinsumStmtOp("dn,nr->dr"), [f_rep.array, cols],
+        [pa.OutSpec("corestrict", (n_dom, n_img))],
+        note="corestrict:f-in-image-frame",
+    )
+    # ``default_basis(space)`` IS ``basis_prod(dual_basis(default dom), default_basis(Img f))``,
+    # and ``_subspace_cols`` returned exactly that second factor (``default_basis(img)``) — so
+    # the tag below names the frames the coordinates were actually built in.
+    slots = _basis_factors(default_basis(space), 2)
+    if slots is None or not _basis_eq(slots[1], img_basis):
+        raise RepresentError(
+            f"represent: corestrict expected the default map basis of {space!r} to carry the "
+            f"image frame {img_basis!r} in its codomain slot; got {slots!r}"
+        )
+    rep = Rep(out, default_basis(space), space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:

@@ -244,6 +244,23 @@ def _pinv():
     return Example("Moore–Penrose pseudo-inverse map.", 'pinv(f)', [("f", _show(A))], _show(got))
 
 
+@_ex("Corestrict")
+def _corestrict():
+    """`f~ : dom(f) ⊸ Img(f)` — f's columns read in the image's own (sign-fixed QR) frame."""
+    V, W = C.base("V", 2), C.base("W", 3)
+    f = C.var("f", C.linear_map_space(V, W), props=C.props.inj)
+    A = np.array([[2.0, 0.0, 1.0], [1.0, 3.0, 0.0]])
+    got = _run(C.corestrict(f), {f: A})
+    Q, _R = _signed_qr(A.T)                       # the image frame, in ambient coords
+    _ck(np.allclose(got, A @ Q))
+    _ck(np.allclose(got @ got.T, A @ A.T))        # an isometry onto the image: Gram preserved
+    return Example(
+        "The corestriction of an injective `f` onto `Img(f)`: a square (2×2) map into the "
+        "image's own frame.",
+        'corestrict(f)', [("f", _show(A))], _show(got),
+    )
+
+
 @_ex("SolveApply")
 def _solve_apply():
     V = C.base("V", 3)

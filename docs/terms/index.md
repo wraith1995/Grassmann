@@ -2,7 +2,7 @@
 
 Every term constructor, its meaning, how it is built, how it is represented, and how it converts. Approve each by setting `status: approved` in its `docs/_authored/` file and re-running `python tools/gen_docs.py`.
 
-**Progress: 0 approved · 34 in review · 0 draft (of 34)**
+**Progress: 0 approved · 35 in review · 0 draft (of 35)**
 
 | node | status |
 |---|---|
@@ -21,6 +21,7 @@ Every term constructor, its meaning, how it is built, how it is represented, and
 | [`Trace`](trace.md) | 🟡 in review |
 | [`Solve`](solve.md) | 🟡 in review |
 | [`Pinv`](pinv.md) | 🟡 in review |
+| [`Corestrict`](corestrict.md) | 🟡 in review |
 | [`SolveApply`](solve-apply.md) | 🟡 in review |
 | [`PinvApply`](pinv-apply.md) | 🟡 in review |
 | [`Dagger`](dagger.md) | 🟡 in review |

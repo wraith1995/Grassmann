@@ -51,6 +51,7 @@ from .embed import (
     coker,
     complete,
     compose,
+    corestrict,
     dagger,
     det,
     diff,
@@ -219,6 +220,7 @@ __all__ = [
     "ostack",
     # application / composition / trace
     "compose",
+    "corestrict",
     "tr",
     "det",
     "logdet",

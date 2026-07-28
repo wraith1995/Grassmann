@@ -397,6 +397,8 @@ def _t(node: object) -> tuple[str, int]:
             return f"{_wrap_t(f, G.P_POSTFIX)}{G.INVERSE}", G.P_POSTFIX
         case T.Pinv(f=f):
             return f"{_wrap_t(f, G.P_POSTFIX)}{G.PINV}", G.P_POSTFIX
+        case T.Corestrict(f=f):
+            return f"corestrict({_t(f)[0]})", G.P_APP
         case T.Dagger(f=f):
             return f"{_wrap_t(f, G.P_POSTFIX)}{G.DAGGER}", G.P_POSTFIX
         case T.Sqrt(f=f):

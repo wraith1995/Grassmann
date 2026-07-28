@@ -410,6 +410,42 @@ class Pinv:
 
 
 @dataclass(frozen=True)
+class Corestrict:
+    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image,
+    ``f~ : dom(f) ⊸ Img(f)``.
+
+    This is the induced isomorphism of the **first isomorphism theorem**, in its
+    ``ker f = 0`` form: ``f`` factors as ``dom(f) --f~--> Img(f) --ι--> cod(f)`` with ``f~``
+    an ISOMORPHISM and ``ι`` the inclusion.  Being an iso, :class:`Pinv` of it is its exact
+    two-sided inverse (``Pinv(f~) : Img(f) ⊸ dom(f)``), and the two compose to the identity
+    on either side — the *explicit* spelling of the identification ``dom(f) ≅ Img(f)`` that
+    the calculus otherwise has no way to write down (no implicit conversions, invariant #2).
+
+    **INJECTIVE ONLY** (a deliberate scope decision, not an accident): ``f`` must be asserted
+    ``inj`` (``props=inj``), which is checked in :mod:`grassmann.infer.synth` and refused
+    loudly otherwise.  For a general ``f`` the domain-side iso of the theorem is
+    ``CoImg(f) ⊸ Img(f)``, a *different* node with a different domain; this one does not
+    generalize to it and must not be used as if it did.
+
+    Why it must be a node and not a derived form: ``Project``/``Embed`` are VALUE-level
+    (they take a value ``v``), so nothing in the calculus could give a MAP whose endpoint is
+    ``Img(f)``.  Every consumer that checks a map endpoint strictly — ``Compose``, hence the
+    contravariant ``Dual`` arm of :func:`grassmann.transform.pullback.pullback` — rejected
+    the ``Pinv(f_B)∘f_A`` spelling of a chart-to-chart transport because it synthesizes as
+    ``dom(f_A) ⊸ dom(f_B)``, silently dropping the ``Img`` identification (and, with it, the
+    ``R``-factor scaling and the σ orientation sign that live in the image frames).
+    """
+
+    f: Term
+
+    def __post_init__(self) -> None:
+        _require_term(self.f, "Corestrict.f")
+
+    def __repr__(self) -> str:
+        return f"Corestrict({self.f!r})"
+
+
+@dataclass(frozen=True)
 class SolveApply:
     """``SolveApply(f, v)`` — solve ``f·x = v`` (the applied form of ``Solve``)."""
 
@@ -807,7 +843,7 @@ class Frame:
 
 
 # A Term is any of the node types above.
-Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Det | LogDet | OpaqueApply | Solve | Pinv | Sqrt | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | TuplePermute | Kron | LLam | Lam | Frame
+Term = Var | External | Zero | Identity | Lit | Scale | Sum | OPlusV | OProdV | Eval | NEval | Compose | Trace | Det | LogDet | OpaqueApply | Solve | Pinv | Corestrict | Sqrt | SolveApply | PinvApply | Dagger | Inner | Flat | Sharp | Project | Embed | Assert | TupleEmbed | TupleProject | Remetric | Lift | InvLift | Permute | TuplePermute | Kron | LLam | Lam | Frame
 
 _TERM_TYPES = (
     Var,
@@ -828,6 +864,7 @@ _TERM_TYPES = (
     OpaqueApply,
     Solve,
     Pinv,
+    Corestrict,
     SolveApply,
     PinvApply,
     Sqrt,
@@ -1085,6 +1122,11 @@ def pinv(f: Term) -> Pinv:
     return Pinv(f)
 
 
+def corestrict(f: Term) -> Corestrict:
+    """``f~ : dom(f) ⊸ Img(f)`` — the corestriction of an INJECTIVE ``f`` onto its image."""
+    return Corestrict(f)
+
+
 def sqrt(f: Term) -> Sqrt:
     return Sqrt(f)
 
@@ -1197,6 +1239,7 @@ __all__ = [
     "OpaqueApply",
     "Solve",
     "Pinv",
+    "Corestrict",
     "sqrt",
     "Sqrt",
     "SolveApply",
@@ -1240,6 +1283,7 @@ __all__ = [
     "opaque_apply",
     "solve",
     "pinv",
+    "corestrict",
     "solve_apply",
     "pinv_apply",
     "dagger",
