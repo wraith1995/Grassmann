@@ -133,6 +133,18 @@ class Expr:
         if self.tower == SPACE and o.tower == SPACE:
             return wrap(_s.oprod(self.node, o.node))
         if self.tower == TERM and o.tower == TERM:
+            # A SCALAR-valued Term operand makes `*` scalar MULTIPLICATION (`Scale`, which takes a
+            # scalar-valued Term), NOT a genuine ⊗. The ⊗-unit convention (Teo 2026-07-28) gives a
+            # `Scalar` factor its own array axis, so `OProdV((q: Scalar, u))` lives in `R ⊗ W` —
+            # one axis MORE than `W` — and `q()*u() + w()` would be a space mismatch that the old
+            # accidental 0-axis lowering silently absorbed. The unit iso `R ⊗ W ≅ W` is applied
+            # HERE, at the creation site (the consumer that makes a scalar factor deals with it);
+            # a genuine `R ⊗ W` tensor is still available explicitly via `G.tensor`/`oprod_v`.
+            from grassmann.infer.synth import synth_space
+            if isinstance(synth_space(self.node), _s.Scalar):
+                return wrap(_t.scale(self.node, o.node))
+            if isinstance(synth_space(o.node), _s.Scalar):
+                return wrap(_t.scale(o.node, self.node))
             return wrap(_t.oprod_v(self.node, o.node))
         if self.tower == BASIS and o.tower == BASIS:
             return wrap(_b.basis_prod(self.node, o.node))
