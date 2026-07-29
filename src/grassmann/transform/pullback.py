@@ -243,6 +243,102 @@ def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
             return _leaf_primitive(S, T, primitives, "no primitive map")
 
 
+def endomorphism_map(space: Space, *, primitives) -> Term:
+    """The functorial SELF-map of ``space`` induced by caller-supplied leaf self-maps.
+
+    ``transport_map``'s structural recursion cannot carry an AUTOMORPHISM: its first arm
+    short-circuits ``S == T`` to ``Identity``, and an automorphism (e.g. a reference-cell
+    orientation acting on a DOF weight's value space) is exactly a nontrivial self-map that
+    structural equality cannot see. This is the same functor with the shortcut removed:
+    ``primitives(S)`` is consulted FIRST at every node (a supplied leaf self-map wins, keyed
+    on the space as it appears in the tree, then on its normalized form), and the structure
+    recurses otherwise —
+
+    - ``Dual``  → the metric-free transpose of the primal self-map (:func:`_transpose_map`),
+      so with the leaf supplied as the PUSHFORWARD action every covector factor automatically
+      carries the PULLBACK ``ω ↦ ω ∘ f``;
+    - ``⊗``     → the ``Kron`` of the factor self-maps;
+    - ``⊕``     → block-diagonal (embedₖ ∘ mₖ ∘ projectₖ, summed);
+    - ``Img(f)``→ conjugation through the ambient (``project ∘ endo(ambient) ∘ embed`` via the
+      corestriction maps ``Img`` itself determines — :func:`_ffs_immersion`). Sound exactly
+      when the ambient action maps the image into itself, which holds for the functorial
+      actions this serves (an antisymmetrizer commutes with ``f⊗ᵏ``, so ``Λᵏ`` images are
+      invariant); a caller whose ambient action does NOT preserve the image must supply the
+      ``Img`` leaf directly.
+    - ``Scalar``→ ``Identity``; ``WithInner`` strips (represent consults no metric here).
+
+    A ``Ker``/``CoKer``/``CoImg``/``App`` node with no supplied primitive raises
+    :class:`PullbackError` — no structural rule determines an induced self-map there.
+
+    ``primitives`` is REQUIRED and is a callable ``space -> Term | None`` (single-space —
+    unlike ``transport_map``'s pair form — since source and target coincide). With no leaf
+    action everything reduces to ``Identity``; call nothing instead.
+    """
+    from typing import assert_never
+
+    from grassmann.core.space import Scalar as _ScalarSpace
+    from grassmann.core.term import chain
+
+    # Consult `primitives` on the space AS STORED (before any expansion) — the caller keys its
+    # leaves off the same tree this recursion walks, and eagerly normalizing first would rewrite
+    # an `OPlusRep` ground (`S.base`) into `OPlus` before the callback could ever match it.
+    p = primitives(space)
+    if p is not None:
+        return p
+    S = space
+    match S:
+        case SVar() | SpaceMeta():
+            raise PullbackError(
+                f"endomorphism_map: space {S!r} is not fully determined; realize it first"
+            )
+        case OPlusRep(count=DimLit() as n, space=summand):
+            # Expand ONE level, keeping the summand as stored so nested primitives still match.
+            return endomorphism_map(oplus(*([summand] * n.value)), primitives=primitives)
+        case OPlusRep():
+            raise PullbackError(
+                f"endomorphism_map: symbolic-count direct sum {S!r} is not supported"
+            )
+        case WithInner():
+            return endomorphism_map(_strip(S), primitives=primitives)
+        case _ScalarSpace():
+            return Identity(S)
+        case Dual(sd):
+            f = endomorphism_map(sd, primitives=primitives)
+            return _transpose_map(f, sd, sd)
+        case OProd(ss):
+            ms = [endomorphism_map(s_i, primitives=primitives) for s_i in ss]
+            out = ms[-1]
+            for m in reversed(ms[:-1]):
+                out = Kron(m, out)
+            return out
+        case OPlus(ss):
+            ms = [endomorphism_map(s_k, primitives=primitives) for s_k in ss]
+            return Sum(tuple(
+                chain(TupleEmbed(S, k), m_k, TupleProject(S, k)) for k, m_k in enumerate(ms)
+            ))
+        case Img():
+            ambient = _img_ambient(S)                     # as stored — primitives may key on it
+            inner = endomorphism_map(ambient, primitives=primitives)
+            project = _ffs_immersion(ambient, S)
+            embed = _ffs_immersion(S, ambient)
+            if project is not None and embed is not None:
+                return chain(project, inner, embed)       # inj defining map: exact corestriction
+            # A PROJECTOR image (e.g. an exterior power's `Img(Alt)`): no corestriction, so
+            # conjugate with the VALUE-level Embed/Project (the `_pb_ffs` mechanism) inside an
+            # `LLam` — Eval-able like the Dual arm's transpose.
+            from grassmann.core.term import LLam, var as _var
+
+            v = _var(f"endo_v{next(_TRANSPOSE_COUNTER)}", S)
+            return LLam((v,), Project(Eval(inner, (0,), (Embed(v, ambient),)), S))
+        case Ker() | CoKer() | CoImg() | App():
+            raise PullbackError(
+                f"endomorphism_map: no structural rule induces a self-map on {S!r}; supply it "
+                "via `primitives`."
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def _ffs_immersion(S: Space, T: Space) -> Term | None:
     """The `Img(f) ↔ ambient` transport, built from the map that DEFINES the image — the canonical
     BAIL for a subspace pair where neither side is a direct ⊕-summand.
