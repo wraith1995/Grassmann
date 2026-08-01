@@ -3767,8 +3767,28 @@ def _rep_project(
         sub_basis = B.projected_basis(sub.f, "image", ep_basis, ep_basis)
         _assert_projection_exact(ctx, P, v_arr)
     else:
-        v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space),
-                              note="project:operand-to-default")
+        # The operand may be presented over SEVERAL space axes (a tensor-square value) while the
+        # cob into the ambient default is a single FUSED matrix — `_basis_cob_matrix` builds the
+        # Kronecker product for a `BasisProd`.  Contracting a fused `(n,n)` cob against a stored
+        # `(a,b)` operand is an arity error, so flatten first; `ProjectOp` reshapes to `(-1)`
+        # anyway, so nothing downstream sees a difference for the single-axis case.
+        _tgt_b = default_basis(v_rep.space)
+        if _basis_eq(v_rep.basis, _tgt_b):
+            v_arr = v_rep.array
+        else:
+            _m = _basis_cob_matrix(ctx, v_rep.basis, _tgt_b)
+            _flat = v_rep.array
+            if len(_shape_of(_flat)) > 1:
+                _n = int(np.prod([int(d) for d in _shape_of(_flat)]))
+                [_flat] = ctx.prog.emit_stmt(
+                    pa.ReshapeOp((_n,)), [_flat], [pa.OutSpec("project:fuse-operand", (_n,))],
+                    note="project:fuse-operand-axes",
+                )
+            [v_arr] = ctx.prog.emit_stmt(
+                pa.EinsumStmtOp("ij,j->i"), [_m, _flat],
+                [pa.OutSpec("project:operand-to-default", (_shape_of(_m)[0],))],
+                note="project:operand-to-default",
+            )
     # projected dim = #columns of the sub-basis (may be a runtime δ_f DimAtom, `42 §B`).
     out_dim = _shape_of(P)[1]
     # BASIS HONESTY (`docs/basis-honesty-handoff.md`; the branch its 2026-07-28 note left unwritten,
@@ -5037,8 +5057,17 @@ def _eval_operand_target(
     for arg_rep in arg_reps:
         if arg_rep.free_labels:
             return None
-        if len(_shape_of(arg_rep.array)) - len(arg_rep.free_labels) > 1:
-            return None
+        # A MULTI-AXIS arg used to back off unconditionally ("a fused slot would fire").
+        # Too strict: an arg over k > 1 space axes carries a `BasisProd` of exactly k
+        # factors, and `dual_basis` of THAT honestly names the fused slot — the same
+        # nested-`BasisProd`-as-fused-axis tagging `_kron_result_basis` uses, which
+        # `realize_basis_cols` lowers through `_kron_cols` to a genuine Kronecker product.
+        # Allow it only when the basis really does split one factor per axis.
+        n_axes = len(_shape_of(arg_rep.array)) - len(arg_rep.free_labels)
+        if n_axes > 1:
+            parts = _basis_factors(arg_rep.basis, n_axes)
+            if parts is None or not isinstance(arg_rep.basis, B.BasisProd):
+                return None
     slots: list[B.Basis] = [want] * n  # placeholder; every position overwritten below
     for pos, b in zip(survivors, comps):
         slots[pos] = b
@@ -6837,6 +6866,30 @@ def _realize_image_covariant(
     n_dom, n_cod = _static_dim(dom), _static_dim(cod)
     f_rep = _rep(f, ctx)
     f_rep = _coerce_rep_basis(ctx, f_rep, note="ffs-cov:f-to-default")
+    # ── SHORT-CIRCUIT: when `F` is already feed-invariant, the endpoint sandwich is a CYCLE ──
+    # `A₀ = T⁻¹·F·S` exists to read `f` in the endpoint coordinates.  But for a NATURAL `f` the
+    # answer is just `F` itself — measured for `alt₂`: the realized matrix is the SAME constant
+    # ({−½, 0, ½}) in the canonical AND the transported realization, which is what naturality
+    # asserts.  Building `S`/`T` to compute something we already have is not merely wasteful, it is
+    # CIRCULAR: `realize_basis_cols` on an `~Img[J]` endpoint goes through `_realize_ffs_in_space`,
+    # which needs `C = U_dᵀ·imm` — the very `QrOp` this path exists to avoid (measured:
+    # `_ffs_immersion` was the dominant remaining requester).  So certify `F` with the same oracle
+    # and, when it passes, take its range basis directly.  `cols = Q₀` satisfies the ambient
+    # contract too, because the matrix is identical in both bases — that equality IS the naturality
+    # condition.  `try_constant_ffs` returning None (not feed-invariant ⇒ not natural) falls through
+    # to the general sandwich below, unchanged.
+    [f_cd_fast] = ctx.prog.emit_stmt(
+        pa.TransposeOp(), [f_rep.array],
+        [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
+        note="ffs-cov:to-(cod,dom)[fast-probe]",
+    )
+    fast = try_constant_ffs(ctx.prog, "img", f_cd_fast, dom_dim=n_dom, cod_dim=n_cod)
+    if fast is not None:
+        real = FfsRealization(cols=fast.cols, rank=fast.rank, rank_dim=fast.rank_dim,
+                              op=fast.op + "+cov-const",
+                              endpoint_cols=fast.cols, endpoint_basis=target)
+        ctx.ffs_realizations[key] = real
+        return real
     [f_cd] = ctx.prog.emit_stmt(
         pa.TransposeOp(), [f_rep.array],
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
