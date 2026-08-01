@@ -1474,6 +1474,98 @@ def _pairing_partner(slot_basis: B.Basis) -> B.Basis:
             return B.dual_basis(slot_basis)
 
 
+def _declared_ffs_frames(want: B.Basis | None) -> dict[int, B.Basis]:
+    """The FFS frame the REQUESTED target declares for each map, keyed by the map's ``uid``.
+
+    A requested basis mentioning ``ImageBasis(J)`` / ``ProjectedBasis(J)`` is the caller SAYING
+    which of the (many, equally valid) frames of ``Img(J)`` it wants that map's space read in.
+    Collected here so a sibling operand of the same map can be realized in the SAME frame instead
+    of falling to its own ``AUTO``.  Ambiguity (one map declared two ways) drops that map — there is
+    no single declared answer, so keep ``AUTO``.
+    """
+    out: dict[int, B.Basis] = {}
+    dropped: set[int] = set()
+
+    def walk(b: object) -> None:
+        if isinstance(b, (B.ImageBasis, B.ProjectedBasis)) and isinstance(b.f, T.Var):
+            uid = b.f.uid
+            if uid in out and not _basis_eq(out[uid], b):
+                dropped.add(uid)
+            out.setdefault(uid, b)
+        for fld in getattr(b, "__dataclass_fields__", {}):
+            val = getattr(b, fld, None)
+            for kid in (val if isinstance(val, tuple) else (val,)):
+                if isinstance(kid, B.Basis):
+                    walk(kid)
+
+    if isinstance(want, B.Basis):
+        walk(want)
+    for uid in dropped:
+        out.pop(uid, None)
+    return out
+
+
+def _redeclare_ffs_leaves(basis: B.Basis, declared: dict[int, B.Basis]) -> B.Basis | None:
+    """``basis`` with each FFS leaf swapped to the frame ``declared`` names for the SAME map.
+
+    Both frames are bases of the same ``Img(f)``, so the swap is basis-LEGAL; it changes only which
+    of them the value is born in.  ``None`` when nothing was declared for any leaf (⇒ the caller
+    keeps ``AUTO`` and the historical path runs byte-identically).
+    """
+    changed = False
+
+    def rec(b: B.Basis) -> B.Basis:
+        nonlocal changed
+        match b:
+            case B.ImageBasis(f=f) | B.ProjectedBasis(f=f) if isinstance(f, T.Var):
+                want_b = declared.get(f.uid)
+                if want_b is not None and not _basis_eq(want_b, b):
+                    changed = True
+                    return want_b
+                return b
+            # The two STRUCTURAL wrappers this substitution descends through.  Both rebuild through
+            # their smart constructors, so the result is a genuine basis of the same space.
+            case B.DualBasis(inner):
+                return B.dual_basis(rec(inner))
+            case B.BasisProd(bases):
+                return B.basis_prod(*[rec(x) for x in bases])
+            # Everything else is returned UNCHANGED — deliberately, not by omission.  Descending
+            # further would have to rebuild nodes whose reconstruction is not a pure re-wrap (a
+            # metric/list/complete frame carries realized data, an abstract `BVar`/`BLam`/`BApp`
+            # has no leaf to substitute), and a missed substitution only costs a cob, while a
+            # botched rebuild is a WRONG-VALUE bug.  `ImageBasis`/`ProjectedBasis` over a non-`Var`
+            # map land here too: `declared` is keyed by `Var.uid`, so there is nothing to look up.
+            case (B.ScalarBasis() | B.BVar() | B.PrimalBasis() | B.BasisSum() | B.BasisRep()
+                  | B.ImageBasis() | B.ProjectedBasis() | B.ListBasis() | B.WithInnerBasis()
+                  | B.OrthonormalBasis() | B.CompleteBasis() | B.BLam() | B.BApp()):
+                return b
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    out = rec(basis)
+    return out if changed else None
+
+
+def _arg_declared_target(
+    arg: T.Term, declared: dict[int, B.Basis], ctx: _Ctx,
+) -> B.TargetBasis | B.Basis:
+    """The target to realize an ``Eval`` argument at: its own default basis with each FFS leaf
+    swapped to the frame the requested target DECLARES for that map.  ``AUTO`` when nothing is
+    declared, when the arg is PINNED (a pin outranks a caller's request), or when its space has no
+    static default — every such case is the historical behaviour, byte-identical.
+    """
+    if not declared:
+        return B.AUTO
+    if isinstance(arg, T.Var) and arg.uid in ctx.basis_env:
+        return B.AUTO
+    try:
+        base = default_basis(_synth(arg))
+    except (S.SpaceError, RepresentError):
+        return B.AUTO
+    out = _redeclare_ffs_leaves(base, declared)
+    return out if out is not None else B.AUTO
+
+
 def _reconcile_pairing(
     ctx: _Ctx, slot_basis: B.Basis | None, op_rep: Rep, *, note: str,
 ) -> Rep:
@@ -2411,7 +2503,20 @@ def _rep_eval(
     want = _resolve_target(ctx, space, target)
     can_steer = want is not None and _metric_node_kind(f) is None and isinstance(_synth(f), S.OProd)
     if can_steer:
-        arg_reps = [_rep(a, ctx) for a in args]
+        # (push-down, args) Realize each arg in the frame the REQUESTED target DECLARES for its map
+        # rather than letting it fall to `AUTO`.  Otherwise the arg's ACCIDENTAL basis becomes
+        # AUTHORITATIVE: `_eval_operand_target` puts `dual_basis(arg_rep.basis)` at the contracted
+        # slot, so an arg that floated to the orthonormal `ProjectedBasis(J)` drags `f` — and every
+        # node below it — into a frame the caller did NOT ask for.  Measured on `P⁻₂Λ¹(TET)`: the
+        # target says `ImageBasis(jacobian)` while the arg realized at `ProjectedBasis(jacobian)`,
+        # and the cob between two frames OF THE SAME MAP is the QR radical `R`.
+        # `≪ .claude/NOTE-intermediate-basis-choices.md ≫`
+        #
+        # Safe by the same argument as `_binder_basis_from_body`: a target `_rep` cannot honour is
+        # ignored, `_eval_operand_target` reads each arg's ACTUAL basis, and the pairing is
+        # reconciled downstream — a poor choice costs a cob, it cannot change a value.
+        _declared = _declared_ffs_frames(want)
+        arg_reps = [_rep(a, ctx, _arg_declared_target(a, _declared, ctx)) for a in args]
         f_target = _eval_operand_target(ctx, want, _synth(f), positions, arg_reps)
         if f_target is not None:
             f_rep = _rep(f, ctx, f_target)
@@ -3848,6 +3953,30 @@ def _rep_embed(
     expected multi-axis tensor.
     """
     v_rep = _rep(vector, ctx)
+    # ── ⊗-UNIT: embedding into the 1-ary tensor power of the operand's OWN space is the IDENTITY ──
+    # `tensor_power(V, 1)` deliberately keeps `OProd((V,))` for `Λ¹` codomain agreement (it is
+    # unit-FREE, so `drop_unit_factors` leaves it alone — see its docstring), so the FEEC `Λ¹` lane
+    # embeds a face covector `Dual(Img J)` into `OProd((Dual(Img J),))`.  Sub-space and ambient are
+    # then the SAME space with the SAME coordinate layout: the immersion is `I` and `EmbedOp` a
+    # no-op, so pass the operand through and TAG it honestly as a 1-ary `BasisProd` of the basis it
+    # is actually in.  Basis-AGNOSTIC — nothing is assumed about which basis that is.
+    #
+    # Why it matters: the general path realizes the immersion via `_ffs_immersion_std` ->
+    # `realize_basis_cols` -> `_realize_ffs_in_space`, which expresses the literal `ImageBasis(J)`
+    # in the CANONICAL `ProjectedBasis` `U_d` — and building `U_d` for an injective image is a
+    # `QrOp`.  An identity embed was paying a QR (plus the `cob:std→to=C⁻¹` undoing it), putting the
+    # radical `R` on the dependency path of a DOF that is metric-free by construction.
+    if (isinstance(big, S.OProd) and len(big.spaces) == 1
+            and _norm_space(big.spaces[0]) == _norm_space(v_rep.space)
+            and _shape_of_space(big) == _shape_of_space(v_rep.space)):
+        rep = Rep(v_rep.array, B.basis_prod(v_rep.basis), big)
+        match target:
+            case B.TargetBasis.STD:
+                return _std_result(ctx, rep)
+            case B.TargetBasis.AUTO:
+                return rep
+            case _:
+                return _match_result(ctx, rep, target)
     # The embedding columns must be the operand's *active* basis vectors in AMBIENT coords —
     # ``P · ⟦v⟧`` reconstructs the ambient value.  Only an ``ImageBasis`` realizes its literal
     # columns directly in the ambient (the f-application cols in cod, `43 §2c`); a plain
@@ -4137,15 +4266,43 @@ def _rep_lift(
     # genuinely honest.  ALWAYS (incl. AUTO) — a default operand cob is a no-op (byte-identical), but a
     # NON-default operand under AUTO (e.g. ``lift`` as a sub-term) must still be coerced, else the
     # ``default_basis`` tag lies about a non-default-operand result (silent-wrong, `⟨lift(m),x⊗y⟩`).
-    v_rep = _rep(e.vector, ctx, target=B.STD)
+    # ...that fallback is now the SECOND choice, not the only one.  The claim above — "a fused axis
+    # would need a genuine Kronecker-product basis object" — is the same stale claim `_rep_kron`
+    # carried, and the object EXISTS: a fused axis is tagged by a nested `BasisProd`, which
+    # `realize_basis_cols` lowers through `_kron_cols` to a real `pa.KronOp`.  So build the honest
+    # tag from the operand's OWN basis (`_lift_result_basis`, the reshape analogue of
+    # `_kron_result_basis`) and only coerce to STD when it declines.
+    #
+    # Why it matters: forcing STD is an INTERMEDIATE BASIS CHOICE
+    # (`≪ .claude/NOTE-intermediate-basis-choices.md ≫`).  For an `Img(J)` operand, STD is the
+    # orthonormal `ProjectedBasis`, realized by a `QrOp` — and the cob back to the literal
+    # `ImageBasis` the caller asked for is the QR radical `R`.  Measured: this was the LAST
+    # requester of a `QrOp` on the FEEC `P⁻₂Λ¹(TET)` lane (the 3x2 face jacobians), upstream of both
+    # `_rep_eval`'s arg steering and `_rep_embed`'s immersion.
+    #
+    # SAFETY mirrors `_rep_kron`: honesty is CHECKED, not assumed — `_lift_result_basis` returns
+    # `None` on any structure it cannot tag exactly, whereupon the historical coerce-to-STD path runs
+    # unchanged.  A lying tag would be a WRONG-VALUE bug (`_match_result` cobs from a basis the array
+    # is not in), so anything doubtful declines.
+    # (push-down) A CONCRETE target splits back to the operand's per-axis bases, so the operand is
+    # BORN in the requested frame and the result match below is a no-op.  Without it the operand
+    # realizes at AUTO (the orthonormal frame for an `Img`) and the caller cobs — the same round
+    # trip, merely relocated.  `None` ⇒ AUTO, exactly as before.
+    _src_space = _synth(e.vector)
+    _v_target = _lift_operand_target(target, e, _src_space)
+    v_rep = _rep(e.vector, ctx, _v_target if _v_target is not None else B.AUTO)
     space = _synth(e)
+    res_basis = _lift_result_basis(v_rep.basis, e, _src_space, space)
+    if res_basis is None:                      # untaggable — historical path, byte-identical
+        v_rep = _rep(e.vector, ctx, target=B.STD)
+        res_basis = default_basis(space)
     out_shape = _shape_of_space(space)
     [out] = ctx.prog.emit_stmt(
         pa.ReshapeOp(tuple(out_shape)), [v_rep.array],
         [pa.OutSpec("lift", out_shape)],
         note=("lift:reshape-fuse" if isinstance(e, T.Lift) else "invlift:reshape-unfuse"),
     )
-    rep = Rep(out, default_basis(space), space)
+    rep = Rep(out, res_basis, space)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -4298,6 +4455,137 @@ def _kron_operand_targets(
         return auto
     return (B.basis_prod(B.dual_basis(dom_parts[0]), cod_parts[0]),
             B.basis_prod(B.dual_basis(dom_parts[1]), cod_parts[1]))
+
+
+def _lift_result_basis(
+    v_basis: B.Basis, e: T.Lift | T.InvLift, src_space: S.Space, space: S.Space,
+) -> B.Basis | None:
+    """The HONEST basis of a ``Lift``/``InvLift`` result, from the operand's own basis.
+
+    Mirrors :func:`~grassmann.infer.synth._synth_lift` exactly, one level down: the reshape keeps
+    the non-fused factors in order and inserts the FUSED BLOCK at ``k`` (default ``min(fused)``).
+    A fused axis is tagged by a nested :class:`~grassmann.core.basis.BasisProd` — the same
+    convention :func:`_kron_result_basis` uses, which ``realize_basis_cols`` lowers through
+    :func:`_kron_cols` to a real ``pa.KronOp``, i.e. the Kronecker product of the component frames.
+
+    * ``Lift`` fuses the (contravariant) input slots into one ``Dual`` of their ⊗, so the block is
+      ``DualBasis(BasisProd(inner…))`` with one ``DualBasis`` peeled off each fused component and
+      re-applied ONCE around the product.
+    * ``InvLift`` fuses primally and REASSOCIATES — a fused component that is itself a ``BasisProd``
+      flattens into the block, mirroring ``_as_factors``.
+
+    Returns ``None`` — "cannot tag exactly, caller must fall back" — whenever the operand basis does
+    not split into one factor per source factor, an index is out of range, or a ``Lift`` fused
+    component is not a literal ``DualBasis`` (peeling would be a guess, and mis-peeling tags an axis
+    ``dual(dual(x))``, which ``_basis_eq`` reads as ``x`` — a skipped cob and a WRONG value).
+    """
+    factors = _factors(src_space)
+    n = len(factors)
+    if any(i >= n for i in e.fused):
+        return None
+    comps = _basis_factors(v_basis, n)
+    if comps is None:
+        return None
+    fused_idx = set(e.fused)
+    fused_b = [comps[i] for i in e.fused]
+    rest_b = [comps[i] for i in range(n) if i not in fused_idx]
+    insert_at = e.k if e.k is not None else (min(e.fused) if e.fused else 0)
+
+    block: B.Basis
+    if isinstance(e, T.Lift):
+        inner: list[B.Basis] = []
+        for b in fused_b:
+            if not isinstance(b, B.DualBasis):
+                return None            # peeling a non-dual factor would be a guess
+            inner.append(b.basis)
+        if not inner:
+            return None                # `oprod()` — no honest empty-product tag
+        block = B.dual_basis(B.basis_prod(*inner))
+    else:
+        flat: list[B.Basis] = []
+        for b in fused_b:
+            flat.extend(b.bases if isinstance(b, B.BasisProd) else (b,))
+        if not flat:
+            return None
+        block = B.basis_prod(*flat) if len(flat) != 1 else flat[0]
+
+    out: list[B.Basis] = list(rest_b)
+    out.insert(min(insert_at, len(out)), block)
+    if len(out) == 1:
+        return out[0]
+    # Only offer the tag if it genuinely describes THIS space (the guard `_kron_result_basis` uses).
+    try:
+        if _basis_factors(default_basis(space), len(out)) is None:
+            return None
+    except S.SpaceError:
+        return None
+    return B.basis_prod(*out)
+
+
+def _lift_operand_target(
+    target: B.TargetBasis | B.Basis, e: T.Lift | T.InvLift, src_space: S.Space,
+) -> B.Basis | None:
+    """Split a CONCRETE ``Lift``/``InvLift`` target back to the operand's per-axis bases — the
+    inverse of :func:`_lift_result_basis`, as :func:`_kron_operand_targets` is to
+    :func:`_kron_result_basis`.
+
+    Without this the operand realizes at ``AUTO`` (``_natural_basis`` ⇒ the ORTHONORMAL frame for an
+    ``Img``), the result is honestly tagged from that, and the caller cobs — the very round trip the
+    honest tag was meant to avoid, just relocated.  With it the operand is BORN in the requested
+    frame and the result match is a no-op.
+
+    ``None`` (⇒ keep ``AUTO``) on anything that does not split exactly: a non-concrete target, an
+    arity mismatch, or a fused block whose shape does not mirror what ``_lift_result_basis`` builds.
+    """
+    if not isinstance(target, B.Basis):
+        return None
+    factors = _factors(src_space)
+    n = len(factors)
+    if not e.fused or any(i >= n for i in e.fused):
+        return None
+    fused_idx = list(e.fused)
+    rest_pos = [i for i in range(n) if i not in set(fused_idx)]
+    insert_at = e.k if e.k is not None else min(fused_idx)
+    n_out = len(rest_pos) + 1
+    at = min(insert_at, len(rest_pos))
+    comps = _basis_factors(target, n_out) if n_out > 1 else [target]
+    if comps is None or len(comps) != n_out:
+        return None
+    block = comps[at]
+    rest_b = [c for j, c in enumerate(comps) if j != at]
+
+    fused_b: list[B.Basis]
+    if isinstance(e, T.Lift):
+        # block = DualBasis(BasisProd(inner…)) — re-wrap each inner in its own DualBasis.
+        if not isinstance(block, B.DualBasis):
+            return None
+        inner = _basis_factors(block.basis, len(fused_idx))
+        if inner is None or len(inner) != len(fused_idx):
+            return None
+        fused_b = [B.dual_basis(x) for x in inner]
+    else:
+        # InvLift REASSOCIATES, so the block is the FLATTENED product: re-split it using each fused
+        # source factor's own arity, then re-nest anything that was itself a product.
+        arities = [len(_factors(factors[i])) for i in fused_idx]
+        total = sum(arities)
+        flat = _basis_factors(block, total) if total > 1 else [block]
+        if flat is None or len(flat) != total:
+            return None
+        fused_b, pos = [], 0
+        for a in arities:
+            part = flat[pos:pos + a]
+            pos += a
+            fused_b.append(part[0] if a == 1 else B.basis_prod(*part))
+
+    slots: list[B.Basis] = [target] * n          # placeholder; every position overwritten below
+    for i, b in zip(fused_idx, fused_b, strict=True):
+        slots[i] = b
+    for i, b in zip(rest_pos, rest_b, strict=True):
+        slots[i] = b
+    try:
+        return _basis_from_factors(slots, src_space)
+    except (S.SpaceError, RepresentError):
+        return None
 
 
 def _kron_result_basis(f_basis: B.Basis, g_basis: B.Basis, space: S.Space) -> B.Basis | None:
@@ -5220,6 +5508,26 @@ def _project_exact_by_naturality(vector: T.Term, sub: S.Space) -> bool:
     """
     if not isinstance(sub, S.Img):
         return False
+    # (0) BY DEFINITION.  ``Project(Eval(f, …), Img(f))`` — the value IS an application of the very
+    # map whose image we project onto, so it lies in that image identically; there is nothing to
+    # project and the residual is zero for ANY frame.  This needs no naturality square: it is the
+    # definition of ``Img``.  It is also the shape the FEEC `Λᵏ` trace actually arrives in — `alt`
+    # is `Scale(½, Lift(LLam(…)))`, NOT a literal `Kron`, so the diagonal-transport recognizer below
+    # never fired for it and every r >= 2 lane fell back to the canonical ambient (a `QrOp`).
+    # Requires the Eval to contract ALL of ``f``'s domain: a PARTIAL application is still a map, not
+    # an element of ``Img(f)``.  Alpha-comparison (spaces ignored) matches the rest of this
+    # function, and the run-time ``in_span`` assert remains the net.
+    if isinstance(vector, T.Eval) and _alpha_key(vector.f) == _alpha_key(sub.f):
+        try:
+            _dom, cod = map_domain_codomain(vector.f)
+            # FULL application, tested on the RESULT: the Eval's own space must be ``f``'s codomain.
+            # (Do NOT test ``len(positions) == len(_factors(dom))`` — for a LIFTED map the domain is
+            # ONE fused slot while ``_factors`` sees through to the block's contents, so a complete
+            # application reads as partial.  ``alt`` is exactly that shape.)
+            if _norm_space(_synth(vector)) == _norm_space(cod):
+                return True
+        except (S.SpaceError, RepresentError, NotImplementedError):
+            pass
     while isinstance(vector, (T.Eval, T.Compose)):
         args = getattr(vector, "args", None) or getattr(vector, "gs", None) or ()
         f = vector.f
