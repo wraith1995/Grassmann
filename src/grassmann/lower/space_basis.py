@@ -268,53 +268,11 @@ class FfsRealization:
     rank: pa.SymArray | None
     rank_dim: pa.DimAtom | None
     op: str
-    """Which op produced ``cols``.  Read by :func:`ffs_cols_orthonormal` — the frame's
-    ORTHONORMALITY is a property of the producing op, and consumers that need the
-    coordinate map INTO the frame must branch on it (``Pᵀ`` only when orthonormal)."""
     # The upper-triangular ``R`` of the injective QR (``J = Q·R``), captured so a change of
     # basis between the literal ``ImageBasis`` and the orthonormal ``ProjectedBasis`` of the
     # SAME map is ``R`` directly — no realize-both-and-pseudo-invert (`Stage B`).  ``None``
     # for the SVD/GSVD seams.
     r: pa.SymArray | None = None
-    # The SAME subspace frame expressed in the DECLARED ENDPOINT basis instead of the ambient
-    # canonical one — i.e. the covariant realization's ``Q₀``, before the ``cols = T·Q₀`` that
-    # exists only to satisfy this dataclass's "ambient standard coordinates" contract.  Set only by
-    # :func:`~grassmann.lower.represent._realize_image_covariant`; ``None`` everywhere else.
-    #
-    # Why it is worth carrying: for a NATURAL ``f`` (the exterior ``alt`` under the transported
-    # ⊗ᵏ frames — certified mechanically by ``try_constant_ffs`` folding ``A₀`` to a build-time
-    # constant) ``Q₀`` is CONSTANT, while ``T`` carries all the cell dependence AND, for an
-    # ``Img(J)`` endpoint, the QR radical ``R``.  A consumer whose operand already lives in
-    # ``endpoint_basis`` can use ``endpoint_cols`` directly and skip ``T``, ``InvOp(T)`` and its own
-    # operand cob entirely.  The two frames span the SAME subspace and yield the SAME subspace
-    # coordinates — the ambient change of basis is applied consistently to frame and operand — but
-    # ONLY when the projection is EXACT: with a residual, ``pinv`` projects along the ambient
-    # orthogonal complement, which differs between the two ambient bases.  Consumers must therefore
-    # guard on exactness (measured: for the FEEC Λᵏ trace the residual is identically zero because a
-    # diagonal pullback of an antisymmetric tensor stays antisymmetric for ANY ι; for a general
-    # operand it is 100%).  See `≪ .claude/NOTE-intermediate-basis-choices.md ≫`.
-    endpoint_cols: pa.SymArray | None = None
-    endpoint_basis: object | None = None      # the `B.Basis` `endpoint_cols` is expressed in
-
-
-# The realization ops whose ``cols`` are STANDARD-orthonormal (``PᵀP = I`` exactly), so the
-# adjoint ``Pᵀ`` IS the matched dual ``pinv(P) = (PᵀP)⁻¹Pᵀ`` and a consumer may read
-# coordinates with a transpose.  POSITIVE whitelist — anything absent needs the general
-# ``pinv``: ``"GSvdOp"`` is *g*-orthonormal (``UᵀGU = I``, not ``UᵀU = I``), ``"MapApply"`` /
-# ``"Gram"`` are the LITERAL map columns, and any ``"…+cov"`` frame is ``T·Q₀`` (orthonormal in
-# the target basis's inner product, not the standard one).
-_STD_ORTHONORMAL_FFS_OPS = frozenset({"QrOp", "SvdOp", "const", "const-svd", "supplied"})
-
-
-def ffs_cols_orthonormal(real: FfsRealization) -> bool:
-    """Whether ``real.cols`` is provably STANDARD-orthonormal (``PᵀP = I``).
-
-    Conservative in the SAFE direction: ``False`` only costs a consumer the general
-    ``pinv``/Gram solve, it is never wrong; ``True`` on a non-orthonormal frame is the
-    documented silent-wrongness class (`docs/basis-honesty-handoff.md`), so this is a
-    positive whitelist of the ops that provably orthonormalize.
-    """
-    return real.op in _STD_ORTHONORMAL_FFS_OPS
 
 
 # block index of each SvdOp/GSvdOp output that carries the named subspace.
@@ -334,7 +292,6 @@ def realize_ffs_basis(
     metric_cod: pa.SymArray | None = None,
     label: str = "f",
     dim_atom: pa.DimAtom | None = None,
-    literal_frame: bool = False,
 ) -> FfsRealization:
     """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``) (`41 §1`).
 
@@ -356,12 +313,6 @@ def realize_ffs_basis(
     ⇒ the seam mints a fresh atom (the legacy behaviour) and reports it in
     :attr:`FfsRealization.rank_dim` (and, for ker/coker, the complement atom is the subspace
     axis of ``cols``) so the caller can record it and pass it back next time.
-
-    ``literal_frame`` (Teo 2026-07-31, "two realizations of the same ffs basis is fine") — on
-    the injective-image route ONLY, realize the LITERAL columns (:func:`_realize_via_gram`)
-    instead of the orthonormal ``Q``.  Same subspace, a different frame; see that function for
-    the precondition and the conditioning price.  Default ``False`` = the orthonormal frame
-    (byte-identical to the historical behaviour on every route).
     """
     if which == "image":
         which = "img"
@@ -372,8 +323,6 @@ def realize_ffs_basis(
     has_metric = metric_dom is not None or metric_cod is not None
 
     if which == "img" and injective and not has_metric:
-        if literal_frame:
-            return _realize_via_gram(program, f_matrix, dom_dim, label)
         return _realize_via_qr(program, f_matrix, dom_dim, label)
     if has_metric:
         return _realize_via_gsvd(
@@ -629,39 +578,6 @@ def _realize_via_qr(
         note=f"ffs-basis:ImageBasis({label}):QR-sign(+diag R)",
     )
     return FfsRealization(cols=Q, rank=None, rank_dim=None, op="QrOp", r=R)
-
-
-def _realize_via_gram(
-    program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, label: str,
-) -> FfsRealization:
-    """The LITERAL-COLUMN (Gram) realization of an injective map's image (`41 §1`).
-
-    The SECOND realization of the SAME FFS basis (Teo 2026-07-31, "two realizations of the
-    same ffs basis is fine"): ``cols = J`` itself — the map's own columns — with ``r = None``
-    (``J = cols·I``).  Same subspace ``Img(f)``, same ``FfsRealization`` contract, a
-    DIFFERENT (non-orthonormal) frame, tagged ``op="Gram"`` so
-    :func:`ffs_cols_orthonormal` reports ``False`` and every consumer that needs coordinates
-    IN the frame takes its general route — the matched dual ``pinv(J) = (JᵀJ)⁻¹Jᵀ = G⁻¹Jᵀ``
-    (the Gram solve this realization is named for) instead of ``Jᵀ``.
-
-    WHY it exists: :func:`_realize_via_qr`'s ``Q`` is ALGEBRAIC-IRRATIONAL in the inputs (QR
-    normalizes by ``√(…)``), so polyarray's exact rational lane cannot carry it and every
-    certificate downstream of it degrades to probe-and-freeze.  ``J`` is RATIONAL in them, so
-    the exact lane certifies through it.  The price is conditioning — coordinates come from
-    ``G = JᵀJ`` whose condition number is ``κ(J)²`` — which is why this realization is OPT-IN
-    (``literal_frame``) and never the numeric default.
-
-    PRECONDITION: ``f`` INJECTIVE — the same precondition :func:`_realize_via_qr` already
-    requires, and the reason no new assumption enters: injective ⇒ the columns are a basis of
-    the image (full column rank) ⇒ ``G`` is invertible and ``pinv(J)·J = I`` identically.
-    Callers select this route only under that guard (:func:`realize_ffs_basis`).
-    """
-    [cols] = program.emit_stmt(
-        pa.IdentityOp(), [f_matrix],
-        [pa.OutSpec("Jg_" + label, _qr_q_shape(f_matrix, dom_dim))],
-        note=f"ffs-basis:ImageBasis({label}):inj=>literal-cols(Gram)",
-    )
-    return FfsRealization(cols=cols, rank=None, rank_dim=None, op="Gram")
 
 
 @dataclass(frozen=True)

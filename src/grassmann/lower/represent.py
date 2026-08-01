@@ -53,7 +53,6 @@ from .provenance import LowerProv
 from .space_basis import (
     FfsRealization,
     default_basis,
-    ffs_cols_orthonormal,
     realize_ffs_basis,
     realize_image_application,
     space_basis,
@@ -161,64 +160,6 @@ def _lowering_budget() -> pa.SymbolicBudget:
 def _rational_lane() -> bool:
     """True inside `rational_lane()` — build statement-free closed-form RF (see `_REPRESENT_BUDGET`)."""
     return _REPRESENT_BUDGET.get() is not None
-
-
-# ===========================================================================
-# FFS frame realization lane (Teo 2026-07-31: "two realizations of the same ffs basis is fine")
-# ===========================================================================
-# The injective-image FFS basis has TWO admissible realizations of the SAME subspace:
-#
-#   * the ORTHONORMAL `Q` (`space_basis._realize_via_qr`) — the NUMERIC DEFAULT.  Coordinates
-#     come from `Qᵀ` (no solve), and the frame is well-conditioned: `κ(Q) = 1`.  Its cost is
-#     that `Q` is ALGEBRAIC-IRRATIONAL in the program inputs (QR normalizes by `√(…)`), so
-#     polyarray's exact lane cannot execute it and every certificate downstream degrades to
-#     probe-and-freeze.
-#   * the LITERAL columns `J` (`space_basis._realize_via_gram`) — RATIONAL in the inputs, so
-#     the exact lane certifies through it.  Its cost is conditioning: coordinates come from
-#     the Gram `G = JᵀJ`, and `κ(G) = κ(J)²` (a recorded sliver case measures κ = 2.4e16, which
-#     the squaring would destroy).
-#
-# Hence: the SYMBOLIC/CERTIFICATE consumer may opt in; the numeric default must not move.
-#
-# NOTE on the gate (measured 2026-07-31 — the design note this implements proposed reusing the
-# `_REPRESENT_BUDGET` rational-lane distinction, and that is NOT usable): the affine-invariance
-# certificate does not build under `rational_lane()`.  `pointwise.sampling.pti` builds its
-# symbolic `W` through the ordinary `force_stmts` lane over a symbolic geometry;
-# `rational_lane()` has exactly one caller in the stack (`oracle.debug`, the sparsity mask).
-# Gating on `_REPRESENT_BUDGET` would therefore have left the certificate on `Q` and switched
-# oracle's mask lane instead — the opposite of the intent.  So the lane is its own EXPLICIT
-# opt-in, default OFF.
-_LITERAL_FFS_FRAMES: contextvars.ContextVar = contextvars.ContextVar(
-    "_gr_literal_ffs_frames", default=None
-)
-
-
-@contextlib.contextmanager
-def literal_ffs_frames(enabled: bool = True):
-    """Within this context, realize an INJECTIVE image FFS basis as its LITERAL columns
-    (rational in the inputs) instead of the orthonormal QR frame — the exact/certificate
-    realization (`space_basis._realize_via_gram`).
-
-    Same subspace, a different frame: every consumer that needs coordinates IN the frame
-    branches on :func:`~grassmann.lower.space_basis.ffs_cols_orthonormal`, so the matched dual
-    `pinv(J)` is used in place of `Jᵀ`.  OFF by default — see the module note above for why the
-    numeric lane must keep the orthonormal frame.
-    """
-    tok = _LITERAL_FFS_FRAMES.set(bool(enabled))
-    try:
-        yield
-    finally:
-        _LITERAL_FFS_FRAMES.reset(tok)
-
-
-def _literal_ffs_frames() -> bool:
-    """True when the LITERAL (Gram) FFS image frame is requested — the `literal_ffs_frames()`
-    context, else the `GRASSMANN_FFS_FRAME=literal` process default (the escape hatch for a
-    consumer that cannot yet wrap the call site, mirroring `GRASSMANN_LLAM_INDEX`)."""
-    ctx = _LITERAL_FFS_FRAMES.get()
-    if ctx is not None:
-        return bool(ctx)
-    return os.environ.get("GRASSMANN_FFS_FRAME", "").strip().lower() == "literal"
 
 
 # ===========================================================================
@@ -1628,20 +1569,7 @@ def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
     match b:
         case B.ScalarBasis():
             return S.Scalar()
-        case B.DualBasis(inner):
-            # `DualBasis(b)` is a basis of `Dual(space_of(b))` — LITERALLY, with no `Dual(Dual(·))`
-            # cancellation.  Using `_dual_toggle` here cancelled it, which made this function
-            # disagree with `_norm_space`, whose docstring explicitly REFUSES to collapse a double
-            # dual ("those are canonical isos, and cob makes no implicit conversions, even canonical
-            # ones").  The two are compared against each other in `_resolve_target`, so the
-            # disagreement silently REJECTED a structurally-matching target: a map basis
-            # `(~~Img ⊗ ~Img)` for a space `Dual(Dual(Img)) ⊗ Dual(Img)` resolved to `None`, the
-            # requested basis was dropped, and the node fell back to the orthonormal default — which
-            # is what kept a `QrOp` alive on the FEEC Λᵏ lane long after the push-down was correct.
-            si = _space_of_basis(ctx, inner)
-            return None if si is None else S.Dual(si)
-        case B.PrimalBasis(inner):
-            # `PrimalBasis` is the one that genuinely UNDOES a star — that is what it means.
+        case B.DualBasis(inner) | B.PrimalBasis(inner):
             si = _space_of_basis(ctx, inner)
             return None if si is None else _dual_toggle(si)
         case B.WithInnerBasis(inner, g):
@@ -2650,13 +2578,10 @@ def _rep_compose(
     # for free labels (a differentiated f/g) — the basis tags would not be honest.
     steered = False
     want = _resolve_target(ctx, space, target)
-    # The gate is `_compose_operand_targets`' own (it returns None on any structure it cannot steer
-    # cleanly).  It used to ALSO require `isinstance(_synth(f), S.OProd)` here — stricter than the
-    # callee needs, since that works off `_factors`/`_basis_factors`, both of which handle a
-    # single-factor space.  The excluded case is the most common FEEC shape there is: a COVECTOR
-    # composed with an inclusion (`u ∘ ι` with `u : Dual(Img(J_cell))`), which is a `Dual`, not an
-    # `OProd` — so the trace DOF never got steered and paid a result cob instead.
-    tgts = _compose_operand_targets(ctx, want, f, positions, gs) if want is not None else None
+    tgts = (
+        _compose_operand_targets(ctx, want, _synth(f), positions, gs)
+        if want is not None and isinstance(_synth(f), S.OProd) else None
+    )
     if tgts is not None:
         f_target, g_targets = tgts
         f_rep = _rep(f, ctx, f_target)
@@ -3217,20 +3142,7 @@ def _rep_corestrict(
     space = _synth(e)
     img = S.Img(f)
     f_rep = _coerce_rep_basis(ctx, _rep(f, ctx), note="corestrict:f-to-default")
-    img_basis, cols, ortho = _subspace_cols(ctx, img, note="corestrict:image-frame")
-    if not ortho:
-        # THIRD instance of the `Pᵀ`-as-inverse pattern (`docs/basis-honesty-handoff.md`): the
-        # einsum below reads `f`'s columns in the image frame as `fᵀ·P`, i.e. `(Pᵀ·f)ᵀ`, which
-        # are coordinates in `img_basis` only for an ORTHONORMAL `P`.  Not rewritten here (out
-        # of the frame-realization arc's scope) — but a non-orthonormal image frame must BAIL
-        # LOUDLY rather than return `fᵀ·P` mislabelled as image-frame coordinates.  The fix
-        # when a consumer needs it is the same matched dual `_rep_project` now emits.
-        raise RepresentError(
-            "represent: corestrict reads f in the image frame as fᵀ·P, which requires an "
-            f"ORTHONORMAL image frame; the realization of {img!r} is not orthonormal "
-            "(literal/Gram or metric frame). Use the orthonormal realization for corestrict, "
-            "or implement the matched dual pinv(P) here."
-        )
+    img_basis, cols = _subspace_cols(ctx, img, note="corestrict:image-frame")
     n_dom = _shape_of(f_rep.array)[0]
     n_img = _shape_of(cols)[1]
     [out] = ctx.prog.emit_stmt(
@@ -3725,85 +3637,28 @@ def _rep_project(
     """``project(v, s')`` — select the sub-block via the sub-space's basis (`41 §3`).
 
     Drop the complement coordinates: with the sub-basis ``P`` (columns = sub vectors in
-    ambient coords), the projected coords are the MATCHED DUAL ``pinv(P) · ⟦v⟧`` — which is
-    exactly ``Pᵀ · ⟦v⟧`` when (and only when) ``P`` is orthonormal.
+    ambient coords), the projected coords are ``Pᵀ · ⟦v⟧`` (orthonormal sub-basis).
     """
-    # (push-down) A requested `ProjectedBasis(f, "image", src, tgt)` names the AMBIENT basis its
-    # coordinates are read in — `tgt`.  Ask the operand for that ambient directly, so the whole
-    # sub-term (`Eval` → `Kron` → the wedge binders) is BORN there instead of realizing at AUTO in
-    # the orthonormal frame and being reconciled afterwards.  Without this the target dies here and
-    # every node below defaults, which is what kept `eval-reconcile@0` — and the QR feeding it —
-    # alive.  `_rep` ignores a target that is not a basis of the operand's space, so this is safe;
-    # AUTO otherwise, exactly as before.
-    v_target: B.TargetBasis | B.Basis = B.AUTO
-    if isinstance(target, B.ProjectedBasis) and target.target is not None:
-        v_target = target.target
-    v_rep = _rep(vector, ctx, v_target)
-    sub_basis, P, ortho = _subspace_cols(ctx, sub, note="project:CompleteBasis-coords")
+    v_rep = _rep(vector, ctx)
+    sub_basis, P = _subspace_cols(ctx, sub, note="project:CompleteBasis-coords")
     # ``P``'s columns are in the AMBIENT default basis, so ``Pᵀ·⟦v⟧`` is basis-consistent only with
     # ``v`` in the SAME ambient default coords — realize it there (a non-default operand pin would
     # otherwise contract std-``P`` against non-std-``v``).  No-op for a default operand.
-    #
-    # ...but WHICH ambient basis the two meet in is grassmann's FREE CHOICE, and dragging the operand
-    # is the expensive direction: for an `Img(J)` endpoint that cob is the QR radical `R`.  When the
-    # operand already lives in the subspace's DECLARED endpoint basis, take the frame there instead
-    # (`Q₀`, constant for a natural `f`) and move nothing.  Same subspace, same subspace coordinates.
-    # GUARDED: `pinv` projects along the AMBIENT-orthogonal complement, which differs between the two
-    # ambient bases, so this is sound only when the projection is EXACT (zero residual) — asserted at
-    # run time below rather than assumed.  `≪ .claude/NOTE-intermediate-basis-choices.md ≫`
-    endpoint = (_endpoint_subspace_cols(ctx, sub, v_rep.basis)
-                if _project_exact_by_naturality(vector, sub) else None)
-    if endpoint is not None:
-        P, ep_basis = endpoint
-        v_arr = v_rep.array
-        ortho = False          # `Q₀` in endpoint coords is NOT `PᵀP = I`; take the matched-dual arm
-        # TAG the result with the ENDPOINT-ful subspace basis, not the endpoint-free
-        # `default_basis(sub)`.  Both name the same subspace, but only this one says which ambient
-        # coordinates the frame was read in — and it is the basis a transported consumer (pointwise's
-        # requested `ProjectedBasis(alt, "image", ~Img⊗~Img, …)`) actually asks for, so the result
-        # lands ON the target and `_match_result` becomes a no-op instead of a cob back through the
-        # canonical frame.  Tagging it endpoint-free here would be the same dishonesty the `LLam`
-        # epilogue had: a basis the array is not in.
-        sub_basis = B.projected_basis(sub.f, "image", ep_basis, ep_basis)
-        _assert_projection_exact(ctx, P, v_arr)
-    else:
-        v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space),
-                              note="project:operand-to-default")
+    v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space), note="project:operand-to-default")
     # projected dim = #columns of the sub-basis (may be a runtime δ_f DimAtom, `42 §B`).
     out_dim = _shape_of(P)[1]
-    # BASIS HONESTY (`docs/basis-honesty-handoff.md`; the branch its 2026-07-28 note left unwritten,
-    # written 2026-07-31 now that a second — non-orthonormal — realization of the FFS image frame
-    # exists).  `ProjectOp` is `Pᵀ·v`, which are coordinates in `sub_basis` ONLY when `PᵀP = I`; the
-    # general coordinate map is the matched dual `P⁺ = (PᵀP)⁻¹Pᵀ`.  So: exploit orthonormality where
-    # `_subspace_cols` can PROVE it (the historical single-Stmt path, unchanged and byte-identical —
-    # every frame this site sees today is metric-free QR/SVD, verified by census), else emit the
-    # general pinv.  `ProjectOp` is reused for the matvec-with-ravel by feeding it `(P⁺)ᵀ`: it
-    # computes `((P⁺)ᵀ)ᵀ·v = P⁺·v`, so no new op and no new lowering enters either render lane.
-    #
-    # NOT the cause of the σ face defect (measured 2026-07-28, still true): on that path every
-    # sub-basis is an endpoint-free `ProjectedBasis` with `PᵀP = I`, so `ortho` is True there and the
-    # emitted program is bit-for-bit what it was.
-    if ortho:
-        [out] = ctx.prog.emit_stmt(
-            pa.ProjectOp(), [P, v_arr],
-            [pa.OutSpec("project", (out_dim,))],
-            note="project:drop-complement",
-        )
-    else:
-        n_amb = _shape_of(P)[0]
-        [p_plus] = ctx.prog.emit_stmt(
-            pa.PinvOp(), [P], [pa.OutSpec("project:pinv", (out_dim, n_amb))],
-            note="project:matched-dual=pinv(P)",
-        )
-        [p_plus_t] = ctx.prog.emit_stmt(
-            pa.TransposeOp(), [p_plus], [pa.OutSpec("project:pinvT", (n_amb, out_dim))],
-            note="project:matched-dual-transposed(for ProjectOp)",
-        )
-        [out] = ctx.prog.emit_stmt(
-            pa.ProjectOp(), [p_plus_t, v_arr],
-            [pa.OutSpec("project", (out_dim,))],
-            note="project:drop-complement(non-orthonormal frame => pinv)",
-        )
+    # NOTE (measured 2026-07-28, do not re-attempt without new evidence): `ProjectOp` is `Pᵀ·v`, which
+    # gives coordinates in `sub_basis` only when `P` is ORTHONORMAL, and `docs/basis-honesty-handoff.md`
+    # records `Project(v, Img(J))` as silent-wrong under a pinned `J` for exactly that reason — so a
+    # `P⁺ = (PᵀP)⁻¹Pᵀ` branch gated on a non-orthonormal sub-basis looks like the fix. It is NOT the
+    # cause of the σ face defect: instrumenting `_subspace_cols` on that path shows every sub-basis is
+    # an endpoint-free `ProjectedBasis` with `PᵀP = I` exactly, and the pinv branch changed the result
+    # bit-for-bit not at all. Left unwritten rather than shipped inert and untested.
+    [out] = ctx.prog.emit_stmt(
+        pa.ProjectOp(), [P, v_arr],
+        [pa.OutSpec("project", (out_dim,))],
+        note="project:drop-complement",
+    )
     rep = Rep(out, sub_basis, sub)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
@@ -3838,34 +3693,17 @@ def _rep_embed(
         P = _ffs_immersion_std(ctx, v_rep.basis)  # P = the f-cols in the STANDARD ambient frame (never target-re-expressed)
         v_arr = v_rep.array                    # … so v's in-space coords are already consistent
     else:
-        # `EmbedOp` is `P·⟦v⟧` — the RECONSTRUCTION, which is covariant under ANY change of the
-        # frame `P` (a GL, not just an orthogonal, one): it needs no matched dual, so the
-        # orthonormality flag is deliberately unread here.
-        _sub_basis, P, _ortho = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
+        _sub_basis, P = _subspace_cols(ctx, v_rep.space, note="embed:CompleteBasis-coords")
         # P = the sub↪ambient default cols ⇒ realize v in that default basis so ``P·⟦v⟧`` is
         # consistent (no-op for a default operand; cob's a non-default ORTHONORMALIZE/metric/list pin).
         v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space), note="embed:operand-to-default")
-    # ...but WHICH ambient frame `P` is read in is a FREE CHOICE, and the operand's own basis often
-    # DECLARES the answer: a `ProjectedBasis(f, "image", src, tgt)` pin names the transported ambient
-    # its coordinates belong to.  Reading `P` there instead of in the canonical ambient keeps the
-    # whole chain in one basis and drops the `T`/`QrOp` that expressing an `ImageBasis` canonically
-    # would cost.  UNCONDITIONAL — unlike `Project`, `EmbedOp` is the reconstruction `P·⟦v⟧`, which
-    # is covariant under ANY (GL) change of frame per this function's own contract above, so there is
-    # no exactness/complement obligation to discharge.  `≪ .claude/NOTE-intermediate-basis-choices.md ≫`
-    amb_basis = default_basis(big)
-    vb = v_rep.basis
-    if isinstance(vb, B.ProjectedBasis) and vb.target is not None:
-        ep = _endpoint_subspace_cols(ctx, v_rep.space, vb.target)
-        if ep is not None:
-            P, amb_basis = ep
-            v_arr = v_rep.array          # v is ALREADY in this frame's subspace coordinates
     big_shape = _shape_of_space(big)  # ambient layout (static); P has rows = Σ|axes|.
     [out] = ctx.prog.emit_stmt(
         pa.EmbedOp(tuple(big_shape)), [P, v_arr],
         [pa.OutSpec("embed", big_shape)],
         note="embed:pad-zeros",
     )
-    rep = Rep(out, amb_basis, big)
+    rep = Rep(out, default_basis(big), big)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -4139,39 +3977,16 @@ def _rep_kron(
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Kron(f, g)`` — the (a0⊗a1)→(b0⊗b1) block tensor via einsum (`41 §3`)."""
-    # The Kron block FUSES the operands' slots (dom = a0⊗a1, cod = b0⊗b1).  This USED to force both
-    # operands to ``B.STD`` and tag the result ``default_basis(space)``, on the grounds that "a fused
-    # axis would need a genuine Kronecker-product basis object".  **That object exists**: a fused
-    # axis is tagged by a nested ``BasisProd``, which ``realize_basis_cols`` lowers through
-    # ``_kron_cols`` to a real ``pa.KronOp`` — and ``default_basis`` ALREADY emits exactly that shape
-    # for a Kron result space (axis 0 ``DualBasis(BasisProd((…,…)))``, axis 1 ``BasisProd((…,…))``).
-    # So the honest tag is constructible from the operands' OWN bases; see ``_kron_result_basis``.
-    #
-    # Why it matters: forcing STD is an INTERMEDIATE BASIS CHOICE
-    # (`≪ .claude/NOTE-intermediate-basis-choices.md ≫`).  For an ``Img(J)`` endpoint, STD is the
-    # orthonormal ``ProjectedBasis``, so the operands pay a ``QrOp`` round trip whose factor is a
-    # RADICAL — values stay right (the cobs are exact inverses) but the exact-fold lane can no longer
-    # certify the entry constant and degrades to probes.  Keeping the operands in the basis they
-    # naturally land in removes it.
-    #
-    # SAFETY: honesty is not assumed, it is CHECKED.  ``_kron_result_basis`` returns ``None`` on any
-    # structure it cannot tag exactly, and the caller then falls back to the historical
-    # coerce-to-STD path — so an untaggable case degrades to today's behaviour, never to a lying tag
-    # (a lying tag is a WRONG-VALUE bug: ``_match_result`` cobs from a basis the array is not in).
-    # (push-down) When a CONCRETE target is asked for, split it back into per-operand bases and
-    # build each operand directly there — the inverse of `_kron_result_basis`.  Without this the
-    # operands realize at AUTO (`_natural_basis` ⇒ the ORTHONORMAL frame for an `Img`), the result is
-    # tagged from that, and the caller cobs — the round trip this whole arc is about.  Falls back to
-    # AUTO on any structure that does not split, and the honesty check below still gates the tag.
-    f_t, g_t = _kron_operand_targets(target, _synth(f), _synth(g))
-    f_rep = _rep(f, ctx, f_t)
-    g_rep = _rep(g, ctx, g_t)
+    # The Kron block FUSES the operands' slots (dom = a0⊗a1, cod = b0⊗b1), so the per-slot
+    # operand bases cannot be re-wrapped as honest factors of the 2-axis fused result (a fused
+    # axis would need a genuine Kronecker-product basis object).  Honest-tagging is intractable,
+    # so we take the roadmap FALLBACK: build the operands in their default basis, making the
+    # ``default_basis`` result tag genuinely honest.  ALWAYS (incl. AUTO) — a default operand cob is a
+    # no-op (byte-identical), but a NON-default operand under AUTO (kron as a sub-term) must still be
+    # coerced, else the ``default_basis`` tag lies.  Free labels (a differentiated Kron) ride the cob.
+    f_rep = _rep(f, ctx, target=B.STD)
+    g_rep = _rep(g, ctx, target=B.STD)
     space = _synth(e)
-    res_basis = _kron_result_basis(f_rep.basis, g_rep.basis, space)
-    if res_basis is None:                      # untaggable — historical path, byte-identical
-        f_rep = _rep(f, ctx, target=B.STD)
-        g_rep = _rep(g, ctx, target=B.STD)
-        res_basis = default_basis(space)
     # f : (a0,b0), g : (a1,b1) ⇒ result[(a0 a1),(b0 b1)] = f[a0,b0] g[a1,b1] (Kron block).
     # A *differentiated* Kron'd map (e.g. Kron(I,…,Γ(h),…,I) for a per-slot connection) may
     # carry the seed as trailing free labels — those ride through (outer product).
@@ -4182,7 +3997,7 @@ def _rep_kron(
         [f_rep.array, g_rep.array],
         [pa.OutSpec("kron", _shape_of_space_dyn(space, ctx) + free_dims)], note="kron:block-einsum",
     )
-    rep = Rep(out, res_basis, space, free_labels=out_free)
+    rep = Rep(out, default_basis(space), space, free_labels=out_free)
     # target — the output basis:  (1) STD  (2) AUTO  (3) concrete (minimal-complexity match)
     match target:
         case B.TargetBasis.STD:
@@ -4191,133 +4006,6 @@ def _rep_kron(
             return rep
         case _:
             return _match_result(ctx, rep, target)
-
-
-def _binder_basis_from_body(body: T.Term, v: T.Var, ctx: _Ctx) -> B.Basis | None:
-    """The basis the BODY's consumer declares for bound var ``v`` — the bottom-up half of ``AUTO``.
-
-    ``LLam``'s binder is free to bind in any basis, and with no pin and no requested target it falls
-    to :func:`_natural_basis` — for an ``Img(J)`` that is the ORTHONORMAL ``ProjectedBasis``, whose
-    realization is a ``QrOp``.  But the body frequently already KNOWS the answer: if the binder is
-    applied as the argument of a PINNED map (``Eval(f, pos, …v…)`` / ``Compose(f, pos, …v…)`` with
-    ``f`` pinned in ``basis_env``), then ``f``'s pin fixes the basis of the slot ``v`` is fed into,
-    and a non-metric contraction is correct exactly when the operand is that slot's dual partner.
-    So the honest, cob-free choice is ``_pairing_partner(pin_slot)``.
-
-    Conservative by construction:
-
-    * only a ``Var`` map with a ``basis_env`` pin counts (anything else has no declared opinion);
-    * the pin must split into the map's factors and the slot must be in range;
-    * **ambiguity yields ``None``** — several use sites that disagree mean there is no single
-      cob-free choice, so keep ``AUTO`` and let the existing machinery cob;
-    * ``None`` is always safe: it is exactly the pre-2026-07-31 behaviour.
-
-    Correctness does not rest on this being a *good* choice — the ``LLam`` epilogue tags the result
-    from ``binding_bases`` whatever they are, and ``_match_result`` cobs to the caller's target.  A
-    poor guess costs a cob; it cannot change a value.  (Which is why it is safe to keep this in
-    while its downstream blocker — NOTE #5 — is still open; see the caller's ⚠ note.)
-    """
-    found: list[B.Basis] = []
-
-    def visit(n: object) -> None:
-        f = getattr(n, "f", None)
-        positions = getattr(n, "positions", None)
-        operands = getattr(n, "args", None)
-        if operands is None:
-            operands = getattr(n, "gs", None)
-        if (isinstance(n, (T.Eval, T.Compose)) and isinstance(f, T.Var)
-                and positions is not None and operands is not None):
-            pin = ctx.basis_env.get(f.uid)
-            if pin is not None:
-                try:
-                    comps = _basis_factors(pin, len(_factors(_synth(f))))
-                except (S.SpaceError, RepresentError):
-                    comps = None
-                if comps is not None:
-                    for pos, a in zip(positions, operands, strict=False):
-                        if isinstance(a, T.Var) and a.uid == v.uid and 0 <= pos < len(comps):
-                            found.append(_pairing_partner(comps[pos]))
-        for fld in getattr(n, "__dataclass_fields__", {}):
-            val = getattr(n, fld)
-            for kid in (val if isinstance(val, tuple) else (val,)):
-                if isinstance(kid, T.Term):
-                    visit(kid)
-
-    visit(body)
-    if not found:
-        return None
-    first = found[0]
-    return first if all(_basis_eq(b, first) for b in found[1:]) else None
-
-
-def _kron_operand_targets(
-    target: B.TargetBasis | B.Basis, f_space: S.Space, g_space: S.Space,
-) -> tuple[B.TargetBasis | B.Basis, B.TargetBasis | B.Basis]:
-    """Split a concrete ``Kron`` target back into ``(f_target, g_target)`` — inverse of
-    :func:`_kron_result_basis`.
-
-    The result's two FUSED axes are tagged ``DualBasis(BasisProd((a₀, a₁)))`` (domain) and
-    ``BasisProd((b₀, b₁))`` (codomain), so operand ``f`` wants ``BasisProd((DualBasis(a₀), b₀))``
-    and ``g`` wants ``BasisProd((DualBasis(a₁), b₁))``.  Returns ``(AUTO, AUTO)`` — today's
-    behaviour, and always correct — for ``STD``/``AUTO`` or any shape that does not split exactly.
-    """
-    auto: tuple[B.TargetBasis | B.Basis, B.TargetBasis | B.Basis] = (B.AUTO, B.AUTO)
-    if not isinstance(target, B.Basis):
-        return auto
-    axes = _basis_factors(target, 2)
-    if axes is None:
-        return auto
-    dom_axis, cod_axis = axes
-    if not isinstance(dom_axis, B.DualBasis):
-        return auto
-    dom_parts = _basis_factors(dom_axis.basis, 2)
-    cod_parts = _basis_factors(cod_axis, 2)
-    if dom_parts is None or cod_parts is None:
-        return auto
-    return (B.basis_prod(B.dual_basis(dom_parts[0]), cod_parts[0]),
-            B.basis_prod(B.dual_basis(dom_parts[1]), cod_parts[1]))
-
-
-def _kron_result_basis(f_basis: B.Basis, g_basis: B.Basis, space: S.Space) -> B.Basis | None:
-    """The HONEST basis of ``Kron(f, g)``'s two FUSED axes, from the operands' own bases.
-
-    ``f : ~a₀⊗b₀`` and ``g : ~a₁⊗b₁`` are each stored ``(dom, cod)``; the Kron block's axis 0 is the
-    fused domain ``a₀⊗a₁`` and axis 1 the fused codomain ``b₀⊗b₁``.  A fused axis is tagged by a
-    nested :class:`~grassmann.core.basis.BasisProd` — ``realize_basis_cols`` lowers that through
-    :func:`_kron_cols` to a real ``pa.KronOp``, which is precisely the Kronecker product of the two
-    component frames, i.e. the basis of the tensor product.  The DOMAIN axis is contravariant, so its
-    components are the operands' domain bases with the outer ``DualBasis`` peeled off and re-applied
-    ONCE around the product: ``dual(a₀) ⊗ dual(a₁)`` as a basis of ``~(a₀⊗a₁)`` is
-    ``DualBasis(BasisProd((a₀, a₁)))``.
-
-    Returns ``None`` — meaning "cannot tag exactly, caller must fall back" — whenever the operand
-    bases do not split into exactly two factors, or a domain factor is not a literal ``DualBasis``
-    (so peeling would be a guess).  Never returns an approximate tag: the caller's fallback is
-    correct, a wrong tag is not.
-
-    SELF-CHECK available to the reader: with DEFAULT operand bases this reproduces
-    ``default_basis(space)`` exactly — that is the shape ``default_basis`` already builds for a Kron
-    result space, and ``test_kron_honest_tag_matches_default_for_default_operands`` pins it.
-    """
-    ff = _basis_factors(f_basis, 2)
-    gf = _basis_factors(g_basis, 2)
-    if ff is None or gf is None:
-        return None
-    (f_dom, f_cod), (g_dom, g_cod) = ff, gf
-    # Contravariant domain: peel one `DualBasis` off each, product them, re-wrap once.
-    if not (isinstance(f_dom, B.DualBasis) and isinstance(g_dom, B.DualBasis)):
-        return None
-    dom_axis = B.dual_basis(B.basis_prod(f_dom.basis, g_dom.basis))
-    cod_axis = B.basis_prod(f_cod, g_cod)
-    out = B.basis_prod(dom_axis, cod_axis)
-    # Only offer the tag if it genuinely describes THIS space (the same guard `_resolve_target`
-    # applies to a caller-supplied basis); anything else falls back.
-    try:
-        if _basis_factors(default_basis(space), 2) is None:
-            return None
-    except S.SpaceError:
-        return None
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -4527,63 +4215,7 @@ def _rep_llam_vmap(
     # 2. Inputs IN ORDER: the bound vars FIRST (each a rank-1 input in its binding basis), then the
     #    body's free vars.  Lowering the body may ALSO pull in extra inputs (e.g. the abstract
     #    vectors of a pinned ``ListBasis`` frame), which appear AFTER in ``sub.inputs`` order.
-    #    A binder's basis is a FREE choice — nothing outside the LLam observes it, because the
-    #    epilogue below TAGS the result from ``binding_bases`` either way, so every choice is
-    #    honest.  But the choice is not cost-free: whatever the binder binds in, the body must cob
-    #    the leaf it feeds into that basis, and the caller must then cob the result basis into what
-    #    it asked for.  Choosing ``AUTO`` (``_natural_basis`` — for an injective ``Img`` the
-    #    ORTHONORMAL ``ProjectedBasis``, realized via ``QrOp``) when the caller asked for something
-    #    else therefore buys a round trip: body cob IN, caller cob OUT, exact inverses of each other.
-    #    That is pure waste, and for an ``Img(J)`` endpoint it is worse than waste — the two cobs are
-    #    ``R`` and ``R⁻¹``, so a RADICAL lands on the dependency path of a term that may otherwise be
-    #    polynomial (the FEEC trace DOF: `≪ .claude/RESUME-feec-dof-arc.md ≫`).
-    #    So: read the binders' bases OFF THE REQUESTED TARGET.  The space's factors are one ``dual``
-    #    per bound var then the body's codomain (mirroring the epilogue), and a domain factor's
-    #    binder binds in its PRIMAL — then ``out_basis`` below already IS ``target`` and
-    #    ``_match_result`` is a no-op.  ``_resolve_target`` yields ``None`` for AUTO/STD and for a
-    #    concrete basis that is not genuinely a basis of THIS space, and ``_basis_factors`` yields
-    #    ``None`` on any arity mismatch — every such case falls back to the historical ``AUTO``
-    #    choice, byte-identically.  A ``basis_env`` PIN still wins inside ``_rep_var``: the user
-    #    fixing an input's basis outranks a caller's request.
-    #    ⚠ Take the primal STRUCTURALLY — only a literal ``DualBasis(x)`` domain factor steers, and it
-    #    steers to exactly ``x``.  Then ``dual_basis(x)`` reproduces the requested factor on the nose.
-    #    Do NOT use ``_pairing_partner`` here: it maps a NON-dual factor ``x`` to ``DualBasis(x)``, so
-    #    the epilogue would tag that axis ``dual(dual(x))`` — which ``_basis_eq`` reads as ``x``, so
-    #    ``_match_result`` skips a cob the array genuinely needed and the result is WRONG (caught by
-    #    ``test_concrete_target_honesty[llam_map]``).  Anything not a literal ``DualBasis`` keeps AUTO.
-    binder_targets: list[B.TargetBasis | B.Basis] = [B.AUTO] * len(vars_)
-    want_llam = _resolve_target(ctx, space, target)
-    if want_llam is not None:
-        comps = _basis_factors(want_llam, len(vars_) + 1)
-        if comps is not None:
-            binder_targets = [
-                c.basis if isinstance(c, B.DualBasis) else B.AUTO for c in comps[:len(vars_)]
-            ]
-    #    BOTTOM-UP fallback, where the caller asked for nothing (`AUTO`): a binder with no pin and no
-    #    requested basis would fall to `_natural_basis` — the ORTHONORMAL choice — even when its own
-    #    CONSUMER in the body already declares which basis it expects.  Ask the body first
-    #    (`≪ .claude/NOTE-intermediate-basis-choices.md ≫`, option A): a pinned map applied to this
-    #    binder pins the slot it is applied at, and the binder's honest basis is that slot's natural
-    #    PAIRING PARTNER.  Purely an AUTO-refinement — it never overrides a pin or a requested
-    #    target, and `None` (no use site, ambiguous use sites, unpinned consumer) keeps `AUTO`.
-    #
-    #    ⚠ MEASURED 2026-07-31: this does NOT yet pay off, and is a small REGRESSION on the k ≥ 2
-    #    FEEC lane (`P⁻₁Λ²(TET)` 78 → 90 statements; k = 1 unchanged, since there the requested
-    #    target already supplies the binder basis and this never fires).  Diffing the statement
-    #    notes says why: the better binder basis propagates up CORRECTLY and is then thrown away by
-    #    `_rep_project` / `_rep_embed`, which must coerce their operand to `default_basis` because
-    #    `_subspace_cols` hands them `P` in std ambient coords — so it buys one extra `ffs-basis:*`
-    #    cob block per axis and keeps nothing.  KEPT DELIBERATELY (Teo 2026-07-31): the choice is
-    #    right, the blocker is downstream, and this is the half that will pay off the moment the
-    #    realization seam can deliver a frame in a DECLARED basis (NOTE #5).  Re-measure then.
-    for i, v in enumerate(vars_):
-        if binder_targets[i] is B.AUTO and v.uid not in ctx.basis_env:
-            inferred = _binder_basis_from_body(body, v, ctx)
-            if inferred is not None:
-                binder_targets[i] = inferred
-    binding_bases: list[B.Basis] = [
-        _rep_var(v, sub_ctx, bt).basis for v, bt in zip(vars_, binder_targets, strict=True)
-    ]
+    binding_bases: list[B.Basis] = [_rep_var(v, sub_ctx).basis for v in vars_]
     for v in free_vars:
         _rep_var(v, sub_ctx)
     body_rep = _rep(body, sub_ctx)
@@ -4600,22 +4232,16 @@ def _rep_llam_vmap(
     n_vars = len(vars_)
     for v in free_vars:
         _rep(v, ctx)
-    # Realize, in the PARENT, any frame/basis term-vars embedded in the bases of the bound or free
-    # vars (e.g. a ``ListBasis`` frame).  These are genuine Program inputs that the body's internal
-    # cobs materialize inside the sub-Program; they must exist in the parent too so the vmap call
-    # can feed them (and so the parent's own output cob reuses them, no duplicate inputs).
-    #
-    # This walked ``ctx.basis_env`` alone while a pin was the ONLY way a var could land in a
-    # non-default basis.  A binder now also takes its basis from the requested ``target`` (above), so
-    # the pins are no longer the full set — walk the bases actually CHOSEN.  Missing one is not
-    # silent: the sub-input lookup below raises ``LLam vmap body needs sub-input …``.
-    chosen_bases = [*binding_bases, *(ctx.basis_env.get(v.uid) for v in free_vars)]
-    for b in chosen_bases:
-        if b is None:
-            continue
-        for fv in _basis_term_vars(b):
-            if fv.uid not in ctx.inputs:
-                _rep(fv, ctx)
+    # Realize, in the PARENT, any frame/basis term-vars embedded in the pinned bases of the bound or
+    # free vars (e.g. a ``ListBasis`` frame).  These are genuine Program inputs that the body's
+    # internal cobs materialize inside the sub-Program; they must exist in the parent too so the
+    # vmap call can feed them (and so the parent's own output cob reuses them, no duplicate inputs).
+    for v in (*vars_, *free_vars):
+        pin = ctx.basis_env.get(v.uid)
+        if pin is not None:
+            for fv in _basis_term_vars(pin):
+                if fv.uid not in ctx.inputs:
+                    _rep(fv, ctx)
     # uid -> the basis each input was declared in inside the sub-Program (from ``sub_ctx.inputs``).
     sub_basis_by_uid = {uid: rep.basis for uid, rep in sub_ctx.inputs.items()}
     bound_names = {_var_name(v) for v in vars_}
@@ -4726,21 +4352,11 @@ def _rep_llam_vmap(
     # ``dual`` per domain var, then the body's codomain as ONE factor (``s_e`` is a single space
     # factor — possibly itself a ⊗ — so it must not be flattened, else a consumer cob sees a
     # different factor structure).  For a default body this is exactly ``default_basis(space)``.
-    # ⚠ The ``default_basis(space)`` shortcut describes the DOMAIN axes too, so it is honest only
-    # when the BINDERS are also default — not just the body.  That was automatic while a binder's
-    # basis was always the AUTO/``_natural_basis`` choice; now that it can be steered to the caller's
-    # requested basis, a default body with a steered binder would be tagged as fully-default and the
-    # epilogue's ``dual(binding)`` domain factor silently dropped (``_match_result`` then cobs from a
-    # basis the array is not in — wrong values, caught by ``test_concrete_target_honesty[llam_map]``).
     try:
         body_is_default = _basis_eq(body_rep.basis, default_basis(body_rep.space))
-        binders_are_default = all(
-            _basis_eq(vb, default_basis(_synth(v)))
-            for v, vb in zip(vars_, binding_bases, strict=True)
-        )
     except S.SpaceError:
-        body_is_default = binders_are_default = False
-    if body_is_default and binders_are_default:
+        body_is_default = False
+    if body_is_default:
         out_basis: B.Basis = default_basis(space)
     else:
         dom_factors = [B.dual_basis(vb) for vb in binding_bases]
@@ -4952,31 +4568,21 @@ def _trace_result_basis(
 
 
 def _compose_operand_targets(
-    ctx: _Ctx, want: B.Basis | None, f: T.Term,
+    ctx: _Ctx, want: B.Basis | None, f_space: S.Space,
     positions: tuple[int, ...], gs: tuple[T.Term, ...],
 ) -> tuple[B.Basis, list[B.Basis]] | None:
     """The ``(f_target, [g_targets])`` so ``Compose(f, pos, gs)`` lands directly in ``want``.
 
     Inverts ``_compose_result_basis``: output slot ``k`` is f's surviving slot, or — where ``gₖ``
     replaced it — ``gₖ``'s domain (axis-0) slot.  Steer f's surviving slots ← ``want``'s comps; each
-    contracted f-slot ``pos`` ← the basis ``f`` will ACTUALLY realize that factor in (internal, never
-    surfaces — see below); each ``gₖ`` ← ``BasisProd(want[pos], dual(that))`` so its domain lands in
+    contracted f-slot ``pos`` ← ``default_basis`` of that factor (internal, never surfaces); each
+    ``gₖ`` ← ``BasisProd(want[pos], dual(default_basis(f-factor[pos])))`` so its domain lands in
     ``want[pos]`` and its codomain is the natural-pairing dual of f's slot (``_reconcile_compose_g``
     is then a no-op).  ``None`` (⇒ keep the natural realize + bail) when no clean structural steer
     exists.  Conservative: every gₖ must be a 2-factor map; any mismatch / type error backs off.
-
-    The contracted slot is genuinely INTERNAL — it is summed away inside the same einsum, so any
-    self-consistent choice is mathematically equivalent, and the caller re-checks honesty
-    (``_basis_eq(f_rep.basis, f_target)``) before trusting the steer.  So prefer the basis ``f`` is
-    already going to land in: a ``basis_env`` PIN on ``f`` outranks ``default_basis``, because
-    ``_rep_var`` honors the pin regardless of what we ask for.  Asking for the default against a
-    pinned ``f`` guarantees the honesty check FAILS and the whole steer is discarded — which is
-    exactly what used to happen to pointwise's pinned ``u`` in the FEEC trace DOF.
     """
     if want is None:
         return None
-    f_space = _synth(f)
-    f_pin = ctx.basis_env.get(f.uid) if isinstance(f, T.Var) and ctx.basis_env else None
     fac = _factors(f_space)
     n = len(fac)
     if any(p >= n for p in positions):
@@ -4987,10 +4593,8 @@ def _compose_operand_targets(
     try:
         f_slots: list[B.Basis] = list(comps)  # surviving slots = want's comps
         g_targets: list[B.Basis] = []
-        pin_comps = _basis_factors(f_pin, n) if f_pin is not None else None
         for pos, g in zip(positions, gs, strict=True):
-            # contracted (internal) — never surfaces; f's pin wins, else the default
-            f_slot = pin_comps[pos] if pin_comps is not None else default_basis(fac[pos])
+            f_slot = default_basis(fac[pos])  # contracted (internal) — never surfaces
             cod = _pairing_partner(f_slot)  # g's codomain = natural-pairing dual of f's slot
             f_slots[pos] = f_slot
             g_space = _synth(g)
@@ -5025,15 +4629,8 @@ def _eval_operand_target(
     comps = _basis_factors(want, len(survivors))
     if comps is None:
         return None
-    # BACK OFF if any arg carries free labels — those break the natural pairing.
-    #
-    # A MULTI-AXIS arg used to back off too ("a fused slot would fire — steering only the clean
-    # common shape").  That is now too strict: an arg presented over k > 1 space axes carries a
-    # `BasisProd` of exactly k factors, and `dual_basis` of THAT honestly describes the fused slot —
-    # the same nested-`BasisProd`-as-fused-axis tagging `_kron_result_basis` uses, which
-    # `realize_basis_cols` lowers through `_kron_cols` to a genuine Kronecker product.  So allow it
-    # when the basis really does split into one factor per axis, and keep backing off otherwise (a
-    # basis that does not match the axis count cannot honestly name the fused slot).
+    # BACK OFF if any arg carries free labels, or presents its value over >1 space axis (a fused
+    # slot would fire — steering only the clean common shape) — these break the natural pairing.
     for arg_rep in arg_reps:
         if arg_rep.free_labels:
             return None
@@ -5146,170 +4743,11 @@ def _slot_swap_operand_target(want: B.Basis | None) -> B.Basis | None:
     return B.basis_prod(B.dual_basis(t1), t0.basis)
 
 
-def _alpha_key(t: object, env: dict | None = None) -> object:
-    """A structural fingerprint of a term, blind to binder uids — alpha-equivalence in one value."""
-    env = {} if env is None else env
-    if isinstance(t, T.Var):
-        return ("var", env.get(t.uid, ("free", t.uid)))
-    if not hasattr(t, "__dataclass_fields__"):
-        return ("lit", repr(t))
-    parts: list[object] = [type(t).__name__]
-    binders = getattr(t, "vars_", None) or getattr(t, "vars", None)
-    if isinstance(binders, tuple):
-        env = dict(env)
-        for i, b in enumerate(binders):
-            if isinstance(b, T.Var):
-                env[b.uid] = ("bound", len(env), i)
-    for f in t.__dataclass_fields__:
-        v = getattr(t, f)
-        if isinstance(v, T.Term):
-            parts.append(_alpha_key(v, env))
-        elif isinstance(v, tuple):
-            parts.append(tuple(_alpha_key(x, env) if isinstance(x, T.Term) else repr(x) for x in v))
-        elif not isinstance(v, S.Space):          # SPACES are deliberately ignored: the same generic
-            parts.append(repr(v))                 # construction on cell vs face must compare EQUAL
-    return tuple(parts)
-
-
-def _project_exact_by_naturality(vector: T.Term, sub: S.Space) -> bool:
-    """Is ``Project(vector, sub)`` EXACT by construction — i.e. is ``vector`` already in ``sub``?
-
-    The sufficient condition is the NATURALITY SQUARE.  ``sub = Img(f)`` for a *generic* ``f`` (one
-    written for any space — the exterior ``alt``), and ``vector`` is a DIAGONAL transport
-    ``Kron(h, h, …)`` applied to a value already in ``Img(f)`` on the other side.  Then
-    ``f ∘ h⊗ᵏ = h⊗ᵏ ∘ f`` and the transported value stays in the image: the residual is identically
-    zero for ANY ``h``, orthonormal or not (measured over 2000 random non-orthonormal inclusions;
-    for a general operand the residual is 100%, which is what the wedge suite hits).
-
-    Conservative: recognizes exactly that shape (`Eval(Kron(h,…,h), (Embed(u, _),))` with all Kron
-    operands alpha-equivalent and ``u : Img(g)`` with ``g`` alpha-equivalent to ``f`` — the SAME
-    generic construction, compared with spaces ignored so cell-vs-face compare equal).  Anything else
-    is ``False`` ⇒ the caller keeps the canonical ambient path.  The run-time ``in_span`` assert
-    remains as the net, so a wrong ``True`` is caught loudly rather than silently.
-    """
-    if not isinstance(sub, S.Img):
-        return False
-    while isinstance(vector, (T.Eval, T.Compose)):
-        args = getattr(vector, "args", None) or getattr(vector, "gs", None) or ()
-        f = vector.f
-        if not isinstance(f, T.Kron) or len(args) != 1:
-            return False
-        ops: list[T.Term] = []
-
-        def flatten(x: T.Term) -> None:
-            if isinstance(x, T.Kron):
-                flatten(x.f)
-                flatten(x.g)
-            else:
-                ops.append(x)
-
-        flatten(f)
-        keys = [_alpha_key(o) for o in ops]
-        if len(keys) < 2 or any(kk != keys[0] for kk in keys[1:]):
-            return False                      # not a DIAGONAL transport
-        vector = args[0]
-        if isinstance(vector, T.Embed):
-            try:
-                inner = _synth(vector.vector)
-            except Exception:
-                return False
-            return isinstance(inner, S.Img) and _alpha_key(inner.f) == _alpha_key(sub.f)
-    return False
-
-
-def _assert_projection_exact(ctx: _Ctx, P: pa.SymArray, v_arr: pa.SymArray) -> None:
-    """Run-time guard for the endpoint-coords projection: ``v`` must lie in ``P``'s span.
-
-    Taking the subspace frame in the operand's own (non-canonical) ambient basis is sound only when
-    the projection is EXACT — with a residual, ``pinv`` projects along the ambient-orthogonal
-    complement, which is a different direction in each ambient basis.  For the FEEC ``Λᵏ`` trace the
-    residual is identically zero (a diagonal pullback of an antisymmetric tensor stays antisymmetric
-    for ANY ``ι`` — measured over 2000 random non-orthonormal inclusions), but that is a property of
-    the TERM, not of ``Project``, so it is checked rather than assumed.  ``AssertOp`` passes its
-    first input through, so the guard is data-ordered ahead of the projection that depends on it."""
-    ctx.prog.emit_stmt(
-        pa.AssertOp("in_span", "project: endpoint-basis frame requires an EXACT projection"),
-        [v_arr, P],
-        [pa.OutSpec("project:in-span-ok", _shape_of(v_arr))],
-        note="assert:project-exact(endpoint-basis frame)",
-    )
-
-
-def _endpoint_subspace_cols(
-    ctx: _Ctx, sub: S.Space, want_basis: B.Basis | None,
-) -> tuple[pa.SymArray, B.Basis] | None:
-    """The subspace frame of ``sub`` expressed in ``want_basis``, if that is available for free.
-
-    ``Img(f, source, target)`` DECLARES its endpoints, and when they are present the covariant
-    realization builds its frame in endpoint coordinates (``Q₀``) and then multiplies by ``T`` purely
-    to meet :class:`FfsRealization`'s "ambient standard coordinates" contract.  A consumer whose
-    operand is ALREADY in the endpoint basis wants ``Q₀`` itself: same subspace, same subspace
-    coordinates, but none of ``T`` — which for an ``Img(J)`` endpoint is where the QR radical lives.
-
-    The endpoints are NOT read off the space: an `Img(alt₂)` arrives with ``source``/``target`` both
-    ``None`` (pointwise declares them on the requested BASIS, not on the space).  They do not need to
-    be — ``alt`` is an ENDOMORPHISM of the tensor square, so ``want_basis``, the ambient basis the
-    operand is already in, serves as BOTH endpoints.  That is the whole point: realize the frame in
-    the basis the consumer already has, rather than dragging the consumer to the frame's basis.
-
-    ``None`` (⇒ caller keeps the ambient path, unchanged) unless every condition holds: the space is
-    an ``Img``; its map is an endomorphism (``dom == cod``, so one ambient basis is honest for both
-    endpoints); the covariant realization ran and published ``endpoint_cols``; and its
-    ``endpoint_basis`` is exactly ``want_basis``.
-
-    ⚠ Sound only for an EXACT projection — the caller must guard.  See ``FfsRealization``.
-    """
-    if want_basis is None or not isinstance(sub, S.Img):
-        return None
-    try:
-        dom, cod = map_domain_codomain(sub.f)
-    except Exception:
-        return None
-    if _norm_space(dom) != _norm_space(cod):
-        return None          # not an endomorphism — one basis cannot honestly serve both endpoints
-    # Do NOT route through `_realize_image_covariant` for this: it eagerly realizes the endpoint
-    # frames `S`/`T` to form `A₀ = T⁻¹·F·S`, and realizing an `~Img[J]` endpoint canonically IS the
-    # QR — so asking it for `Q₀` pays exactly the cost this function exists to avoid (measured: the
-    # `QrOp` that stayed live on the FEEC Λ² lane was requested from right here).
-    #
-    # The sandwich is unnecessary whenever `f` is NATURAL, and naturality is precisely what makes
-    # `F` itself feed-invariant: `T⁻¹·F·S` is the constant reference matrix because `F` already IS
-    # that constant (measured for `alt₂`: entries {−½, 0, ½} in BOTH the canonical and the
-    # transported realization).  So certify `F` directly with the same oracle
-    # (`try_constant_ffs` — evaluate the dependency cone at several feeds) and take its range basis.
-    # `try_constant_ffs` returning `None` (not feed-invariant ⇒ not natural ⇒ the endpoint frame is
-    # not basis-independent) declines, which is the correct conservative answer.
-    try:
-        dom_dim, cod_dim = _static_dim(dom), _static_dim(cod)
-        f_rep = _rep(sub.f, ctx)
-        [f_cd] = ctx.prog.emit_stmt(
-            pa.TransposeOp(), [f_rep.array],
-            [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
-            note="ffs-endpoint:to-(cod,dom)",
-        )
-        const = try_constant_ffs(ctx.prog, "img", f_cd, dom_dim=dom_dim, cod_dim=cod_dim)
-    except (S.SpaceError, RepresentError, NotImplementedError):
-        return None
-    if const is None:
-        return None
-    return const.cols, want_basis
-
-
-def _subspace_cols(
-    ctx: _Ctx, sub: S.Space, *, note: str,
-) -> tuple[B.Basis, pa.SymArray, bool]:
+def _subspace_cols(ctx: _Ctx, sub: S.Space, *, note: str) -> tuple[B.Basis, pa.SymArray]:
     """Realize a subspace's basis columns (ambient coords) for Project/Embed (`41 §2`).
 
     Uses the FFS SVD/QR/GSVD seam for an FFS subspace; a plain ⊕-component subspace uses
     its standard-basis selection columns.
-
-    Returns ``(sub_basis, cols, orthonormal)``.  ``orthonormal`` is the BASIS-HONESTY flag a
-    consumer needs before it reads coordinates with a transpose: ``Pᵀ·v`` are the coordinates
-    of ``v`` in ``sub_basis`` only when ``PᵀP = I``; otherwise the matched dual
-    ``pinv(P) = (PᵀP)⁻¹Pᵀ`` is required.  For the FFS seam it comes from the realization's
-    producing op (:func:`~grassmann.lower.space_basis.ffs_cols_orthonormal`); the non-FFS
-    branch realizes ⊕-component SELECTION columns (a subset of the standard basis), which are
-    orthonormal by construction.
     """
     from grassmann.infer.subspace import is_ffs
     if is_ffs(sub):
@@ -5318,10 +4756,10 @@ def _subspace_cols(
         # the runtime DimAtom δ_f) — `41 §1`, threaded by `_realize_ffs_for_space`.
         real = _realize_ffs_for_space(ctx, sub)
         sub_basis = default_basis(sub)
-        return sub_basis, real.cols, ffs_cols_orthonormal(real)
+        return sub_basis, real.cols
     # Non-FFS subspace: realize its (standard) basis columns directly.
     sub_basis = default_basis(sub)
-    return sub_basis, realize_basis_cols(ctx, sub_basis), True
+    return sub_basis, realize_basis_cols(ctx, sub_basis)
 
 
 # ===========================================================================
@@ -5392,9 +4830,7 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
 
     Every term/basis belongs to exactly one space, so realize is always in that space's
     coords — here the canonical *metric-free* ``ProjectedBasis`` ``U_d`` of ``(which, f)``.
-    The result is ``pinv(U_d)·immersion(basis)`` — the coordinates of the immersion's columns
-    in ``U_d``, which reduce to ``U_dᵀ·immersion(basis)`` exactly when ``U_dᵀU_d = I`` (the
-    historical single-einsum path, taken whenever the realization proves it): an ``r×k``
+    The result is ``U_dᵀ·immersion(basis)``: an ``r×k`` matrix where ``r`` is the canonical δ
     (the ``U_d`` column count) and ``k`` is the immersion's column count (metric-free
     ``ProjectedBasis`` ⇒ ``I``; metric ``ProjectedBasis`` ⇒ the reorthonormalization
     ``U_dᵀ·U_g``; ``ImageBasis`` ⇒ the ``R`` factor where ``J = U_d·R``).
@@ -5411,30 +4847,12 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     # No opt-in fold here: the SVD is emitted uniformly and the ONE general constant-fold in
     # `_post_pass` (`pa.fold_numeric`) folds that constant SVD ONCE (a single consistent range
     # basis — no arbitrary per-cell null space) and resolves its dynamic δ to a static rank.
-    u_d_real = _realize_ffs_by_which(ctx, which, f, source=None, target=None)
-    u_d = u_d_real.cols
+    u_d = _realize_ffs_by_which(ctx, which, f, source=None, target=None).cols
     r = _shape_of(u_d)[1]
     k = _shape_of(imm)[1]
-    # BASIS HONESTY (the second `Uᵀ`-as-inverse site): `U_dᵀ·imm` are the immersion's
-    # coordinates in `U_d` only when `U_dᵀU_d = I`.  The general map is the matched dual
-    # `pinv(U_d)·imm`.  Exploit orthonormality where the realization PROVES it (the historical
-    # single-einsum path — every frame this site sees today is the metric-free QR/SVD one, so
-    # this is byte-identical), else emit the pinv.
-    if ffs_cols_orthonormal(u_d_real):
-        [out] = ctx.prog.emit_stmt(
-            pa.EinsumStmtOp("nr,nk->rk"), [u_d, imm],
-            [pa.OutSpec("ffs-in-space:U_dᵀ·imm", (r, k))], note="ffs-basis:in-space=U_dᵀ·imm",
-        )
-        return out
-    n_amb = _shape_of(u_d)[0]
-    [u_d_plus] = ctx.prog.emit_stmt(
-        pa.PinvOp(), [u_d], [pa.OutSpec("ffs-in-space:pinv(U_d)", (r, n_amb))],
-        note="ffs-basis:in-space:matched-dual=pinv(U_d)",
-    )
     [out] = ctx.prog.emit_stmt(
-        pa.EinsumStmtOp("rn,nk->rk"), [u_d_plus, imm],
-        [pa.OutSpec("ffs-in-space:pinv(U_d)·imm", (r, k))],
-        note="ffs-basis:in-space=pinv(U_d)·imm (non-orthonormal frame)",
+        pa.EinsumStmtOp("nr,nk->rk"), [u_d, imm],
+        [pa.OutSpec("ffs-in-space:U_dᵀ·imm", (r, k))], note="ffs-basis:in-space=U_dᵀ·imm",
     )
     return out
 
@@ -6788,9 +6206,6 @@ def _realize_ffs_by_which(
         props=map_props(f), metric_dom=metric_dom, metric_cod=metric_cod,
         label=getattr(f, "name", "f"),
         dim_atom=ctx.ffs_dim_atoms.get(dim_key),
-        # The certificate lane's LITERAL (rational) image frame, when opted in — see the
-        # `literal_ffs_frames` note.  The seam applies it on the injective-image route only.
-        literal_frame=_literal_ffs_frames(),
     )
     # Record the canonical SUBSPACE atom (the column axis of ``cols``) the first time it is
     # minted, so later realizations of the same ``(which, id(f))`` reuse the very same atom.
@@ -6879,12 +6294,8 @@ def _realize_image_covariant(
         [pa.OutSpec("ffs-cov:cols", (n_cod, k_cols))],
         note="ffs-cov:cols=T·Q₀ (std ambient out)",
     )
-    # Carry `Q₀` — the SAME frame in the DECLARED ENDPOINT basis — alongside the ambient `T·Q₀`, so a
-    # consumer already living in `target` can skip `T` (and, for an `Img(J)` endpoint, the QR radical
-    # inside it).  See `FfsRealization.endpoint_cols` for the soundness condition (exactness).
     real = FfsRealization(cols=cols, rank=inner.rank, rank_dim=inner.rank_dim,
-                          op=inner.op + "+cov",
-                          endpoint_cols=inner.cols, endpoint_basis=target)
+                          op=inner.op + "+cov")
     ctx.ffs_realizations[key] = real
     return real
 
