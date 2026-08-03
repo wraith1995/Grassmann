@@ -3985,7 +3985,28 @@ def _rep_embed(
     # reshape crash).  So gate the literal-column branch on ``ImageBasis`` and route every other
     # basis (List/Complete/Projected/default) through ``_subspace_cols`` (the sub↪ambient immersion)
     # + a cob of the operand to its default basis — correct for sub==ambient and sub⊊ambient alike.
-    if isinstance(_peel_to_core(v_rep.basis), B.ImageBasis):
+    # ...but WHICH ambient frame `P` is read in is a FREE CHOICE, and the operand's own basis often
+    # DECLARES the answer: a `ProjectedBasis(f, "image", src, tgt)` pin names the transported ambient
+    # its coordinates belong to.  Reading `P` there instead of in the canonical ambient keeps the
+    # whole chain in one basis and drops the `T`/`QrOp` that expressing an `ImageBasis` canonically
+    # would cost.  UNCONDITIONAL — unlike `Project`, `EmbedOp` is the reconstruction `P·⟦v⟧`, which
+    # is covariant under ANY (GL) change of frame per this function's own contract above, so there is
+    # no exactness/complement obligation to discharge.  `≪ .claude/NOTE-intermediate-basis-choices.md ≫`
+    #
+    # HOISTED (frame-probe): this test used to sit AFTER the if/else below and merely OVERWRITE
+    # `P`/`v_arr`.  Both branches' outputs are then discarded — but their Stmts are already in the
+    # program, and for an endpoint-ful `ProjectedBasis` operand the `else` branch's
+    # `embed:operand-to-default` cob is exactly the canonical realization whose `Img(J)` endpoint IS
+    # the QR.  Measured on `P⁻₂Λ²(TET)`: 99/99 `else` entries had `vb.target is not None` and
+    # 108/108 `_endpoint_subspace_cols` calls hit, i.e. EVERY such cob was emitted and thrown away.
+    amb_basis = default_basis(big)
+    vb = v_rep.basis
+    ep = (_endpoint_subspace_cols(ctx, v_rep.space, vb.target)
+          if isinstance(vb, B.ProjectedBasis) and vb.target is not None else None)
+    if ep is not None:
+        P, amb_basis = ep
+        v_arr = v_rep.array          # v is ALREADY in this frame's subspace coordinates
+    elif isinstance(_peel_to_core(v_rep.basis), B.ImageBasis):
         P = _ffs_immersion_std(ctx, v_rep.basis)  # P = the f-cols in the STANDARD ambient frame (never target-re-expressed)
         v_arr = v_rep.array                    # … so v's in-space coords are already consistent
     else:
@@ -3996,20 +4017,6 @@ def _rep_embed(
         # P = the sub↪ambient default cols ⇒ realize v in that default basis so ``P·⟦v⟧`` is
         # consistent (no-op for a default operand; cob's a non-default ORTHONORMALIZE/metric/list pin).
         v_arr = _coerce_basis(ctx, v_rep, default_basis(v_rep.space), note="embed:operand-to-default")
-    # ...but WHICH ambient frame `P` is read in is a FREE CHOICE, and the operand's own basis often
-    # DECLARES the answer: a `ProjectedBasis(f, "image", src, tgt)` pin names the transported ambient
-    # its coordinates belong to.  Reading `P` there instead of in the canonical ambient keeps the
-    # whole chain in one basis and drops the `T`/`QrOp` that expressing an `ImageBasis` canonically
-    # would cost.  UNCONDITIONAL — unlike `Project`, `EmbedOp` is the reconstruction `P·⟦v⟧`, which
-    # is covariant under ANY (GL) change of frame per this function's own contract above, so there is
-    # no exactness/complement obligation to discharge.  `≪ .claude/NOTE-intermediate-basis-choices.md ≫`
-    amb_basis = default_basis(big)
-    vb = v_rep.basis
-    if isinstance(vb, B.ProjectedBasis) and vb.target is not None:
-        ep = _endpoint_subspace_cols(ctx, v_rep.space, vb.target)
-        if ep is not None:
-            P, amb_basis = ep
-            v_arr = v_rep.array          # v is ALREADY in this frame's subspace coordinates
     big_shape = _shape_of_space(big)  # ambient layout (static); P has rows = Σ|axes|.
     [out] = ctx.prog.emit_stmt(
         pa.EmbedOp(tuple(big_shape)), [P, v_arr],
