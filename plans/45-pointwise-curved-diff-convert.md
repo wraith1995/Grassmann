@@ -1,7 +1,7 @@
 # Plan 45 — Grassmann support for the `pointwise` FEM backend (curved diff, convert, tracers, exterior)
 
-**Audience:** an agent working in grassmann (`/Users/teoc/projects/fem/grassmann/`, branch
-`transform-pullback-covariant-diff`; sibling AD tree `/Users/teoc/projects/fem/grassmann-ad/`). Self-contained.
+**Audience:** an agent working in grassmann (`<workspace>/grassmann/`, branch
+`transform-pullback-covariant-diff`; sibling AD tree `<workspace>/grassmann-ad/`). Self-contained.
 **Driver:** the `pointwise` rebuild uses grassmann as its general backend
 (`pointwise/plans/42-finish-single-compile.md`). pointwise must NEVER hand-roll a metric or pick a basis —
 everything below must keep the metric *riding free* from native `inner` via image immersion. Each task is

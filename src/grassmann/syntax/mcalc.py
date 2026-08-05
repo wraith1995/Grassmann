@@ -1,7 +1,7 @@
 """``mcalc`` — a matrixcalculus.org-style **ASCII** surface for Grassmann.
 
 This is the *input* language for the matrixcalculus-style web tool (see
-``plans/100-matrixcalculus-site.md``). It is a strict superset of matrixcalculus.org's
+It is a strict superset of matrixcalculus.org's
 grammar — their examples (``0.5*x'*A*x``, ``norm2(A*x-y)^2``, ``tr(A*X'*B*X*C)``,
 ``log(det(inv(X)))``) parse verbatim — plus coordinate-free extensions (``@`` compose,
 ``(+)`` direct sum, ``[a;b]`` stack, ``ker``/``img`` FFS, ``'`` = dual/flat).

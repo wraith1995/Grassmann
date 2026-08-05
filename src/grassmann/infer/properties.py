@@ -39,7 +39,7 @@ def is_bijective(f: object) -> bool:
     # The inverse / metric-adjoint of a bijection is itself a bijection — so a re-inverted
     # bijection (e.g. ``Solve(Solve(X))``, which the ``d det``/``d logdet`` rules build when
     # differentiating a determinant of an inverse) type-checks without a fresh ``bij`` assertion.
-    if isinstance(f, (Solve, Pinv, Dagger)):  # audit: ok EX-ISINSTANCE-LADDER — safe direction: refusal-to-license bijectivity [approved Teo 2026-07-03]
+    if isinstance(f, (Solve, Pinv, Dagger)):  # audit: ok EX-ISINSTANCE-LADDER — safe direction: refusal-to-license bijectivity [approved 2026-07-03]
         return is_bijective(f.f)
     return False
 

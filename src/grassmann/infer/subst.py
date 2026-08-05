@@ -59,7 +59,7 @@ def subst_space(s: Space, name: str, repl: Space) -> Space:
             g = _subst_space_in_term(s.g, name, repl)
             args = tuple(_subst_in_app_arg(a, name, repl) for a in s.args)
             return App(g, s.positions, args)
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): structural recursion; leaves unchanged [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): structural recursion; leaves unchanged [approved 2026-07-03]
             # Scalar / Base / SVar(other) / metavars: unchanged.
             return s
 

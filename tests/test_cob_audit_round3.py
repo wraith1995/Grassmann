@@ -1,6 +1,6 @@
-"""Cob audit (round 3) — regression tests for the correctness fixes A/B/C.
+"""Change-of-basis regressions A/B/C.
 
-These three paths were UNTESTED before the round-3 fixes:
+These three paths were previously untested:
 
 * **A** — a short ``ListBasis(reduce=ORTHONORMALIZE)`` must realize a genuinely orthonormal
   full basis (its auto-completion is re-orthonormalized) and its cob must round-trip.

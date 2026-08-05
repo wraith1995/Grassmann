@@ -1,4 +1,4 @@
-"""Task-1 acceptance (plan 45): differentiating the inner product of an x-dependent IMMERSED
+"""Task-1 acceptance: differentiating the inner product of an x-dependent IMMERSED
 tangent/cotangent space ``Img(J(x))`` keeps the metric *riding free*.
 
 The pointwise FEM backend lives a value in an immersed tangent space ``Img(J)`` (cotangent =

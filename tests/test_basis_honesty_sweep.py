@@ -1,6 +1,6 @@
 """Systematic basis-honesty sweep — the permanent guard against the SILENT-WRONG class.
 
-This session fixed five bugs of one shape: an arm tagged its result in basis A while the coordinates
+Five bugs of one shape have been fixed here: an arm tagged its result in basis A while the coordinates
 actually lived in basis B, so a ``target=STD`` cob was a no-op (or wrong) and the program returned
 WRONG NUMBERS with no error (dagger fast path, llam non-default body, pinv-GSVD, eval rank-1 covector,
 embed subspace-list).  Each was found by a hand-written two-route probe; this module turns that probe
@@ -15,7 +15,7 @@ The invariant (per arm × non-default operand basis):
 
 Two robustness rules learned the hard way:
   * coords in basis B are derived VIA THE MACHINERY (``represent(op, target=B)``), never by a
-    hand-written transform — hand-transforms were the source of every false probe result this session.
+    hand-written transform — hand-transforms are the source of nearly every false probe result.
   * a loud ``RepresentError`` is an ACCEPTABLE outcome (a deliberate bail, e.g. eye-mode llam on a
     cod-non-default body); only a *silent* mismatch is a bug.
 

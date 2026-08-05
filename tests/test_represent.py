@@ -218,7 +218,7 @@ def test_solve_emits_invop_and_full_rank_assert() -> None:
 
 
 def test_application_convention_invariant() -> None:
-    # plans/91 — the application convention: every bundled apply equals applying the
+    # The application convention: every bundled apply equals applying the
     # corresponding MAP via Eval (the canonical contraction-view):
     #     XApply(f, v) ≡ Eval(X(f), (0,), v).
     # SolveApply was the lone violator (solve(f,v)=f⁻¹v); now it conforms like PinvApply.
@@ -240,7 +240,7 @@ def test_application_convention_invariant() -> None:
 
 
 def test_solve_apply_is_eval_of_solve() -> None:
-    # Convention (plans/91): SolveApply(f,v) lowers as Eval(Solve(f),(0,),v) — apply the inverse
+    # Convention: SolveApply(f,v) lowers as Eval(Solve(f),(0,),v) — apply the inverse
     # MAP in Eval's contraction-view, = solve(fᵀ, v).  (No longer a bare SolveOp = solve(f,v).)
     V = C.base("V", 3)
     f = C.var("f", C.linear_map_space(V, V), props=P.bij)

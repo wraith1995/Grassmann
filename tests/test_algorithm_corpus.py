@@ -1,6 +1,6 @@
 """Phase-5 algorithm corpus — standalone A1 (FFS/FSV) + A5 (GSVD metric-pinv).
 
-The two acceptance tests `plans/50-algorithms-targets.md` (OQ1/OQ6) still owed a
+The two acceptance tests (OQ1/OQ6) still owed a
 *standalone* gate:
 
 * **A1 — Four fundamental subspaces via FSV** (`50 §A1`). For a concrete numeric map

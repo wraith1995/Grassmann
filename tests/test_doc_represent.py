@@ -188,7 +188,7 @@ def test_solve_apply_solves() -> None:
     A = np.random.default_rng(7).standard_normal((3, 3))
     vv = np.array([1.0, 2.0, 3.0])
     got = np.asarray(_run(C.solve_apply(f, v), {_k(f): A, _k(v): vv}), float)
-    # Convention (plans/91): SolveApply(f,v) ≡ Eval(Solve(f),v) = solve(fᵀ,v) ⇒ Aᵀ·got = v.
+    # Convention: SolveApply(f,v) ≡ Eval(Solve(f),v) = solve(fᵀ,v) ⇒ Aᵀ·got = v.
     assert A.T @ got == pytest.approx(vv)
 
 

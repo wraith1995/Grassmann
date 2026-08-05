@@ -1,4 +1,4 @@
-"""E1 — geometry / determinant cross-checks (`plans/72-exterior-testing-plan.md §2b`).
+"""E1 — geometry / determinant cross-checks.
 
 Extends the solid d∈{2,3} geometry suite (``tests/test_chartlib_geometry.py``) with the
 property-based geometry half of the plan:

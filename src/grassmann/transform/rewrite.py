@@ -97,7 +97,7 @@ class SoPConfig:
     :func:`is_normalized_sop` then certifies). Each flag turns a rule group on/off; the
     surface grows as the build ladder lands (contraction-push, ⊕-dissolve, up-to-iso ⊗/⊕
     ordering, …). Confluence is *not* assumed — the engine just runs the chosen rules to a
-    fixpoint (`plans/90`)."""
+    fixpoint."""
 
     beta: bool = True            # β-reduce applied binders (Eval(LLam …) / NEval(Lam …))
     distribute: bool = True      # push linear/multilinear ops through + (incl. zero-padded ⊕)
@@ -278,7 +278,7 @@ def _subst_nat_in_term(term: Term, name: str, repl: object) -> Term:
     ``term`` embeds (used by nat-binder β). A single generic structural walk over the whole
     Term/Space/Dim tree — every ``DimVar(name)`` (in an ``OPlusRep`` count, an ``App``/``NEval``
     nat arg, a ``DimSum``/``DimProd``/…) is replaced. (Capture under a shadowing inner nat
-    binder is not handled in v1 — nat binders are rare; noted in plans/90.)"""
+    binder is not handled in v1 — nat binders are rare.)"""
     from grassmann.core.space import DimVar
 
     def go(node: object) -> object:
@@ -378,7 +378,7 @@ def alpha_canon(term: Term) -> Term:
                         body = _rename_dimvar(body, name, cname)
                 body = go(body, env2) if is_term(body) else body  # type: ignore[arg-type]
                 return Lam(tuple(new_binders), body, tuple(ntv))  # type: ignore[arg-type]
-            case _:  # audit: ok EX-WILDCARD — bail-default (§0): generic structural recursion [approved Teo 2026-07-03]
+            case _:  # audit: ok EX-WILDCARD — bail-default (§0): generic structural recursion [approved 2026-07-03]
                 return _rebuild(node, lambda c: go(c, env))
 
     return go(term, {})
@@ -388,7 +388,7 @@ def _has_binder(t: Term) -> bool:
     match t:
         case LLam() | Lam() | Frame():
             return True
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): generic structural recursion [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): generic structural recursion [approved 2026-07-03]
             return any(_has_binder(c) for c in _child_terms(t))
 
 
@@ -411,7 +411,7 @@ def _space(t: Term) -> Space | None:
 
 def normalize_space(s: Space) -> Space:
     """Canonical representative of a space's **isomorphism class** — "space normalization
-    *modulo* term normalization" (`plans/90`, the `𝒞` framework for #5):
+    *modulo* term normalization" (the `𝒞` framework for #5):
 
     - ``⊗`` factors and ``⊕`` components are sorted by canonical key (symmetric-monoidal: two
       spaces are iso iff their normal forms are equal), recursing through ``Dual``/``WithInner``;
@@ -582,7 +582,7 @@ def rule_beta_eval(node: Term) -> Term | None:
             if not remaining:
                 return new_body
             return LLam(remaining, new_body)
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -651,7 +651,7 @@ def rule_beta_neval(node: Term) -> Term | None:
                 and (v := _term_var_for_binder(lam, i)) is not None
             )
             return Lam(remaining, body, rem_term_vars)
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -676,7 +676,7 @@ def rule_scale(node: Term) -> Term | None:
             if (_is_num(r) and _is_num(v.scalar)) or not isinstance(_space(v.vector), Scalar):
                 return Scale(_mul_scalar(r, v.scalar), v.vector)
             return None
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -694,14 +694,14 @@ def rule_sum(node: Term) -> Term | None:
                         changed = True
                     case Zero():
                         changed = True
-                    case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other summand is kept as-is [approved Teo 2026-07-03]
+                    case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other summand is kept as-is [approved 2026-07-03]
                         flat.append(v)
             if not flat:
                 return Zero(_space(vectors[0]))
             if len(flat) == 1:
                 return flat[0]
             return Sum(tuple(flat)) if changed else None
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -717,7 +717,7 @@ def _gather_scalar_product(t: Term, num: float, syms: list[Term]) -> float:
             else:
                 num = _gather_scalar_product(t.scalar, num, syms)  # type: ignore[arg-type]
             return _gather_scalar_product(t.vector, num, syms)
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other Term is an atomic scalar factor [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other Term is an atomic scalar factor [approved 2026-07-03]
             syms.append(t)  # an atomic scalar factor (a dot-product Eval, External scalar, scalar Var…)
             return num
 
@@ -781,7 +781,7 @@ def rule_eval_identity(node: Term) -> Term | None:
     match node:
         case Eval(f=Identity(), positions=(0,), args=(arg,)):
             return arg
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -794,7 +794,7 @@ def _mentions_vars(node: Term, uids: set[int]) -> bool:
 def rule_eta(node: Term) -> Term | None:
     """η-reduction (the inverse of β): ``λ⊸(x₀,…,xₙ₋₁). f(x₀,…,xₙ₋₁) → f`` when ``f`` does not
     mention the bound vars and applies them at slots ``0..n-1`` in order. Now **sound** because an
-    ``LLam`` lowers identically to the stored map it expands (the FFS re-orientation, plans/92).
+    ``LLam`` lowers identically to the stored map it expands (the FFS re-orientation).
     Collapses an η-expanded map back to the map itself."""
     match node:
         case LLam(vars=vars_, body=Eval() as body):
@@ -804,7 +804,7 @@ def rule_eta(node: Term) -> Term | None:
             if _mentions_vars(body.f, {v.uid for v in vars_}):
                 return None  # f must be closed w.r.t. the bound vars
             return body.f
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -836,7 +836,7 @@ def _peel_inner(arm: Term, r: Term, dvar: Var) -> Term | None:
             if v is not None:
                 return _peel_inner(v, External(arm.space, arm.data, (c, r)), dvar)
             return None
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -896,7 +896,7 @@ def _factor_trace(node: Trace, dvar: Var) -> Term | None:
             daggered = False
         case Dagger(f=Var(uid=u)) if u == uid:
             daggered = True
-        case _:  # audit: ok EX-WILDCARD — rule probe: δ buried inside a non-bare factor — not a clean trace pairing [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: δ buried inside a non-bare factor — not a clean trace pairing [approved 2026-07-03]
             return None
     rest = factors[k + 1 :] + factors[:k]  # cyclic rotation: the factor after δ moves to front
     rmap = _compose_chain(rest, dvar.space)
@@ -947,7 +947,7 @@ def _factor_llam_body(node: Term, dvar: Var) -> Term | None:
         case Eval(positions=(0,), args=(arg0,)) if not _mentions(node.f, uid):
             m = _factor_llam_body(arg0, dvar)
             return Compose(node.f, (0,), (m,)) if m is not None else None
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = shape not expressible lambda-free [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = shape not expressible lambda-free [approved 2026-07-03]
             return None
 
 
@@ -960,7 +960,7 @@ def rule_eta_advanced(node: Term) -> Term | None:
 
     The body must be **exactly-once linear** in δ (the resource gate rejects the nonlinear
     ``⟨δ,δ⟩`` and the δ-unused body). Sound on this branch because an ``LLam`` lowers identically
-    to the stored map it denotes (the FFS re-orientation, plans/92): the rewrite is an equality
+    to the stored map it denotes (the FFS re-orientation): the rewrite is an equality
     of the coordinate-free algebra, verified value-identical by the suite. Opt-in
     (``SoPConfig.eta_advanced``); off in ``simplify``/``DEFAULT_SOP``."""
     match node:
@@ -983,13 +983,13 @@ def rule_eta_advanced(node: Term) -> Term | None:
             if m is None or _mentions_vars(m, {dvar.uid}):
                 return None  # not expressible lambda-free, or δ leaked — leave the LLam intact
             return m
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
 def rule_eval_compose_fold(node: Term) -> Term | None:
     """Fold a nested application into a composition (application associativity, now unambiguous
-    under the normalized convention, `plans/91`):
+    under the normalized convention):
 
         ``Eval(f, (0,), (Eval(h,(0,),(x,)),)) → Eval(Compose(f,(0,),(h,)), (0,), (x,))``.
 
@@ -1010,7 +1010,7 @@ def rule_eval_zero(node: Term) -> Term | None:
     match node:
         case Eval() if isinstance(node.f, Zero) or any(isinstance(a, Zero) for a in node.args):
             return Zero(_space(node))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1032,7 +1032,7 @@ def rule_compose(node: Term) -> Term | None:
                 match g:
                     case Identity():
                         dropped = True
-                    case _:  # audit: ok EX-WILDCARD — bail-default (§0): a non-Identity operand is kept [approved Teo 2026-07-03]
+                    case _:  # audit: ok EX-WILDCARD — bail-default (§0): a non-Identity operand is kept [approved 2026-07-03]
                         keep_pos.append(p)
                         keep_gs.append(g)
             if not dropped:
@@ -1040,7 +1040,7 @@ def rule_compose(node: Term) -> Term | None:
             if not keep_gs:
                 return f
             return Compose(f, tuple(keep_pos), tuple(keep_gs))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1051,7 +1051,7 @@ def rule_involution(node: Term) -> Term | None:
             return inner
         case Solve(f=Solve(f=inner)):
             return inner
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1071,7 +1071,7 @@ def rule_dagger_push(node: Term) -> Term | None:
             return Kron(Dagger(a), Dagger(b))
         case Dagger(f=Compose(f=h, positions=(0,), gs=(g,))):
             return Compose(Dagger(g), (0,), (Dagger(h),))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1090,7 +1090,7 @@ def rule_musical(node: Term) -> Term | None:
             return Identity(sg)
         case Compose(f=Inner(space=sf), positions=(0,), gs=(Pinv(f=Inner(space=sg)),)) if sf == sg:
             return Identity(dual(sf))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1118,7 +1118,7 @@ def rule_inverse_compose(node: Term) -> Term | None:
             return Identity(map_domain_codomain(g)[0])
         case Compose(f=f, positions=(0,), gs=(Pinv(f=inner),)) if inner == f and is_surjective(f):
             return Identity(map_domain_codomain(f)[1])
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1137,7 +1137,7 @@ def rule_project_embed(node: Term) -> Term | None:
             if spaces_iso(target, sv):
                 return v
             return None
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1152,7 +1152,7 @@ def rule_kron(node: Term) -> Term | None:
             return Identity(oprod(sa, sb))
         case Compose(f=Kron(f=a, g=b), positions=(0,), gs=(Kron(f=c, g=d),)):
             return Kron(Compose(a, (0,), (c,)), Compose(b, (0,), (d,)))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1163,7 +1163,7 @@ def rule_trace_identity(node: Term) -> Term | None:
         case Trace(f=Identity(space=s), i=i, j=j) if {i, j} == {0, 1}:
             d = _static_space_dim(s)
             return Lit(float(d)) if d is not None else None
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1186,7 +1186,7 @@ def rule_trace_kron(node: Term) -> Term | None:
             if _map_arity(f) != 2 or _map_arity(g) != 2:
                 return None
             return Scale(Trace(f, 1, 0), Trace(g, 1, 0))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1240,7 +1240,7 @@ def rule_tuple_roundtrip(node: Term) -> Term | None:
             if i == j:
                 return Identity(comps[i])
             return Zero(linear_map_space(comps[j], comps[i]))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1257,10 +1257,10 @@ def _push_sum_then_scale(node: Term, slots: list[tuple[Term, Callable[[Term], Te
     scalar outward (``Scale``). Doing one slot per call lets the engine iterate to a
     fixpoint; trying sums across all slots first keeps the result a clean SoP."""
     for child, rebuild in slots:
-        if isinstance(child, Sum):  # audit: ok EX-ISINSTANCE-LADDER — rule probe / two-phase slot scan (all Sums before any Scale) resists a single match [approved Teo 2026-07-03]
+        if isinstance(child, Sum):  # audit: ok EX-ISINSTANCE-LADDER — rule probe / two-phase slot scan (all Sums before any Scale) resists a single match [approved 2026-07-03]
             return Sum(tuple(rebuild(c) for c in child.vectors))
     for child, rebuild in slots:
-        if isinstance(child, Scale):  # audit: ok EX-ISINSTANCE-LADDER — rule probe / two-phase slot scan (all Sums before any Scale) resists a single match [approved Teo 2026-07-03]
+        if isinstance(child, Scale):  # audit: ok EX-ISINSTANCE-LADDER — rule probe / two-phase slot scan (all Sums before any Scale) resists a single match [approved 2026-07-03]
             return Scale(child.scalar, rebuild(child.vector))
     return None
 
@@ -1272,7 +1272,7 @@ def dist_scale(node: Term) -> Term | None:
             return Sum(tuple(Scale(r, x) for x in v.vectors))
         case Scale(scalar=Sum() as r, vector=v):
             return Sum(tuple(Scale(p, v) for p in r.vectors))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1326,7 +1326,7 @@ def dist_oprod(node: Term) -> Term | None:
 
                 slots.append((vectors[k], rb))
             return _push_sum_then_scale(node, slots)
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1352,7 +1352,7 @@ def dist_oplus(node: Term) -> Term | None:
                         parts.append(OPlusV(tuple(slot)))
                     return Sum(tuple(parts))
             return None
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1367,7 +1367,7 @@ def dist_kron(node: Term) -> Term | None:
                 (node.g, lambda g: Kron(node.f, g)),
             ]
             return _push_sum_then_scale(node, slots)
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1410,7 +1410,7 @@ def dist_eval_oprod(node: Term) -> Term | None:
             for cf in coeffs:
                 body = Scale(cf, body)
             return body
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1433,7 +1433,7 @@ def dist_trace_oprod(node: Term) -> Term | None:
                 return coeff
             body = OProdV(tuple(rest)) if len(rest) > 1 else rest[0]
             return Scale(coeff, body)
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1450,7 +1450,7 @@ def dist_compose_oprod(node: Term) -> Term | None:
                 Compose(g, (0,), (composed[i],)) if i in composed else g for i, g in enumerate(gs)
             ]
             return OProdV(tuple(factors)) if len(factors) > 1 else factors[0]
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1464,7 +1464,7 @@ def _unary_linear(node: Term, child: Term, rebuild: Callable[[Term], Term]) -> T
             return Sum(tuple(rebuild(c) for c in child.vectors))
         case Scale():
             return Scale(child.scalar, rebuild(child.vector))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1492,7 +1492,7 @@ def dist_unary(node: Term) -> Term | None:
             return _unary_linear(node, node.vector, lambda v: TuplePermute(v, node.perm))
         case Remetric():
             return _unary_linear(node, node.vector, lambda v: Remetric(v, node.metric))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = not a single-child linear operator [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = not a single-child linear operator [approved 2026-07-03]
             return None
 
 
@@ -1611,13 +1611,13 @@ def _has_additive_structure(t: Term) -> bool:
     match t:
         case Sum() | Scale() | Zero():
             return True
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): membership predicate, any other head is clean [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): membership predicate, any other head is clean [approved 2026-07-03]
             return False
 
 
 def rule_order_otimes(node: Term) -> Term | None:
     """Canonicalize the factor order of a tensor product **up to isomorphism**, restoring the
-    original layout with a ``Permute`` correction (the ``𝒞`` of ``plans/90``):
+    original layout with a ``Permute`` correction (the ``𝒞``):
 
         ``OProdV(factors)  ≡  Permute(OProdV(sorted), σ⁻¹)``
 
@@ -1643,7 +1643,7 @@ def rule_order_otimes(node: Term) -> Term | None:
             for position, i in enumerate(sigma):
                 inv[i] = position
             return Permute(OProdV(sorted_facs), tuple(inv))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1670,7 +1670,7 @@ def rule_order_oplus(node: Term) -> Term | None:
             for k, i in enumerate(sigma):
                 inv[i] = k
             return TuplePermute(OPlusV(tuple(comps[i] for i in sigma)), tuple(inv))
-        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — rule probe: None = rule not applicable [approved 2026-07-03]
             return None
 
 
@@ -1731,7 +1731,7 @@ def _is_scalar_atom(a: Term) -> bool:
     match a:
         case Lit() | Sum() | Scale() | Zero():
             return False
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other scalar head defers to _is_atom_head [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other scalar head defers to _is_atom_head [approved 2026-07-03]
             return _is_atom_head(a)
 
 
@@ -1772,7 +1772,7 @@ def _is_atom_head(a: Term, canon_scalars: bool = False) -> bool:
             return False
         case NEval(f=Lam()):
             return False
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other head is a legal atom head [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): any other head is a legal atom head [approved 2026-07-03]
             return True
 
 
@@ -1796,7 +1796,7 @@ def _is_monomial(mono: Term, canon_scalars: bool = False) -> bool:
             if canon_scalars and isinstance(_space(mono), Scalar):
                 return _is_canonical_scalar_product(mono)
             return _is_atom_head(mono.vector, canon_scalars)
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): a bare atom is the coefficient-1 monomial [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): a bare atom is the coefficient-1 monomial [approved 2026-07-03]
             return _is_atom_head(mono, canon_scalars)
 
 
@@ -1835,7 +1835,7 @@ def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
                 return False
             if config.order_sum and keys != sorted(keys):  # not in canonical order
                 return False
-        case _ if not _is_monomial(t, cs):  # audit: ok EX-WILDCARD — bail-default (§0): a non-Sum must be a lone monomial [approved Teo 2026-07-03]
+        case _ if not _is_monomial(t, cs):  # audit: ok EX-WILDCARD — bail-default (§0): a non-Sum must be a lone monomial [approved 2026-07-03]
             return False
     if config.canon_binders and _has_binder(t) and alpha_canon(t) != t:
         return False  # bound variables are not in α-canonical form

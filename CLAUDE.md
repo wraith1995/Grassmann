@@ -6,9 +6,8 @@ Programs. Pipeline: **embed (eDSL) → infer (typing) → represent (lowering) �
 `fem/PHILOSOPHY.md`. This repo has the best docs in the workspace — **use them**:
 `docs/` is a full mkdocs reference (per-node pages, bases guide, definitions).
 
-Work happens on the `oracle-push` worktree right now; these docs/procedures reach `main`
-through it. Ignore the sibling variant checkouts (`grassmann-ad`/`-rw`/`-stable`) —
-experiments; never cross-import from them.
+Ignore the sibling variant checkouts (`grassmann-ad`/`-rw`/`-stable`) — experiments; never
+cross-import from them.
 
 ## What grassmann can represent — DON'T SPECIAL-CASE AROUND IT
 
@@ -95,7 +94,7 @@ as above; orthonormal tangent frames use **sign-adjusted QR**
    Space/Term/Basis/Dim need the user's approval (`# audit: ok EX-... — reason`).
    Known hotspots: `lower/represent.py` (~313 cases, runtime-raise fall-throughs),
    `transform/rewrite.py` (isinstance-chain style), `syntax/unparse.py`, `printer/latex.py`.
-   **Decided 2026-07-03: the `case _: raise` fall-throughs are to be MIGRATED to
+   **Decided: the `case _: raise` fall-throughs are to be MIGRATED to
    `assert_never` families** (then residuals re-approved) — don't add new raise arms.
 
 ## Docs index (read before an audit or a dispatch change)
@@ -112,5 +111,6 @@ Adding a node to Space/Term/Basis/Dim touches, minimally: infer (`synth`/`unify`
 `lower/represent.py`, cob arms, `syntax/{parse,unparse}.py`, `printer/latex.py`, docs
 (`tools/gen_docs.py` from `docs/_authored/`), and the honesty sweep. The `assert_never`
 modules will flag themselves; the raise-fallthrough modules will NOT — grep them.
-Tests: repo `.venv`, `pytest -n auto`. mypy: configured in pyproject; baseline 1102 errors (2026-07-03, systemic union-attr/arg-type over the sum types — its own campaign; shrink, don't grow). Audit: `python3 savo/audit/workspace/run_audits.py --repos
+Tests: repo `.venv`, `pytest -n auto`. mypy: configured in pyproject; baseline 1102 errors (systemic union-attr/arg-type over the sum types — its own body of work;
+shrink, don't grow). Audit: `python3 savo/audit/workspace/run_audits.py --repos
 grassmann`.

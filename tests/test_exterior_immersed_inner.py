@@ -1,4 +1,4 @@
-"""Task-4 acceptance (plan 45): exterior inner over an IMMERSED basis ``Λᵏ(Img(J))``.
+"""Task-4 acceptance: exterior inner over an IMMERSED basis ``Λᵏ(Img(J))``.
 
 pointwise wants the determinant k-form inner of FEEC k-form-valued fields (moment DOFs), with the
 field space ``Λᵏ(Img(J))`` — the k-th exterior power of the immersed tangent ``Img(J)``, NOT a static
@@ -11,7 +11,7 @@ Two things this file pins:
   ``Λᵏ(Img(J))`` compiles and runs for a curved/injective ``J``, and equals ``k!·det[⟨αᵢ,βⱼ⟩]`` where
   the pairwise ``⟨αᵢ,βⱼ⟩`` is the *immersed* inner of ``Img(J)`` (the metric rides free — identity in
   the orthonormal realization frame, cf. Task 1). The earlier "cannot decode map space:
-  ``Img(alt(V,k))``" block (pointwise/plans/39) is gone.
+  ``Img(alt(V,k))``" block is gone.
 
 * **Two DISTINCT k-form values unify** — a mass/moment matrix entry ``⟨αᵢ, αⱼ⟩`` with ``i≠j``. This
   needed the fix in :func:`grassmann.stdlib.exterior.exterior_power`: each ``wedge``/``exterior_power``

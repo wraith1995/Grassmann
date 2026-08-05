@@ -1,6 +1,6 @@
 """IW1 acceptance tests for the Grassmann core IR.
 
-Constructs the core-IR forms of the `26-worked-examples.md` terms (pullback of a
+Constructs the core-IR forms of the worked-example terms (pullback of a
 bilinear form; the k-linear antisymmetrizer as a multi-var LLam + Lift), asserts the
 smart constructors accept them and build the expected node structure, checks that a
 handful of deliberately malformed constructions raise, and that ``repr`` round-trips.

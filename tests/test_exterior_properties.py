@@ -1,4 +1,4 @@
-"""E1 — exterior-**algebra** property tests (`plans/72-exterior-testing-plan.md §2a`).
+"""E1 — exterior-**algebra** property tests.
 
 Property-based numeric checks of the derived ``stdlib.wedge`` / ``exterior_power`` against
 clean numpy oracles, lowered through ``represent`` + ``Program.run`` exactly like the G3

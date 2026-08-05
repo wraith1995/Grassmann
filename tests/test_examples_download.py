@@ -1,4 +1,4 @@
-"""Audit harness (plan 103, items 0–1): every example shipped in the web GUI must build,
+"""Audit harness (items 0–1): every example shipped in the web GUI must build,
 differentiate, AND Generate-Python (primal + derivative) without error. The examples are read
 straight from ``web/index.html`` (single source of truth) via node, so this test fails the moment
 a shipped example regresses — e.g. the opaque-``f`` symbolic-dimension breakage."""

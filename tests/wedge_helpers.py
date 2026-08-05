@@ -1,6 +1,6 @@
 """Shared test infrastructure for the exterior-algebra / geometry property suite (E1).
 
-The single reusable primitive the plan (`plans/72-exterior-testing-plan.md §2/§3`) calls
+The single reusable primitive the exterior-testing plan calls
 for: :func:`wedge_all` — the general ``m``-fold wedge of ``Λ¹`` vectors lowered into the
 **ambient** ``V⊗ᵐ`` standard basis (the fully antisymmetric tensor).  It generalizes the
 d≤3-capped ``_volume_form_via_grassmann`` of ``tests/test_chartlib_geometry.py`` to any

@@ -1,8 +1,7 @@
 """IW5 — the exterior-algebra stdlib (derived ops, NOT core IR).
 
 A thin library on top of the :mod:`grassmann.embed` surface implementing the
-exterior/symmetric algebra constructions of ``plans/26-worked-examples.md §2`` and
-``plans/50-algorithms-targets.md A4``. Nothing here is a core node: ``alt`` /
+the standard exterior/symmetric algebra constructions. Nothing here is a core node: ``alt`` /
 ``exterior_power`` / ``wedge`` are *derived* functions composing the existing core ops
 (``LLam`` + ``Lift`` antisymmetrization, ``Img``, ``Embed``/``Project``, ``Scale``).
 
@@ -116,7 +115,7 @@ def alt(V: Expr, k: int) -> Expr:
 # otherwise build a FRESH ``alt`` ``LLam`` (fresh binder uids) / rank-``Var``, so two independently
 # constructed ``Λᵏ(V)`` — e.g. the spaces of two distinct ``wedge`` results, or two k-form fields —
 # are only ALPHA-equivalent, not identical. FFS unification compares the defining map by structural
-# identity, so ``inner``/``dot`` of two such values (a FEEC k-form mass/moment DOF ``⟨αᵢ,αⱼ⟩``)
+# identity, so ``inner``/``dot`` of two such values (a k-form mass/moment DOF ``⟨αᵢ,αⱼ⟩``)
 # raised ``UnifyError: FFS map mismatch``. Memoizing on ``(V-space, k, rank)`` makes ``Λᵏ(V)`` one
 # canonical space — so the SAME ``V`` and ``k`` always yield the identical ``Img`` node and unify.
 _EXTPOW_CACHE: dict[object, Expr] = {}
@@ -150,12 +149,12 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
         # `G.tensor(G.dual(Vk), Vk)` — the map space `Vk ⊸ Vk` spelled DIRECTLY, NOT via `Vk >> Vk`.
         # `>>` deliberately re-associates (`27 Q1`: `V >> W >> R == V >> (W >> R)`): when its LEFT
         # operand looks like a map space `~a ⊗ b` it peels the domain and curries. For a FORM base
-        # (`V = Dual(...)`, every FEEC k-form) `Vk = V*⊗…⊗V*` has a `Dual` FIRST FACTOR, so
+        # (`V = Dual(...)`, every k-form) `Vk = V*⊗…⊗V*` has a `Dual` FIRST FACTOR, so
         # `_peel_map_space` mistakes the Λᵏ AMBIENT for a curried map and curries it — and
         # `Vk >> Vk` never builds `Dual(Vk) ⊗ Vk` at all. The projector's space then came out
         # RIGHT-NESTED while `tensor_power` builds the ambient FLAT, so one space had two spellings
         # (`V*⊗V*⊗V*` vs `V*⊗(V*⊗V*)`) and `unify` had no rewrite that made progress between them.
-        # That blocked `P⁻₁Λ³(TET)`; k = 2 escaped only because both spellings land at arity 2.
+        # That blocked every Λ³ lane; k = 2 escaped only because both spellings land at arity 2.
         # Spelling it directly also keeps `Alt_k` the 2-axis `(n^k, n^k)` MATRIX the SVD/FFS seam
         # expects — which is why the alternative (splicing nested products inside `oprod`) is NOT a
         # fix: it flattens `Dual(dom) ⊗ cod` into its component axes and the factorization seam then
@@ -375,7 +374,7 @@ def _base_space_of_exterior(a: Expr, k: int) -> Expr:
         inner = f.vector if isinstance(f, _t.Scale) else f
         if isinstance(inner, _t.Lift):
             inner = inner.vector
-        if isinstance(inner, _t.LLam) and inner.vars:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one structural pattern; non-match raises [approved Teo 2026-07-03]
+        if isinstance(inner, _t.LLam) and inner.vars:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one structural pattern; non-match raises [approved 2026-07-03]
             return Expr(inner.vars[0].space)
     # ``Λ¹(V) = V``: a one-form may be a PLAIN value — a covector ``Dual(W)``, or an ``Img(J)`` tangent
     # that is NOT an ``alt`` exterior power — so it also pairs with a vector (``ι_X``). Its base space IS

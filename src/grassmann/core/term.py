@@ -714,7 +714,7 @@ class TuplePermute:
     so ``v : ⊕(sₖ)`` maps to ``⊕(s_{perm[i]})``. Lowers to a block (stack-slice) permutation.
     Introduced as the clean output-correction node for canonical ``⊕`` ordering — the one
     reordering ``TupleEmbed``/``TupleProject`` can only express as a heavy sum of inject∘project
-    maps (`plans/90`)."""
+    maps."""
 
     vector: Term
     perm: tuple[int, ...]
@@ -972,7 +972,7 @@ def _check_llam_linearity(vars: tuple[Var, ...], body: Term) -> None:
                         walk(a, True)
                     else:
                         walk(a, in_disallowed)
-            case _:  # audit: ok EX-WILDCARD — bail-default (§0): documented generic child recursion [approved Teo 2026-07-03]
+            case _:  # audit: ok EX-WILDCARD — bail-default (§0): documented generic child recursion [approved 2026-07-03]
                 # Generic structural recursion over child Terms/Spaces.
                 for child in _children(node):
                     walk(child, in_disallowed)

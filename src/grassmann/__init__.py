@@ -27,7 +27,6 @@ Note: ``embed`` names both the subpackage and the movement builder; ``G.embed`` 
 :func:`grassmann.embed.embed`, while every other movement op (``G.project``,
 ``G.assert_``, …) is on ``G`` directly.
 
-Start the design docs at ``plans/60-*`` (the IW build) and ``plans/20-core-language.md``.
 """
 
 from __future__ import annotations

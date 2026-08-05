@@ -1,4 +1,4 @@
-"""Numeric pins for the FFS map-orientation refactor (plans/92).
+"""Numeric pins for the FFS map-orientation refactor.
 
 These freeze the substrate's numeric behavior against INDEPENDENT ground truth (numpy /
 finite differences) so the `(cod,dom)→(dom,cod)` re-orientation can be shown value-preserving.

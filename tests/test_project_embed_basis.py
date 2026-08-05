@@ -1,9 +1,9 @@
-"""project / embed honor the operand's basis (round-7 re-audit finding).
+"""project / embed honor the operand's basis.
 
 ``project``'s ``Pᵀ·⟦v⟧`` and ``embed``'s default-path ``P·⟦v⟧`` use a selection matrix ``P`` in the
 *default* basis, so the operand must be realized in that default basis too — otherwise a non-default
 operand pin contracts std-``P`` against non-std coords and silently returns the wrong vector (a
-basis-honesty bug of the metric-seam class; pre-existing, surfaced by the re-audit).  Two-route
+basis-honesty bug of the metric-seam class).  Two-route
 ground truth: operand pinned to a non-default basis fed its coords (target=STD) == operand pinned
 default fed the std vector.
 """

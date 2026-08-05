@@ -1,4 +1,4 @@
-"""IW3 inference engine tests (`plans/25-embedding-inference.md`, `26-worked-examples.md`).
+"""IW3 inference engine tests.
 
 Builds the §26 terms with ``grassmann.core`` constructors and asserts inference yields the
 expected Space/Type. Covers the G0 acceptance gate (a deliberate space-mismatch is

@@ -1,6 +1,6 @@
 # 94 — The coordinate-convention charter (and finishing the FEEC arc)
 
-**Status**: PLAN (Teo-requested, 2026-07-05). Owner: next session(s).
+**Status**: PLAN (maintainer-requested, 2026-07-05). Owner: next session(s).
 **Motivation**: three shipped bugs in one week were the SAME bug — a realization
 delivered columns in one frame while its consumer assumed another, silently:
 
@@ -126,4 +126,4 @@ naturality of `alt`:
 Per-phase: suites + `run_audits.py` green before commit; findings appended to
 `fem/audit/FINDINGS-*`; PLAN.md updated per milestone. Phase 2 is the only one
 touching decided behavior — where the charter contradicts an existing decision
-(audit #4's scope, the FFS-STD meaning), STOP and ask Teo rather than reinterpret.
+(audit #4's scope, the FFS-STD meaning), STOP and ask the maintainer rather than reinterpret.

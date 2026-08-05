@@ -1,4 +1,4 @@
-"""Regression (2026-07-03 audit sweep): metavars nested in FFS endpoints, FFS defining
+"""Regression: metavars nested in FFS endpoints, FFS defining
 maps, or ``App`` args must be seen by ``has_unsolved`` and the occurs-check — previously
 both fell through ``case _: return False`` while the sibling ``subst_space`` descended,
 so a cyclic ``m := Img(f, source=…m…)`` solution could be admitted."""

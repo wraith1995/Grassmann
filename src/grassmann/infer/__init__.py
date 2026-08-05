@@ -4,7 +4,7 @@ Bidirectional type synthesis + checking over the core IR, with first-order unifi
 SPACE terms only, symbolic dimension reasoning (static OR the runtime SVD atom ``δ_f``),
 the subspace relation ``⊑``, and asserted map-property / FFS-dimension propagation.
 
-Spec: ``plans/25-embedding-inference.md`` (§0–§7). Operates over the IW1 core
+Operates over the IW1 core
 (``grassmann.core``); does not modify it.
 
 Public entry points
