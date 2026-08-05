@@ -4596,6 +4596,30 @@ def _lift_operand_target(
         return None
 
 
+def _spliced_basis_prod(*parts: B.Basis) -> B.Basis:
+    """⊗ of basis factors with any PRODUCT factor spliced in — ``a ⊗ (b ⊗ c) ↦ a ⊗ b ⊗ c``.
+
+    The basis mirror of :func:`~grassmann.infer.synth._spliced_oprod`, and it must stay in step
+    with it. ``_synth_kron`` splices the Kron result's SPACE, so a kron CHAIN synthesizes the flat
+    ``a₀⊗a₁⊗a₂``; without the same splice here the honest tag nests as
+    ``BasisProd((a₀, BasisProd((a₁, a₂))))``, whose ``_space_of_basis`` is the nested
+    ``OProd((A, OProd((A, A))))``. Basis and space then disagree, ``_same_space`` refuses the cob
+    (``unify``'s ⊗ arm compares ARITIES, 2 against 3) and a Λ³ assembly dies with "bases of
+    different spaces". Λ² is immune: a two-factor chain has no nesting to disagree about.
+
+    Re-spelling only, never a re-ordering: ⊗ of frames is the Kronecker product, whose flattened
+    column order is associative, so ``a₀⊗(a₁⊗a₂)`` and ``a₀⊗a₁⊗a₂`` enumerate the same frame in
+    the same order. Only the nesting — hence which space the tag claims to be a basis OF — changes.
+    """
+    flat: list[B.Basis] = []
+    for p in parts:
+        if isinstance(p, B.BasisProd) and len(p.bases) > 1:
+            flat.extend(p.bases)
+        else:
+            flat.append(p)
+    return B.basis_prod(*flat)
+
+
 def _kron_result_basis(f_basis: B.Basis, g_basis: B.Basis, space: S.Space) -> B.Basis | None:
     """The HONEST basis of ``Kron(f, g)``'s two FUSED axes, from the operands' own bases.
 
@@ -4625,8 +4649,8 @@ def _kron_result_basis(f_basis: B.Basis, g_basis: B.Basis, space: S.Space) -> B.
     # Contravariant domain: peel one `DualBasis` off each, product them, re-wrap once.
     if not (isinstance(f_dom, B.DualBasis) and isinstance(g_dom, B.DualBasis)):
         return None
-    dom_axis = B.dual_basis(B.basis_prod(f_dom.basis, g_dom.basis))
-    cod_axis = B.basis_prod(f_cod, g_cod)
+    dom_axis = B.dual_basis(_spliced_basis_prod(f_dom.basis, g_dom.basis))
+    cod_axis = _spliced_basis_prod(f_cod, g_cod)
     out = B.basis_prod(dom_axis, cod_axis)
     # Only offer the tag if it genuinely describes THIS space (the same guard `_resolve_target`
     # applies to a caller-supplied basis); anything else falls back.
