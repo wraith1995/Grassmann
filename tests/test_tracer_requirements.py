@@ -1,4 +1,4 @@
-"""Task-3 acceptance (plan 45): unlimited-derivative tracers + requirements enumeration.
+"""Task-3 acceptance: unlimited-derivative tracers + requirements enumeration.
 
 pointwise inserts each field/geometry as a TRACER variable (``deps[uid] = None``) with unlimited
 derivatives available, ``diff`` the whole compound term (possibly more than once, to arbitrary

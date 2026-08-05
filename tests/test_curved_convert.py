@@ -1,4 +1,4 @@
-"""Task-2 acceptance (plan 45): the TWO distinct converts pointwise needs, over a curved ``Img(J)``.
+"""Task-2 acceptance: the TWO distinct converts pointwise needs, over a curved ``Img(J)``.
 
 pointwise's ``convert`` is really two operations that must NOT be merged:
 

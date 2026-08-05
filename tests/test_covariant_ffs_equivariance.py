@@ -1,6 +1,6 @@
 """Two-feed equivariance guard for the covariant FFS seam (``_realize_image_covariant``).
 
-plans/94 Phase 1/3.  The covariant realization of ``ProjectedBasis(f, "image", src, tgt)``
+The covariant realization of ``ProjectedBasis(f, "image", src, tgt)``
 reads ``f``'s matrix in the ENDPOINT coordinates, ``A0 = T⁻¹·F·S``, factors THAT, and maps
 the ``Q`` factor back out (``cols = T·Q0``).  Its whole justification is that when ``f`` is
 natural w.r.t. the endpoint transport (the exterior ``alt`` under the transported ``⊗ᵏ``

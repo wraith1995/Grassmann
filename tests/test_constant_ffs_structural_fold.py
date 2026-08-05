@@ -204,7 +204,7 @@ def test_constant_fold_frame_is_canonical_per_subspace():
     This is the property the old ``cols == _svd_cols(M)`` assertion was standing in for, stated so
     that it is well-posed. Two operators with the SAME range must fold to the IDENTICAL frame —
     otherwise a change of basis composed across two ``Space`` nodes naming one subspace comes out a
-    rotation, which is the σ defect recorded in ``.claude/NOTES-sigma-plumbing.md``: for a
+    rotation, which is the recorded σ defect: for a
     reoriented facet, ``Img(alt_canonical)`` and ``Img(alt_permuted)`` are different nodes for the
     same subspace, and no memo can tie them because their keys legitimately differ.
 

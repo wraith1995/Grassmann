@@ -212,7 +212,7 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
     else:
         body = _dd(e, ctx)
         rspace = R
-    if isinstance(body, Zero):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: Zero-derivative shape test, else LLam wrap [approved Teo 2026-07-03]
+    if isinstance(body, Zero):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: Zero-derivative shape test, else LLam wrap [approved 2026-07-03]
         # e is x-independent: the derivative is the zero map (an LLam over an unused seed
         # would violate the linear discipline, so emit the zero map directly).
         return Zero(linear_map_space(ctx.X, rspace))
@@ -1210,7 +1210,7 @@ def _chart_jacobian_var(g: Term) -> Var | None:
         f, gg = g.f, g.gs[0]
         if isinstance(f, Dagger) and isinstance(f.f, Var) and gg == f.f:
             return f.f
-        if isinstance(gg, Dagger) and isinstance(gg.f, Var) and f == gg.f:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one JtJ Compose/Dagger pattern, else None [approved Teo 2026-07-03]
+        if isinstance(gg, Dagger) and isinstance(gg.f, Var) and f == gg.f:  # audit: ok EX-ISINSTANCE-LADDER — narrowing: one JtJ Compose/Dagger pattern, else None [approved 2026-07-03]
             return f
     return None
 
@@ -1283,7 +1283,7 @@ def _connection_correction(
     raise DiffError(
         f"diff: covariant differentiation of {sspace!r} is not yet supported. A pure "
         f"contravariant slot in a non-map tensor ((2,0) etc.) needs per-slot application "
-        f"that hits the nested-⊗ codomain issue — see plans/80. Supported: vector, "
+        f"that hits the nested-⊗ codomain issue. Supported: vector, "
         f"covector, all-covariant forms (incl. the metric, ∇g=0), and (1,1) maps."
     )
 
@@ -1507,7 +1507,7 @@ def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None])
     def walk(node: object, in_space: bool, in_subspace: bool) -> None:
         if isinstance(node, Frame):
             raise DiffError("diff: cannot differentiate through a Frame (basis binder)")
-        if in_space and not in_subspace and isinstance(node, Var) and is_xdep(node):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): Frame/x-dep rejections on generic recursion [approved Teo 2026-07-03]
+        if in_space and not in_subspace and isinstance(node, Var) and is_xdep(node):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): Frame/x-dep rejections on generic recursion [approved 2026-07-03]
             raise DiffError(
                 "diff: an x-dependent term flows into a non-subspace space position "
                 "(a space made to depend on x — e.g. a SpaceFunction); differentiating through a "
@@ -1527,7 +1527,7 @@ def _mentions_space_meta(s: Space) -> bool:
 
     def walk(node: object) -> None:
         nonlocal found
-        if isinstance(node, (SpaceMeta, SVar)):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): meta/SVar leaf detect else generic recursion [approved Teo 2026-07-03]
+        if isinstance(node, (SpaceMeta, SVar)):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): meta/SVar leaf detect else generic recursion [approved 2026-07-03]
             found = True
             return
         for child in _children(node):

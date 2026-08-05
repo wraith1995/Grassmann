@@ -1,4 +1,4 @@
-"""Scalar-lowering regressions (fem #13 matrix findings G1–G3, fixed 2026-07-03).
+"""Scalar-lowering regressions (matrix findings G1–G3).
 
 The R ≅ R¹ empty-product law: a Scalar-space value is stored 0-d, but contraction and
 change-of-basis seams consume the coordinate vector ``[x]`` in the standard basis {1}.
@@ -38,8 +38,8 @@ def test_scalar_product_plus_scalar_dot():
 
 
 def test_transpose_map_types_dual_and_is_metric_free():
-    """fem #15 F1: the covector-factor transport is the metric-free TRANSPOSE
-    ``λω. ω∘f : Dual(B) ⊸ Dual(A)`` (LLam + Compose — defined in the calculus, Teo),
+    """ F1: the covector-factor transport is the metric-free TRANSPOSE
+    ``λω. ω∘f : Dual(B) ⊸ Dual(A)`` (LLam + Compose — defined in the calculus),
     NOT ``dagger`` (the metric adjoint, typed PRIMAL ``B ⊸ A`` — pairing a covector
     against it was the Dual(Img J) ~ Img J unify refusal). Applied to a covector it
     computes exactly ``fᵀω`` with no Gram anywhere."""
@@ -66,7 +66,7 @@ def test_transpose_map_types_dual_and_is_metric_free():
 
 
 def test_dual_image_wrapper_trace_chain_exact():
-    """fem #15 P(T)=I seam regression (fixed 2026-07-04): the ambient-immersion seam
+    """ P(T)=I seam regression: the ambient-immersion seam
     (embed/complete/backup) must ALWAYS receive standard-ambient columns —
     `ImageBasis.target` is representation-only and is never honored there, and the
     operator matrix in `_realize_image_basis` is coerced to its default slot bases.
@@ -101,7 +101,7 @@ def test_dual_image_wrapper_trace_chain_exact():
                     return B.image_basis(f)
                 case S.Img(f, _src, _tgt):
                     return B.image_basis(f, None, None)
-                case _:  # audit: ok EX-WILDCARD — choice-protocol: None = no override; map_basis mirrors/defaults exhaustively [approved Teo 2026-07-03]
+                case _:  # audit: ok EX-WILDCARD — choice-protocol: None = no override; map_basis mirrors/defaults exhaustively [approved 2026-07-03]
                     return None
         return map_basis(space, leaf)
 

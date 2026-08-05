@@ -5,7 +5,7 @@ description = "Grassmann — typed, coordinate-free linear-algebra core IR (kind
 readme = "README.md"
 requires-python = ">=3.13"
 authors = [
-    { name = "teocollin1995", email = "teoc@mit.edu" },
+    { name = "Thea Collin", email = "teoc@mit.edu" },
 ]
 # polyarray is the IW4 lowering target; the IW1 core datatypes do not import it
 # at runtime, but we declare the dependency now so the package graph is correct.

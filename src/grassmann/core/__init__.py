@@ -1,6 +1,6 @@
 """Grassmann core IR (IW1): the typed Kind / Space / Type / Term / Basis towers.
 
-Faithful transcription of ``plans/20-core-language.md``. Nodes are frozen dataclasses;
+Nodes are frozen dataclasses;
 the module-level smart constructors enforce arity and structural kind well-formedness
 (full type CHECKING — dims/properties/contraction matching — is IW3). Re-exports the
 public constructors of every sub-module.

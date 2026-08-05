@@ -134,7 +134,7 @@ class Expr:
             return wrap(_s.oprod(self.node, o.node))
         if self.tower == TERM and o.tower == TERM:
             # A SCALAR-valued Term operand makes `*` scalar MULTIPLICATION (`Scale`, which takes a
-            # scalar-valued Term), NOT a genuine ⊗. The ⊗-unit convention (Teo 2026-07-28) gives a
+            # scalar-valued Term), NOT a genuine ⊗. The ⊗-unit convention gives a
             # `Scalar` factor its own array axis, so `OProdV((q: Scalar, u))` lives in `R ⊗ W` —
             # one axis MORE than `W` — and `q()*u() + w()` would be a space mismatch that the old
             # accidental 0-axis lowering silently absorbed. The unit iso `R ⊗ W ≅ W` is applied
@@ -447,7 +447,7 @@ def _peel_map_space(node: object) -> tuple[list[object], object] | None:
 
 
 def _split_map_space(node: object) -> tuple[object, object] | None:
-    """``OProd(Dual(a), b)`` → ``(a, b)``; else ``None`` (canonical peel, fem audit #18)."""
+    """``OProd(Dual(a), b)`` → ``(a, b)``; else ``None`` (canonical peel)."""
     from grassmann.infer.subspace import split_map_space
 
     return split_map_space(node) if _s.is_space(node) else None

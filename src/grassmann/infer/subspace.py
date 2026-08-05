@@ -51,7 +51,7 @@ def _norm(s: Space) -> Space:
             return ns[0] if len(ns) == 1 else OProd(tuple(ns))
         case Dual(inner):
             return Dual(_norm(inner))
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): canonicalize specific else passthrough [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): canonicalize specific else passthrough [approved 2026-07-03]
             return s
 
 
@@ -77,7 +77,7 @@ def is_subspace(sub: Space, amb: Space) -> bool:
         dom = _ffs_dom(sub)
         if dom is not None and is_subspace_or_eq(dom, amb):
             return True
-    if isinstance(sub, (Img, CoKer)):  # audit: ok EX-ISINSTANCE-LADDER — safe direction: False only blocks project/embed [approved Teo 2026-07-03]
+    if isinstance(sub, (Img, CoKer)):  # audit: ok EX-ISINSTANCE-LADDER — safe direction: False only blocks project/embed [approved 2026-07-03]
         cod = _ffs_cod(sub)
         if cod is not None and is_subspace_or_eq(cod, amb):
             return True
@@ -114,7 +114,7 @@ def _ffs_cod(node: Img | CoKer) -> Space | None:
 
 
 # ---------------------------------------------------------------------------
-# Canonical FFS / map-space probes (2026-07-03 consolidation — fem audit #18).
+# Canonical FFS / map-space probes (—).
 # These replace the per-module hand-rolled copies (pullback._is_ffs/_ffs_superspace,
 # diff._subspace_defining_map/_ffs_kind/_map_dom_cod, choose._operator_of,
 # embed.ops._split_map_space, _dims' peel, represent's membership gates).
@@ -125,7 +125,7 @@ FfsKind = Literal["img", "ker", "coimg", "coker"]
 
 def is_ffs(s: Space) -> TypeGuard[Img | Ker | CoImg | CoKer]:
     """Whether ``s`` is one of the four fundamental subspaces of a map."""
-    return isinstance(s, (Img, Ker, CoImg, CoKer))  # audit: ok EX-ISINSTANCE-LADDER — THE canonical FFS membership predicate (definitional 4-member subset) [approved Teo 2026-07-03]
+    return isinstance(s, (Img, Ker, CoImg, CoKer))  # audit: ok EX-ISINSTANCE-LADDER — THE canonical FFS membership predicate (definitional 4-member subset) [approved 2026-07-03]
 
 
 def ffs_defining_map(s: Space) -> object | None:
@@ -175,7 +175,7 @@ def split_map_space(s: Space) -> tuple[Space, Space] | None:
     """Strict one-step peel of the linear-map encoding: ``OProd(Dual(dom), cod)`` → ``(dom, cod)``,
     else ``None``. (The general multi-factor decoder is :func:`grassmann.infer.synth._decode_map_space`
     via :func:`map_domain_codomain`; this is the syntactic 2-factor case, no synthesis.)"""
-    if isinstance(s, OProd) and len(s.spaces) == 2 and isinstance(s.spaces[0], Dual):  # audit: ok EX-ISINSTANCE-LADDER — canonical syntactic peel: OProd(Dual, ·) or None by contract [approved Teo 2026-07-03]
+    if isinstance(s, OProd) and len(s.spaces) == 2 and isinstance(s.spaces[0], Dual):  # audit: ok EX-ISINSTANCE-LADDER — canonical syntactic peel: OProd(Dual, ·) or None by contract [approved 2026-07-03]
         return s.spaces[0].space, s.spaces[1]
     return None
 

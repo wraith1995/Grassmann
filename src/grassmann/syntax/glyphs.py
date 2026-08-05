@@ -4,7 +4,7 @@ The parser (:mod:`grassmann.syntax.parse`) and unparser (:mod:`grassmann.syntax.
 both read this table so the two stay in lock-step. A goal-04 LaTeX printer can consume the
 SAME operator/precedence model (it only needs to swap the glyph strings for LaTeX macros).
 
-Design (see ``plans/27-surface-syntax.md`` for the operator allocation):
+Design (the operator allocation):
 
 - **Infix** binary operators carry a *binding power* (higher binds tighter). All are
   left-associative. They are deliberately **sort-polymorphic**: ``⊗`` is ``OProd`` on

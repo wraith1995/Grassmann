@@ -1,4 +1,4 @@
-"""TASK D3 — external-op basis requirement made visible in the type (``plans/71``).
+"""TASK D3 — external-op basis requirement made visible in the type.
 
 ``ExternalOp`` now carries a :class:`~grassmann.lower.represent.BasisReq`
 (``STANDARD`` default / ``EQUIVARIANT``). Under ``STANDARD`` the lowering ``cob``\\ s every

@@ -1,4 +1,4 @@
-"""Regression (2026-07-03 audit #17 migration): the represent-layer basis classifiers
+"""Regression (#17 migration): the represent-layer basis classifiers
 honor their documented contracts on wrapped/composite spellings.
 
 Probe-verified bugs fixed here:
@@ -55,7 +55,7 @@ def test_immersed_gram_sees_composite_factors():
 
 def test_peel_orthonormal_metric_through_complete():
     """`Orth(Complete(sub, comp))` spans the COMPLEMENT's space (`_space_of_basis`), so a
-    metric carried there must ride into the orthonormalization (2026-07-03 probe fix)."""
+    metric carried there must ride into the orthonormalization."""
     V, std, J = _fixture()
     g = T.Var(name="g", space=S.OProd((S.Dual(V), S.Dual(V))))
     wib = B.with_inner_basis(std, g)

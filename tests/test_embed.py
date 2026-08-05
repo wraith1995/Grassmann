@@ -1,6 +1,6 @@
 """IW2 acceptance tests — the Python embedding (eDSL).
 
-Renders the `26-worked-examples.md` constructions in the FINALIZED surface syntax
+Renders the worked-example constructions in the FINALIZED surface syntax
 (`27`) and asserts they desugar to the SAME core nodes the IW1 tests build (compared
 against the `grassmann.core` constructors). Also exercises operator precedence
 consequences, ``>>`` right-re-association, ``f[α]`` type application, and

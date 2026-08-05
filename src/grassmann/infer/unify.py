@@ -92,7 +92,7 @@ class MetaStore:
                 return OProd(tuple(self.resolve(c) for c in s.spaces))
             case OPlusRep():
                 return OPlusRep(s.count, self.resolve(s.space))
-            case _:  # audit: ok EX-WILDCARD — bail-default (§0): zonk recursion; wildcard returns node unchanged [approved Teo 2026-07-03]
+            case _:  # audit: ok EX-WILDCARD — bail-default (§0): zonk recursion; wildcard returns node unchanged [approved 2026-07-03]
                 return s
 
     def walk(self, s: Space) -> Space:
@@ -109,7 +109,7 @@ class MetaStore:
 
         Descends into FFS defining maps / endpoints and ``App`` like
         :func:`grassmann.infer.subst.subst_space` — a metavar hiding inside
-        ``Img(f, source=…)`` counts (2026-07-03 audit fix). ``WithInner.metric``
+        ``Img(f, source=…)`` counts. ``WithInner.metric``
         is skipped for parity with ``subst_space``; ``Dim``s carry no metavars."""
         s = self.walk(s)
         match s:
@@ -140,7 +140,7 @@ class MetaStore:
 
 def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
     """Occurs-check with the same FFS/``App`` descent as :meth:`MetaStore.has_unsolved`
-    (a cyclic ``m := Img(f, source=…m…)`` solution must be rejected — 2026-07-03 audit fix)."""
+    (a cyclic ``m:= Img(f, source=…m…)`` solution must be rejected —)."""
     s = store.walk(s)
 
     def pred(sp: Space) -> bool:
@@ -246,7 +246,7 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
                 # `linear_map_space(cod, dom) = oprod(dual(dom), cod)` RIGHT-NESTS as soon as the
                 # codomain is compound, so `V*⊗V*⊗V*` meets `V*⊗(V*⊗V*)`. Λ³ is the first degree at
                 # which that is observable (for k = 2 both sides are arity 2), and it is what blocks
-                # `P⁻₁Λ³(TET)`.
+                # any Λ³-valued lane.
                 #
                 # Deciding it HERE would be wrong: `shape_of_space` makes ⊗ factors SEPARATE AXES, so
                 # the two spellings realize as `(3,3,3)` and `(3,9)`; unifying them would let
@@ -324,10 +324,10 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
         case (Dual(), _) if isinstance(store.walk(a.space), Dual):
             unify(store.walk(a.space).space, b, store)
             return
-        case (_, Dual()) if isinstance(store.walk(b.space), Dual):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: substructure guards inside exhaustive match [approved Teo 2026-07-03]
+        case (_, Dual()) if isinstance(store.walk(b.space), Dual):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: substructure guards inside exhaustive match [approved 2026-07-03]
             unify(a, store.walk(b.space).space, store)
             return
-        case _:  # audit: ok EX-WILDCARD — unification-failure arm: no rule <=> not unifiable; the raise IS the algorithm's negative answer (pairs, not node dispatch) [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — unification-failure arm: no rule <=> not unifiable; the raise IS the algorithm's negative answer (pairs, not node dispatch) [approved 2026-07-03]
             raise UnifyError(f"cannot unify {a!r} ~ {b!r}")
 
 

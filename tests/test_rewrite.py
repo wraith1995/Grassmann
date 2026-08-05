@@ -98,7 +98,7 @@ def test_beta_eval_full_application() -> None:
     out = beta(redex)
     assert out == T.Eval(f, (0,), (x,))
     # The reduced form computes the coordinate-free matvec fᵀx; with the canonical LLam storage
-    # (plans/92) the un-reduced redex now ALSO lowers, to the same value — β is a simplification,
+    # the un-reduced redex now ALSO lowers, to the same value — β is a simplification,
     # no longer a prerequisite for running.
     fv, xv = np.arange(6.0).reshape(2, 3), np.array([1.0, 2.0])
     np.testing.assert_allclose(_run(out, {_key(f): fv, _key(x): xv}), fv.T @ xv)
@@ -106,7 +106,7 @@ def test_beta_eval_full_application() -> None:
 
 
 def test_eta_reduction() -> None:
-    # η (sound now that an LLam lowers like a stored map — plans/92): λ⊸x.f(x) → f.
+    # η (sound now that an LLam lowers like a stored map): λ⊸x.f(x) → f.
     V, W = S.base("V", 2), S.base("W", 3)
     f, a = T.var("f", S.linear_map_space(V, W)), T.var("a", V)
     assert simplify(T.LLam((a,), T.Eval(f, (0,), (a,)))) == f
@@ -910,7 +910,7 @@ def test_inverse_compose_needs_property() -> None:
 
 
 # ===========================================================================
-# Phase 3 (plans/91) — application fold + applied-form inverse cancellation.
+# Phase 3 — application fold + applied-form inverse cancellation.
 # ===========================================================================
 
 

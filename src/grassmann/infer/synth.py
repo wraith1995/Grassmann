@@ -289,7 +289,7 @@ def _synth_external(e: External, ctx: Ctx) -> Space:
     if _external_requires_standard(e.data):
         for a in e.args:
             sp = ctx.store.resolve(_synth_value(a, ctx))
-            if isinstance(sp, (SpaceMeta, SVar)):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: peels unresolved SVar/SpaceMeta to reject [approved Teo 2026-07-03]
+            if isinstance(sp, (SpaceMeta, SVar)):  # audit: ok EX-ISINSTANCE-LADDER — narrowing: peels unresolved SVar/SpaceMeta to reject [approved 2026-07-03]
                 raise InferError(
                     f"External {getattr(e.data, 'name', e.data)!r} requires standard "
                     f"coordinates (basis_req=STANDARD), but operand {a!r} has a "
@@ -718,7 +718,8 @@ def _spliced_oprod(*parts: Space) -> Space:
     ``Kron`` is where the nested spelling was minted: ``kron(f, kron(g, h))`` built its domain as
     ``oprod(a0, oprod(a1, a2))``, so a ``kron`` CHAIN right-nests while ``tensor_power(V, k)`` builds
     the same space FLAT. They then met — the Λᵏ ambient against the antisymmetrizer's domain — and
-    ``P⁻₁Λ³(TET)`` could not be assembled. ``k = 2`` escaped only because a two-factor chain has no
+    a degree-3 exterior power could not be assembled. ``k = 2`` escaped only because a two-factor
+    chain has no
     nesting to disagree about.
 
     Splicing HERE is layout-neutral, which is why it is done here rather than in ``oprod`` itself:

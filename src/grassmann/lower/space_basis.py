@@ -94,7 +94,7 @@ def default_basis(space: S.Space) -> B.Basis:
 
 
 def map_basis(space: S.Space, choice) -> B.Basis:
-    """Structure-mirroring basis functor (2026-07-03, fem audit #18): a general basis CHOICE
+    """Structure-mirroring basis functor: a general basis CHOICE
     for ``space`` that mirrors the basis tower — ``choice(space) -> Basis | None`` is consulted
     at EVERY node first (``None`` = no override there); un-overridden structural wrappers
     (``Dual``/``OPlus``/``OProd``/``OPlusRep``/``WithInner``) mirror and recurse; every other
@@ -129,7 +129,7 @@ def map_space(space: S.Space, choice, *, map_choice=None) -> S.Space:
     there); un-overridden structural wrappers (``Dual``/``OPlus``/``OProd``/``OPlusRep``/
     ``WithInner``) mirror and recurse; every other un-overridden node is returned unchanged.
     Consumers supply ONLY their leaf policy instead of hand-rolling the tower walk — the same
-    argument that produced ``map_basis`` (fem audit #18).
+    argument that produced ``map_basis``.
 
     ``map_choice(f) -> Term | None`` (optional) is applied to an FFS node's DEFINING MAP, so a consumer
     can rewrite ``Img(f)`` by rewriting ``f`` itself — without matching over ``Space`` in its own code
@@ -228,7 +228,7 @@ def candidate_bases(space: S.Space) -> tuple[B.Basis, ...]:
         case S.CoKer(f, src, tgt):
             if tgt is not None:
                 _add(out, default_basis(tgt))
-        case _:  # audit: ok EX-WILDCARD — bail-default (§0): out[0]=default_basis; extras are optimization [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — bail-default (§0): out[0]=default_basis; extras are optimization [approved 2026-07-03]
             pass
     return tuple(out)
 
@@ -290,9 +290,9 @@ class FfsRealization:
     # coordinates — the ambient change of basis is applied consistently to frame and operand — but
     # ONLY when the projection is EXACT: with a residual, ``pinv`` projects along the ambient
     # orthogonal complement, which differs between the two ambient bases.  Consumers must therefore
-    # guard on exactness (measured: for the FEEC Λᵏ trace the residual is identically zero because a
+    # guard on exactness (measured: for the Λᵏ trace the residual is identically zero because a
     # diagonal pullback of an antisymmetric tensor stays antisymmetric for ANY ι; for a general
-    # operand it is 100%).  See `≪ .claude/NOTE-intermediate-basis-choices.md ≫`.
+    # operand it is 100%). See
     endpoint_cols: pa.SymArray | None = None
     endpoint_basis: object | None = None      # the `B.Basis` `endpoint_cols` is expressed in
 
@@ -357,7 +357,7 @@ def realize_ffs_basis(
     :attr:`FfsRealization.rank_dim` (and, for ker/coker, the complement atom is the subspace
     axis of ``cols``) so the caller can record it and pass it back next time.
 
-    ``literal_frame`` (Teo 2026-07-31, "two realizations of the same ffs basis is fine") — on
+    ``literal_frame`` ("two realizations of the same ffs basis is fine") — on
     the injective-image route ONLY, realize the LITERAL columns (:func:`_realize_via_gram`)
     instead of the orthonormal ``Q``.  Same subspace, a different frame; see that function for
     the precondition and the conditioning price.  Default ``False`` = the orthonormal frame
@@ -384,7 +384,7 @@ def realize_ffs_basis(
     # cone is a closed constant subprogram (no live input ref, only `stmt_out` generators — see
     # `_cone_is_structurally_constant`), its plain-SVD frame is a PROVABLE build-time constant.
     # Fold it once here — emitting the constant `cols` directly — instead of deferring an SvdOp
-    # whose downstream `fold_numeric` chokes on the dynamic rank-δ axis (the Argyris `∫u·v`
+    # whose downstream `fold_numeric` chokes on the dynamic rank-δ axis (the high-degree `∫u·v`
     # blow-up: ~480 realizations of 2 structurally-constant operators, the 2×2 reference
     # tangent-frame identity and the 4×4 Λ² `alt` antisymmetrizer, OOM-ing codegen).  Only the
     # PLAIN-SVD path is folded (the metric GSVD and the sign-fixed injective QR produce a
@@ -450,7 +450,7 @@ def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
     """A CANONICAL orthonormal basis of ``span(q)`` — a function of the SUBSPACE (and the ambient
     index order) alone, not of the factorization that produced ``q``.
 
-    Why this exists (`73 Topic 2`; measured 2026-07-28).  ``U[:, :r]`` is only determined up to a
+    Why this exists (`73 Topic 2`). ``U[:,:r]`` is only determined up to a
     rotation *inside* each degenerate singular subspace, so it is a **discontinuous** function of
     the operator: the Λᵏ antisymmetrizer's nonzero singular values are degenerate (measured
     ``σ = 1, 1, 1, 0…`` for the 3-dim ``Λ²`` case) and the operator we factor is invariant only
@@ -636,7 +636,7 @@ def _realize_via_gram(
 ) -> FfsRealization:
     """The LITERAL-COLUMN (Gram) realization of an injective map's image (`41 §1`).
 
-    The SECOND realization of the SAME FFS basis (Teo 2026-07-31, "two realizations of the
+    The SECOND realization of the SAME FFS basis ("two realizations of the
     same ffs basis is fine"): ``cols = J`` itself — the map's own columns — with ``r = None``
     (``J = cols·I``).  Same subspace ``Img(f)``, same ``FfsRealization`` contract, a
     DIFFERENT (non-orthonormal) frame, tagged ``op="Gram"`` so

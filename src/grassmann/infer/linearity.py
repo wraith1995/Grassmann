@@ -130,7 +130,7 @@ def _usage(node: object, tracked: set[int], names: dict[int, str]) -> Usage:
 
     # A nested LLam binds its OWN (fresh-uid) vars; the outer linear vars it mentions are
     # captured once by the value it denotes. Recurse into the body multiplicatively.
-    if isinstance(node, LLam):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): binder cases else generic multiplicative recursion [approved Teo 2026-07-03]
+    if isinstance(node, LLam):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): binder cases else generic multiplicative recursion [approved 2026-07-03]
         return _usage(node.body, tracked, names)
 
     # Everything else is MULTIPLICATIVE: every child Term contributes to the same path,

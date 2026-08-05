@@ -1,4 +1,4 @@
-"""Task-5 acceptance (plan 45): substitute the tangent placeholder ``SVar("T") → Img(J)`` through a
+"""Task-5 acceptance: substitute the tangent placeholder ``SVar("T") → Img(J)`` through a
 representative pointwise value space.
 
 pointwise builds value spaces abstractly with a tangent placeholder ``SVar("T")`` and substitutes the

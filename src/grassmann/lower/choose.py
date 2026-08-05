@@ -106,7 +106,7 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
             return f is op or f == op
         case B.ProjectedBasis(f, _, _, _):
             return f is op or f == op
-        case _:  # audit: ok EX-WILDCARD — safe direction: False only skips a scoring bonus [approved Teo 2026-07-03]
+        case _:  # audit: ok EX-WILDCARD — safe direction: False only skips a scoring bonus [approved 2026-07-03]
             return False
 
 

@@ -1,7 +1,7 @@
-"""Cob audit (round 4) — regression tests for the correctness fixes 1/2/3 and the
-sub-optimal fixes 4/5/6.
+"""Change-of-basis regressions: three correctness fixes (1/2/3) and three sub-optimality
+fixes (4/5/6).
 
-These paths were UNTESTED before the round-4 fixes:
+These paths were previously untested:
 
 * **1** — the abstract-basis reject was TOP-node-only, so a structured/wrapped basis with a
   NESTED ``BVar`` leaf that is ``_basis_eq``-equal slipped to the identity short-circuit and

@@ -5,7 +5,7 @@ runtime ``DimAtom`` dimension) WITH an explicit backup used to crash: ``_Complet
 target column count as a static ``int`` field, so a ``DimAtom`` ambient made the
 ``kept.shape[1] != self.n`` check (int vs symbolic) never match → ``ValueError``.  The op now reads
 the target (= the ambient dimension) from the inputs' row count at run time, so it completes
-correctly.  Found by the round-6 cob re-audit (a pre-existing latent bug, not a regression).
+correctly.  This was a pre-existing latent bug, not a regression.
 """
 
 import importlib

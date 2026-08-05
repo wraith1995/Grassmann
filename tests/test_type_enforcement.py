@@ -223,8 +223,8 @@ class TestTermEnforcement:
 
 
 class TestKindEnforcement:
-    """``core/kinds.py`` — found by RE-AUDITING (SpaceSort carries a Space but is typed object,
-    so a non-Space binder domain slipped into Lam/BLam ⇒ unhashable IR)."""
+    """``core/kinds.py`` — SpaceSort carries a Space but is typed ``object``, so a non-Space
+    binder domain could slip into Lam/BLam and yield unhashable IR."""
 
     def test_spacesort_space_must_be_a_space(self):
         from grassmann.core.kinds import KindError, SpaceSort
