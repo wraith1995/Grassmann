@@ -59,12 +59,16 @@ def _setup():
 
 
 def _tower(k: int, leaf: S.Space) -> S.Space:
-    """``Dual(leaf) ⊗ (Dual(leaf) ⊗ (… ⊗ ℝ))`` — the space a ``k``-th derivative of a scalar
-    field lands in (right-nested, exactly as ``G.diff`` builds it)."""
-    sp = G.R.node
-    for _ in range(k):
-        sp = S.oprod(S.dual(leaf), sp)
-    return sp
+    """``Dual(leaf) ⊗ … ⊗ Dual(leaf) ⊗ ℝ`` — the space a ``k``-th derivative of a scalar field
+    lands in: FLAT, one axis per differentiation, exactly as ``transform.diff._tower_space`` builds
+    it (`§flat-tower`).  ``test_tower_matches_what_diff_builds`` pins the two together.
+
+    It used to be spelled right-nested (``Dual ⊗ (Dual ⊗ (… ⊗ ℝ))``), i.e. as
+    ``linear_map_space`` curries, which realizes as the ``(d, dᵏ⁻¹)`` MATRIX rather than the ``k+1``
+    separate axes.  From ``k = 3`` up that layout could not meet the flat ``tensor_power`` product
+    it is contracted against and ``unify`` raised ``AssociationMismatch``, so only ``k ≤ 2`` was
+    representable at all."""
+    return S.oprod(*[S.dual(leaf)] * k, G.R.node)
 
 
 def _realized_matrix(k: int, *, pinned: bool) -> np.ndarray:
@@ -105,11 +109,47 @@ def _kirby_theta(kmat: np.ndarray) -> np.ndarray:
     ])
 
 
-@pytest.mark.parametrize("k", [1, 2])
+@pytest.mark.parametrize("k", [1, 2, 3, 4])
 def test_rank_k_covariant_pullback_is_the_kth_tensor_power(k: int) -> None:
-    """``(A⁻¹)^{⊗k}`` — one rule, no per-order case."""
+    """``(A⁻¹)^{⊗k}`` — one rule, no per-order case.
+
+    ``k = 3`` is the first degree at which the tower's SPELLING is observable (at ``k = 2`` the
+    ⊗-unit rewrite bridges the one nesting level, ``(d,d)`` vs ``(d,d,1)``), so it is the case that
+    was unrepresentable before the tower went flat.  ``k = 4`` is cheap and pins that nothing about
+    the rule is degree-2-or-3 special."""
     np.testing.assert_allclose(_realized_matrix(k, pinned=True), _kron_power(AINV, k),
                                atol=1e-12)
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_tower_matches_what_diff_builds(k: int) -> None:
+    """ASSERT ON THE ARTIFACT: this file's ``_tower`` is the spelling ``diff`` actually allocates.
+
+    The pullback above is only evidence about derivative jets if the space it pulls back is the one
+    ``transform.diff`` mints for an order-``k`` derivative input.  Compare the two directly —
+    ``_tower(k, ℝᵉ)`` against the space of the order-``k`` ``DerivInput`` a ``k``-fold ``diff`` of a
+    scalar tracer allocates — so a producer-side respelling cannot leave this test passing against a
+    layout nothing builds."""
+    from grassmann.core import term as T
+    # `grassmann.transform.diff` the ATTRIBUTE is the re-exported function, so name the module's
+    # members directly rather than reaching through the package.
+    from grassmann.transform.diff import clear_deriv_inputs, diff, enumerate_derivative_inputs
+
+    amb = G.osum(*[G.R] * EDIM).node
+    clear_deriv_inputs()
+    try:
+        u, x = T.Var("u", S.Scalar()), T.Var("x", amb)
+        deps: dict[int, object] = {u.uid: None, x.uid: None}
+        e: object = u
+        for _ in range(k):
+            e = G.beta(diff(e, x, deps))
+            e = e.node if hasattr(e, "node") else e
+            for rec in enumerate_derivative_inputs(e):
+                deps.setdefault(rec.var.uid, None)
+        (top,) = [r for r in enumerate_derivative_inputs(e) if r.order == k]
+        assert top.var.space == _tower(k, amb)
+    finally:
+        clear_deriv_inputs()
 
 
 def test_rank_2_block_is_kirby_theta() -> None:

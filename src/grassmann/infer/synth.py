@@ -29,6 +29,7 @@ from grassmann.core.space import (
     linear_map_space,
     oplus,
     oprod,
+    spliced_oprod,
 )
 from grassmann.core.term import (
     Assert,
@@ -708,34 +709,20 @@ def _synth_remetric(e: Remetric, ctx: Ctx) -> Space:
 
 
 def _spliced_oprod(*parts: Space) -> Space:
-    """⊗ of ``parts`` with any PRODUCT operand spliced in — ``X ⊗ (Y ⊗ Z) ↦ X ⊗ Y ⊗ Z``.
-
-    ⊗ is associative, so a nested and a flat product denote one space; but they are different
-    NODES, and `unify`'s ``(OProd, OProd)`` arm compares arities, so the two spellings of ``V⊗³``
-    could not be unified at all (there is no rewrite between them that makes progress — it recursed
-    until the stack blew before that arm was guarded).
+    """``Kron``'s endpoint spelling: :func:`grassmann.core.space.spliced_oprod`.
 
     ``Kron`` is where the nested spelling was minted: ``kron(f, kron(g, h))`` built its domain as
-    ``oprod(a0, oprod(a1, a2))``, so a ``kron`` CHAIN right-nests while ``tensor_power(V, k)`` builds
-    the same space FLAT. They then met — the Λᵏ ambient against the antisymmetrizer's domain — and
-    a degree-3 exterior power could not be assembled. ``k = 2`` escaped only because a two-factor
-    chain has no
-    nesting to disagree about.
+    ``oprod(a0, oprod(a1, a2))``, so a ``kron`` CHAIN right-nested while ``tensor_power(V, k)``
+    builds the same space FLAT. They then met — the Λᵏ ambient against the antisymmetrizer's domain
+    — and a degree-3 exterior power could not be assembled. ``k = 2`` escaped only because a
+    two-factor chain has no nesting to disagree about.
 
-    Splicing HERE is layout-neutral, which is why it is done here rather than in ``oprod`` itself:
-    the nesting sits INSIDE the ``Dual(dom)`` / ``cod`` factor of a map space, and ``shape_of_space``
-    counts that factor as ONE axis whatever its interior, so the map keeps its ``(dom, cod)`` matrix
-    shape either way. Splicing inside ``oprod`` globally does NOT have that property — it flattens a
-    map space's ``Dual(dom) ⊗ cod`` into its component axes, and the FFS/SVD seam then receives a
-    rank-6 array where it expects an ``(n^k, n^k)`` matrix (measured).
+    Splicing the ENDPOINTS is layout-neutral, which is why it is done here rather than in ``oprod``
+    itself: the nesting sits INSIDE the ``Dual(dom)`` / ``cod`` factor of the map space
+    ``_synth_kron`` returns, and ``_shape_of_space`` counts that factor as ONE axis whatever its
+    interior, so the map keeps its ``(dom, cod)`` matrix shape either way.
     """
-    flat: list[Space] = []
-    for p in parts:
-        if isinstance(p, OProd) and len(p.spaces) > 1:
-            flat.extend(p.spaces)
-        else:
-            flat.append(p)
-    return oprod(*flat)
+    return spliced_oprod(*parts)
 
 
 def _synth_kron(e: Kron, ctx: Ctx) -> Space:

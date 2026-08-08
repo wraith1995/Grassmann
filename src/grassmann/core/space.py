@@ -555,6 +555,37 @@ def oprod(*spaces: Space) -> OProd:
     return OProd(tuple(spaces))
 
 
+def spliced_oprod(*parts: Space) -> OProd:
+    """⊗ of ``parts`` with any PRODUCT operand SPLICED IN — ``X ⊗ (Y ⊗ Z) ↦ X ⊗ Y ⊗ Z``.
+
+    ⊗ is associative, so a nested and a flat product denote ONE space; but they are different
+    NODES, each top-level factor is a separate ARRAY AXIS (``lower.represent._shape_of_space``),
+    and :func:`grassmann.infer.unify.unify` compares ``OProd`` arities.  So the two spellings are
+    two LAYOUTS that do not meet: from three leaves up they raise ``AssociationMismatch``.  This
+    builder is the FLAT spelling, and the ⊗-towers that want one flat axis per leaf are built with
+    it (``stdlib.exterior.tensor_power``, ``infer.synth._spliced_oprod`` for ``Kron``'s endpoints,
+    ``transform.diff``'s derivative tower).
+
+    ⚠ **Not a canonicalizer, and NOT what ``oprod`` should do.** A map space
+    ``linear_map_space(dom, cod) = Dual(dom) ⊗ cod`` is deliberately TWO factors — an
+    ``(|dom|, |cod|)`` MATRIX — however compound ``cod`` is; splicing it would hand the FFS/SVD
+    seam a rank-``2k`` array where it expects the ``(nᵏ, nᵏ)`` matrix (measured: ``Alt₃ : V⊗³ ⊸ V⊗³``
+    stops being ``(27, 27)``).  Use this ONLY where the flat, one-axis-per-leaf layout is the
+    intended one; use :func:`linear_map_space` where a matrix is.
+
+    The leaf ORDER is preserved exactly (``tensor_leaves(spliced_oprod(*p))`` equals the
+    concatenation of the parts' leaves), and only one nesting level is removed per operand —
+    which is all any producer here builds.
+    """
+    flat: list[Space] = []
+    for p in parts:
+        if isinstance(p, OProd) and len(p.spaces) > 1:
+            flat.extend(p.spaces)
+        else:
+            flat.append(p)
+    return oprod(*flat)
+
+
 def drop_unit_factors(s: Space) -> Space:
     """The tensor-unit law ``𝟙 ⊗ λ ≅ λ`` as an explicit, opt-in canonicalizer (`25 §1`).
 
@@ -705,6 +736,7 @@ __all__ = [
     "dual",
     "oplus",
     "oprod",
+    "spliced_oprod",
     "drop_unit_factors",
     "tensor_leaves",
     "oplus_rep",
