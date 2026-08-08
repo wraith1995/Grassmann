@@ -3,14 +3,18 @@
 
 Background.  ``OProd`` is a flat tuple of factors, so the NESTING of a ⊗-tower is significant:
 ``lower.represent._shape_of_space`` makes each top-level factor its own array axis, so
-``V*⊗V*⊗V*`` is ``(3,3,3)`` while ``V*⊗(V*⊗V*)`` is ``(3,9)``.  Two producers legitimately
-disagree about which they build — ``tensor_power(V, k)`` is FLAT, ``linear_map_space(dom, cod) =
-oprod(dual(dom), cod)`` RIGHT-NESTS as soon as ``cod`` is compound — and at k = 3 the two meet and
-``unify`` refuses.
+``V*⊗V*⊗V*`` is ``(3,3,3)`` while ``V*⊗(V*⊗V*)`` is ``(3,9)``.  Two producers disagreed about which
+they build — ``tensor_power(V, k)`` is FLAT, ``linear_map_space(dom, cod) = oprod(dual(dom), cod)``
+RIGHT-NESTS as soon as ``cod`` is compound — and at k = 3 the two met and ``unify`` refused.
 
 The refusal is CORRECT and stays: ⊗ associativity makes the two one *space* but not one *layout*,
-and unifying them would let mismatched layouts meet silently.  What changes here is only the
-diagnosis.  Both rows below still raise; the success set of ``unify`` is untouched.
+and unifying them would let mismatched layouts meet silently.  What this file pinned first was the
+diagnosis — both rows raise; the success set of ``unify`` is untouched.  What then changed is the
+PRODUCER: ``transform.diff``'s derivative tower, the only nested ⊗-tower anything built, is now
+flat (``_tower_space``, `§flat-tower`), so the association row is unreachable from it —
+``test_the_derivative_tower_is_flat_and_never_reaches_the_association_row``.  A genuine map space
+(``Alt₃``, an opaque Jacobian) is still a two-factor ``linear_map_space`` MATRIX, so the row itself
+stays live and stays the right answer for anyone who respells one by hand.
 
 ⚠ **k = 2 is invisible** — both spellings are arity 2 there — which is exactly why the space level
 looked healthy while the BASIS level was silently wrong (the rank-2 defect fixed in ``b7af6db``:
@@ -27,7 +31,7 @@ import pytest
 import grassmann as G
 from grassmann.core import space as S
 from grassmann.infer.unify import AssociationMismatch, MetaStore, UnifyError, unify
-from grassmann.lower.represent import _basis_prod_leaves
+from grassmann.lower.represent import _basis_prod_leaves, _shape_of_space
 from grassmann.lower.space_basis import default_basis, map_basis
 from grassmann.stdlib.exterior import alt
 
@@ -211,3 +215,45 @@ def test_alt3_still_realizes_as_a_27_by_27_matrix():
     V = G.osum(*[G.R] * 3)
     out = G.compile(alt(V, 3)).run({})["result"]
     assert np.asarray(out).shape == (27, 27)
+
+
+# ===========================================================================
+# The producer that used to reach the association row.
+# ===========================================================================
+
+
+def test_the_derivative_tower_is_flat_and_never_reaches_the_association_row():
+    """``diff``'s derivative tower was the ONE nested ⊗-tower producer, and this row is the reason
+    it had to stop being one.
+
+    An order-``n`` derivative input is ``X ⊸ (X ⊸ (… ⊸ V))``.  Spelled with ``linear_map_space``
+    that right-nests, so from order 3 up it met the FLAT products it is contracted against
+    (``tensor_power``, ``Kron``'s spliced endpoints) and landed exactly on the
+    ``AssociationMismatch`` row above — an error with no repair, because ⊗ associativity makes the
+    two one space but ``_shape_of_space`` makes them two LAYOUTS.  ``transform.diff._tower_space``
+    now builds the tower FLAT, so both sides agree by construction (`§flat-tower`).
+
+    Assert it on the ARTIFACT the producer mints, not on a hand-written space: what matters is that
+    nothing in the stack still spells a tower nested."""
+    from grassmann.core import term as T
+    from grassmann.transform.diff import clear_deriv_inputs, diff, enumerate_derivative_inputs
+
+    clear_deriv_inputs()
+    try:
+        u, x = T.Var("u", S.Scalar()), T.Var("x", V3)
+        deps: dict[int, object] = {u.uid: None, x.uid: None}
+        e: object = u
+        for _ in range(3):
+            e = G.beta(diff(e, x, deps))
+            e = e.node if hasattr(e, "node") else e
+            for rec in enumerate_derivative_inputs(e):
+                deps.setdefault(rec.var.uid, None)
+        (d3,) = [r for r in enumerate_derivative_inputs(e) if r.order == 3]
+    finally:
+        clear_deriv_inputs()
+
+    # FLAT: three seed factors then the value's ⊗-unit — four factors, four axes, not two.
+    assert d3.var.space == S.oprod(S.dual(V3), S.dual(V3), S.dual(V3), S.Scalar())
+    assert _shape_of_space(d3.var.space) == (3, 3, 3, 1)
+    # and it unifies with the flat spelling the contraction partners build (the ⊗-unit drops).
+    unify(d3.var.space, _flat(3, V3), MetaStore())

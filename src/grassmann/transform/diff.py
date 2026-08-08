@@ -43,8 +43,10 @@ from grassmann.core.space import (
     Scalar,
     Space,
     WithInner,
+    dual,
     is_space,
     linear_map_space,
+    spliced_oprod,
 )
 from grassmann.core.term import (
     Assert,
@@ -141,19 +143,55 @@ class DerivInput:
     order: int
 
 
+def _tower_space(ctx: _DCtx, cod: Space) -> Space:
+    """THE spelling of a derivative-tower var's space: ``X ⊸ cod`` built **FLAT** (`§flat-tower`).
+
+    An order-``n`` derivative input is the order-``(n−1)`` one differentiated once more, so its
+    space is ``X ⊸ (X ⊸ (… ⊸ V))``.  Spelled with :func:`linear_map_space` that RIGHT-NESTS, and
+    each nesting level is one array axis, so an order-``n`` jet realized as ``(|X|, |X|ⁿ⁻¹·|V|)`` —
+    a matrix whose second axis silently fuses ``n−1`` seed slots with the value.  This builder
+    SPLICES instead, so the tower is one axis per differentiation plus the value's own axes:
+
+    ==========  ==============================  ==========================
+    order       nested (former)                 flat (this)
+    ==========  ==============================  ==========================
+    1           ``(d, 1)``                      ``(d, 1)``      — identical
+    2           ``(d, d)``                      ``(d, d, 1)``
+    3           ``(d, d²)``                     ``(d, d, d, 1)``
+    ==========  ==============================  ==========================
+
+    That is what makes the ``(|X|,…,|X|,k,n)`` layout this module documents actually TRUE, and it
+    is the whole of what unblocks rank ≥ 3.  ⊗ is associative but the two spellings are two
+    LAYOUTS, and :func:`grassmann.infer.unify.unify` refuses to identify them
+    (``AssociationMismatch``): from three leaves up, a nested tower could not meet the flat
+    ``tensor_power``/``Kron`` products it is contracted against, so a rank-3 covariant pullback of
+    a jet was unrepresentable.  Flat, it realizes exactly ``(A⁻¹)^{⊗k}``
+    (``tests/test_rank_k_covariant_pullback.py``).  ``k = 2`` escaped only because the ⊗-unit
+    rewrite bridges exactly one level (``(d, d)`` vs ``(d, d, 1)``).
+
+    ⚠ The tower is the ONLY thing spelled this way.  A genuine operator — an opaque op's Jacobian
+    ``op.dom ⊸ op.cod``, ``Alt₃ : V⊗³ ⊸ V⊗³`` — stays a two-factor :func:`linear_map_space`
+    MATRIX; splicing those hands the FFS/SVD seam a rank-``2k`` array (measured).
+    """
+    return spliced_oprod(dual(ctx.X), cod)
+
+
 def _alloc_deriv_input(source: Var, ctx: _DCtx, space: Space | None = None) -> Var:
     """Get-or-create the symbolic derivative-map input ``∂source/∂x`` (codomain space
     ``source.space`` by default, or ``space`` when the derivative lands elsewhere — e.g. a metric
     gradient ``M ⊸ M*⊗M*``), recording its provenance.  Deduped by ``(source.uid, x.uid)`` so
     repeated/nested ``diff`` of the same source reuses one input.  When ``source`` is itself a
     derivative input, the new var inherits the base tracer and bumps the order (so an order-``n``
-    chain reports ``(base, n)``)."""
+    chain reports ``(base, n)``).
+
+    The space is the FLAT tower spelling (:func:`_tower_space`), so an order-``n`` input has ``n``
+    seed axes followed by the value's own — ``(d, d, 1)`` at order 2, not ``(d, d)``."""
     key = (source.uid, ctx.x.uid)
     existing = _DERIV_INPUT_BY_KEY.get(key)
     if existing is not None:
         return existing
     cod = space if space is not None else source.space
-    var = Var(f"d_{source.name}_{next(_counter)}", linear_map_space(ctx.X, cod))
+    var = Var(f"d_{source.name}_{next(_counter)}", _tower_space(ctx, cod))
     parent = _DERIV_INPUTS.get(source.uid)
     base, order = (parent.source, parent.order + 1) if parent is not None else (source, 1)
     _DERIV_INPUTS[var.uid] = DerivInput(var=var, source=base, order=order)
@@ -609,9 +647,11 @@ def clear_subspace_gauges() -> None:
 # numerically by :func:`qr_gauge_feed`.  The frame is a SELF-DIFFERENTIATING TOWER
 # ``Q₀ = Q, Q₁ = ∂Q/∂x, Q₂ = ∂²Q/∂x², …``: ``diff`` of any tower element yields the next one
 # (`§qr-tower`), so the opaque QR gauge supports ARBITRARY differentiation order.  Each ``Qₙ`` lives
-# in ``linear_map_space(X, Qₙ₋₁.space)`` (the flat ``(|X|,…,|X|,k,n)`` layout of the n-th derivative
-# tensor); ``diff`` treats ``Qₙ`` like a marked-variable derivative:
-# ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.
+# in ``_tower_space(X, Qₙ₋₁.space)`` — the flat ``(|X|,…,|X|,k,n)`` layout of the n-th derivative
+# tensor, one axis per differentiation (see `§flat-tower`; it used to be spelled with
+# ``linear_map_space``, which right-nests, so the layout was ``(|X|, |X|ⁿ⁻¹·k·n)`` and the sentence
+# you are reading was aspirational rather than true).  ``diff`` treats ``Qₙ`` like a marked-variable
+# derivative: ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.
 #
 # ``_QR_AUTO_VARS``: ``(J.uid, kind) -> Q₀`` (the realization frame; one per (defining map, FFS kind)
 #   — ``Img(J)`` and ``Ker(J)`` of the SAME ``J`` need DIFFERENT frames, so the kind is part of the
@@ -625,11 +665,12 @@ _QR_NEXT: dict[int, Var] = {}
 
 
 def _qr_next(e: Var, ctx: _DCtx) -> Var:
-    """Get-or-create ``e``'s derivative tower var ``∂e/∂x`` of space ``linear_map_space(X, e.space)``,
-    register it in ``_QR_FRAME_VARS`` (so it too is self-differentiating) and ``_QR_NEXT``, and return
-    it.  Drives the arbitrary-order QR frame tower (`§qr-tower`)."""
+    """Get-or-create ``e``'s derivative tower var ``∂e/∂x`` of space ``_tower_space(X, e.space)`` —
+    the FLAT ``(|X|, …, |X|, k, n)`` spelling this section documents (`§flat-tower`) — register it in
+    ``_QR_FRAME_VARS`` (so it too is self-differentiating) and ``_QR_NEXT``, and return it.  Drives
+    the arbitrary-order QR frame tower (`§qr-tower`)."""
     if e.uid not in _QR_NEXT:
-        nxt = Var(f"_dQqr_{e.name}_{next(_counter)}", linear_map_space(ctx.X, e.space))
+        nxt = Var(f"_dQqr_{e.name}_{next(_counter)}", _tower_space(ctx, e.space))
         _QR_NEXT[e.uid] = nxt
         _QR_FRAME_VARS.add(nxt.uid)
     return _QR_NEXT[e.uid]
@@ -739,8 +780,10 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
     (``feed[DⁿJ]``, ``(|X|,…,|X|,k,n)``), reconstructs ``J(x₀+δ) = Σ_m (1/m!) ∂ᵐJ · δ^⊗m``, sets
     ``Q(x₀+δ) = _ffs_frame_value(kind, J(x₀+δ))ᵀ`` (QR for ``img``, the SVD U/V slice for the others),
     and takes each ``∂ⁿQ/∂xⁿ`` tensor at ``δ=0`` by NESTED Richardson central differences.  Returns
-    ``{Qₙ: value}`` for every realized tower var, grassmann ``(δ, ambient)`` codomain layout (``Qₙ``
-    flattened to ``(|X|, |X|^(n-1)·δ·ambient)`` to match the nested map-space lowering).
+    ``{Qₙ: value}`` for every realized tower var, shaped ``(|X|,)*n + (δ, ambient)`` — the derivative
+    tensor's own layout, fed through unreshaped, because the tower var's space is the FLAT
+    ``_tower_space`` spelling (`§flat-tower`).  (It used to be flattened to
+    ``(|X|, |X|ⁿ⁻¹·δ·ambient)`` to match the right-nested ``linear_map_space`` lowering.)
 
     SVD ordering must be consistent across the tiny FD steps — pick a generic ``J`` with well-separated
     singular values (degenerate spectra rotate the frame discontinuously).  Call after ``diff`` so the
@@ -791,10 +834,9 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
                 f"ffs_gauge_feed: tower needs ∂^{order}Q but only {depth} J-derivative(s) supplied; "
                 f"mark J→DJ→…→D^{order}J in the nested diffs and pass them all"
             )
-        Qn = _nth_deriv_tensor(Q_at, x0, order)  # shape (|X|,)*order + (δ, ambient)
-        # Lower layout: flatten all but the first |X| axis ⇒ (|X|, …); order 0 ⇒ (δ, ambient).
-        val = Qn if order == 0 else Qn.reshape(nX, -1)
-        out[f"{var.name}_{var.uid}"] = val
+        # shape (|X|,)*order + (δ, ambient) — already the FLAT tower layout (`§flat-tower`), so it
+        # goes in unreshaped; order 0 is the bare frame (δ, ambient).
+        out[f"{var.name}_{var.uid}"] = _nth_deriv_tensor(Q_at, x0, order)
         nxt = _QR_NEXT.get(var.uid)
         if nxt is None:
             break
