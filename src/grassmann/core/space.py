@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 if TYPE_CHECKING:
     # `term` imports `space` at runtime, so importing it here would be a true
@@ -591,6 +591,45 @@ def drop_unit_factors(s: Space) -> Space:
             return s
 
 
+def tensor_leaves(s: Space) -> list[Space]:
+    """The ordered ⊗-leaves of a (possibly nested) ``OProd`` — the SPACE-level twin of
+    ``lower.represent._basis_prod_leaves``.
+
+    ⊗ is associative on the underlying space, so ``a⊗(b⊗c)``, ``(a⊗b)⊗c`` and ``a⊗b⊗c`` all have
+    THIS leaf sequence.  What differs between them is only the NESTING — i.e. how the leaves are
+    grouped into array axes, which is what ``lower.represent._shape_of_space`` reads.  So this is
+    the reader that says "same leaves?" while leaving "same layout?" to the caller; the two
+    questions are genuinely different and a caller that conflates them lets mismatched layouts
+    meet silently.
+
+    ⚠ **``Dual`` is a LEAF, not a distribution point.**  ``Dual(A⊗B)`` is one axis of size
+    ``|A|·|B|`` (``_shape_of_space``'s single-axis default) while ``Dual(A)⊗Dual(B)`` is two axes;
+    they are different layouts and this reader must not identify them.  ``_basis_prod_leaves``
+    makes the same call — ``default_basis(Dual(A⊗B))`` is a ``DualBasis``, not a ``BasisProd``, so
+    it stops there too.  Only ``OProd`` is descended through, by both.
+
+    ⚠ The ⊗-unit ``Scalar()`` is KEPT as a leaf: it occupies no array axis but it does occupy a
+    factor position, and dropping it here would put this reader out of step with
+    ``_basis_prod_leaves`` (whose ``BasisProd((…, ScalarBasis()))`` tails are leaves).  A caller
+    that wants the unit-free sequence filters it itself — ``drop_unit_factors`` is the canonicalizer
+    and it, too, is opt-in.
+
+    Pure and total: no error paths, no normalization, no interning.  A non-product space is its own
+    single leaf, so ``tensor_leaves(V) == [V]``.
+    """
+    match s:
+        case OProd(spaces=spaces):
+            out: list[Space] = []
+            for f in spaces:
+                out.extend(tensor_leaves(f))
+            return out
+        case (Scalar() | SVar() | Dual() | OPlus() | OPlusRep()
+              | Ker() | Img() | CoKer() | CoImg() | WithInner() | App() | SpaceMeta()):
+            return [s]
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def oplus_rep(count: object, space: Space) -> OPlusRep:
     return OPlusRep(as_dim(count), space)
 
@@ -667,6 +706,7 @@ __all__ = [
     "oplus",
     "oprod",
     "drop_unit_factors",
+    "tensor_leaves",
     "oplus_rep",
     "ker",
     "img",
