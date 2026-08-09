@@ -7889,34 +7889,28 @@ def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
 
 
 def numpy_op_renderers() -> dict:
-    """``to_numpy_source`` ``op_renderers`` for grassmann's front-end data/shape ops.
+    """``to_numpy_source`` ``op_renderers`` for grassmann's front-end data/shape ops — now EMPTY.
 
-    A grassmann body lowered into a folded pointwise assembly ``Program`` (plan ``46`` — e.g. a
-    stiffness form's metric core) can carry ops that :mod:`polyarray` does not know how to render
-    itself (its builtin table is keyed by type and is deliberately front-end-agnostic).  This maps
-    each such op *class name* to a renderer ``(op, arg_exprs) -> python_expression_str`` that
-    reproduces the op's ``__call__`` value, so ``polyarray.to_numpy_source`` can emit standalone
-    numpy for the fold.  Pass via ``op_renderers=grassmann.lower.numpy_op_renderers()`` — pointwise
-    merges it in ``fold_op_renderers``.  Mirrors :func:`chartlib.covariant.numpy_op_renderers`.
+    A grassmann body lowered into a folded pointwise assembly ``Program`` can carry ops that
+    :mod:`polyarray` does not know how to render itself, and this is where grassmann would
+    supply their renderers, keyed by op *class name*.  Pass via
+    ``op_renderers=grassmann.lower.numpy_op_renderers()`` — pointwise merges it in
+    ``fold_op_renderers``.  Mirrors :func:`chartlib.covariant.numpy_op_renderers`.
 
-    Covers the three shape/const ops emitted by :func:`_const` and the reduction lowering:
+    It used to carry three: ``_ConstOp``, ``_AxisLenOp`` and ``_ReshapeOp``.  Those ops were
+    RELOCATED into polyarray (as ``ConstOp`` / ``AxisLenOp`` / ``ReshapeOp``) and given built-in
+    renderers there, which made these entries unreachable **twice over**: the keys named classes
+    that no longer exist under those names, and ``_render_op`` consults its type-keyed built-in
+    table BEFORE the caller-supplied name table, so even the corrected spelling could not fire.
+    Deleting them is therefore behaviour-preserving by construction — the built-ins were already
+    doing the work, which is exactly why nothing ever looked wrong.
 
-    * :class:`_ConstOp` (no args) — a frozen numeric constant, re-materialised from its raw bytes;
-    * :class:`_AxisLenOp` — the 0-d int length of an input's axis (the FFS rank ``δ_f``);
-    * :class:`_ReshapeOp` — reshape an input.
+    This is the ``batch.py`` dead-dispatch-key shape again (seven rules keyed on names that were
+    not classes, silently falling back for a year), and it was found by the detector written for
+    that: ``polyarray.numpy_source._warn_dead_op_keys``, which now flags a private ``_Name``
+    spelling of a polyarray op at both string-keyed entry points.
+
+    Keep the function: it is grassmann's half of a public seam, and a real front-end op will want
+    it again.  An empty mapping is the honest answer today.
     """
-
-    def _const(op: _ConstOp, args: list[str]) -> str:
-        # Reproduce __call__: np.frombuffer(data_bytes, dtype).reshape(shape).copy().
-        return (
-            f"np.frombuffer({op.data_bytes!r}, dtype={op.dtype!r})"
-            f".reshape({tuple(op.shape)!r}).copy()"
-        )
-
-    def _axis_len(op: _AxisLenOp, args: list[str]) -> str:
-        return f"np.asarray(int(np.asarray({args[0]}).shape[{op.axis}]))"
-
-    def _reshape(op: _ReshapeOp, args: list[str]) -> str:
-        return f"np.asarray({args[0]}, dtype=float).reshape({tuple(op.shape)!r})"
-
-    return {"_ConstOp": _const, "_AxisLenOp": _axis_len, "_ReshapeOp": _reshape}
+    return {}
