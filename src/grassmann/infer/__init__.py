@@ -54,7 +54,7 @@ from .properties import (
 from .subspace import (FfsKind, ffs_defining_map, ffs_kind, ffs_superspace, is_ffs,
                        is_subspace, split_map_space)
 from .synth import Ctx, InferError, SynthResult, map_domain_codomain, synth, synth_space
-from .unify import MetaStore, SpaceMeta, UnifyError, fresh_meta, unify
+from .unify import AssociationMismatch, MetaStore, SpaceMeta, UnifyError, fresh_meta, unify
 
 __all__ = [
     # synthesis / checking
@@ -76,6 +76,7 @@ __all__ = [
     # unification
     "unify",
     "UnifyError",
+    "AssociationMismatch",
     "MetaStore",
     "SpaceMeta",
     "fresh_meta",
