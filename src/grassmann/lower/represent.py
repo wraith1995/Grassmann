@@ -1461,6 +1461,69 @@ def _basis_pairing_consistent(slot_basis: B.Basis, op_basis: B.Basis) -> bool:
     )
 
 
+def _basis_prod_leaves(basis: B.Basis) -> list[B.Basis]:
+    """The ⊗-leaves of a (possibly nested) ``BasisProd``, in Kronecker column order.
+
+    The mirror of :func:`_spliced_basis_prod`'s flattening, read rather than built: ⊗ of frames
+    is the Kronecker product and its flattened column order is associative, so ``a⊗(b⊗c)`` and
+    ``(a⊗b)⊗c`` and ``a⊗b⊗c`` all have THIS leaf sequence and all enumerate the same frame.
+    Only the ⊗-nesting — i.e. how the leaves are grouped into ARRAY AXES — differs.
+
+    Parameters
+    ----------
+    basis
+        Any basis.  Only ``BasisProd`` is descended through.
+
+    Returns
+    -------
+    list[B.Basis]
+        The leaves in ⊗ order; a non-product basis is its own single leaf.
+    """
+    if isinstance(basis, B.BasisProd):
+        out: list[B.Basis] = []
+        for b in basis.bases:
+            out.extend(_basis_prod_leaves(b))
+        return out
+    return [basis]
+
+
+def _respell_basis_like(basis: B.Basis, like: B.Basis) -> B.Basis | None:
+    """``basis`` re-grouped with ``like``'s ⊗-nesting — a pure RE-SPELLING, not a cob.
+
+    Two ``BasisProd``s over the same ⊗-leaves may be spelled with different nesting, because the
+    two producers legitimately differ: a value's basis mirrors its space tower (``default_basis``
+    right-nests ``a ⊗ (b ⊗ ℝ)``), while a ``Kron`` map's FUSED slot is flat
+    (:func:`_spliced_basis_prod`, ``a ⊗ b ⊗ ℝ``, to keep the tag in step with ``_synth_kron``'s
+    spliced space).  The nesting is what says how many ARRAY AXES each factor covers, so a
+    per-axis operation must put the two in correspondence before it can run.
+
+    Parameters
+    ----------
+    basis
+        The basis whose leaves are kept, in order.
+    like
+        The basis whose ⊗-nesting is imposed.
+
+    Returns
+    -------
+    B.Basis or None
+        ``basis``'s leaves regrouped as ``like`` groups its own, or ``None`` when the two leaf
+        sequences differ in length — then the two really are bases of different shapes and there
+        is no re-spelling, only a genuine mismatch for the caller to bail on.
+    """
+    leaves = _basis_prod_leaves(basis)
+    if len(leaves) != len(_basis_prod_leaves(like)):
+        return None
+    it = iter(leaves)
+
+    def build(node: B.Basis) -> B.Basis:
+        if isinstance(node, B.BasisProd):
+            return B.basis_prod(*[build(b) for b in node.bases])
+        return next(it)
+
+    return build(like)
+
+
 def _pairing_partner(slot_basis: B.Basis) -> B.Basis:
     """The operand basis that a contraction ``slot_basis`` naturally pairs with.
 
@@ -1585,12 +1648,27 @@ def _reconcile_pairing(
     # has all its space axes fused into the one contracted slot, so every axis must be reconciled.
     # The fused slot's dual partner decomposes to a ``BasisProd`` matching the operand's axes — cob
     # per-axis (``_coerce_rep_to_target``; the axis-0 whole-basis ``_coerce_rep_to_basis`` below is
-    # invalid for a multi-axis operand — that mismatch is what the old rank-1 gate sidestepped).  If
-    # the partner doesn't axis-match, leave it (genuinely inconsistent; the contraction asserts dims).
+    # invalid for a multi-axis operand).
+    #
+    # ⚠ The correspondence is over the ⊗-LEAVES, not the top-level factor COUNT.  Testing the count
+    # tests the SPELLING: a ``Kron`` slot's partner is FLAT (``_spliced_basis_prod``) while a
+    # value's basis mirrors its space tower (``default_basis`` right-nests), so a rank-``k`` value
+    # for k ≥ 2 presents ``k`` leaves in 2 top-level factors against a partner with ``k+1`` in
+    # ``k+1``.  Refusing on that count leaves the operand contracted RAW — its components read in
+    # the basis it was pinned to while the slot expects another — and that is a silent WRONG VALUE,
+    # not a missed optimization: on a rank-2 covariant pullback ``Dual(Img J)⊗Dual(Img J) →
+    # Dual(ℝᵉ)⊗Dual(ℝᵉ)`` it makes the pinned (immersed ``ImageBasis``) and unpinned (orthonormal
+    # ``ProjectedBasis``) realizations identical — the pin has no effect at all — and realizes
+    # ``Q⊗Q`` where ``(J⁻¹)⊗(J⁻¹)`` is the answer (Kirby, SMAI-JCM 4 (2018) eq. 3.33).
+    # Re-spelling the partner to the operand's own nesting puts the axes in correspondence; where
+    # the leaves already agree every per-axis cob is the identity, so a consistent pair is
+    # unchanged.
     if isinstance(op_rep.basis, B.BasisProd):
-        if isinstance(partner, B.BasisProd) and len(partner.bases) == len(op_rep.basis.bases):
-            return _coerce_rep_to_target(ctx, op_rep, partner, note=note)
-        return op_rep
+        if isinstance(partner, B.BasisProd):
+            matched = _respell_basis_like(partner, op_rep.basis)
+            if matched is not None:
+                return _coerce_rep_to_target(ctx, op_rep, matched, note=note)
+        return op_rep      # leaf counts differ ⇒ genuinely inconsistent; the contraction asserts dims
     return _coerce_rep_to_basis(ctx, op_rep, partner, note=note)
 
 

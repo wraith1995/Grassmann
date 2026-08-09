@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 if TYPE_CHECKING:
     # `term` imports `space` at runtime, so importing it here would be a true
@@ -555,6 +555,49 @@ def oprod(*spaces: Space) -> OProd:
     return OProd(tuple(spaces))
 
 
+def spliced_oprod(*parts: Space) -> OProd:
+    """⊗ of ``parts`` with any PRODUCT operand SPLICED IN — ``X ⊗ (Y ⊗ Z) ↦ X ⊗ Y ⊗ Z``.
+
+    ⊗ is associative, so a nested and a flat product denote ONE space; but they are different
+    NODES, each top-level factor is a separate ARRAY AXIS (``lower.represent._shape_of_space``),
+    and :func:`grassmann.infer.unify.unify` compares ``OProd`` arities.  The two spellings are
+    therefore two LAYOUTS that do not meet: from three leaves up they raise
+    ``AssociationMismatch``.  This builder is the FLAT spelling, and the ⊗-towers that want one
+    axis per leaf are built with it (``stdlib.exterior.tensor_power``,
+    ``infer.synth._spliced_oprod`` for ``Kron``'s endpoints, ``transform.diff``'s derivative
+    tower).
+
+    Parameters
+    ----------
+    *parts
+        The factors.  A part that is itself a multi-factor ``OProd`` is spliced in; anything else
+        contributes one factor.
+
+    Returns
+    -------
+    OProd
+        The flat product.  Leaf ORDER is preserved exactly —
+        ``tensor_leaves(spliced_oprod(*parts))`` is the concatenation of the parts' leaves — and
+        only one nesting level is removed per operand, which is all any producer here builds.
+
+    Notes
+    -----
+    ⚠ **Not a canonicalizer, and NOT what** :func:`oprod` **should do.**  A map space
+    ``linear_map_space(dom, cod) = Dual(dom) ⊗ cod`` is deliberately TWO factors — an
+    ``(|dom|, |cod|)`` MATRIX — however compound ``cod`` is; splicing it hands the FFS/SVD seam a
+    rank-``2k`` array where it expects the ``(nᵏ, nᵏ)`` matrix (``Alt₃ : V⊗³ ⊸ V⊗³`` would stop
+    being ``(27, 27)``).  Use this ONLY where the flat, one-axis-per-leaf layout is the intended
+    one; use :func:`linear_map_space` where a matrix is.
+    """
+    flat: list[Space] = []
+    for p in parts:
+        if isinstance(p, OProd) and len(p.spaces) > 1:
+            flat.extend(p.spaces)
+        else:
+            flat.append(p)
+    return oprod(*flat)
+
+
 def drop_unit_factors(s: Space) -> Space:
     """The tensor-unit law ``𝟙 ⊗ λ ≅ λ`` as an explicit, opt-in canonicalizer (`25 §1`).
 
@@ -589,6 +632,56 @@ def drop_unit_factors(s: Space) -> Space:
             return OProd(survivors)
         case _:
             return s
+
+
+def tensor_leaves(s: Space) -> list[Space]:
+    """The ordered ⊗-leaves of a (possibly nested) ``OProd``.
+
+    The SPACE-level twin of ``lower.represent._basis_prod_leaves``.  ⊗ is associative on the
+    underlying space, so ``a⊗(b⊗c)``, ``(a⊗b)⊗c`` and ``a⊗b⊗c`` all have THIS leaf sequence; what
+    differs between them is only the NESTING — how the leaves are grouped into array axes, which
+    is what ``lower.represent._shape_of_space`` reads.  This is therefore the reader that says
+    "same leaves?" while leaving "same layout?" to the caller; the two questions are genuinely
+    different, and a caller that conflates them lets mismatched layouts meet silently.
+
+    Parameters
+    ----------
+    s
+        Any space.  Only ``OProd`` is descended through.
+
+    Returns
+    -------
+    list[Space]
+        The leaves in ⊗ order.  A non-product space is its own single leaf, so
+        ``tensor_leaves(V) == [V]``.
+
+    Notes
+    -----
+    ⚠ **``Dual`` is a LEAF, not a distribution point.**  ``Dual(A⊗B)`` is one axis of size
+    ``|A|·|B|`` (``_shape_of_space``'s single-axis default) while ``Dual(A)⊗Dual(B)`` is two axes;
+    they are different layouts and this reader must not identify them.  ``_basis_prod_leaves``
+    makes the same call — ``default_basis(Dual(A⊗B))`` is a ``DualBasis``, not a ``BasisProd``, so
+    it stops there too.
+
+    ⚠ The ⊗-unit ``Scalar()`` is KEPT as a leaf: it occupies no array axis but it does occupy a
+    factor position, and dropping it here would put this reader out of step with
+    ``_basis_prod_leaves`` (whose ``BasisProd((…, ScalarBasis()))`` tails are leaves).  A caller
+    that wants the unit-free sequence filters it itself — ``drop_unit_factors`` is the
+    canonicalizer and it, too, is opt-in.
+
+    Pure and total: no error paths, no normalization, no interning.
+    """
+    match s:
+        case OProd(spaces=spaces):
+            out: list[Space] = []
+            for f in spaces:
+                out.extend(tensor_leaves(f))
+            return out
+        case (Scalar() | SVar() | Dual() | OPlus() | OPlusRep()
+              | Ker() | Img() | CoKer() | CoImg() | WithInner() | App() | SpaceMeta()):
+            return [s]
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def oplus_rep(count: object, space: Space) -> OPlusRep:
@@ -666,7 +759,9 @@ __all__ = [
     "dual",
     "oplus",
     "oprod",
+    "spliced_oprod",
     "drop_unit_factors",
+    "tensor_leaves",
     "oplus_rep",
     "ker",
     "img",
