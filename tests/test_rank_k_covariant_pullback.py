@@ -16,17 +16,19 @@ the rank-2 block of his per-vertex ``V^c`` (3.34, ``[1, J⁻ᵀ, Θ⁻¹]``), wh
 Hessian degrees of freedom transform by.  Θ acts on the symmetric-reduced triple
 ``(δˣˣ, δˣʸ, δʸʸ)``; the test reduces the realized 4×4 to that triple and compares entrywise.
 
-⚠ **REGRESSION THIS PINS.**  ``represent._reconcile_pairing`` used to match a multi-axis operand to
-its contraction slot's dual partner by TOP-LEVEL FACTOR COUNT.  A ``Kron`` map's fused slot basis is
-FLAT (``_spliced_basis_prod``, in step with ``_synth_kron``'s spliced space) while a value's basis
-mirrors its right-nested space tower — so from rank 2 up the two counts differed, the reconciliation
-was refused, and the operand was contracted RAW: its components read in the basis it was pinned to
-while the slot expected another.  The tell was that the PINNED and UNPINNED realizations came out
-bit-identical (the pin had no effect at all) and the realized matrix was ``Q⊗Q`` for the orthonormal
+⚠ **WHAT THIS PINS.**  ``represent._reconcile_pairing`` must match a multi-axis operand to its
+contraction slot's dual partner by ⊗-LEAVES, not by top-level factor count.  A ``Kron`` map's fused
+slot basis is FLAT (``_spliced_basis_prod``, in step with ``_synth_kron``'s spliced space) while a
+value's basis mirrors its right-nested space tower, so from rank 2 up the two counts differ; a count
+test refuses the reconciliation and the operand is contracted RAW — its components read in the basis
+it was pinned to while the slot expects another.  The observable signature of that is a PINNED and an
+UNPINNED realization that agree (the pin has no effect at all), realizing ``Q⊗Q`` for the orthonormal
 frame ``Q`` instead of ``(A⁻¹)^{⊗2}``.  ``test_pin_is_honoured_at_rank_2`` is that tripwire.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -34,6 +36,7 @@ import pytest
 import grassmann as G
 from grassmann.core import basis as B
 from grassmann.core import space as S
+from grassmann.embed.ops import Expr
 from grassmann.lower.represent import represent
 from grassmann.lower.space_basis import default_basis, map_basis
 from grassmann.transform.pullback import pullback
@@ -43,13 +46,20 @@ A = np.array([[2.0, -0.5], [1.0, 2.0]])          # the jacobian ARRAY (dom, cod)
 AINV = np.linalg.inv(A)
 
 
-def _setup():
-    """``J : ℝᵗ ⊸ ℝᵉ`` injective, its image, and the immersed-frame leaf policy."""
+def _setup() -> tuple[Expr, S.Space, S.Space, Callable[[S.Space], B.Basis | None]]:
+    """``J : ℝᵗ ⊸ ℝᵉ`` injective, its image, and the immersed-frame leaf policy.
+
+    Returns
+    -------
+    tuple
+        ``(J, Img(J), ℝᵉ, leaf_policy)`` — the injective map expression, its image space, the
+        ambient space, and the leaf policy :func:`~grassmann.lower.space_basis.map_basis` consults.
+    """
     rt, re = G.space("Rt", EDIM), G.osum(*[G.R] * EDIM)
     jv = G.var("jacobian", rt >> re, props=G.inj)
     img = G.img(jv).node
 
-    def immersed(sp):
+    def immersed(sp: S.Space) -> B.Basis | None:
         """The immersed (literal transported) frame at the tangent leaf; default everywhere else."""
         if sp == img:
             return B.image_basis(jv.node, default_basis(rt.node), default_basis(re.node))
@@ -60,19 +70,46 @@ def _setup():
 
 def _tower(k: int, leaf: S.Space) -> S.Space:
     """``Dual(leaf) ⊗ … ⊗ Dual(leaf) ⊗ ℝ`` — the space a ``k``-th derivative of a scalar field
-    lands in: FLAT, one axis per differentiation, exactly as ``transform.diff._tower_space`` builds
-    it (`§flat-tower`).  ``test_tower_matches_what_diff_builds`` pins the two together.
+    lands in.
 
-    It used to be spelled right-nested (``Dual ⊗ (Dual ⊗ (… ⊗ ℝ))``), i.e. as
-    ``linear_map_space`` curries, which realizes as the ``(d, dᵏ⁻¹)`` MATRIX rather than the ``k+1``
-    separate axes.  From ``k = 3`` up that layout could not meet the flat ``tensor_power`` product
-    it is contracted against and ``unify`` raised ``AssociationMismatch``, so only ``k ≤ 2`` was
-    representable at all."""
+    FLAT, one axis per differentiation, exactly as ``transform.diff._tower_space`` builds it
+    (`§flat-tower`); ``test_tower_matches_what_diff_builds`` pins the two together.  The
+    alternative spelling, right-nested ``Dual ⊗ (Dual ⊗ (… ⊗ ℝ))`` as ``linear_map_space``
+    curries, realizes as the ``(d, dᵏ⁻¹)`` MATRIX rather than ``k+1`` separate axes, and from
+    ``k = 3`` up cannot meet the flat ``tensor_power`` product it is contracted against —
+    ``unify`` raises ``AssociationMismatch``.
+
+    Parameters
+    ----------
+    k
+        The derivative order, i.e. the number of covariant slots.
+    leaf
+        The space each slot is dual to.
+
+    Returns
+    -------
+    S.Space
+        The flat ``k+1``-factor tower.
+    """
     return S.oprod(*[S.dual(leaf)] * k, G.R.node)
 
 
 def _realized_matrix(k: int, *, pinned: bool) -> np.ndarray:
-    """The ``eᵈ`` columns of the realized rank-``k`` pullback, as an ``eᵏ × eᵏ`` matrix."""
+    """The ``eᵈ`` columns of the realized rank-``k`` pullback, as an ``eᵏ × eᵏ`` matrix.
+
+    Parameters
+    ----------
+    k
+        The rank of the covariant tensor being pulled back.
+    pinned
+        Whether the source components are declared in the immersed frame (``True``) or left to
+        the default, orthonormal one (``False``).
+
+    Returns
+    -------
+    np.ndarray
+        The realized transform, column ``c`` being the image of the ``c``-th unit component.
+    """
     jv, img, amb, immersed = _setup()
     src, tgt = _tower(k, img), _tower(k, amb)
     v = G.var(f"v{k}", src)
@@ -92,6 +129,7 @@ def _realized_matrix(k: int, *, pinned: bool) -> np.ndarray:
 
 
 def _kron_power(m: np.ndarray, k: int) -> np.ndarray:
+    """The ``k``-th Kronecker power ``m^{⊗k}`` (``k = 0`` is the 1×1 identity)."""
     out = np.array([[1.0]])
     for _ in range(k):
         out = np.kron(out, m)
@@ -114,9 +152,9 @@ def test_rank_k_covariant_pullback_is_the_kth_tensor_power(k: int) -> None:
     """``(A⁻¹)^{⊗k}`` — one rule, no per-order case.
 
     ``k = 3`` is the first degree at which the tower's SPELLING is observable (at ``k = 2`` the
-    ⊗-unit rewrite bridges the one nesting level, ``(d,d)`` vs ``(d,d,1)``), so it is the case that
-    was unrepresentable before the tower went flat.  ``k = 4`` is cheap and pins that nothing about
-    the rule is degree-2-or-3 special."""
+    ⊗-unit rewrite bridges the one nesting level, ``(d,d)`` vs ``(d,d,1)``), so it is the case a
+    nested tower cannot represent at all.  ``k = 4`` is cheap and pins that nothing about the rule
+    is degree-2-or-3 special."""
     np.testing.assert_allclose(_realized_matrix(k, pinned=True), _kron_power(AINV, k),
                                atol=1e-12)
 
@@ -173,7 +211,7 @@ def test_rank_2_block_is_kirby_theta() -> None:
 
 
 def test_pin_is_honoured_at_rank_2() -> None:
-    """The immersed pin must CHANGE the rank-2 realization — it was silently dropped."""
+    """The immersed pin must CHANGE the rank-2 realization; a dropped pin leaves the two equal."""
     pinned = _realized_matrix(2, pinned=True)
     unpinned = _realized_matrix(2, pinned=False)
     assert not np.allclose(pinned, unpinned, atol=1e-9), (

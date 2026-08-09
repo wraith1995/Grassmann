@@ -57,14 +57,15 @@ class UnifyError(Exception):
 class AssociationMismatch(UnifyError):
     """The two spaces have the SAME ⊗-leaves in the same order but different ⊗-NESTING.
 
-    A strict subclass of :class:`UnifyError`, so every existing handler and every existing test
-    that expects a failure here still sees one: this widens nothing, it only says *which kind* of
-    failure it is.  ⊗ is associative on the underlying space, so the leaves agreeing means the two
-    denote one space — but ``lower.represent._shape_of_space`` makes each top-level ⊗ factor its
-    own ARRAY AXIS, so the two spellings are different LAYOUTS (``V*⊗V*⊗V*`` is ``(d,d,d)``;
-    ``V*⊗(V*⊗V*)`` is ``(d,d²)``).  Unifying them would let mismatched layouts meet silently, so
-    this is still an error — but it is an error of CONSTRUCTION, at the site that built one of the
-    two spellings, not a genuine space mismatch at the site that tried to unify them."""
+    A strict subclass of :class:`UnifyError`, so every handler that expects a failure here sees
+    one: this widens nothing, it only says *which kind* of failure it is.  ⊗ is associative on the
+    underlying space, so the leaves agreeing means the two denote one space — but
+    ``lower.represent._shape_of_space`` makes each top-level ⊗ factor its own ARRAY AXIS, so the
+    two spellings are different LAYOUTS (``V*⊗V*⊗V*`` is ``(d,d,d)``; ``V*⊗(V*⊗V*)`` is
+    ``(d,d²)``).  Unifying them would let mismatched layouts meet silently, so this is still an
+    error — but an error of CONSTRUCTION, at the site that built one of the two spellings, not a
+    genuine space mismatch at the site that tried to unify them.
+    """
 
 
 def fresh_meta(hint: str = "α") -> SpaceMeta:
@@ -95,7 +96,13 @@ class MetaStore:
 
         For TRIAL unifications whose bindings must not escape — see
         :func:`_leaves_pairwise_unifiable`, which asks "would these unify?" purely to classify a
-        failure and must not solve a single metavar as a side effect of asking."""
+        failure and must not solve a single metavar as a side effect of asking.
+
+        Returns
+        -------
+        MetaStore
+            A store with the same solutions, sharing no mutable state with this one.
+        """
         out = MetaStore()
         out._solved = dict(self._solved)
         return out
@@ -280,14 +287,13 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
                 # (measured). Resolving it needs the value-tensor / map-space distinction settled in
                 # the representation. Until then, FAIL LOUDLY rather than hang.
                 #
-                # What we CAN do here — and it costs nothing on any success path, because both rows
-                # below still raise — is say WHICH failure this is. Compare the two ⊗-LEAF
-                # sequences (`tensor_leaves`, the space-level twin of represent's
-                # `_basis_prod_leaves`): if they agree pairwise, ⊗ associativity says the two spell
-                # ONE space and the bug is at a CONSTRUCTION site, which the generic "arity
-                # mismatch" text sends the reader hunting for in the wrong place. If they differ,
-                # the spaces really are different and the existing message is the right one, so it
-                # is left byte-identical.
+                # What this arm CAN do — at no cost on any success path, since both rows below
+                # raise — is say WHICH failure this is. Compare the two ⊗-LEAF sequences
+                # (`tensor_leaves`, the space-level twin of represent's `_basis_prod_leaves`): if
+                # they agree pairwise, ⊗ associativity says the two spell ONE space and the bug is
+                # at a CONSTRUCTION site, which the generic "arity mismatch" text sends the reader
+                # hunting for in the wrong place. If they differ, the spaces really are different
+                # and the generic message is the right one.
                 la, lb = _unit_free_leaves(a), _unit_free_leaves(b)
                 if _leaves_pairwise_unifiable(la, lb, store):
                     flat, nested = (a, b) if len(a.spaces) >= len(b.spaces) else (b, a)
@@ -413,6 +419,16 @@ def _unit_free_leaves(s: Space) -> tuple[Space, ...]:
     a legitimate rewrite (:func:`_drop_scalar_factors`), and it drops units only at the TOP level,
     so a right-nested tower's inner ``… ⊗ ℝ`` tail survives to here.  Filtering the unit is
     therefore exactly the equivalence ``unify`` itself already honours, applied all the way down.
+
+    Parameters
+    ----------
+    s
+        The space to read.
+
+    Returns
+    -------
+    tuple[Space, ...]
+        The ⊗-leaves in order, with every ``Scalar()`` removed.
     """
     return tuple(x for x in tensor_leaves(s) if not isinstance(x, Scalar))
 
@@ -422,10 +438,21 @@ def _leaves_pairwise_unifiable(
 ) -> bool:
     """Would ``la`` and ``lb`` unify leaf-for-leaf?  Asked on a COPY of ``Θ``, so nothing binds.
 
-    Classification only.  A ``False`` here means the two towers differ in their leaves and the
-    caller reports a genuine space mismatch; a ``True`` means the leaves agree and only the
-    nesting differs.  The recursion is well-founded: a leaf is never itself an ``OProd``, so a
+    Classification only.  The recursion is well-founded: a leaf is never itself an ``OProd``, so a
     re-entry into this branch can only happen strictly deeper (inside a ``Dual``/``OPlus``/… ).
+
+    Parameters
+    ----------
+    la, lb
+        The two ⊗-leaf sequences to compare, positionally.
+    store
+        The caller's ``Θ``.  It is copied, never written.
+
+    Returns
+    -------
+    bool
+        ``True`` when the leaves agree and only the nesting differs; ``False`` when the two towers
+        differ in their leaves, so the caller reports a genuine space mismatch.
     """
     if len(la) != len(lb):
         return False
@@ -449,9 +476,19 @@ def _axis_layout(s: OProd) -> str:
     This is the whole point of the message: the leaves agree, so the two spaces are one space, and
     the ONLY thing that differs is this.  ``lower._dims.dim_of`` is the same static sizer
     ``_shape_of_space`` goes through, imported LAZILY (``infer`` sits below ``lower``; this is a
-    diagnostic on an error path, not a lowering).  An axis whose size is not statically known —
-    a runtime FFS rank ``δ_f``, a symbolic ``DimVar``, an unsolved metavar — prints as its
-    symbolic :func:`grassmann.infer.dims.dim_of`, or ``?`` if even that is unavailable.
+    diagnostic on an error path, not a lowering).
+
+    Parameters
+    ----------
+    s
+        The product whose layout to render.
+
+    Returns
+    -------
+    str
+        A shape tuple, ``"(3, 9)"``-style.  An axis whose size is not statically known — a runtime
+        FFS rank ``δ_f``, a symbolic ``DimVar``, an unsolved metavar — prints as its symbolic
+        :func:`grassmann.infer.dims.dim_of`, or ``?`` if even that is unavailable.
     """
     from grassmann.lower._dims import DynamicDim
     from grassmann.lower._dims import dim_of as static_dim_of

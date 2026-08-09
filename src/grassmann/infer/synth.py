@@ -711,16 +711,26 @@ def _synth_remetric(e: Remetric, ctx: Ctx) -> Space:
 def _spliced_oprod(*parts: Space) -> Space:
     """``Kron``'s endpoint spelling: :func:`grassmann.core.space.spliced_oprod`.
 
-    ``Kron`` is where the nested spelling was minted: ``kron(f, kron(g, h))`` built its domain as
-    ``oprod(a0, oprod(a1, a2))``, so a ``kron`` CHAIN right-nested while ``tensor_power(V, k)``
-    builds the same space FLAT. They then met — the Λᵏ ambient against the antisymmetrizer's domain
-    — and a degree-3 exterior power could not be assembled. ``k = 2`` escaped only because a
-    two-factor chain has no nesting to disagree about.
+    A ``kron`` CHAIN nests its endpoints — ``kron(f, kron(g, h))`` has domain
+    ``oprod(a0, oprod(a1, a2))`` — while ``tensor_power(V, k)`` builds the same space FLAT.  The
+    two meet wherever a Λᵏ ambient is unified against an antisymmetrizer's domain, and ``unify``
+    refuses to identify two ⊗ layouts, so ``Kron``'s endpoints are spliced to the flat spelling
+    here.  (At ``k = 2`` a chain has no nesting to disagree about; from ``k = 3`` up it does.)
 
-    Splicing the ENDPOINTS is layout-neutral, which is why it is done here rather than in ``oprod``
-    itself: the nesting sits INSIDE the ``Dual(dom)`` / ``cod`` factor of the map space
+    Splicing the ENDPOINTS is layout-neutral, which is why it is done here rather than in
+    ``oprod`` itself: the nesting sits INSIDE the ``Dual(dom)`` / ``cod`` factor of the map space
     ``_synth_kron`` returns, and ``_shape_of_space`` counts that factor as ONE axis whatever its
     interior, so the map keeps its ``(dom, cod)`` matrix shape either way.
+
+    Parameters
+    ----------
+    *parts
+        The endpoint factors to multiply.
+
+    Returns
+    -------
+    Space
+        The flat product, as :func:`grassmann.core.space.spliced_oprod` builds it.
     """
     return spliced_oprod(*parts)
 

@@ -3,24 +3,25 @@
 
 Background.  ``OProd`` is a flat tuple of factors, so the NESTING of a ⊗-tower is significant:
 ``lower.represent._shape_of_space`` makes each top-level factor its own array axis, so
-``V*⊗V*⊗V*`` is ``(3,3,3)`` while ``V*⊗(V*⊗V*)`` is ``(3,9)``.  Two producers disagreed about which
-they build — ``tensor_power(V, k)`` is FLAT, ``linear_map_space(dom, cod) = oprod(dual(dom), cod)``
-RIGHT-NESTS as soon as ``cod`` is compound — and at k = 3 the two met and ``unify`` refused.
+``V*⊗V*⊗V*`` is ``(3,3,3)`` while ``V*⊗(V*⊗V*)`` is ``(3,9)``.  Two producers can disagree about
+which they build — ``tensor_power(V, k)`` is FLAT, ``linear_map_space(dom, cod) =
+oprod(dual(dom), cod)`` RIGHT-NESTS as soon as ``cod`` is compound — and from k = 3 up the two
+cannot meet.
 
-The refusal is CORRECT and stays: ⊗ associativity makes the two one *space* but not one *layout*,
-and unifying them would let mismatched layouts meet silently.  What this file pinned first was the
-diagnosis — both rows raise; the success set of ``unify`` is untouched.  What then changed is the
-PRODUCER: ``transform.diff``'s derivative tower, the only nested ⊗-tower anything built, is now
-flat (``_tower_space``, `§flat-tower`), so the association row is unreachable from it —
+The refusal is CORRECT: ⊗ associativity makes the two one *space* but not one *layout*, and
+unifying them would let mismatched layouts meet silently.  So the arm CLASSIFIES rather than
+resolves — both rows raise; the success set of ``unify`` is untouched.  On the producer side,
+``transform.diff``'s derivative tower is flat (``_tower_space``, `§flat-tower`), so the
+association row is unreachable from it —
 ``test_the_derivative_tower_is_flat_and_never_reaches_the_association_row``.  A genuine map space
-(``Alt₃``, an opaque Jacobian) is still a two-factor ``linear_map_space`` MATRIX, so the row itself
+(``Alt₃``, an opaque Jacobian) is a two-factor ``linear_map_space`` MATRIX, so the row itself
 stays live and stays the right answer for anyone who respells one by hand.
 
-⚠ **k = 2 is invisible** — both spellings are arity 2 there — which is exactly why the space level
-looked healthy while the BASIS level was silently wrong (the rank-2 defect fixed in ``b7af6db``:
-``_reconcile_pairing`` matched by top-level factor count, refused, and contracted the operand RAW).
-``test_leaf_readers_agree_on_order`` is the tripwire that keeps ``core.space.tensor_leaves`` and
-``lower.represent._basis_prod_leaves`` — now a matched pair — from drifting apart again.
+⚠ **k = 2 is invisible** — both spellings are arity 2 there — which is why the space level can
+look healthy while the BASIS level is silently wrong (``_reconcile_pairing`` matching by top-level
+factor count refuses and contracts the operand RAW).  ``test_leaf_readers_agree_on_order`` is the
+tripwire that keeps ``core.space.tensor_leaves`` and ``lower.represent._basis_prod_leaves`` — a
+matched pair — from drifting apart.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ import numpy as np
 import pytest
 
 import grassmann as G
+from grassmann.core import basis as B
 from grassmann.core import space as S
 from grassmann.infer.unify import AssociationMismatch, MetaStore, UnifyError, unify
 from grassmann.lower.represent import _basis_prod_leaves, _shape_of_space
@@ -57,13 +59,13 @@ def _nested(k: int, leaf: S.Space) -> S.Space:
 # ===========================================================================
 
 
-def test_tensor_leaves_flattens_only_oprod():
+def test_tensor_leaves_flattens_only_oprod() -> None:
     assert S.tensor_leaves(_flat(3, V3)) == [S.dual(V3)] * 3
     assert S.tensor_leaves(_nested(3, V3)) == [S.dual(V3)] * 3
     assert S.tensor_leaves(V3) == [V3]          # a non-product is its own single leaf
 
 
-def test_tensor_leaves_treats_dual_as_a_leaf_not_a_distribution_point():
+def test_tensor_leaves_treats_dual_as_a_leaf_not_a_distribution_point() -> None:
     """``Dual(A⊗B)`` is ONE axis of size ``|A|·|B|``; ``Dual(A)⊗Dual(B)`` is two.  Different
     layouts ⇒ the reader must not identify them (and ``_basis_prod_leaves`` does not either —
     ``default_basis(Dual(A⊗B))`` is a ``DualBasis``, not a ``BasisProd``)."""
@@ -73,7 +75,7 @@ def test_tensor_leaves_treats_dual_as_a_leaf_not_a_distribution_point():
     assert S.tensor_leaves(split) == [S.dual(V3), S.dual(V5)]
 
 
-def test_tensor_leaves_keeps_the_tensor_unit():
+def test_tensor_leaves_keeps_the_tensor_unit() -> None:
     """The ⊗-unit occupies no array axis but it DOES occupy a factor position, and
     ``_basis_prod_leaves`` keeps its ``ScalarBasis`` tail.  Dropping it here would put the two
     readers out of step, which is the drift Phase 4 exists to catch."""
@@ -86,9 +88,9 @@ def test_tensor_leaves_keeps_the_tensor_unit():
 # ===========================================================================
 
 
-def test_association_mismatch_is_reported_as_its_own_failure():
-    """Same 3 leaves, different nesting ⇒ the NEW error, naming both spellings and both
-    layouts.  It is still a ``UnifyError`` subclass: nothing that used to fail now succeeds."""
+def test_association_mismatch_is_reported_as_its_own_failure() -> None:
+    """Same 3 leaves, different nesting ⇒ ``AssociationMismatch``, naming both spellings and both
+    layouts.  It is a ``UnifyError`` subclass, so it widens no success set."""
     with pytest.raises(AssociationMismatch) as excinfo:
         unify(_flat(3, V3), _nested(3, V3), MetaStore())
     msg = str(excinfo.value)
@@ -101,16 +103,17 @@ def test_association_mismatch_is_reported_as_its_own_failure():
     assert "tensor_power" in msg and "linear_map_space" in msg   # flat vs nested producer
 
 
-def test_association_mismatch_is_symmetric():
+def test_association_mismatch_is_symmetric() -> None:
     for a, b in ((_flat(3, V3), _nested(3, V3)), (_nested(3, V3), _flat(3, V3))):
         with pytest.raises(AssociationMismatch) as excinfo:
             unify(a, b, MetaStore())
         assert "(3, 3, 3)" in str(excinfo.value) and "(3, 9)" in str(excinfo.value)
 
 
-def test_genuine_arity_mismatch_keeps_the_old_message():
-    """Different leaves ⇒ the spaces really differ; the pre-existing text is the right one and
-    is left byte-identical (and is NOT the association subclass)."""
+def test_genuine_arity_mismatch_keeps_the_old_message() -> None:
+    """Different leaves ⇒ the spaces really differ, so the generic arity-mismatch text is the
+    right one and the association subclass must NOT fire.  Asserted verbatim: the message names
+    the two producers, and a reader sent to the wrong one hunts at the wrong site."""
     a, b = _flat(3, V3), _flat(2, V5)
     with pytest.raises(UnifyError) as excinfo:
         unify(a, b, MetaStore())
@@ -127,7 +130,7 @@ def test_genuine_arity_mismatch_keeps_the_old_message():
     )
 
 
-def test_equal_leaf_count_but_mismatched_leaves_is_still_the_old_message():
+def test_equal_leaf_count_but_mismatched_leaves_is_still_the_old_message() -> None:
     """The leaf COUNT agreeing is not enough — the leaves must unify pairwise.  ``V*⊗V*⊗W*``
     against ``V*⊗(V*⊗V*)`` has three leaves a side and is still a genuine mismatch."""
     a = S.oprod(S.dual(V3), S.dual(V3), S.dual(V5))
@@ -137,7 +140,7 @@ def test_equal_leaf_count_but_mismatched_leaves_is_still_the_old_message():
     assert "arity mismatch" in str(excinfo.value)
 
 
-def test_classification_does_not_bind_metavars():
+def test_classification_does_not_bind_metavars() -> None:
     """The classification asks "would these unify?" on a COPY of ``Θ``.  Asking must not solve
     anything: the store the caller handed in is unchanged whichever row fires."""
     m = S.SpaceMeta()
@@ -147,8 +150,8 @@ def test_classification_does_not_bind_metavars():
     assert store.get(m) is None
 
 
-def test_success_set_is_untouched():
-    """Every pair that unified before still unifies — the ⊗-unit and 1-ary rewrites in
+def test_success_set_is_untouched() -> None:
+    """Unification still succeeds wherever it should — the ⊗-unit and 1-ary rewrites in
     particular, which reach the same ``OProd`` arm and must not be diverted."""
     unify(_flat(3, V3), _flat(3, V3), MetaStore())
     unify(S.oprod(S.dual(V3), S.Scalar()), S.dual(V3), MetaStore())
@@ -175,7 +178,7 @@ def test_success_set_is_untouched():
         S.oprod(V3, S.oprod(S.oplus(V3, V5), S.Scalar())),             # a ⊕ leaf
     ],
 )
-def test_leaf_readers_agree_on_order(tower):
+def test_leaf_readers_agree_on_order(tower: S.Space) -> None:
     """``core.space.tensor_leaves`` and ``represent._basis_prod_leaves`` induce the SAME leaf
     sequence on the same tower — positionally, not as a multiset.
 
@@ -189,13 +192,13 @@ def test_leaf_readers_agree_on_order(tower):
     assert basis_leaves == [default_basis(s) for s in space_leaves]
 
 
-def test_leaf_readers_agree_under_a_non_default_leaf_policy():
+def test_leaf_readers_agree_under_a_non_default_leaf_policy() -> None:
     """Not an artifact of ``default_basis``: with a leaf CHOICE overriding one leaf, the two
     readers still line up position for position (``map_basis`` mirrors the same tower)."""
     tower = S.oprod(S.dual(V3), S.oprod(S.dual(V5), S.Scalar()))
     pinned = G.basis("β", V5)
 
-    def choice(sp):
+    def choice(sp: S.Space) -> B.Basis | None:
         return pinned.node if sp == V5 else None
 
     space_leaves = S.tensor_leaves(tower)
@@ -208,33 +211,32 @@ def test_leaf_readers_agree_under_a_non_default_leaf_policy():
 # ===========================================================================
 
 
-def test_alt3_still_realizes_as_a_27_by_27_matrix():
+def test_alt3_still_realizes_as_a_27_by_27_matrix() -> None:
     """``Alt₃ : V⊗³ ⊸ V⊗³`` is ``Dual(V⊗³) ⊗ V⊗³`` — TWO axes, ``(27, 27)``, which is what the
-    SVD/QR seam consumes.  Splicing ⊗ at construction would flatten it to six ``(3,…)`` axes; this
-    pins that nothing here moved in that direction."""
+    SVD/QR seam consumes.  Splicing ⊗ at construction would flatten it to six ``(3,…)`` axes, so
+    this pins that no producer on this path splices a map space."""
     V = G.osum(*[G.R] * 3)
     out = G.compile(alt(V, 3)).run({})["result"]
     assert np.asarray(out).shape == (27, 27)
 
 
 # ===========================================================================
-# The producer that used to reach the association row.
+# The producer closest to the association row.
 # ===========================================================================
 
 
-def test_the_derivative_tower_is_flat_and_never_reaches_the_association_row():
-    """``diff``'s derivative tower was the ONE nested ⊗-tower producer, and this row is the reason
-    it had to stop being one.
+def test_the_derivative_tower_is_flat_and_never_reaches_the_association_row() -> None:
+    """``diff``'s derivative tower is the ⊗-tower producer this row would otherwise catch.
 
     An order-``n`` derivative input is ``X ⊸ (X ⊸ (… ⊸ V))``.  Spelled with ``linear_map_space``
-    that right-nests, so from order 3 up it met the FLAT products it is contracted against
-    (``tensor_power``, ``Kron``'s spliced endpoints) and landed exactly on the
+    that right-nests, so from order 3 up it meets the FLAT products it is contracted against
+    (``tensor_power``, ``Kron``'s spliced endpoints) and lands exactly on the
     ``AssociationMismatch`` row above — an error with no repair, because ⊗ associativity makes the
     two one space but ``_shape_of_space`` makes them two LAYOUTS.  ``transform.diff._tower_space``
-    now builds the tower FLAT, so both sides agree by construction (`§flat-tower`).
+    builds the tower FLAT, so both sides agree by construction (`§flat-tower`).
 
     Assert it on the ARTIFACT the producer mints, not on a hand-written space: what matters is that
-    nothing in the stack still spells a tower nested."""
+    nothing in the stack spells a tower nested."""
     from grassmann.core import term as T
     from grassmann.transform.diff import clear_deriv_inputs, diff, enumerate_derivative_inputs
 
