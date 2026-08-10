@@ -26,6 +26,7 @@ import itertools
 from collections.abc import Callable
 
 from grassmann.core.space import (
+    App,
     CoImg,
     CoKer,
     DimLit,
