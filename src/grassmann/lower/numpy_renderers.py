@@ -56,15 +56,20 @@ def _qr_cols(op, a):           # orthonormal columns, positive-R-diagonal sign c
 
 
 def _qr_sign_convention(op, a):  # _QrSignConventionOp(Q, R) -> (Q·s, s·R), s = sign(diag R) (0→1)
-    return (f"(lambda _Q, _R: (lambda _s: (_Q * _s, _s[:, None] * _R))"
-            f"(np.where(np.sign(np.diag(_R)) == 0, 1.0, np.sign(np.diag(_R)))))"
-            f"(np.asarray({a[0]}, dtype=float), np.asarray({a[1]}, dtype=float))")
+    # Delegate to the op's own auto-discovery hook — single source of truth. This entry stays for
+    # explicit ``op_renderers=`` threading; ``to_numpy_source`` finds the hook on its own.
+    return op.__numpy_source__(a)
 
 
 def op_renderers() -> dict:
     """The ``{op_class_name: (op, arg_exprs) -> python_expr}`` map for grassmann's remaining
     Stmt ops (the generic array / linalg ops now render as polyarray builtins), to pass as
-    ``polyarray.to_numpy_source(..., op_renderers=op_renderers())``."""
+    ``polyarray.to_numpy_source(..., op_renderers=op_renderers())``.
+
+    ``_QrSignConventionOp`` also carries its own ``__numpy_source__`` hook, which
+    ``to_numpy_source`` discovers unaided — so a program containing it emits with no
+    ``op_renderers=`` at all (an observability dump, say). Its entry here delegates to that hook,
+    and an explicit mapping still takes precedence over it."""
     return {
         "_ExternalOp": _external_op,
         # FFS / geometry realization
