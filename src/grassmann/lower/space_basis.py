@@ -691,6 +691,28 @@ class _QrSignConventionOp:
         s[s == 0] = 1.0
         return Q * s, s[:, None] * R
 
+    def __numpy_source__(self, args: list[str]) -> str:
+        """``to_numpy_source`` op-carried emit hook, discovered by ``numpy_source._render_op``.
+
+        Renders the +diagonal-R sign convention so ANY :class:`polyarray.Program` carrying this
+        op emits standalone numpy without the caller threading ``op_renderers=`` — the emit twin
+        of :meth:`__pyab_lower__`, and the same value body as :meth:`__call__`.
+
+        Parameters
+        ----------
+        args
+            The already-rendered argument expressions ``[Q, R]``, in operand order.
+
+        Returns
+        -------
+        str
+            A numpy expression yielding the multi-output ``(Q·diag(s), diag(s)·R)`` with
+            ``s = sign(diag R)`` and zeros mapped to ``+1``.
+        """
+        return (f"(lambda _Q, _R: (lambda _s: (_Q * _s, _s[:, None] * _R))"
+                f"(np.where(np.sign(np.diag(_R)) == 0, 1.0, np.sign(np.diag(_R)))))"
+                f"(np.asarray({args[0]}, dtype=float), np.asarray({args[1]}, dtype=float))")
+
     def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
         """Pyab op-carried lowering.
 
