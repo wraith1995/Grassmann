@@ -1068,8 +1068,8 @@ def _rep_external(
         raise RepresentError(
             "represent: an elementwise External cannot thread a free (LLam-seed) basis-index axis "
             f"carried by only some operands (free_labels={[r.free_labels for r in arg_reps]}); "
-            "lower the Jacobian map in the default vmap mode (free-label threading through externals "
-            "is future work — `41 §7`)."
+            "lower the Jacobian map in the default vmap mode (the single elementwise kernel this "
+            "mode emits cannot broadcast a free axis present on only some operands)."
         )
     # Elementwise over matching-shaped operands (scalar args ⇒ scalar result).
     out_shape = _shape_of(arrays[0]) if arrays else _shape_of_space(space)
@@ -3579,7 +3579,8 @@ def _rep_pinv_apply(
         # handles it with a concrete seed per slice).
         raise RepresentError(
             "represent: PinvApply cannot thread a free (LLam-seed) index through the f⁺ matvec; "
-            "differentiate in the default vmap mode (free-label threading is task 15 — `41 §7`)."
+            "differentiate in the default vmap mode (this lowering's einsum has no subscript slot "
+            "for a free label; vmap uses a concrete seed per slice)."
         )
     metric = _map_metrics(f)
     if metric is not None:
@@ -4949,7 +4950,7 @@ def _rep_llam_eye(
             f"represent: LLam body lands in a non-default codomain basis (cod={body_rep.basis!r}); "
             f"the one-einsum eye lowering cannot honestly tag the free-axis Gram. Use the default "
             f"vmap mode (unset GRASSMANN_LLAM_INDEX) or realize the body's operand(s) in default "
-            f"(LLam free-label-basis tracking is future work — `41 §7`)."
+            f"(the eye lowering does not track a basis along a free label)."
         )
     # Re-orient to CANONICAL (dom,cod) storage: the eye einsum lands the body in
     # (cod…, dom…); transpose to (dom…, cod…) so the LLam matches its declared space (η-sound) and
@@ -5203,7 +5204,7 @@ def _rep_llam_vmap(
         if parent_arr is None:
             raise RepresentError(
                 f"represent: LLam vmap body needs sub-input {spec.name!r}, but the parent has no "
-                f"matching input — frame/free realization mismatch (`41 §7`)."
+                f"matching input — frame/free realization mismatch."
             )
         shared_arrays.append(parent_arr)
     n_shared = len(shared_arrays)
