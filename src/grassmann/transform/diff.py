@@ -727,14 +727,12 @@ _NESTED_FD_EPS = {1: 1e-4, 2: 4e-3, 3: 8e-3}
 
 
 def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -> np.ndarray:
-    """The ``order``-th derivative tensor of ``f .
-
-    R^nX → array`` at ``x0`` by NESTED, **Richardson-extrapolated** central differences over the ``nX``
-    coordinate directions.  Each level uses ``(4·D(h/2) − D(h))/3`` (``D`` the central difference), cancelling
-    the ``O(eps²)`` truncation ⇒ ``O(eps⁴)`` per level — sharp enough that the fed ``∂ⁿQ`` tower is accurate,
-    not smoke-accurate.  Returns shape ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th direction); mixed
-    partials are symmetric, so it is symmetric in its first ``order`` axes.
-    """
+    """The ``order``-th derivative tensor of ``f : R^nX → array`` at ``x0`` by NESTED,
+    **Richardson-extrapolated** central differences over the ``nX`` coordinate directions.  Each
+    level uses ``(4·D(h/2) − D(h))/3`` (``D`` the central difference), cancelling the ``O(eps²)``
+    truncation ⇒ ``O(eps⁴)`` per level — sharp enough that the fed ``∂ⁿQ`` tower is accurate, not
+    smoke-accurate.  Returns shape ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th direction);
+    mixed partials are symmetric, so it is symmetric in its first ``order`` axes."""
     if order == 0:
         return np.asarray(f(x0), dtype=float)
     if eps is None:
@@ -1367,9 +1365,8 @@ def _connection_map(M: Space, g: Term, Dg: Term, h: Var) -> Term:
 
 
 def _frame_connection_map(M: Space, J: Term, DJ: Term, h: Var) -> Term:
-    """The Levi-Civita connection of a **chart immersion** ``J .
-
-    M ⊸ A`` (a moving frame), direction ``h`` — ``Γ(h) = J⁺·(∂J·h) : M ⊸ M`` (task 3).
+    """The Levi-Civita connection of a **chart immersion** ``J : M ⊸ A`` (a moving frame),
+    direction ``h`` — ``Γ(h) = J⁺·(∂J·h) : M ⊸ M`` (task 3).
 
     For the induced (pullback) metric ``g = JᵀJ`` the Christoffel symbols are
     ``Γ^k_{mi} = (J⁺ ∂_i J)^k_m``, so ``Γ(h) = Pinv(J) ∘ Eval(DJ,(0,),h)`` — built from the bare
@@ -1377,22 +1374,18 @@ def _frame_connection_map(M: Space, J: Term, DJ: Term, h: Var) -> Term:
     gradient (sidestepping the nested-⊗ substrate gap that ``∂(JᵀJ)`` would hit).  Numerically
     identical to :func:`_connection_map` fed ``g = JᵀJ``, ``Dg = ∂(JᵀJ)`` (verified), so it plugs
     into the same per-slot :func:`_connection_correction`.  Assumes a true chart Jacobian
-    (``J = ∂Φ`` ⇒ ``∂J`` symmetric in direction ↔ tangent slot ⇒ a torsion-free connection).
-    """
+    (``J = ∂Φ`` ⇒ ``∂J`` symmetric in direction ↔ tangent slot ⇒ a torsion-free connection)."""
     return Compose(Pinv(J), (0,), (Eval(DJ, (0,), (h,)),))  # J⁺ ∘ (∂J·h) : M ⊸ M
 
 
 def _metric_gradient(g: Term, M: Space, ctx: _DCtx) -> Term | None:
-    """The metric gradient ``Dg .
-
-    M ⊸ (M*⊗M*)`` (``∂g/∂x``), as a *primitive* map, or ``None`` when the metric does not depend on ``x`` (a
-    constant/flat metric).
+    """The metric gradient ``Dg : M ⊸ (M*⊗M*)`` (``∂g/∂x``), as a *primitive* map, or
+    ``None`` when the metric does not depend on ``x`` (a constant/flat metric).
 
     For v1 the metric must be a marked-dependent ``Var`` (its gradient supplied via ``deps``,
     or a fresh symbolic map var for ``None``); a constant metric ``Var`` (absent from
     ``deps``) yields ``None`` (the flat case). A more complex x-dependent metric expression
-    is rejected — supply the metric (and its derivative) as a marked variable.
-    """
+    is rejected — supply the metric (and its derivative) as a marked variable."""
     if isinstance(g, Var):
         if g.uid not in ctx.deps:
             return None  # metric does not depend on x ⇒ flat

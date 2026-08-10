@@ -265,11 +265,8 @@ def free_vars(expression: str) -> list[str]:
 
 
 def default_decls(expression: str) -> dict[str, str]:
-    """``{name.
-
-    "scalar"|"vector"|"matrix"}`` for each free variable, by the naming convention (:func:`default_type`) —
-    the initial dropdown selections for the web tool.
-    """
+    """``{name: "scalar"|"vector"|"matrix"}`` for each free variable, by the naming
+    convention (:func:`default_type`) — the initial dropdown selections for the web tool."""
     return {n: default_type(n) for n in free_vars(expression)}
 
 
@@ -700,10 +697,8 @@ class _Builder:
     # -- space materialisation ----------------------------------------------
 
     def named_slot(self, name: str) -> int:
-        """The slot for a user-declared dimension name (shared across all variables that name it, e.g.
-
-        ``x:vector(n)`` and ``A:matrix(m,n)`` share ``n``).
-        """
+        """The slot for a user-declared dimension name (shared across all variables that name
+        it, e.g. ``x:vector(n)`` and ``A:matrix(m,n)`` share ``n``)."""
         if name not in self.slot_of_dimname:
             sl = self.uf.fresh()
             self.uf.set_name(sl, name)

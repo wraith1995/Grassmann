@@ -213,17 +213,14 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
 
 
 def interior(omega: Expr, v: Expr, k: int) -> Expr:  # noqa: E741
-    """``ι_v(ω) .
-
-    Λᵏ(W) × Dual(W) → Λ^{k-1}(W)`` — the **interior product** (contract the FIRST slot of a ``k``-form ``ω``
-    with a covector-eating vector ``v ∈ Dual(W)``).
+    """``ι_v(ω) : Λᵏ(W) × Dual(W) → Λ^{k-1}(W)`` — the **interior product** (contract the FIRST slot of a
+    ``k``-form ``ω`` with a covector-eating vector ``v ∈ Dual(W)``).
 
     ``embed → eval → project``: a bare ``ω(v)`` fails because a ``k``-form's space ``Img(alt(W,k))`` is not
     decomposed into factors (``synth`` finds no dual slot); embedding ``ω ⊑ W⊗ᵏ`` exposes the factors, then
     the ordinary application ``·(v)`` contracts slot 0 ⇒ ``W⊗ᵏ⁻¹``, and ``project`` lands it on ``Λ^{k-1}``.
     Generalizes the dual pairing: ``k = 1`` is exactly ``⟨ω, v⟩`` (a scalar). No rescale needed — this is
-    the textbook ``ι_v`` (validated on the Leibniz identity ``ι_v(a∧b) = ⟨a,v⟩b − ⟨b,v⟩a``).
-    """
+    the textbook ``ι_v`` (validated on the Leibniz identity ``ι_v(a∧b) = ⟨a,v⟩b − ⟨b,v⟩a``)."""
     if k < 1:
         raise ValueError(f"interior: k must be >= 1, got k={k}")
     W = _base_space_of_exterior(omega, k)
@@ -255,9 +252,8 @@ def _std_basis_vector(V: Expr, i: int, n: int) -> Expr:
 
 
 def hodge_star(omega: Expr, k: int) -> Expr:
-    """The **Hodge star** ``⋆ .
-
-    Λᵏ(V) → Λⁿ⁻ᵏ(V)`` for the standard Euclidean metric and the standard orientation of ``V = ℝⁿ`` (`Hodge`).
+    """The **Hodge star** ``⋆ : Λᵏ(V) → Λⁿ⁻ᵏ(V)`` for the standard Euclidean metric and the
+    standard orientation of ``V = ℝⁿ`` (`Hodge`).
 
     Characterised by ``α ∧ ⋆ω = ⟨α, ω⟩ · vol`` for every ``α ∈ Λᵏ(V)``, where ``vol`` is the
     **unit volume form** ``e₁∧…∧eₙ`` of the standard oriented basis.  Built coordinate-free as
@@ -315,10 +311,8 @@ def hodge_star(omega: Expr, k: int) -> Expr:
 
 
 def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
-    """The exterior derivative ``dω .
-
-    Ωᵏ(V) → Ωᵏ⁺¹(V)`` of a ``k``-form FIELD ``ω`` over the point ``x ∈ V`` (``Ωᵏ = Λᵏ(V*)``), by the
-    coordinate formula ``dω = Σⱼ eʲ ∧ ∂ⱼω``:
+    """The exterior derivative ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` of a ``k``-form FIELD ``ω`` over the point
+    ``x ∈ V`` (``Ωᵏ = Λᵏ(V*)``), by the coordinate formula ``dω = Σⱼ eʲ ∧ ∂ⱼω``:
 
     - ``∂ⱼω = ∂ω/∂xⱼ`` — the partial derivative, ``diff(ω, x)`` applied to the ``j``-th basis
       vector ``eⱼ ∈ V``;

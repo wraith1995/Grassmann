@@ -53,9 +53,8 @@ _counter = itertools.count()
 
 @dataclass(frozen=True)
 class Var:
-    """``Var(x, props?)`` — a (term) variable, optionally carrying asserted map properties (`20 §6`.
-
-    Props ON VARS ONLY in v1).
+    """``Var(x, props?)`` — a (term) variable, optionally carrying asserted map
+    properties (`20 §6`: props ON VARS ONLY in v1).
 
     ``space`` is the variable's space; ``uid`` is a fresh identity so that two distinct
     binders' variables of the same name/space do not collide (used by binders).
@@ -325,11 +324,9 @@ class Det:
 
 @dataclass(frozen=True)
 class LogDet:
-    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f .
-
-    V ⊸ V`` (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
-    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`.
-    """
+    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``
+    (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
+    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`."""
 
     f: Term
 
@@ -418,9 +415,8 @@ class Pinv:
 
 @dataclass(frozen=True)
 class Corestrict:
-    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image, ``f~ .
-
-    Dom(f) ⊸ Img(f)``.
+    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image,
+    ``f~ : dom(f) ⊸ Img(f)``.
 
     This is the induced isomorphism of the **first isomorphism theorem**, in its
     ``ker f = 0`` form: ``f`` factors as ``dom(f) --f~--> Img(f) --ι--> cod(f)`` with ``f~``
@@ -498,13 +494,11 @@ class Dagger:
 
 @dataclass(frozen=True)
 class Sqrt:
-    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of a square endomorphism ``f .
-
-    V ⊸ V`` (the unique SPD ``S`` with ``S·S = f``).  Lowers via an eigendecomposition and **fails loudly if
-    ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization factor: for an immersed metric
-    ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the whitening, so ``J·Sqrt(G)⁻¹`` is the polar
-    orthonormal frame (`§ realization`).
-    """
+    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of a square endomorphism
+    ``f : V ⊸ V`` (the unique SPD ``S`` with ``S·S = f``).  Lowers via an eigendecomposition and
+    **fails loudly if ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization
+    factor: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the
+    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame (`§ realization`)."""
 
     f: Term
 
