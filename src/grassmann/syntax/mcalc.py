@@ -200,8 +200,10 @@ class _Parser:
         raise McalcParseError("expected an expression", t.pos, self.src)
 
     def _list(self) -> ListN:
-        """``[a, b]`` (concat / column-stack) or ``[a; b]`` (row-stack). The ``;`` form is
-        parsed by ``_INFIX`` inside, so we collect comma-separated top-level items here."""
+        """``[a, b]`` (concat / column-stack) or ``[a; b]`` (row-stack).
+
+        The ``;`` form is parsed by ``_INFIX`` inside, so we collect comma-separated top-level items here.
+        """
         t = self.expect_op("[")
         items: list = []
         if not self.at_op("]"):
@@ -235,9 +237,11 @@ def parse_ast(src: str) -> object:
 
 
 def free_vars(expression: str) -> list[str]:
-    """The free variable names of an expression, in first-appearance order — the names the
-    web tool renders type dropdowns for. Excludes function heads (``sin``/``tr``/…) and the
-    reserved identity ``eye``."""
+    """The free variable names of an expression, in first-appearance order.
+
+    The names the web tool renders type dropdowns for. Excludes function heads (``sin``/``tr``/…) and the
+    reserved identity ``eye``.
+    """
     seen: dict[str, None] = {}
 
     def walk(n: object, is_fn: bool = False) -> None:
@@ -261,8 +265,11 @@ def free_vars(expression: str) -> list[str]:
 
 
 def default_decls(expression: str) -> dict[str, str]:
-    """``{name: "scalar"|"vector"|"matrix"}`` for each free variable, by the naming
-    convention (:func:`default_type`) — the initial dropdown selections for the web tool."""
+    """``{name.
+
+    "scalar"|"vector"|"matrix"}`` for each free variable, by the naming convention (:func:`default_type`) —
+    the initial dropdown selections for the web tool.
+    """
     return {n: default_type(n) for n in free_vars(expression)}
 
 
@@ -332,9 +339,11 @@ def _space_tokens(s: str) -> list[str]:
 
 
 class _SpaceParser:
-    """ASCII space grammar (low→high precedence): ``A -> B`` (linear-map space, right-assoc) ·
-    ``A (+) B`` (⊕) · ``A (x) B`` (⊗) · ``S*`` (postfix dual) · atoms ``R^n`` / named / ``(…)`` /
-    ``T(phi)`` / ``CT(phi)``."""
+    """ASCII space grammar (low→high precedence).
+
+    ``A -> B`` (linear-map space, right-assoc) · ``A (+) B`` (⊕) · ``A (x) B`` (⊗) · ``S*`` (postfix dual) ·
+    atoms ``R^n`` / named / ``(…)`` / ``T(phi)`` / ``CT(phi)``.
+    """
 
     def __init__(self, toks: list[str], src: str, env: dict, params: dict) -> None:
         self.toks, self.src, self.env, self.params, self.i = toks, src, env, params, 0
@@ -401,9 +410,11 @@ class _SpaceParser:
 
 
 def _resolve_space(s: str, env: dict, params: dict | None = None):
-    """Resolve an ASCII space expression to a grassmann space ``Expr`` — the full algebra:
-    named refs, ``R^n``, ``A -> B``, ``A (x) B``, ``A (+) B``, ``S*`` (dual), ``T(phi)``/
-    ``CT(phi)``, and parentheses."""
+    """Resolve an ASCII space expression to a grassmann space ``Expr`` — the full algebra.
+
+    Named refs, ``R^n``, ``A -> B``, ``A (x) B``, ``A (+) B``, ``S*`` (dual), ``T(phi)``/ ``CT(phi)``, and
+    parentheses.
+    """
     s = s.strip()
     if s in env:
         return env[s]
@@ -442,8 +453,10 @@ def _collect_dim_vars(node, seen: set | None = None) -> set:
 
 
 def _split_top_arrow(s: str) -> tuple[str, str] | None:
-    """Split a space string on a TOP-LEVEL ``->`` (depth-0, outside parens) → ``(dom, cod)``
-    for a map space; ``None`` if there is no top-level arrow."""
+    """Split a space string on a TOP-LEVEL ``->`` (depth-0, outside parens) → ``(dom, cod)`` for a map space.
+
+    ``None`` if there is no top-level arrow.
+    """
     depth = 0
     i = 0
     while i < len(s) - 1:
@@ -459,8 +472,10 @@ def _split_top_arrow(s: str) -> tuple[str, str] | None:
 
 
 def _maybe_space(ty: str, builder) -> bool:
-    """Whether ``ty`` is a (non-geometry) space expression — a named space, ``R^n``, or
-    ``A -> B``. Geometry types (``tangent(...)`` etc.) keep their dedicated path."""
+    """Whether ``ty`` is a (non-geometry) space expression — a named space, ``R^n``, or ``A -> B``.
+
+    Geometry types (``tangent(...)`` etc.) keep their dedicated path.
+    """
     import re
     if re.match(r"(tangent|cotangent|normal|conormal|T|CT|Img|Ker)\(", ty):
         return False
@@ -472,8 +487,10 @@ def _maybe_space(ty: str, builder) -> bool:
 
 
 def _parse_type(ty: str, var: str) -> tuple[str, list[str]]:
-    """Parse a declared type into ``(head, dim_names)``. Forms (suffix tier — user-named,
-    shared dims; the advanced ``R^n``/``R^n->R^m`` space-expression tier is future work):
+    """Parse a declared type into ``(head, dim_names)``.
+
+    Forms (suffix tier — user-named, shared dims; the advanced ``R^n``/``R^n->R^m`` space-expression tier is
+    future work):
 
         scalar | vector | matrix | vector(n) | matrix(m, n)
     """
@@ -494,8 +511,10 @@ def _parse_type(ty: str, var: str) -> tuple[str, list[str]]:
 
 
 def default_type(name: str) -> str:
-    """matrixcalculus naming convention: ``a–g`` scalar, ``h–z`` vector, ``A–Z`` matrix,
-    ``eye`` the identity matrix."""
+    """Matrixcalculus naming convention.
+
+    ``a–g`` scalar, ``h–z`` vector, ``A–Z`` matrix, ``eye`` the identity matrix.
+    """
     if name == "eye":
         return "matrix"
     c = name[0]
@@ -508,7 +527,8 @@ def default_type(name: str) -> str:
 
 class _UF:
     """Union-find over integer space slots, with optional per-class **dimension names** (so a
-    user-named dim like ``n`` survives unification and is shared across variables)."""
+    user-named dim like ``n`` survives unification and is shared across variables).
+    """
 
     def __init__(self) -> None:
         self.parent: list[int] = []
@@ -559,15 +579,18 @@ class _UF:
 
 @dataclass
 class _TN:
-    """A typed node: a kind tag, its space slots, and a thunk that emits the core Expr
-    once slots have been materialized to concrete spaces.
+    """A typed node.
+
+    A kind tag, its space slots, and a thunk that emits the core Expr once slots have been materialized to
+    concrete spaces.
 
     A **covector** ``x' (A B …)`` is carried structurally as a *Riesz vector* ``u`` plus a
     *pending map* ``P``, denoting the functional ``w ↦ ⟨u, P(w)⟩``. This keeps the canonical
     bilinear form ``x'*A*x = ⟨x, A x⟩`` free of any ``Dagger`` node (so it differentiates
     cleanly): ``x'`` is ``(u=x, P=id)``; ``· A`` becomes ``P ↦ P∘A``; ``· w`` contracts to
     ``⟨u, P(w)⟩``. ``emit`` produces the Riesz vector ``u``; ``pmap`` (or ``None`` = identity)
-    produces ``P``; ``usp`` is ``u``'s slot, ``sp`` the covector's current domain slot."""
+    produces ``P``; ``usp`` is ``u``'s slot, ``sp`` the covector's current domain slot.
+    """
 
     kind: str                       # "scalar" | "vec" | "cov" | "mat"
     emit: object                    # () -> Expr  (vector/scalar/map; for "cov", the Riesz u)
@@ -618,9 +641,11 @@ class _Builder:
     # -- bases (resolved lazily, after vars are built) ----------------------
 
     def resolve_basis(self, expr):
-        """Resolve an ASCII basis expression to a core ``Basis`` — ``ImageBasis(f)`` (f a
-        parameterization or matrix var), ``OrthonormalBasis(b)``, ``DualBasis(b)``,
-        ``ListBasis(v1,…)``, ``WithInnerBasis(b,g)``, or a declared basis name."""
+        """Resolve an ASCII basis expression to a core ``Basis``.
+
+        ``ImageBasis(f)`` (f a parameterization or matrix var), ``OrthonormalBasis(b)``, ``DualBasis(b)``,
+        ``ListBasis(v1,…)``, ``WithInnerBasis(b,g)``, or a declared basis name.
+        """
         from grassmann.core import basis as _B
         node = parse_ast(expr) if isinstance(expr, str) else expr
         if isinstance(node, Name):
@@ -646,8 +671,11 @@ class _Builder:
         raise self.err(f"cannot resolve basis {expr!r}")
 
     def _basis_space_arg(self, arg, h: str):
-        """Resolve a StandardEuclideanBasis argument to a space node: a declared space name (``V``),
-        a dimension (``n`` ⇒ ``R^n``), a literal (``3`` ⇒ ``R^3``), or a space expr (``R^n``)."""
+        """Resolve a StandardEuclideanBasis argument to a space node.
+
+        A declared space name (``V``), a dimension (``n`` ⇒ ``R^n``), a literal (``3`` ⇒ ``R^3``), or a space
+        expr (``R^n``).
+        """
         if isinstance(arg, Name) and arg.text in self.space_env:
             return _node(self.space_env[arg.text])
         if isinstance(arg, Name):                       # a dimension name ⇒ R^<name>
@@ -672,8 +700,10 @@ class _Builder:
     # -- space materialisation ----------------------------------------------
 
     def named_slot(self, name: str) -> int:
-        """The slot for a user-declared dimension name (shared across all variables that name
-        it, e.g. ``x:vector(n)`` and ``A:matrix(m,n)`` share ``n``)."""
+        """The slot for a user-declared dimension name (shared across all variables that name it, e.g.
+
+        ``x:vector(n)`` and ``A:matrix(m,n)`` share ``n``).
+        """
         if name not in self.slot_of_dimname:
             sl = self.uf.fresh()
             self.uf.set_name(sl, name)
@@ -681,10 +711,12 @@ class _Builder:
         return self.slot_of_dimname[name]
 
     def space_of(self, slot: int):
-        """The space for a slot: the **default Euclidean space ℝ^N with N symbolic** — a Nat
-        dimension per independent slot (a user name if declared, else a fresh ``n{rep}``),
-        shared across unified slots. Stays dimension-polymorphic; concrete sizes are supplied
-        only at run time (matching matrixcalculus's symbolic-dimension model)."""
+        """The space for a slot.
+
+        The **default Euclidean space ℝ^N with N symbolic** — a Nat dimension per independent slot (a user
+        name if declared, else a fresh ``n{rep}``), shared across unified slots. Stays dimension-polymorphic;
+        concrete sizes are supplied only at run time (matching matrixcalculus's symbolic-dimension model).
+        """
         rep = self.uf.find(slot)
         if rep not in self.space_cache:
             if rep in self.uf.fixed:                  # a fixed geometry space (Img(J), …)
@@ -699,8 +731,11 @@ class _Builder:
         return McalcBuildError(msg)
 
     def _inner(self, slot: int, x_expr, y_expr):
-        """⟨x, y⟩ over the (now-unified) space at ``slot`` — built from the known space so it
-        works on composite operands that don't carry a static ``.space`` (unlike ``G.dot``)."""
+        """⟨x, y⟩ over the (now-unified) space at ``slot``.
+
+        Built from the known space so it works on composite operands that don't carry a static ``.space``
+        (unlike ``G.dot``).
+        """
         return _G.inner(self.space_of(slot))(x_expr, y_expr)
 
     def _pwl(self, cov: _TN, w_expr):
@@ -708,10 +743,12 @@ class _Builder:
         return w_expr if cov.pmap is None else cov.pmap()(w_expr)
 
     def _mark_bij(self, m: _TN) -> None:
-        """Assert a matrix operand of inv/det/logdet is invertible (``bij``) when it is a bare
-        variable. A composite operand (e.g. ``inv(X)`` inside ``det(...)``) is left alone — it
-        is bijective by construction when built from bij pieces (Solve/Dagger of a bijection);
-        if it isn't, the engine raises a clear error at diff time."""
+        """Assert a matrix operand of inv/det/logdet is invertible (``bij``) when it is a bare variable.
+
+        A composite operand (e.g. ``inv(X)`` inside ``det(...)``) is left alone — it is bijective by
+        construction when built from bij pieces (Solve/Dagger of a bijection); if it isn't, the engine raises
+        a clear error at diff time.
+        """
         if m.var_name is not None:
             self.bij_vars.add(m.var_name)
 
@@ -820,8 +857,10 @@ class _Builder:
     # -- unary ---------------------------------------------------------------
 
     def _scaled(self, a: _TN, r) -> _TN:
-        """Scale a typed node by scalar ``r`` (a thunk -> Expr|number), preserving its kind
-        and slots. For a covector, scale its Riesz vector."""
+        """Scale a typed node by scalar ``r`` (a thunk -> Expr|number), preserving its kind and slots.
+
+        For a covector, scale its Riesz vector.
+        """
         return _TN(a.kind, (lambda a=a, r=r: _G.scale(r(), a.emit())),
                    sp=a.sp, src=a.src, tgt=a.tgt, usp=a.usp, pmap=a.pmap)
 
@@ -1210,10 +1249,12 @@ def _wrap_lit(val: float):
 
 @dataclass
 class McalcResult:
-    """The compiled result of a matrixcalculus-style problem — the integration surface the
-    oracle harness and the website drive. Carries the primal term, the (shared) variable
-    ``Expr``s and their program-input keys, the symbolic dimension names, and the optional
-    derivative; plus helpers to instantiate the symbolic dims to concrete sizes and run."""
+    """The compiled result of a matrixcalculus-style problem.
+
+    The integration surface the oracle harness and the website drive. Carries the primal term, the (shared)
+    variable ``Expr``s and their program-input keys, the symbolic dimension names, and the optional
+    derivative; plus helpers to instantiate the symbolic dims to concrete sizes and run.
+    """
 
     builder: _Builder
     primal: object                       # grassmann Expr
@@ -1225,7 +1266,7 @@ class McalcResult:
 
     @property
     def vars(self) -> dict[str, object]:
-        """name -> the shared variable ``Expr`` (same object/uid wherever it occurs)."""
+        """Name -> the shared variable ``Expr`` (same object/uid wherever it occurs)."""
         return {n: tn.emit() for n, tn in self.builder.var_meta.items()}
 
     def input_key(self, name: str) -> str:
@@ -1234,9 +1275,11 @@ class McalcResult:
 
     @property
     def dim_names(self) -> list[str]:
-        """Every symbolic Nat dimension this problem is polymorphic over — collected from the
-        built term, so it includes both auto names (``"n0"``) and user-named dims from symbolic
-        spaces (``R^n`` → ``"n"``). Set these to concrete sizes to run / generate Python."""
+        """Every symbolic Nat dimension this problem is polymorphic over.
+
+        Collected from the built term, so it includes both auto names (``"n0"``) and user-named dims from
+        symbolic spaces (``R^n`` → ``"n"``). Set these to concrete sizes to run / generate Python.
+        """
         names = _collect_dim_vars(_node(self.primal))
         if self.derivative is not None:
             names |= _collect_dim_vars(self.derivative.node)
@@ -1244,22 +1287,26 @@ class McalcResult:
 
     def instantiate(self, node: object, dims: dict[str, int]) -> object:
         """Substitute concrete integer sizes for the symbolic Nat dims in ``node`` (a term
-        ``Expr``), so it can be lowered + run. ``dims`` maps dim-name -> int."""
+        ``Expr``), so it can be lowered + run. ``dims`` maps dim-name -> int.
+        """
         return instantiate(node, dims)
 
     @property
     def bases(self) -> dict[str, object]:
         """The declared bases resolved to core ``Basis`` nodes (raises per-basis on bad refs).
-        Used to validate the Bases section and to realize values (`realize_run`)."""
+
+        Used to validate the Bases section and to realize values (`realize_run`).
+        """
         return {nm: self.builder.resolve_basis(nm) for nm in self.builder.bases_src}
 
     def realize_run(self, node, values: dict, dims: dict | None = None,
                     realize: dict | None = None, raw_feed: dict | None = None):
-        """Run ``node`` realizing chosen values in declared bases. ``realize`` maps a variable
-        name -> a declared basis name; that value lowers in that basis. ``values`` are keyed by
-        variable name; ``raw_feed`` supplies extra program inputs by their raw key (e.g. a
-        parameterization immersion ``J``). Generalizes the geometry realization to declared
-        bases."""
+        """Run ``node`` realizing chosen values in declared bases.
+
+        ``realize`` maps a variable name -> a declared basis name; that value lowers in that basis. ``values``
+        are keyed by variable name; ``raw_feed`` supplies extra program inputs by their raw key (e.g. a
+        parameterization immersion ``J``). Generalizes the geometry realization to declared bases.
+        """
         import numpy as np
 
         from grassmann.lower.represent import represent
@@ -1274,10 +1321,12 @@ class McalcResult:
         return np.asarray(represent(_node(term), basis_env=env).run(feed)["result"])
 
     def numeric(self, dims: dict, values: dict, realize: dict | None = None) -> dict:
-        """The full end-to-end numeric run: instantiate symbolic dims, feed variable values
-        (matrixcalculus numpy convention), **finite-difference each opaque ∂f from its kernel**,
-        realize chosen bases, and return ``{"value", "gradient"}`` (gradient for a scalar primal
-        differentiated w.r.t. a vector/matrix ``wrt``). The wiring behind step ④."""
+        """The full end-to-end numeric run.
+
+        Instantiate symbolic dims, feed variable values (matrixcalculus numpy convention), **finite-difference
+        each opaque ∂f from its kernel**, realize chosen bases, and return ``{"value", "gradient"}`` (gradient
+        for a scalar primal differentiated w.r.t. a vector/matrix ``wrt``). The wiring behind step ④.
+        """
         import numpy as np
 
         from grassmann.lower.represent import represent
@@ -1338,9 +1387,11 @@ class McalcResult:
 
     @property
     def required_derivatives(self) -> list[dict]:
-        """The opaque-function derivatives the engine requires to evaluate the derivative
-        (step ④ in the UI) — one per opaque ``f`` used, with its source name and order. The
-        user supplies these numerically (a provided Jacobian or finite-difference) + a frame."""
+        """The opaque-function derivatives the engine requires to evaluate the derivative (step ④ in the UI).
+
+        One per opaque ``f`` used, with its source name and order. The user supplies these numerically (a
+        provided Jacobian or finite-difference) + a frame.
+        """
         if self.derivative is None:
             return []
         from grassmann.transform.diff import enumerate_derivative_inputs
@@ -1354,7 +1405,7 @@ class McalcResult:
 
     @property
     def var_kinds(self) -> dict[str, str]:
-        """name -> ``"scalar" | "vector" | "matrix"``."""
+        """Name -> ``"scalar" | "vector" | "matrix"``."""
         m = {"scalar": "scalar", "vec": "vector", "mat": "matrix"}
         return {n: m[tn.kind] for n, tn in self.builder.var_meta.items()}
 
@@ -1379,10 +1430,11 @@ class McalcResult:
         return out
 
     def run_node(self, node: object, values: dict[str, object], dims: dict[str, int]):
-        """Run a built node (primal or derivative) under the matrixcalculus numpy convention:
-        matrix inputs transposed in, 2-D results transposed out. ``values`` maps variable
-        name -> numpy array (matrices as rows=output × cols=input); ``dims`` maps dim-name ->
-        size."""
+        """Run a built node (primal or derivative) under the matrixcalculus numpy convention.
+
+        Matrix inputs transposed in, 2-D results transposed out. ``values`` maps variable name -> numpy array
+        (matrices as rows=output × cols=input); ``dims`` maps dim-name -> size.
+        """
         import numpy as np
         res = _G.run(self.instantiate(node, dims), self._inputs(values))["result"]
         res = np.asarray(res)
@@ -1397,8 +1449,11 @@ class McalcResult:
         return int(dims[self.builder.dim_label[rep]])
 
     def _geom_env_feed(self, points: dict[str, object], coords: dict[str, object]):
-        """Build the (basis_env, feed) for the geometry vars: realize each tangent value in
-        ``ImageBasis(J)`` and auto-feed the immersion ``dφ``/``d²φ`` at its point."""
+        """Build the (basis_env, feed) for the geometry vars.
+
+        Realize each tangent value in ``ImageBasis(J)`` and auto-feed the immersion ``dφ``/``d²φ`` at its
+        point.
+        """
         import numpy as np
 
         from grassmann.core import basis as _B
@@ -1419,8 +1474,10 @@ class McalcResult:
 
     def run_geometry(self, points: dict[str, object], coords: dict[str, object]):
         """Run a primal that contains **geometry** variables (declared on `tangent(phi)` etc.).
-        ``points`` maps parameterization name -> the point `u` (ℝᵏ); ``coords`` maps geometry-
-        var name -> its coordinate array in the tangent frame."""
+
+        ``points`` maps parameterization name -> the point `u` (ℝᵏ); ``coords`` maps geometry- var name -> its
+        coordinate array in the tangent frame.
+        """
         import numpy as np
 
         from grassmann.lower.represent import represent
@@ -1432,7 +1489,8 @@ class McalcResult:
         """Evaluate the **covariant derivative** (built with ``wrt`` = a parameterization) in a
         given ``direction`` (ℝᵏ tangent direction at the point). ``sections`` maps a tangent-var
         name -> its derivative-section coords (default the zero/constant section). Returns the
-        directional covariant derivative as an array."""
+        directional covariant derivative as an array.
+        """
         import numpy as np
 
         from grassmann.core import basis as _B
@@ -1453,7 +1511,8 @@ class McalcResult:
 
     def _geom_basis_env(self) -> dict:
         """The symbolic basis env realizing geometry values in ``ImageBasis(J)`` (and the
-        derivative sections in ``dφ⊗ImageBasis``) — used for both running and codegen."""
+        derivative sections in ``dφ⊗ImageBasis``) — used for both running and codegen.
+        """
         from grassmann.core import basis as _B
         from grassmann.lower.represent import default_basis
         env: dict = {}
@@ -1467,10 +1526,12 @@ class McalcResult:
         return env
 
     def geometry_source(self) -> dict:
-        """Standalone numpy source for a geometry/parameterization problem — the primal and (if
-        present) the derivative, realized via ``ImageBasis(J)``. The emitted functions take the
-        immersion ``dφ`` (and ``d²φ`` / sections / direction for the derivative) + tangent
-        coordinates. Returns ``{"primal_py": ..., "derivative_py": ...}`` (raw source)."""
+        """Standalone numpy source for a geometry/parameterization problem.
+
+        The primal and (if present) the derivative, realized via ``ImageBasis(J)``. The emitted functions take
+        the immersion ``dφ`` (and ``d²φ`` / sections / direction for the derivative) + tangent coordinates.
+        Returns ``{"primal_py": ..., "derivative_py": ...}`` (raw source).
+        """
         import polyarray as pa
 
         from grassmann.lower.numpy_renderers import op_renderers
@@ -1486,9 +1547,11 @@ class McalcResult:
         return out
 
     def grad(self, values: dict[str, object], dims: dict[str, int]):
-        """Numeric derivative of the primal w.r.t. ``wrt`` under the matrixcalculus numpy
-        convention. Scalar-f → gradient (vector, or matrix when ``wrt`` is a matrix);
-        vector-f → Jacobian. Matrix-shaped results come out (output, input) like numpy."""
+        """Numeric derivative of the primal w.r.t.
+
+        ``wrt`` under the matrixcalculus numpy convention. Scalar-f → gradient (vector, or matrix when ``wrt``
+        is a matrix); vector-f → Jacobian. Matrix-shaped results come out (output, input) like numpy.
+        """
         import numpy as np
         if self.derivative is None:
             raise McalcBuildError("no derivative — build_problem was called without wrt")
@@ -1530,8 +1593,10 @@ def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
 
 
 def _simplify_safe(expr):
-    """Run the rewrite simplifier on a derivative for a cleaner result; fall back to the raw
-    term if simplification fails (it must remain value-equivalent + lowerable)."""
+    """Run the rewrite simplifier on a derivative for a cleaner result.
+
+    Fall back to the raw term if simplification fails (it must remain value-equivalent + lowerable).
+    """
     try:
         return _G.simplify(expr)
     except Exception:  # noqa: BLE001
@@ -1549,19 +1614,23 @@ def build_problem(expr: str, wrt: str | None = None,
     ``scalar|vector|matrix`` (with optional ``(n)``/``(m,n)`` dims), or — when ``params`` maps
     a name to a :class:`grassmann.syntax.geometry.Parameterization` — a geometry space
     ``tangent(phi)|cotangent(phi)|normal(phi)|conormal(phi)``. Absent names default by the
-    naming convention (:func:`default_type`)."""
+    naming convention (:func:`default_type`).
+    """
     return _build(expr, decls, wrt, params, spaces, functions, bases)
 
 
 def mcbuild(expr: str, decls: dict[str, str] | None = None):
     """Parse a matrixcalculus-style string + variable declarations into a Grassmann ``Expr``
-    (the primal term). See :func:`build_problem` for the richer result surface."""
+    (the primal term). See :func:`build_problem` for the richer result surface.
+    """
     return _build(expr, decls, None).primal
 
 
 def mcdiff(expr: str, wrt: str, decls: dict[str, str] | None = None):
-    """Parse + differentiate: return ``G.diff(expr, wrt)`` — the coordinate-free derivative
-    map w.r.t. the declared variable ``wrt``."""
+    """Parse + differentiate: return ``G.diff(expr, wrt)`` — the coordinate-free derivative map w.r.t.
+
+    the declared variable ``wrt``.
+    """
     return _build(expr, decls, wrt).derivative
 
 
@@ -1569,7 +1638,8 @@ def instantiate(node: object, dims: dict[str, int]):
     """Substitute concrete integer sizes for symbolic Nat dimension variables in a built
     term, returning a runnable ``Expr``. Needed because the default space is ``ℝ^N`` with
     ``N`` symbolic (dimension-polymorphic), but lowering a plain symbolic-dim Euclidean var to
-    numbers needs a concrete size. ``dims`` maps dim-name (e.g. ``"n0"``) -> int."""
+    numbers needs a concrete size. ``dims`` maps dim-name (e.g. ``"n0"``) -> int.
+    """
     from grassmann.transform.rewrite import _subst_nat_in_term
     n = _node(node)
     for name, val in dims.items():

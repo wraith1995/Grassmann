@@ -717,8 +717,10 @@ class _Resolver:
     # -- binders -------------------------------------------------------------
 
     def _bind(self, node: LamN, env: _Env, *, basis_ctx: bool):
-        """Build the core binder list + a child env. Returns
-        ``(binders, child_env, term_var, basis_var)`` (the last two for BLam)."""
+        """Build the core binder list + a child env.
+
+        Returns ``(binders, child_env, term_var, basis_var)`` (the last two for BLam).
+        """
         child = env.child()
         binders: list = []
         term_var = None

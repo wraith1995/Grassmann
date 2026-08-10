@@ -102,7 +102,8 @@ class Expr:
 
         Notes are optional metadata that never affect equality/hashing (an annotated and
         an un-annotated handle over the same node compare equal). Existing notes are
-        merged; later keys win. Use :meth:`get_note` to read one back."""
+        merged; later keys win. Use :meth:`get_note` to read one back.
+        """
         merged = dict(self.note) if self.note else {}
         merged.update(kw)
         return Expr(self.node, self.tower, merged)
@@ -425,8 +426,9 @@ def _arg_node(x: object) -> object:
 
 
 def _peel_map_space(node: object) -> tuple[list[object], object] | None:
-    """If ``node`` is a (possibly curried) linear-map space ``~a * (~b * (... * cod))``,
-    return ``([a, b, ...], cod)``; else ``None``.
+    """If ``node`` is a (possibly curried) linear-map space ``~a * (~b * (...
+
+    * cod))``, return ``([a, b, ...], cod)``; else ``None``.
 
     A linear-map space is ``OProd(Dual(dom), cod)`` (`linear_map_space`). We peel left
     domains while the codomain is itself a map space, to support `>>` re-association.

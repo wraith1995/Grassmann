@@ -53,8 +53,9 @@ _counter = itertools.count()
 
 @dataclass(frozen=True)
 class Var:
-    """``Var(x, props?)`` — a (term) variable, optionally carrying asserted map
-    properties (`20 §6`: props ON VARS ONLY in v1).
+    """``Var(x, props?)`` — a (term) variable, optionally carrying asserted map properties (`20 §6`.
+
+    Props ON VARS ONLY in v1).
 
     ``space`` is the variable's space; ``uid`` is a fresh identity so that two distinct
     binders' variables of the same name/space do not collide (used by binders).
@@ -275,7 +276,8 @@ class NEval:
 @dataclass(frozen=True)
 class Compose:
     """``Compose(f, positions, gs…)`` — contract each ``gₖ``'s codomain into ``f``'s
-    selected slot."""
+    selected slot.
+    """
 
     f: Term
     positions: tuple[int, ...]
@@ -323,9 +325,11 @@ class Det:
 
 @dataclass(frozen=True)
 class LogDet:
-    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``
-    (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
-    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`."""
+    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f .
+
+    V ⊸ V`` (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
+    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`.
+    """
 
     f: Term
 
@@ -343,7 +347,8 @@ class OpaqueOp:
     ``fn`` is an optional numpy kernel (an ``A``-array → ``B``-array callable) used to
     *run* the op; it is excluded from equality/hash (``compare=False``) so two ops are
     equal iff their ``name``/``dom``/``cod`` agree.  ``OpaqueOp`` is a *payload* (the
-    function symbol), not a Term — it is applied via :class:`OpaqueApply`."""
+    function symbol), not a Term — it is applied via :class:`OpaqueApply`.
+    """
 
     name: str
     dom: Space
@@ -362,9 +367,11 @@ class OpaqueOp:
 
 @dataclass(frozen=True)
 class OpaqueApply:
-    """``OpaqueApply(op, arg)`` — apply an opaque map ``op`` to ``arg`` (a Term in
-    ``op.dom``), yielding a Term in ``op.cod``.  Differentiated via an auto-allocated
-    Jacobian tracer input — see :mod:`grassmann.transform.diff`."""
+    """``OpaqueApply(op, arg)``.
+
+    Apply an opaque map ``op`` to ``arg`` (a Term in ``op.dom``), yielding a Term in ``op.cod``.
+    Differentiated via an auto-allocated Jacobian tracer input — see :mod:`grassmann.transform.diff`.
+    """
 
     op: OpaqueOp
     arg: Term
@@ -411,8 +418,9 @@ class Pinv:
 
 @dataclass(frozen=True)
 class Corestrict:
-    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image,
-    ``f~ : dom(f) ⊸ Img(f)``.
+    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image, ``f~ .
+
+    Dom(f) ⊸ Img(f)``.
 
     This is the induced isomorphism of the **first isomorphism theorem**, in its
     ``ker f = 0`` form: ``f`` factors as ``dom(f) --f~--> Img(f) --ι--> cod(f)`` with ``f~``
@@ -490,11 +498,13 @@ class Dagger:
 
 @dataclass(frozen=True)
 class Sqrt:
-    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of a square endomorphism
-    ``f : V ⊸ V`` (the unique SPD ``S`` with ``S·S = f``).  Lowers via an eigendecomposition and
-    **fails loudly if ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization
-    factor: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the
-    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame (`§ realization`)."""
+    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of a square endomorphism ``f .
+
+    V ⊸ V`` (the unique SPD ``S`` with ``S·S = f``).  Lowers via an eigendecomposition and **fails loudly if
+    ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization factor: for an immersed metric
+    ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the whitening, so ``J·Sqrt(G)⁻¹`` is the polar
+    orthonormal frame (`§ realization`).
+    """
 
     f: Term
 
@@ -692,7 +702,8 @@ class Permute:
     (so ``Permute(v, (1, 0))`` transposes a 2-factor tensor / form). The arity must match
     ``v``'s factor count (checked at synthesis). Lowers to an axis transpose — the one
     tensor reordering the reshape-only ``Lift``/``InvLift`` cannot express (e.g. the
-    transpose of a ``(0,2)`` form, which ``Dagger`` only provides for proper maps)."""
+    transpose of a ``(0,2)`` form, which ``Dagger`` only provides for proper maps).
+    """
 
     vector: Term
     perm: tuple[int, ...]
@@ -707,14 +718,17 @@ class Permute:
 
 @dataclass(frozen=True)
 class TuplePermute:
-    """``TuplePermute(v, perm)`` — reorder the ``⊕`` *components* of ``v`` (the direct-sum
-    analogue of :class:`Permute`, which reorders ``⊗`` factors).
+    """``TuplePermute(v, perm)``.
+
+    Reorder the ``⊕`` *components* of ``v`` (the direct-sum analogue of :class:`Permute`, which reorders ``⊗``
+    factors).
 
     ``perm`` is a permutation: the result's component ``i`` is ``v``'s component ``perm[i]``,
     so ``v : ⊕(sₖ)`` maps to ``⊕(s_{perm[i]})``. Lowers to a block (stack-slice) permutation.
     Introduced as the clean output-correction node for canonical ``⊕`` ordering — the one
     reordering ``TupleEmbed``/``TupleProject`` can only express as a heavy sum of inject∘project
-    maps."""
+    maps.
+    """
 
     vector: Term
     perm: tuple[int, ...]
@@ -906,7 +920,8 @@ def _require_space_field(s: object, ctx: str) -> None:
 
 def _require_space_or_none(s: object, ctx: str) -> None:
     """Like :func:`_require_space_field` but permits ``None`` (an OPTIONAL space left to
-    inference, B1)."""
+    inference, B1).
+    """
     if s is not None and not is_space(s):
         raise TermError(f"{ctx}: expected a Space or None, got {s!r}")
 
