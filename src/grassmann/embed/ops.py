@@ -102,7 +102,8 @@ class Expr:
 
         Notes are optional metadata that never affect equality/hashing (an annotated and
         an un-annotated handle over the same node compare equal). Existing notes are
-        merged; later keys win. Use :meth:`get_note` to read one back."""
+        merged; later keys win. Use :meth:`get_note` to read one back.
+        """
         merged = dict(self.note) if self.note else {}
         merged.update(kw)
         return Expr(self.node, self.tower, merged)

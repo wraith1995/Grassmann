@@ -184,9 +184,10 @@ def compose(f: object, g: object, positions: list[int] | tuple[int, ...] | None 
 
 
 def chain(*fs: object, at: int = 0) -> Expr:
-    """Series composition ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]`` (right-applied at dual slot
-    ``at``). Sugar over nested single-arg :class:`Compose`; see
-    :func:`grassmann.core.term.chain`."""
+    """Series composition ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]`` (right-applied at dual slot ``at``).
+
+    Sugar over nested single-arg :class:`Compose`; see :func:`grassmann.core.term.chain`.
+    """
     return wrap(_t.chain(*[_term(f) for f in fs], at=at))
 
 
@@ -205,8 +206,10 @@ def logdet(f: object) -> Expr:
 
 
 class _OpaqueHandle:
-    """A callable handle for an opaque map ``f : dom → cod``.  ``f(x)`` builds an
-    ``OpaqueApply(op, x)`` wrapped as an :class:`Expr`."""
+    """A callable handle for an opaque map ``f : dom → cod``.
+
+    ``f(x)`` builds an ``OpaqueApply(op, x)`` wrapped as an :class:`Expr`.
+    """
 
     def __init__(self, op: object) -> None:
         self.op = op
@@ -228,7 +231,8 @@ def opaque(name: str, dom: object, cod: object, fn: object = None) -> _OpaqueHan
     ``fn`` is an optional numpy kernel (a ``dom``-array → ``cod``-array callable) used to *run*
     the op; omit it to build/differentiate symbolically only.  Returns a callable handle: apply
     it to an argument ``Expr`` to build ``f(x)``.  Differentiating ``f(x)`` allocates a required
-    Jacobian tracer input ``Df`` (surfaced by ``enumerate_derivative_inputs``, fed numerically)."""
+    Jacobian tracer input ``Df`` (surfaced by ``enumerate_derivative_inputs``, fed numerically).
+    """
     op = _t.OpaqueOp(name, _space(dom), _space(cod), fn)
     return _OpaqueHandle(op)
 
@@ -326,9 +330,11 @@ def kron(f: object, g: object) -> Expr:
 
 
 def pullback(v: object, target: object) -> Expr:
-    """``G.pullback(v, T)`` — transport the value ``v`` into the target space ``T``
-    (auto project/embed, structural recursion through ⊗/⊕/Dual). See
-    :func:`grassmann.transform.pullback.pullback`."""
+    """``G.pullback(v, T)``.
+
+    Transport the value ``v`` into the target space ``T`` (auto project/embed, structural recursion through
+    ⊗/⊕/Dual). See :func:`grassmann.transform.pullback.pullback`.
+    """
     from grassmann.transform.pullback import pullback as _pb
 
     return wrap(_pb(_term(v), _space(target)))
@@ -355,10 +361,12 @@ def pull_along(v: object, f: object) -> Expr:
 
 
 def transport_basis(b: object, f: object, target: object = None) -> Expr:
-    """``G.transport_basis(b, f)`` — the reference basis ``b`` of ``dom(f)`` transported
-    along ``f`` into ``Img(f)`` (the literal pushforward ``f(bᵢ)``, not orthonormalized,
-    hence rational).  ``b=None`` uses the standard basis. See
-    :func:`grassmann.transform.transport.transport_basis`."""
+    """``G.transport_basis(b, f)``.
+
+    The reference basis ``b`` of ``dom(f)`` transported along ``f`` into ``Img(f)`` (the literal pushforward
+    ``f(bᵢ)``, not orthonormalized, hence rational).  ``b=None`` uses the standard basis. See
+    :func:`grassmann.transform.transport.transport_basis`.
+    """
     from grassmann.transform.transport import transport_basis as _tb
 
     return wrap(_tb(
@@ -368,9 +376,10 @@ def transport_basis(b: object, f: object, target: object = None) -> Expr:
 
 
 def transport_cobasis(b: object, f: object, target: object = None) -> Expr:
-    """``G.transport_cobasis(b, f)`` — the ``T^{-⋆}`` dual / functional side of
-    :func:`transport_basis`. See
-    :func:`grassmann.transform.transport.transport_cobasis`."""
+    """``G.transport_cobasis(b, f)`` — the ``T^{-⋆}`` dual / functional side of :func:`transport_basis`.
+
+    See :func:`grassmann.transform.transport.transport_cobasis`.
+    """
     from grassmann.transform.transport import transport_cobasis as _tcb
 
     return wrap(_tcb(
@@ -380,10 +389,11 @@ def transport_cobasis(b: object, f: object, target: object = None) -> Expr:
 
 
 def diff(e: object, x: object, deps: dict | None = None) -> Expr:
-    """``G.diff(e, x, deps=None)`` — total covariant derivative of ``e`` w.r.t. the value
-    variable ``x`` (a map ``X ⊸ space(e)``). ``deps`` maps a marked var's ``uid`` to its
-    derivative map (or ``None`` for a fresh symbolic one). See
-    :func:`grassmann.transform.diff.diff`."""
+    """``G.diff(e, x, deps=None)`` — total covariant derivative of ``e`` w.r.t.
+
+    the value variable ``x`` (a map ``X ⊸ space(e)``). ``deps`` maps a marked var's ``uid`` to its derivative
+    map (or ``None`` for a fresh symbolic one). See :func:`grassmann.transform.diff.diff`.
+    """
     from grassmann.transform.diff import diff as _diff
 
     xv = _node(x)
@@ -394,26 +404,33 @@ def diff(e: object, x: object, deps: dict | None = None) -> Expr:
 
 
 def beta(e: object) -> Expr:
-    """``G.beta(e)`` — β-reduce applied binders (``Eval(LLam …)`` / ``NEval(Lam …)``) to a
-    fixpoint. See :func:`grassmann.transform.rewrite.beta`."""
+    """``G.beta(e)`` — β-reduce applied binders (``Eval(LLam …)`` / ``NEval(Lam …)``) to a fixpoint.
+
+    See :func:`grassmann.transform.rewrite.beta`.
+    """
     from grassmann.transform.rewrite import beta as _beta
 
     return wrap(_beta(_term(e)))
 
 
 def simplify(e: object) -> Expr:
-    """``G.simplify(e)`` — β + the always-valid algebraic cleanups (scalar/zero/identity
-    laws, sum flattening, involutions). See :func:`grassmann.transform.rewrite.simplify`."""
+    """``G.simplify(e)``.
+
+    Β + the always-valid algebraic cleanups (scalar/zero/identity laws, sum flattening, involutions). See
+    :func:`grassmann.transform.rewrite.simplify`.
+    """
     from grassmann.transform.rewrite import simplify as _simplify
 
     return wrap(_simplify(_term(e)))
 
 
 def normal_form(e: object, config: object = None) -> Expr:
-    """``G.normal_form(e, config=None)`` — rewrite to sum-of-products normal form (β,
-    distribution, contraction-push, collection, canonical ordering). Pass a
-    :class:`~grassmann.transform.rewrite.SoPConfig` to select aggressiveness. See
-    :func:`grassmann.transform.rewrite.sum_of_products`."""
+    """``G.normal_form(e, config=None)``.
+
+    Rewrite to sum-of-products normal form (β, distribution, contraction-push, collection, canonical
+    ordering). Pass a :class:`~grassmann.transform.rewrite.SoPConfig` to select aggressiveness. See
+    :func:`grassmann.transform.rewrite.sum_of_products`.
+    """
     from grassmann.transform.rewrite import DEFAULT_SOP
     from grassmann.transform.rewrite import sum_of_products as _sop
 
@@ -428,7 +445,8 @@ def latex(e: object) -> str:
     """``G.latex(e)`` — render a term/space (or its ``diff``) as a LaTeX string.
 
     Accepts an embed :class:`Expr` handle or a raw core node. See
-    :func:`grassmann.printer.latex.latex`."""
+    :func:`grassmann.printer.latex.latex`.
+    """
     from grassmann.printer.latex import latex as _latex
 
     return _latex(_node(e))
@@ -567,16 +585,21 @@ def bfn(dom: object, fn):
 
 
 def unparse(x: object) -> str:
-    """``G.unparse(x)`` — render a term/space/basis (or ``Expr``) as round-trippable
-    Unicode mathematical text. See :func:`grassmann.syntax.unparse`."""
+    """``G.unparse(x)``.
+
+    Render a term/space/basis (or ``Expr``) as round-trippable Unicode mathematical text. See
+    :func:`grassmann.syntax.unparse`.
+    """
     from grassmann.syntax import unparse as _u
 
     return _u(x)
 
 
 def parse(src: str, sort: str | None = None) -> object:
-    """``G.parse(s)`` — parse Unicode surface text back into a core node (the inverse of
-    :func:`unparse`). See :func:`grassmann.syntax.parse`."""
+    """``G.parse(s)`` — parse Unicode surface text back into a core node (the inverse of :func:`unparse`).
+
+    See :func:`grassmann.syntax.parse`.
+    """
     from grassmann.syntax import parse as _p
 
     return _p(src, sort)

@@ -139,7 +139,8 @@ def _check_subspace_obligations(ctx: Ctx) -> None:
     Once the surrounding context has run, each deferred target metavar should be solved
     (by the ⇐ check direction). A solved target must be a subspace of its parent; an
     *unsolved* target means the omitted projection target was never pinned down — an
-    ambiguity the caller must resolve by annotating it or supplying an expected space."""
+    ambiguity the caller must resolve by annotating it or supplying an expected space.
+    """
     from .subspace import is_subspace
 
     pending = ctx.subspace_obligations
@@ -270,7 +271,8 @@ def _external_requires_standard(data: object) -> bool:
     """Read the basis contract off an ``External``'s ``data`` payload without importing the
     lowering layer (`71 §2.4`): an op carrying ``basis_req`` whose value is ``"standard"``
     (the default :class:`~grassmann.lower.represent.BasisReq.STANDARD`) is meaningful only
-    in standard coordinates; one marked ``"equivariant"`` is basis-free."""
+    in standard coordinates; one marked ``"equivariant"`` is basis-free.
+    """
     req = getattr(data, "basis_req", None)
     if req is None:
         return False  # not a basis-aware op payload ⇒ no constraint to surface.
@@ -479,7 +481,8 @@ def _synth_trace(e: Trace, ctx: Ctx) -> Space:
 def _synth_det(e: Det | LogDet, ctx: Ctx) -> Space:
     """``Det(f)``/``LogDet(f)`` — scalar determinant of a *square* endomorphism ``f : V ⊸ V``.
 
-    Requires ``f``'s source space to equal its target space (mirrors :func:`_synth_sqrt`)."""
+    Requires ``f``'s source space to equal its target space (mirrors :func:`_synth_sqrt`).
+    """
     dom, cod = _map_dom_cod_resolved(e.f, ctx)
     if dom != cod:
         raise InferError(
@@ -491,7 +494,8 @@ def _synth_det(e: Det | LogDet, ctx: Ctx) -> Space:
 def _synth_opaque(e: OpaqueApply, ctx: Ctx) -> Space:
     """``OpaqueApply(op, arg)`` — apply opaque ``op : dom → cod`` to ``arg``.
 
-    The argument's synthesized space must unify with ``op.dom``; the result is ``op.cod``."""
+    The argument's synthesized space must unify with ``op.dom``; the result is ``op.cod``.
+    """
     arg_space = _synth_value(e.arg, ctx)
     try:
         unify(arg_space, e.op.dom, ctx.store)
@@ -655,8 +659,10 @@ def _synth_embed(e: Embed, ctx: Ctx) -> Space:
 
 
 def _synth_assert(e: Assert, ctx: Ctx) -> Space:
-    """``Assert(v, s)`` — unify ``v``'s space with ``s`` (recovering implicit metavars),
-    then let any **asserted map properties** of ``v`` *aid* inference (A3).
+    """``Assert(v, s)``.
+
+    Unify ``v``'s space with ``s`` (recovering implicit metavars), then let any **asserted map properties** of
+    ``v`` *aid* inference (A3).
 
     Structural unification of ``s`` solves the implicit space metavars in ``v``'s space
     (the basic unification aid). On top of that, if ``v`` is a property-bearing map
@@ -783,8 +789,10 @@ def _synth_lift(e: Lift | InvLift, ctx: Ctx) -> Space:
 
 
 def _synth_permute(e: Permute, ctx: Ctx) -> Space:
-    """``Permute(v, perm)`` — reorder ``v``'s tensor factors: result factor ``i`` is
-    ``v``'s factor ``perm[i]``."""
+    """``Permute(v, perm)`` — reorder ``v``'s tensor factors.
+
+    Result factor ``i`` is ``v``'s factor ``perm[i]``.
+    """
     s = ctx.store.resolve(_synth_value(e.vector, ctx))
     factors = list(_as_factors(s))
     n = len(factors)
@@ -800,8 +808,11 @@ def _synth_permute(e: Permute, ctx: Ctx) -> Space:
 
 
 def _synth_tuple_permute(e: TuplePermute, ctx: Ctx) -> Space:
-    """``TuplePermute(v, perm)`` — reorder ``v``'s ``⊕`` components: result component ``i`` is
-    ``v``'s component ``perm[i]`` (the direct-sum analogue of :func:`_synth_permute`)."""
+    """``TuplePermute(v, perm)`` — reorder ``v``'s ``⊕`` components.
+
+    Result component ``i`` is ``v``'s component ``perm[i]`` (the direct-sum analogue of
+    :func:`_synth_permute`).
+    """
     s = ctx.store.resolve(_synth_value(e.vector, ctx))
     if not isinstance(s, OPlus):
         raise InferError(f"TuplePermute: value must have a ⊕ space, got {s!r}")

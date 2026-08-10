@@ -240,8 +240,10 @@ def _ambient_dim(V: Expr) -> int:
 
 
 def _std_basis_vector(V: Expr, i: int, n: int) -> Expr:
-    """The ``i``-th standard basis vector ``eᵢ ∈ V = ℝⁿ`` as a constant (an ``External`` with no
-    arguments).  The volume form tensors these and projects the whole ``V⊗ⁿ`` onto ``Λⁿ``."""
+    """The ``i``-th standard basis vector ``eᵢ ∈ V = ℝⁿ`` as a constant (an ``External`` with no arguments).
+
+    The volume form tensors these and projects the whole ``V⊗ⁿ`` onto ``Λⁿ``.
+    """
     import numpy as np
 
     from grassmann.lower.represent import ExternalOp

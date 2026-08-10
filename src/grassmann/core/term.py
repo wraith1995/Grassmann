@@ -275,7 +275,8 @@ class NEval:
 @dataclass(frozen=True)
 class Compose:
     """``Compose(f, positions, gs…)`` — contract each ``gₖ``'s codomain into ``f``'s
-    selected slot."""
+    selected slot.
+    """
 
     f: Term
     positions: tuple[int, ...]
@@ -343,7 +344,8 @@ class OpaqueOp:
     ``fn`` is an optional numpy kernel (an ``A``-array → ``B``-array callable) used to
     *run* the op; it is excluded from equality/hash (``compare=False``) so two ops are
     equal iff their ``name``/``dom``/``cod`` agree.  ``OpaqueOp`` is a *payload* (the
-    function symbol), not a Term — it is applied via :class:`OpaqueApply`."""
+    function symbol), not a Term — it is applied via :class:`OpaqueApply`.
+    """
 
     name: str
     dom: Space
@@ -362,9 +364,11 @@ class OpaqueOp:
 
 @dataclass(frozen=True)
 class OpaqueApply:
-    """``OpaqueApply(op, arg)`` — apply an opaque map ``op`` to ``arg`` (a Term in
-    ``op.dom``), yielding a Term in ``op.cod``.  Differentiated via an auto-allocated
-    Jacobian tracer input — see :mod:`grassmann.transform.diff`."""
+    """``OpaqueApply(op, arg)``.
+
+    Apply an opaque map ``op`` to ``arg`` (a Term in ``op.dom``), yielding a Term in ``op.cod``.
+    Differentiated via an auto-allocated Jacobian tracer input — see :mod:`grassmann.transform.diff`.
+    """
 
     op: OpaqueOp
     arg: Term
@@ -692,7 +696,8 @@ class Permute:
     (so ``Permute(v, (1, 0))`` transposes a 2-factor tensor / form). The arity must match
     ``v``'s factor count (checked at synthesis). Lowers to an axis transpose — the one
     tensor reordering the reshape-only ``Lift``/``InvLift`` cannot express (e.g. the
-    transpose of a ``(0,2)`` form, which ``Dagger`` only provides for proper maps)."""
+    transpose of a ``(0,2)`` form, which ``Dagger`` only provides for proper maps).
+    """
 
     vector: Term
     perm: tuple[int, ...]
@@ -707,14 +712,17 @@ class Permute:
 
 @dataclass(frozen=True)
 class TuplePermute:
-    """``TuplePermute(v, perm)`` — reorder the ``⊕`` *components* of ``v`` (the direct-sum
-    analogue of :class:`Permute`, which reorders ``⊗`` factors).
+    """``TuplePermute(v, perm)``.
+
+    Reorder the ``⊕`` *components* of ``v`` (the direct-sum analogue of :class:`Permute`, which reorders ``⊗``
+    factors).
 
     ``perm`` is a permutation: the result's component ``i`` is ``v``'s component ``perm[i]``,
     so ``v : ⊕(sₖ)`` maps to ``⊕(s_{perm[i]})``. Lowers to a block (stack-slice) permutation.
     Introduced as the clean output-correction node for canonical ``⊕`` ordering — the one
     reordering ``TupleEmbed``/``TupleProject`` can only express as a heavy sum of inject∘project
-    maps."""
+    maps.
+    """
 
     vector: Term
     perm: tuple[int, ...]
@@ -906,7 +914,8 @@ def _require_space_field(s: object, ctx: str) -> None:
 
 def _require_space_or_none(s: object, ctx: str) -> None:
     """Like :func:`_require_space_field` but permits ``None`` (an OPTIONAL space left to
-    inference, B1)."""
+    inference, B1).
+    """
     if s is not None and not is_space(s):
         raise TermError(f"{ctx}: expected a Space or None, got {s!r}")
 

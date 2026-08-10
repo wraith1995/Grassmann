@@ -34,8 +34,11 @@ from grassmann.core.space import (
 
 
 def _norm(s: Space) -> Space:
-    """Canonicalize a space for structural comparison: expand static ``⊕ⁿ s`` to ``⊕(s,…,s)``
-    (recursively), so ``ℝⁿ`` compares equal whether written as ``OPlusRep`` or ``OPlus``."""
+    """Canonicalize a space for structural comparison.
+
+    Expand static ``⊕ⁿ s`` to ``⊕(s,…,s)`` (recursively), so ``ℝⁿ`` compares equal whether written as
+    ``OPlusRep`` or ``OPlus``.
+    """
     match s:
         case OPlusRep(count, inner) if isinstance(count, DimLit):
             return OPlus(tuple([_norm(inner)] * count.value))
@@ -172,9 +175,12 @@ def ffs_superspace(s: Space) -> Space | None:
 
 
 def split_map_space(s: Space) -> tuple[Space, Space] | None:
-    """Strict one-step peel of the linear-map encoding: ``OProd(Dual(dom), cod)`` → ``(dom, cod)``,
-    else ``None``. (The general multi-factor decoder is :func:`grassmann.infer.synth._decode_map_space`
-    via :func:`map_domain_codomain`; this is the syntactic 2-factor case, no synthesis.)"""
+    """Strict one-step peel of the linear-map encoding.
+
+    ``OProd(Dual(dom), cod)`` → ``(dom, cod)``, else ``None``. (The general multi-factor decoder is
+    :func:`grassmann.infer.synth._decode_map_space` via :func:`map_domain_codomain`; this is the syntactic
+    2-factor case, no synthesis.)
+    """
     if isinstance(s, OProd) and len(s.spaces) == 2 and isinstance(s.spaces[0], Dual):  # audit: ok EX-ISINSTANCE-LADDER — canonical syntactic peel: OProd(Dual, ·) or None by contract [approved 2026-07-03]
         return s.spaces[0].space, s.spaces[1]
     return None
