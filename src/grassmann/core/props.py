@@ -1,11 +1,11 @@
-"""Asserted map properties (`20` point 5, `25 §7`) — replaces ``IsoSpace``.
+"""Asserted map properties — replaces ``IsoSpace``.
 
 A linear-map var may carry **user-asserted, trusted** properties:
 
 - the booleans ``inj`` / ``surj`` / ``bij`` (v1), and/or
 - a (possibly symbolic) ``rank`` — or directly ``dim_ker`` / ``dim_img``.
 
-These are recorded on ``Var`` (`20 §6`: properties ON VARS ONLY in v1). They (a) set
+These are recorded on ``Var`` (properties live ON VARS ONLY in v1). They (a) set
 ``rank(f)`` for the FFS dimension rules and (b) license ``Solve`` (``bij``) / sharpen
 ``Pinv`` (``inj``/``surj``). If a rank is left unspecified it becomes a runtime atom
 ``δ_f`` at lowering — **no static rank-inference** in v1 (F3). Property *inference*
@@ -63,6 +63,7 @@ class MapProps:
             )
 
     def is_empty(self) -> bool:
+        """Report whether no property at all is asserted."""
         return not (
             self.inj
             or self.surj
@@ -91,7 +92,7 @@ class MapProps:
 
 
 # ---------------------------------------------------------------------------
-# Smart constructors / convenience singletons (mirror the `25 §F4` `props=` API).
+# Smart constructors / convenience singletons (mirror the builder `props=` API).
 # ---------------------------------------------------------------------------
 
 inj = MapProps(inj=True)

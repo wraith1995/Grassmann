@@ -1,10 +1,10 @@
-"""Bidirectional checking ``Γ ⊢ e ⇐ s`` (`25 §4`).
+"""Bidirectional checking ``Γ ⊢ e ⇐ s``.
 
 Default rule: synthesize ``e ⇒ s'`` then unify ``s' ~ s``. Propagation rules:
 
 - a ``Lam`` checked against ``Π(b:σ).τ`` pushes ``σ`` in and checks ``body ⇐ τ``;
 - an application checked against an expected ``s`` synthesizes and unifies the result
-  with ``s`` to **recover implicit params that appear only in the result** (`25 §4`).
+  with ``s`` to **recover implicit params that appear only in the result**.
 
 ``check_against`` accepts either a Space or a Type as the expected classifier.
 """
@@ -20,18 +20,49 @@ from .unify import unify
 
 
 def check(term: Term, expected: Space | Type, ctx: Ctx | None = None) -> None:
-    """Public ``⇐`` entry point. Raises on a mismatch (`25 §4`)."""
+    """Check ``term`` against the expected classifier.
+
+    Parameters
+    ----------
+    term
+        The term to check.
+    expected
+        The expected classifier — a Space or a Type.
+    ctx
+        Typing context; a fresh one is created at the top level.
+
+    Raises
+    ------
+    InferError
+        If ``term`` does not check against ``expected``.
+    """
     top = ctx is None
     if ctx is None:
         ctx = Ctx()
     check_against(term, expected, ctx)
     if top:
-        # B1: validate any deferred Project(v, None) obligations now that the expected
+        # Validate any deferred Project(v, None) obligations now that the expected
         # space has flowed in and solved their target metavars.
         _check_subspace_obligations(ctx)
 
 
 def check_against(term: object, expected: Space | Type, ctx: Ctx) -> None:
+    """Check ``term`` against ``expected`` in ``ctx``, without the top-level obligations.
+
+    Parameters
+    ----------
+    term
+        Candidate term; a non-term raises.
+    expected
+        The expected classifier — a Space or a Type.
+    ctx
+        Typing context, carrying metavariable solutions.
+
+    Raises
+    ------
+    InferError
+        If ``term`` is not a Term, or does not check against ``expected``.
+    """
     if not is_term(term):
         raise InferError(f"check: expected a Term, got {term!r}")
 
@@ -66,13 +97,13 @@ def _check_lam_against_pi(term: Lam, expected: Pi, ctx: Ctx) -> None:
     # v1: the binders' domains must structurally agree with the Π's; then check body.
     # We synthesize the Lam and unify against the full Π (handles the common nested case
     # for these examples). A deeper push-in is unnecessary while codomains are
-    # value-independent (`25` note in §3/§4).
+    # value-independent.
     got = synth(term, ctx)
     _check_type_eq(got, expected, ctx)
 
 
 def _check_type_eq(got: object, expected: Type, ctx: Ctx) -> None:
-    """Structural type equality with space unification at the leaves (`25 §4`)."""
+    """Compare types structurally, unifying spaces at the leaves."""
     match expected:
         case SpaceAsType():
             if isinstance(got, SpaceAsType):
