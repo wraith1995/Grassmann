@@ -1,4 +1,4 @@
-"""Term (vector) ADT (`20 §6`), with the two binders (`20 §1`/`§2`).
+"""Term (vector) ADT, with the two binders.
 
 Favors the FEMOracle impl, n-ary, real-only. The two binders replace the impl's
 ``Abstract`` + ``nonLinearVars``:
@@ -11,9 +11,9 @@ Favors the FEMOracle impl, n-ary, real-only. The two binders replace the impl's
 - **``Lam``** — the one general, body-polymorphic **non-linear** binder ``Lam(b:σ. body)``
   whose body may be a Term, Space, Type, or Nat, and whose domain ``b:σ`` is a value
   (a space ``s``), a space, or a nat. A ``Lam`` whose body is a Space / Type is a
-  **SpaceFunction / TypeFunction** (`20 §4`).
+  **SpaceFunction / TypeFunction**.
 
-Position/index convention (`20 §6`): one mechanism — an integer index list selects
+Position/index convention: one mechanism — an integer index list selects
 parameter slots (``Eval``/``NEval``/``Compose``), tensor indices to fuse
 (``Lift``/``InvLift`` + optional ``k``), or indices to contract (``Trace``).
 
@@ -53,11 +53,11 @@ _counter = itertools.count()
 
 @dataclass(frozen=True)
 class Var:
-    """``Var(x, props?)`` — a (term) variable, optionally carrying asserted map
-    properties (`20 §6`: props ON VARS ONLY in v1).
+    """``Var(x, props?)`` — a (term) variable, optionally carrying asserted map properties.
 
-    ``space`` is the variable's space; ``uid`` is a fresh identity so that two distinct
-    binders' variables of the same name/space do not collide (used by binders).
+    Properties live ON VARS ONLY. ``space`` is the variable's space; ``uid`` is a fresh
+    identity so that two distinct binders' variables of the same name/space do not collide
+    (used by binders).
     """
 
     name: str
@@ -274,9 +274,7 @@ class NEval:
 
 @dataclass(frozen=True)
 class Compose:
-    """``Compose(f, positions, gs…)`` — contract each ``gₖ``'s codomain into ``f``'s
-    selected slot.
-    """
+    """``Compose(f, positions, gs…)`` — contract each ``gₖ``'s codomain into ``f``'s selected slot."""
 
     f: Term
     positions: tuple[int, ...]
@@ -324,9 +322,10 @@ class Det:
 
 @dataclass(frozen=True)
 class LogDet:
-    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``
-    (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
-    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`.
+    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``.
+
+    The result is a ``Scalar``.  A dedicated node (not ``log(det f)``) because its derivative
+    is the clean ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`.
     """
 
     f: Term
@@ -416,11 +415,11 @@ class Pinv:
 
 @dataclass(frozen=True)
 class Corestrict:
-    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image,
-    ``f~ : dom(f) ⊸ Img(f)``.
+    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image.
 
-    This is the induced isomorphism of the **first isomorphism theorem**, in its
-    ``ker f = 0`` form: ``f`` factors as ``dom(f) --f~--> Img(f) --ι--> cod(f)`` with ``f~``
+    It is the map ``f~ : dom(f) ⊸ Img(f)``.  This is the induced isomorphism of the **first
+    isomorphism theorem**, in its ``ker f = 0`` form: ``f`` factors as
+    ``dom(f) --f~--> Img(f) --ι--> cod(f)`` with ``f~``
     an ISOMORPHISM and ``ι`` the inclusion.  Being an iso, :class:`Pinv` of it is its exact
     two-sided inverse (``Pinv(f~) : Img(f) ⊸ dom(f)``), and the two compose to the identity
     on either side — the *explicit* spelling of the identification ``dom(f) ≅ Img(f)`` that
@@ -495,11 +494,12 @@ class Dagger:
 
 @dataclass(frozen=True)
 class Sqrt:
-    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of a square endomorphism
-    ``f : V ⊸ V`` (the unique SPD ``S`` with ``S·S = f``).  Lowers via an eigendecomposition and
+    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of ``f : V ⊸ V``.
+
+    It is the unique SPD ``S`` with ``S·S = f``.  Lowers via an eigendecomposition and
     **fails loudly if ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization
     factor: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the
-    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame (`§ realization`).
+    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame.
     """
 
     f: Term
@@ -915,9 +915,7 @@ def _require_space_field(s: object, ctx: str) -> None:
 
 
 def _require_space_or_none(s: object, ctx: str) -> None:
-    """Like :func:`_require_space_field` but permits ``None`` (an OPTIONAL space left to
-    inference, B1).
-    """
+    """Require ``s`` to be a Space, or ``None`` for an OPTIONAL space left to inference (B1)."""
     if s is not None and not is_space(s):
         raise TermError(f"{ctx}: expected a Space or None, got {s!r}")
 
@@ -943,9 +941,10 @@ def _is_lam_body(body: object) -> bool:
 
 
 def _check_llam_linearity(vars: tuple[Var, ...], body: Term) -> None:
-    """Reject the structurally detectable ways a linear var would make the result
-    space *depend* on it (`20 §1`/`§2`): occurring in a ``Lam`` binder domain
-    annotation, or as an explicit space/nat argument of an ``NEval``/``App``.
+    """Reject the structurally detectable ways a linear var makes the result space depend on it.
+
+    Those are: occurring in a ``Lam`` binder domain annotation, or as an explicit space/nat
+    argument of an ``NEval``/``App``.
 
     Also requires each linear var to occur at least once in the body (a vacuous linear
     binder is almost always a mistake; full per-variable linearity is IW3).
@@ -1040,60 +1039,71 @@ def _space_children(s: object) -> tuple[object, ...]:
 
 
 def var(name: str, space: Space, props: MapProps | None = None) -> Var:
+    """Build a ``Var`` — a term variable of ``space``, with optional asserted map ``props``."""
     return Var(name, space, props)
 
 
 def external(space: Space, data: object, *args: Term) -> External:
+    """Build an ``External`` — a foreign value in ``space`` from opaque ``data`` and arg deps."""
     return External(space, data, tuple(args))
 
 
 def zero(space: Space | None = None) -> Zero:
+    """Build a ``Zero`` — the zero vector of ``space`` (``None`` leaves the space to inference)."""
     return Zero(space)
 
 
 def identity(space: Space) -> Identity:
+    """Build an ``Identity`` — the identity map on ``space``."""
     return Identity(space)
 
 
 def lit(value: float) -> Lit:
+    """Build a ``Lit`` — a real scalar literal."""
     return Lit(value)
 
 
 def scale(scalar: float | Term, vector: Term) -> Scale:
+    """Build a ``Scale`` — the scalar multiple ``scalar · vector``."""
     return Scale(scalar, vector)
 
 
 def sum_(*vectors: Term) -> Sum:
+    """Build a ``Sum`` — the n-ary vector addition of ``vectors``."""
     return Sum(tuple(vectors))
 
 
 def oplus_v(*vectors: Term) -> OPlusV:
+    """Build an ``OPlusV`` — the direct-sum stack of ``vectors``."""
     return OPlusV(tuple(vectors))
 
 
 def oprod_v(*vectors: Term) -> OProdV:
+    """Build an ``OProdV`` — the tensor product of ``vectors``."""
     return OProdV(tuple(vectors))
 
 
 def eval_(f: Term, positions: tuple[int, ...], *args: Term) -> Eval:
+    """Build an ``Eval`` — the linear application of ``f`` to ``args`` at ``positions``."""
     return Eval(f, tuple(positions), tuple(args))
 
 
 def neval(f: Term, positions: tuple[int, ...], *args: Term | Space | Dim) -> NEval:
+    """Build an ``NEval`` — the non-linear application of ``f`` to ``args`` at ``positions``."""
     return NEval(f, tuple(positions), tuple(args))
 
 
 def compose(f: Term, positions: tuple[int, ...], *gs: Term) -> Compose:
+    """Build a ``Compose`` — contract each ``gₖ``'s codomain into ``f``'s slot ``positions[k]``."""
     return Compose(f, tuple(positions), tuple(gs))
 
 
 def chain(*fs: Term, at: int = 0) -> Term:
-    """Series composition ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]`` (right-applied at dual slot
-    ``at``).
+    """Compose ``fs`` in series, ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]``, right-applied at dual slot ``at``.
 
     A thin smart constructor — **no new core node**. It mimics FEMOracle's nested
-    single-arg ``Compose`` (``pullback.py:778`` builds ``Compose(proj, (0,),
-    [Compose(conv, (0,), [embed])])`` for ``proj ∘ conv ∘ embed``). Each junction feeds
+    single-arg ``Compose``: ``proj ∘ conv ∘ embed`` is ``Compose(proj, (0,),
+    (Compose(conv, (0,), (embed,)),))``. Each junction feeds
     one map's codomain into the dual slot ``at`` of the map to its left, so
     ``chain(f, g) == Compose(f, (at,), (g,))`` and longer chains nest right-to-left.
 
@@ -1110,26 +1120,32 @@ def chain(*fs: Term, at: int = 0) -> Term:
 
 
 def trace(f: Term, i: int, j: int) -> Trace:
+    """Build a ``Trace`` — contract the primal index ``i`` of ``f`` with its dual index ``j``."""
     return Trace(f, i, j)
 
 
 def det(f: Term) -> Det:
+    """Build a ``Det`` — the determinant of the endomorphism ``f``."""
     return Det(f)
 
 
 def logdet(f: Term) -> LogDet:
+    """Build a ``LogDet`` — the log-determinant of the endomorphism ``f``."""
     return LogDet(f)
 
 
 def opaque_apply(op: OpaqueOp, arg: Term) -> OpaqueApply:
+    """Build an ``OpaqueApply`` — the application of the opaque map ``op`` to ``arg``."""
     return OpaqueApply(op, arg)
 
 
 def solve(f: Term) -> Solve:
+    """Build a ``Solve`` — the inverse map ``f⁻¹``."""
     return Solve(f)
 
 
 def pinv(f: Term) -> Pinv:
+    """Build a ``Pinv`` — the Moore–Penrose pseudo-inverse map ``f†``."""
     return Pinv(f)
 
 
@@ -1139,74 +1155,95 @@ def corestrict(f: Term) -> Corestrict:
 
 
 def sqrt(f: Term) -> Sqrt:
+    """Build a ``Sqrt`` — the SPD operator square root of the endomorphism ``f``."""
     return Sqrt(f)
 
 
 def solve_apply(f: Term, v: Term) -> SolveApply:
+    """Build a ``SolveApply`` — the solution of ``f·x = v``."""
     return SolveApply(f, v)
 
 
 def pinv_apply(f: Term, v: Term) -> PinvApply:
+    """Build a ``PinvApply`` — the applied pseudo-inverse ``f†·v``."""
     return PinvApply(f, v)
 
 
 def dagger(f: Term) -> Dagger:
+    """Build a ``Dagger`` — the metric-transpose adjoint of ``f``."""
     return Dagger(f)
 
 
 def inner(space: Space) -> Inner:
+    """Build an ``Inner`` — the inner-product map of ``space``."""
     return Inner(space)
 
 
 def flat(space: Space) -> Flat:
+    """Build a ``Flat`` — the musical ♭ ``space ⊸ space*``."""
     return Flat(space)
 
 
 def sharp(space: Space) -> Sharp:
+    """Build a ``Sharp`` — the musical ♯ ``space* ⊸ space``."""
     return Sharp(space)
 
 
 def project(vector: Term, space: Space | None = None) -> Project:
+    """Build a ``Project`` — project ``vector`` onto the subspace ``space``.
+
+    ``space=None`` leaves the target subspace to inference.
+    """
     return Project(vector, space)
 
 
 def embed(vector: Term, space: Space) -> Embed:
+    """Build an ``Embed`` — embed ``vector`` into the larger space ``space``."""
     return Embed(vector, space)
 
 
 def assert_(vector: Term, space: Space) -> Assert:
+    """Build an ``Assert`` — assert that ``vector`` has space ``space``."""
     return Assert(vector, space)
 
 
 def tuple_embed(space: Space, i: int) -> TupleEmbed:
+    """Build a ``TupleEmbed`` — inject the ``i``-th ⊕ component of ``space``."""
     return TupleEmbed(space, i)
 
 
 def tuple_project(space: Space, i: int) -> TupleProject:
+    """Build a ``TupleProject`` — extract the ``i``-th ⊕ component of ``space``."""
     return TupleProject(space, i)
 
 
 def remetric(vector: Term, metric: Term) -> Remetric:
+    """Build a ``Remetric`` — move ``vector`` into ``WithInner(space(vector), metric)``."""
     return Remetric(vector, metric)
 
 
 def lift(vector: Term, fused: tuple[int, ...], k: int | None = None) -> Lift:
+    """Build a ``Lift`` — fuse the tensor indices ``fused`` of ``vector``."""
     return Lift(vector, tuple(fused), k)
 
 
 def inv_lift(vector: Term, fused: tuple[int, ...], k: int | None = None) -> InvLift:
+    """Build an ``InvLift`` — the inverse reshape, splitting the indices ``fused`` apart."""
     return InvLift(vector, tuple(fused), k)
 
 
 def permute(vector: Term, perm: tuple[int, ...]) -> Permute:
+    """Build a ``Permute`` — reorder the ⊗ factors of ``vector``'s space by ``perm``."""
     return Permute(vector, tuple(perm))
 
 
 def tuple_permute(vector: Term, perm: tuple[int, ...]) -> TuplePermute:
+    """Build a ``TuplePermute`` — reorder the ⊕ components of ``vector`` by ``perm``."""
     return TuplePermute(vector, tuple(perm))
 
 
 def kron(f: Term, g: Term) -> Kron:
+    """Build a ``Kron`` — the Kronecker product of the maps ``f`` and ``g``."""
     return Kron(f, g)
 
 
@@ -1220,10 +1257,12 @@ def lam(
     body: Term | Space | Type | Dim,
     term_vars: tuple[Var, ...] = (),
 ) -> Lam:
+    """Build a ``Lam`` — the general non-linear binder over ``binders``."""
     return Lam(tuple(binders), body, tuple(term_vars))
 
 
 def frame(var: Var, basis_body: Basis) -> Frame:
+    """Build a ``Frame`` — bind the value ``var`` to the basis ``basis_body``."""
     return Frame(var, basis_body)
 
 
