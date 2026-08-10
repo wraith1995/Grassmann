@@ -13,6 +13,8 @@ See :mod:`grassmann.syntax.parse` for the inverse and the grammar.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator, Sequence
+
 from grassmann.core import basis as B
 from grassmann.core import kinds as K
 from grassmann.core import props as P
@@ -112,7 +114,7 @@ def _collect(node: object, bound_uids: frozenset[int], bound_names: frozenset[st
         _collect(child, bound_uids, bound_names, acc)
 
 
-def _iter_children(node: object):
+def _iter_children(node: object) -> Iterator[object]:
     """Yield core sub-objects (term/space/basis/dim/type/kind/props) of a node."""
     fields = getattr(node, "__dataclass_fields__", None)
     if not fields:
@@ -126,8 +128,8 @@ def _iter_children(node: object):
             yield from _explode(val)
 
 
-def _explode(item: object):
-    # a (name, kind) binder pair, or a plain core object
+def _explode(item: object) -> Iterator[object]:
+    """Yield the core object(s) inside ``item`` — a (name, kind) binder pair, or a node."""
     if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str):
         yield item[1]
         return
@@ -477,7 +479,7 @@ def _ints(xs: tuple[int, ...]) -> str:
 
 
 def _arg(a: object) -> str:
-    """An NEval/App argument: a Term, Space, or Dim."""
+    """Unparse an NEval/App argument — a Term, Space, or Dim."""
     if T.is_term(a):
         return _t(a)[0]
     if S.is_dim(a):
@@ -488,26 +490,34 @@ def _arg(a: object) -> str:
 
 
 def _barg(a: object) -> str:
-    """A BApp argument: a Term, Basis, Space, or Dim."""
+    """Unparse a BApp argument — a Term, Basis, Space, or Dim."""
     if B.is_basis(a):
         return _b(a)[0]
     return _arg(a)
 
 
-def _app_like(head: str, f: object, pos: tuple[int, ...], args, argf) -> str:
+def _app_like(
+    head: str,
+    f: object,
+    pos: tuple[int, ...],
+    args: Sequence[object],
+    argf: Callable[[object], str],
+) -> str:
+    """Render an application-shaped node ``head(f, [positions], args…)``."""
     fs = _t(f)[0] if T.is_term(f) else (_b(f)[0] if B.is_basis(f) else _t(f)[0])
     body = ", ".join(argf(a) for a in args)
     sep = f", {body}" if body else ""
     return f"{head}({fs}, {_ints(pos)}{sep})"
 
 
-def _binder(glyph: str, binders, body_str: str) -> str:
+def _binder(glyph: str, binders: Sequence[tuple[str, K.Kind]], body_str: str) -> str:
+    """Render a binder ``glyph name:sort, …. body``."""
     decls = ", ".join(f"{name}:{_k(sort)}" for name, sort in binders)
     return f"{glyph} {decls}. {body_str}"
 
 
 def _body(body: object) -> str:
-    """A Lam body: Term | Space | Type | Dim."""
+    """Unparse a Lam body — a Term, Space, Type, or Dim."""
     if T.is_term(body):
         return _t(body)[0]
     if S.is_space(body):
@@ -590,8 +600,10 @@ def _emit_body(node: object) -> str:
 
 
 def unparse(x: object) -> str:
-    """Render ``x`` (a core term/space/basis/dim/type/kind, or an embed ``Expr``)
-    as round-trippable Unicode text, with a typed-variable preamble for any free vars.
+    """Render ``x`` as round-trippable Unicode text.
+
+    ``x`` is a core term/space/basis/dim/type/kind, or an embed ``Expr``.  The output
+    carries a typed-variable preamble declaring any free variables.
     """
     node = _unwrap(x)
     acc = _Free()
