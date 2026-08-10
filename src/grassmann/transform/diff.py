@@ -1,4 +1,4 @@
-"""Total covariant differentiation — symbolic forward-mode (`§50`).
+"""Total covariant differentiation — symbolic forward-mode.
 
 ``diff(e, x, deps)`` differentiates a **closed** term ``e`` (no free space variables)
 w.r.t. a single value variable ``x : X``, returning the total derivative as a
@@ -35,6 +35,7 @@ from typing import assert_never
 
 import itertools
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -70,6 +71,7 @@ from grassmann.core.term import (
     LogDet,
     NEval,
     OpaqueApply,
+    OpaqueOp,
     OPlusV,
     OProdV,
     Permute,
@@ -118,7 +120,7 @@ class _DCtx:
 
 
 # ===========================================================================
-# Derivative-input provenance + enumeration (`§tracer-reqs`).
+# Derivative-input provenance + enumeration.
 #
 # A ``deps[uid] = None`` tracer differentiates into a fresh symbolic derivative-MAP input
 # ``∂ⁿsource/∂xⁿ : X ⊸ …`` (a Program input pointwise samples).  These two registries give the
@@ -134,8 +136,9 @@ _OPAQUE_JAC_BY_KEY: dict[tuple[str, Term], Var] = {}  # (op.name, arg) -> Jacobi
 
 @dataclass(frozen=True)
 class DerivInput:
-    """Provenance of a symbolic derivative-map input that ``diff`` allocated for a ``deps=None``
-    tracer.  ``var`` is the Program-input map ``∂ᵒʳᵈᵉʳsource/∂xᵒʳᵈᵉʳ``; ``source`` is the base
+    """Provenance of a symbolic derivative-map input allocated for a ``deps=None`` tracer.
+
+    ``var`` is the Program-input map ``∂ᵒʳᵈᵉʳsource/∂xᵒʳᵈᵉʳ``; ``source`` is the base
     tracer ``Var`` it ultimately differentiates; ``order`` is the derivative order (1 = first).
     """
 
@@ -145,11 +148,12 @@ class DerivInput:
 
 
 def _tower_space(ctx: _DCtx, cod: Space) -> Space:
-    """THE spelling of a derivative-tower var's space: ``X ⊸ cod`` built **FLAT** (`§flat-tower`).
+    """Build a derivative-tower var's space ``X ⊸ cod`` **FLAT**.
 
-    An order-``n`` derivative input is the order-``(n−1)`` one differentiated once more, so its
-    space is ``X ⊸ (X ⊸ (… ⊸ V))``.  :func:`linear_map_space` RIGHT-NESTS that, and each nesting
-    level is one array axis, so it would realize as ``(|X|, |X|ⁿ⁻¹·|V|)`` — a matrix whose second
+    This is THE spelling of such a var's space.  An order-``n`` derivative input is the
+    order-``(n−1)`` one differentiated once more, so its space is ``X ⊸ (X ⊸ (… ⊸ V))``.
+    :func:`linear_map_space` RIGHT-NESTS that, and each nesting level is one array axis, so it
+    would realize as ``(|X|, |X|ⁿ⁻¹·|V|)`` — a matrix whose second
     axis fuses ``n−1`` seed slots with the value.  This builder SPLICES instead, giving one axis
     per differentiation plus the value's own axes:
 
@@ -192,9 +196,10 @@ def _tower_space(ctx: _DCtx, cod: Space) -> Space:
 
 
 def _alloc_deriv_input(source: Var, ctx: _DCtx, space: Space | None = None) -> Var:
-    """Get-or-create the symbolic derivative-map input ``∂source/∂x`` (codomain space
-    ``source.space`` by default, or ``space`` when the derivative lands elsewhere — e.g. a metric
-    gradient ``M ⊸ M*⊗M*``), recording its provenance.  Deduped by ``(source.uid, x.uid)`` so
+    """Get-or-create the symbolic derivative-map input ``∂source/∂x``, recording its provenance.
+
+    The codomain space is ``source.space`` by default, or ``space`` when the derivative lands
+    elsewhere — e.g. a metric gradient ``M ⊸ M*⊗M*``.  Deduped by ``(source.uid, x.uid)`` so
     repeated/nested ``diff`` of the same source reuses one input.  When ``source`` is itself a
     derivative input, the new var inherits the base tracer and bumps the order (so an order-``n``
     chain reports ``(base, n)``).
@@ -216,11 +221,12 @@ def _alloc_deriv_input(source: Var, ctx: _DCtx, space: Space | None = None) -> V
 
 
 def enumerate_derivative_inputs(term: Term) -> list[DerivInput]:
-    """The symbolic derivative-map inputs (``deps=None`` tracer derivatives) that occur in ``term``,
-    each with provenance ``(base tracer var, derivative order)``.  A requirements pass reads this
-    after lowering to sample exactly the chart/field derivatives actually used — and to confirm
-    pruning unreferenced tracers leaves a valid program.  Deterministic order: by ``(source name,
-    order, uid)``.
+    """List the symbolic derivative-map inputs occurring in ``term``, with their provenance.
+
+    These are the ``deps=None`` tracer derivatives, each carrying ``(base tracer var, derivative
+    order)``.  A requirements pass reads this after lowering to sample exactly the chart/field
+    derivatives actually used — and to confirm pruning unreferenced tracers leaves a valid
+    program.  Deterministic order: by ``(source name, order, uid)``.
     """
     seen: dict[int, DerivInput] = {}
 
@@ -235,8 +241,10 @@ def enumerate_derivative_inputs(term: Term) -> list[DerivInput]:
 
 
 def clear_deriv_inputs() -> None:
-    """Drop all recorded derivative-input provenance + dedup keys (test hygiene / a fresh tracer
-    session).  Safe to omit — keys are globally unique Var uids, so stale reuse cannot occur.
+    """Drop all recorded derivative-input provenance and dedup keys.
+
+    For test hygiene / a fresh tracer session.  Safe to omit — keys are globally unique Var uids,
+    so stale reuse cannot occur.
     """
     _DERIV_INPUTS.clear()
     _DERIV_INPUT_BY_KEY.clear()
@@ -281,9 +289,7 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
 
 
 def _dd(e: Term, ctx: _DCtx) -> Term:
-    """The directional derivative of ``e`` in direction ``ctx.h`` — a value in
-    ``space(e)``.
-    """
+    """Differentiate ``e`` in direction ``ctx.h`` — a value in ``space(e)``."""
     match e:
         case Var():
             return _dd_var(e, ctx)
@@ -392,7 +398,7 @@ def _dd_var(e: Var, ctx: _DCtx) -> Term:
             ctx._ddval[e.uid] = Eval(dmap, (0,), (ctx.h,))
         return ctx._ddval[e.uid]
     if e.uid in _QR_FRAME_VARS:
-        # A self-differentiating QR-frame tower element (`§qr-tower`): its derivative is the next
+        # A self-differentiating QR-frame tower element: its derivative is the next
         # tower var, applied to the seed — ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.  Recursing through this
         # rule (``diff`` of ``Eval(Qₙ₊₁, h)`` hits ``Qₙ₊₁`` again) gives ARBITRARY differentiation
         # order from a single registry.
@@ -431,7 +437,7 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
         "sinh": lambda u: _cosh(u, sp),  # cosh(u)
         "cosh": lambda u: _sinh(u, sp),  # sinh(u)
         "tanh": lambda u: _recip(_prod(_cosh(u, sp), _cosh(u, sp), sp), sp),  # sech²(u)
-        # batch 2 — derivatives need the unit constant 1±g(u) (built via _ones, see above)
+        # derivatives needing the unit constant 1±g(u) (built via _ones, see above)
         "atan": lambda u: _recip(Sum((_ones(u, sp), _prod(u, u, sp))), sp),  # 1/(1+u²)
         "asin": lambda u: _recip(_sqrt(_one_minus_sq(u, sp), sp), sp),  # 1/√(1−u²)
         "acos": lambda u: Scale(-1.0, _recip(_sqrt(_one_minus_sq(u, sp), sp), sp)),  # −1/√(1−u²)
@@ -460,7 +466,7 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
             parts.append(_prod(coeff, dw, sp))
         return _sum(parts, e, ctx)
     if name == "hadamard":
-        # The pointwise linear op (goal 02): bilinear, so d(a⊙b) = da⊙b + a⊙db.
+        # The pointwise linear op: bilinear, so d(a⊙b) = da⊙b + a⊙db.
         a, b = args
         da, db = _dd(a, ctx), _dd(b, ctx)
         parts = []
@@ -476,9 +482,7 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
 
 
 def _dd_scale(e: Scale, ctx: _DCtx) -> Term:
-    """``d(r·v) = (dr)·v + r·(dv)`` — product rule (``r`` may be a constant or a scalar
-    term).
-    """
+    """``d(r·v) = (dr)·v + r·(dv)`` — product rule (``r`` may be a constant or a scalar term)."""
     r, v = e.scalar, e.vector
     dv = _dd(v, ctx)
     parts: list[Term] = []
@@ -491,9 +495,12 @@ def _dd_scale(e: Scale, ctx: _DCtx) -> Term:
     return _sum(parts, e, ctx)
 
 
-def _dd_multilinear_tuple(ctor, vs: tuple[Term, ...], ctx: _DCtx, e: Term) -> Term:
-    """Leibniz rule for an n-ary multilinear tuple node (``OProdV``): differentiate one
-    factor at a time, keeping the others.
+def _dd_multilinear_tuple(
+    ctor: Callable[[tuple[Term, ...]], Term], vs: tuple[Term, ...], ctx: _DCtx, e: Term
+) -> Term:
+    """Apply the Leibniz rule to an n-ary multilinear tuple node (``OProdV``).
+
+    Differentiate one factor at a time, keeping the others.
     """
     parts: list[Term] = []
     for k in range(len(vs)):
@@ -507,8 +514,9 @@ def _dd_multilinear_tuple(ctor, vs: tuple[Term, ...], ctx: _DCtx, e: Term) -> Te
 
 
 def _dd_eval(e: Eval, ctx: _DCtx) -> Term:
-    """``d(f(args)) = (df)(args) + Σₖ f(…, dargₖ, …)`` — product rule over the map and
-    every argument (the multilinear-form case).
+    """``d(f(args)) = (df)(args) + Σₖ f(…, dargₖ, …)``.
+
+    The product rule over the map and every argument (the multilinear-form case).
     """
     f, pos, args = e.f, e.positions, e.args
     parts: list[Term] = []
@@ -543,9 +551,10 @@ def _dd_compose(e: Compose, ctx: _DCtx) -> Term:
 
 
 def _subspace_defining_map(space: object) -> Term | None:
-    """The defining map ``f`` of a term-dependent subspace, else ``None`` (canonical, audit #18).
+    """Give the defining map ``f`` of a term-dependent subspace, else ``None``.
+
     Callers pass ``sub_or_J`` (a Space OR the map Term itself); a non-Space is simply not a
-    subspace node — the canonical probe is Space-strict.
+    subspace node — this canonical probe is Space-strict.
     """
     from grassmann.core.space import is_space
     from grassmann.infer.subspace import ffs_defining_map
@@ -554,7 +563,7 @@ def _subspace_defining_map(space: object) -> Term | None:
 
 
 # The four fundamental subspaces (FFS) of a linear map ``J : dom ⊸ cod`` and the AMBIENT space each
-# embeds into.  ``represent`` realizes each in a deterministic orthonormal frame (`§ffs-frame`):
+# embeds into.  ``represent`` realizes each in a deterministic orthonormal frame:
 #   Img(J)   ⊂ cod, range frame qr_pos(Jᵀ)        — δ = rank
 #   CoImg(J) ⊂ dom, range frame SVD V[:,:δ]       — δ = rank
 #   Ker(J)   ⊂ dom, complement frame SVD V[:,δ:]  — δ = dom−rank
@@ -565,7 +574,8 @@ _FFS_AMBIENT = {"img": "cod", "coimg": "dom", "ker": "dom", "coker": "cod"}
 
 
 def _ffs_kind(sub: object) -> str | None:
-    """The FFS kind string of a moving-subspace node, else ``None`` (canonical, audit #18).
+    """Give the FFS kind string of a moving-subspace node, else ``None``.
+
     Tolerates a Term (callers pass ``sub_or_J``) — a Term has no FFS kind.
     """
     from grassmann.core.space import is_space
@@ -575,7 +585,7 @@ def _ffs_kind(sub: object) -> str | None:
 
 
 def _ffs_ambient(kind: str, J: Term) -> Space:
-    """The ambient space (``dom`` or ``cod`` of ``J``) the FFS ``kind`` embeds into."""
+    """Give the ambient space (``dom`` or ``cod`` of ``J``) the FFS ``kind`` embeds into."""
     from grassmann.infer.synth import synth_space
 
     dom, cod = _map_dom_cod(synth_space(J))
@@ -585,16 +595,17 @@ def _ffs_ambient(kind: str, J: Term) -> Space:
 
 
 def _ffs_frame_value(kind: str, Jval: np.ndarray, rank: int | None = None) -> np.ndarray:
-    """The ambient orthonormal frame columns of the FFS ``kind`` for immersion ``Jval`` (grassmann
-    ``(dom=k, cod=n)`` layout).  Returns shape ``(ambient_dim, δ)`` — Img via QR, the other three via
-    a full SVD of ``Jm = Jval.T`` (cod×dom).  ``represent`` lowers exactly these frames (`§ffs-frame`,
-    probed to machine precision).
+    """Give the ambient orthonormal frame columns of the FFS ``kind`` for immersion ``Jval``.
+
+    ``Jval`` is in the grassmann ``(dom=k, cod=n)`` layout; the result has shape
+    ``(ambient_dim, δ)`` — Img via QR, the other three via a full SVD of ``Jm = Jval.T``
+    (cod×dom).  ``represent`` lowers exactly these frames (probed to machine precision).
 
     ``rank`` PINS the slice width.  Defaults to the numeric ``matrix_rank(Jm)``, but a moving NON-full
     rank subspace (e.g. a non-injective ``Img(J)``) must pass the DECLARED rank: the Taylor-reconstructed
     ``Jm`` drifts off the rank-``r`` manifold at finite δ, so its numeric rank jumps (spurious small
-    singular values) and the slice width would change between FD steps — fixing ``rank`` keeps δ constant
-    (the §ffs-frame-drift subtlety).
+    singular values) and the slice width would change between FD steps — fixing ``rank`` keeps δ
+    constant.
     """
     Jm = Jval.T  # ambient immersion columns, cod×dom
     if rank is None:
@@ -621,22 +632,22 @@ def _ffs_frame_value(kind: str, Jval: np.ndarray, rank: int | None = None) -> np
 
 
 # ---------------------------------------------------------------------------
-# Gauge of a moving subspace (`§gauge`).  Differentiating a section of a moving subspace needs a
+# Gauge of a moving subspace.  Differentiating a section of a moving subspace needs a
 # *connection* (a gauge): the realization frame ``Q`` of ``Img(J)`` is defined only up to ``O(k)``,
 # and the derivative depends on the choice.  The gauge is a property of the SPACE — keyed here by the
 # defining map's uid — read by ``diff`` to pick the frame ``(Q, dQ)``.  ``represent`` is untouched: it
 # realizes the subspace in its basis and cobs the value to any output basis, exactly as before.
 #
-# Gauge-awareness lives ENTIRELY in ``diff`` + this registry.  The default ``immersion`` gauge
-# (``Q = J``, ``dQ = ∂J``) makes the arms byte-identical to the prior behavior.  ``polar``
+# Gauge-awareness lives ENTIRELY in ``diff`` + this registry.  The ``immersion`` gauge
+# (``Q = J``, ``dQ = ∂J``) is the literal immersion frame.  ``polar``
 # (``Q = J·G^{-1/2}``, via the SPD ``Sqrt`` primitive) is the closed-form orthonormal gauge.  An
-# opaque (e.g. QR) gauge — ``dQ`` supplied as a program-backed variable — is a later phase (P2).
+# opaque (e.g. QR) gauge supplies ``dQ`` as a program-backed variable.
 # uid -> (gauge_name, frame, frame_deriv).  frame/frame_deriv are used only by OPAQUE gauges (qr/…).
 _SUBSPACE_GAUGE: dict[int, tuple[str, Term | None, Term | None]] = {}
 # The DEFAULT gauge is ``qr`` — the realization frame ``Q`` of ``Img(J)`` that ``represent``
 # actually lowers (the orthonormal ``ProjectedBasis = qr_pos(Jᵀ)``).  So an unregistered moving
 # subspace differentiates in the SAME frame its value lives in, with no per-test pinning.  The
-# opaque ``dQ`` is supplied through auto-created program-backed variables (`§qr-auto`), seeded by
+# opaque ``dQ`` is supplied through auto-created program-backed variables, seeded by
 # :func:`qr_gauge_feed` — ``represent`` stays untouched.
 _DEFAULT_GAUGE = "qr"
 
@@ -644,8 +655,9 @@ _DEFAULT_GAUGE = "qr"
 def set_subspace_gauge(
     defining_map: Term, gauge: str, *, frame: Term | None = None, frame_deriv: Term | None = None,
 ) -> None:
-    """Register the AD gauge for the moving subspace ``Img(defining_map)``.  Read by ``diff`` ONLY;
-    ``represent`` is unaffected.
+    """Register the AD gauge for the moving subspace ``Img(defining_map)``.
+
+    Read by ``diff`` ONLY; ``represent`` is unaffected.
 
     * ``"immersion"``, ``"polar"`` — closed-form frames (no extra args).
     * ``"qr"`` (the DEFAULT) — the orthonormal ``ProjectedBasis`` frame ``Q = qr_pos(Jᵀ)``.  With no
@@ -666,15 +678,15 @@ def clear_subspace_gauges() -> None:
     _QR_NEXT.clear()
 
 
-# --- opaque QR gauge (`§qr-auto`): the default frame is the lowered ``ProjectedBasis`` ------------
+# --- opaque QR gauge: the default frame is the lowered ``ProjectedBasis`` ------------------------
 # ``represent`` realizes a moving ``Img(J)`` in the orthonormal ``ProjectedBasis = qr_pos(Jᵀ)``.
 # The matching AD gauge frame ``Q`` (and its motion ``∂ⁿQ/∂xⁿ``) has NO closed form the substrate can
 # thread, so we supply it as opaque program-backed variables, auto-created on demand and seeded
 # numerically by :func:`qr_gauge_feed`.  The frame is a SELF-DIFFERENTIATING TOWER
-# ``Q₀ = Q, Q₁ = ∂Q/∂x, Q₂ = ∂²Q/∂x², …``: ``diff`` of any tower element yields the next one
-# (`§qr-tower`), so the opaque QR gauge supports ARBITRARY differentiation order.  Each ``Qₙ`` lives
+# ``Q₀ = Q, Q₁ = ∂Q/∂x, Q₂ = ∂²Q/∂x², …``: ``diff`` of any tower element yields the next one,
+# so the opaque QR gauge supports ARBITRARY differentiation order.  Each ``Qₙ`` lives
 # in ``_tower_space(X, Qₙ₋₁.space)`` — the flat ``(|X|,…,|X|,k,n)`` layout of the n-th derivative
-# tensor, one axis per differentiation (see `§flat-tower`).  ``diff`` treats ``Qₙ`` like a
+# tensor, one axis per differentiation (see :func:`_tower_space`).  ``diff`` treats ``Qₙ`` like a
 # marked-variable derivative: ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.
 #
 # ``_QR_AUTO_VARS``: ``(J.uid, kind) -> Q₀`` (the realization frame; one per (defining map, FFS kind)
@@ -692,9 +704,8 @@ def _qr_next(e: Var, ctx: _DCtx) -> Var:
     """Get-or-create ``e``'s derivative tower var ``∂e/∂x``.
 
     Its space is ``_tower_space(X, e.space)`` — the FLAT ``(|X|, …, |X|, k, n)`` spelling this
-    section documents (`§flat-tower`).  The new var is registered in ``_QR_FRAME_VARS`` (so it too
-    is self-differentiating) and in ``_QR_NEXT``.  Drives the arbitrary-order QR frame tower
-    (`§qr-tower`).
+    section documents.  The new var is registered in ``_QR_FRAME_VARS`` (so it too is
+    self-differentiating) and in ``_QR_NEXT``.  Drives the arbitrary-order QR frame tower.
 
     Parameters
     ----------
@@ -715,9 +726,11 @@ def _qr_next(e: Var, ctx: _DCtx) -> Var:
     return _QR_NEXT[e.uid]
 
 
-def _qr_pos(M: np.ndarray):
-    """Positive-diagonal (``R``) QR of ``M`` — the unique factorization ``M = Q·R`` with
-    ``diag(R) > 0`` (so ``Q`` is a deterministic orthonormal frame, == grassmann ``ProjectedBasis``).
+def _qr_pos(M: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Give the positive-diagonal (``R``) QR of ``M``.
+
+    The unique factorization ``M = Q·R`` with ``diag(R) > 0`` (so ``Q`` is a deterministic
+    orthonormal frame, == grassmann ``ProjectedBasis``).
     """
     q, r = np.linalg.qr(M)
     s = np.sign(np.diag(r))
@@ -726,8 +739,10 @@ def _qr_pos(M: np.ndarray):
 
 
 def _qr_dQ(Q: np.ndarray, R: np.ndarray, dJm: np.ndarray) -> np.ndarray:
-    """The analytic QR frame differential.  For ``Q,R = _qr_pos(Jm)`` (``Jm`` of shape ``(n,k)``)
-    and a column perturbation ``dJm`` (``(n,k)``), the motion of the orthonormal factor is
+    """Give the analytic QR frame differential.
+
+    For ``Q,R = _qr_pos(Jm)`` (``Jm`` of shape ``(n,k)``) and a column perturbation ``dJm``
+    (``(n,k)``), the motion of the orthonormal factor is
 
         M = Qᵀ·dJm·R⁻¹ ,   Ω = tril(M,−1) − tril(M,−1)ᵀ ,   dQ = Q·Ω + (I − Q·Qᵀ)·dJm·R⁻¹ .
 
@@ -743,11 +758,12 @@ def _qr_dQ(Q: np.ndarray, R: np.ndarray, dJm: np.ndarray) -> np.ndarray:
 
 
 def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
-    """Get-or-create the opaque realization frame ``Q₀`` for the moving FFS subspace ``sub`` of
-    defining map ``J``, keyed by ``(J.uid, kind)`` — ``Img(J)`` and ``Ker(J)`` of the SAME ``J`` get
-    SEPARATE frames.  ``Q₀`` lives in the grassmann frame-map space ``coords ⊸ ambient`` (stored
+    """Get-or-create the opaque realization frame ``Q₀`` of the moving FFS subspace ``sub``.
+
+    Keyed by ``(J.uid, kind)`` for defining map ``J`` — ``Img(J)`` and ``Ker(J)`` of the SAME ``J``
+    get SEPARATE frames.  ``Q₀`` lives in the grassmann frame-map space ``coords ⊸ ambient`` (stored
     ``(δ, ambient_dim)``); it is registered in ``_QR_FRAME_VARS`` so it is self-differentiating —
-    ``_dd(Q₀)`` grows the tower ``Q₁ = ∂Q/∂x, …`` on demand (`§qr-tower`).
+    ``_dd(Q₀)`` grows the tower ``Q₁ = ∂Q/∂x, …`` on demand.
 
     For ``Img`` the coordinate space IS ``J``'s domain, so ``Q₀ : J.space`` exactly reproduces the
     prior Img path (byte-identical).  For ``CoImg/Ker/CoKer`` the coordinate space is the moving
@@ -782,10 +798,17 @@ def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
 _NESTED_FD_EPS = {1: 1e-4, 2: 4e-3, 3: 8e-3}
 
 
-def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -> np.ndarray:
-    """The ``order``-th derivative tensor of ``f : R^nX → array`` at ``x0`` by NESTED,
-    **Richardson-extrapolated** central differences over the ``nX`` coordinate directions.  Each
-    level uses ``(4·D(h/2) − D(h))/3`` (``D`` the central difference), cancelling the ``O(eps²)``
+def _nth_deriv_tensor(
+    f: Callable[[np.ndarray], np.ndarray],
+    x0: np.ndarray,
+    order: int,
+    eps: float | None = None,
+) -> np.ndarray:
+    """Give the ``order``-th derivative tensor of ``f : R^nX → array`` at ``x0``.
+
+    Computed by NESTED, **Richardson-extrapolated** central differences over the ``nX``
+    coordinate directions.  Each level uses ``(4·D(h/2) − D(h))/3`` (``D`` the central
+    difference), cancelling the ``O(eps²)``
     truncation ⇒ ``O(eps⁴)`` per level — sharp enough that the fed ``∂ⁿQ`` tower is accurate, not
     smoke-accurate.  Returns shape ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th direction);
     mixed partials are symmetric, so it is symmetric in its first ``order`` axes.
@@ -796,7 +819,7 @@ def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -
         eps = _NESTED_FD_EPS.get(order, 1e-2)
     nX = x0.shape[0]
 
-    def g(x):  # the (order-1) tensor — itself Richardson-extrapolated
+    def g(x: np.ndarray) -> np.ndarray:  # the (order-1) tensor — itself Richardson-extrapolated
         return _nth_deriv_tensor(f, x, order - 1, eps)
 
     blocks = []
@@ -809,10 +832,14 @@ def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -
     return np.stack(blocks, axis=0)
 
 
-def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
-    """Numeric values for the auto-created opaque gauge TOWER of a moving FFS subspace (the default
-    ``qr`` gauge, `§qr-tower`).  Fills the ENTIRE realized frame tower ``Q₀ = Q, Q₁ = ∂Q/∂x, …`` to
-    whatever depth ``diff`` grew it — so arbitrary-order FFS AD lowers.
+def ffs_gauge_feed(
+    sub_or_J: Space | Term, J_deriv_tower: Sequence[Var] | Var, feed: dict
+) -> dict:
+    """Build the numeric values of the auto-created opaque gauge TOWER of a moving FFS subspace.
+
+    This is the default ``qr`` gauge.  Fills the ENTIRE realized frame tower
+    ``Q₀ = Q, Q₁ = ∂Q/∂x, …`` to whatever depth ``diff`` grew it — so arbitrary-order FFS AD
+    lowers.
 
     ``sub_or_J`` selects the case: pass the moving-subspace NODE (``Img(J)/CoImg(J)/Ker(J)/CoKer(J)``)
     to feed that exact frame; passing the bare defining map ``J`` is the back-compat ``Img`` alias
@@ -825,7 +852,7 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
     and takes each ``∂ⁿQ/∂xⁿ`` tensor at ``δ=0`` by NESTED Richardson central differences.  Returns
     ``{Qₙ: value}`` for every realized tower var, shaped ``(|X|,)*n + (δ, ambient)`` — the derivative
     tensor's own layout, fed through unreshaped, because the tower var's space is the FLAT
-    ``_tower_space`` spelling (`§flat-tower`).
+    ``_tower_space`` spelling.
 
     SVD ordering must be consistent across the tiny FD steps — pick a generic ``J`` with well-separated
     singular values (degenerate spectra rotate the frame discontinuously).  Call after ``diff`` so the
@@ -847,7 +874,7 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
     # PIN the frame slice width at the base immersion's numeric rank.  A moving non-full-rank subspace
     # (non-injective Img) reconstructs OFF its rank-r manifold at finite δ, so the per-δ numeric rank
     # would jump and the slice width with it — fixing it here keeps the δ-dimension constant across the
-    # nested FD steps so the ∂ⁿQ tower has a stable shape (the §ffs-frame-drift subtlety).
+    # nested FD steps so the ∂ⁿQ tower has a stable shape.
     base_rank = int(np.linalg.matrix_rank(Jval.T))
 
     def J_at(delta: np.ndarray) -> np.ndarray:
@@ -862,7 +889,7 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
         return acc  # (k, n)
 
     def Q_at(delta: np.ndarray) -> np.ndarray:
-        """The grassmann (δ, ambient) realization frame Q₀ at x₀+δ for this FFS case."""
+        """Give the grassmann (δ, ambient) realization frame Q₀ at x₀+δ for this FFS case."""
         return _ffs_frame_value(kind, J_at(delta), base_rank).T  # frame (ambient, δ) ⇒ (δ, ambient)
 
     # Walk the realized tower Q₀ → Q₁ → … via _QR_NEXT; fill each to its order.
@@ -877,7 +904,7 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
                 f"ffs_gauge_feed: tower needs ∂^{order}Q but only {depth} J-derivative(s) supplied; "
                 f"mark J→DJ→…→D^{order}J in the nested diffs and pass them all"
             )
-        # shape (|X|,)*order + (δ, ambient) — already the FLAT tower layout (`§flat-tower`), so it
+        # shape (|X|,)*order + (δ, ambient) — already the FLAT tower layout, so it
         # goes in unreshaped; order 0 is the bare frame (δ, ambient).
         out[f"{var.name}_{var.uid}"] = _nth_deriv_tensor(Q_at, x0, order)
         nxt = _QR_NEXT.get(var.uid)
@@ -888,20 +915,21 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
     return out
 
 
-def qr_gauge_feed(J: Term, J_deriv_tower, feed: dict) -> dict:
-    """Back-compat ``Img`` alias of :func:`ffs_gauge_feed` — fills the opaque ``ProjectedBasis`` (QR)
-    frame tower of ``Img(J)`` (the default gauge).  ``J`` is the bare defining map; see
+def qr_gauge_feed(J: Term, J_deriv_tower: Sequence[Var] | Var, feed: dict) -> dict:
+    """Fill the opaque ``ProjectedBasis`` (QR) frame tower of ``Img(J)`` — the default gauge.
+
+    The ``Img`` alias of :func:`ffs_gauge_feed`.  ``J`` is the bare defining map; see
     :func:`ffs_gauge_feed` for the general FFS cases (pass the subspace node).
     """
     return ffs_gauge_feed(J, J_deriv_tower, feed)
 
 
 def _gauge_frame(J: Term, dJ: Term, sub: Space, kind: str, ctx: _DCtx) -> tuple[Term, Term]:
-    """The realization frame ``Q`` of the moving FFS subspace ``sub`` (kind ``"img"/"coimg"/"ker"/
-    "coker"``) and its motion ``dQ`` for the subspace's gauge.
+    """Give the realization frame ``Q`` of the moving FFS subspace ``sub`` and its motion ``dQ``.
 
+    ``kind`` is ``"img"/"coimg"/"ker"/"coker"``; the frame is the one the subspace's gauge names.
     The DEFAULT gauge is ``qr`` — the orthonormal frame ``represent`` actually lowers — supplied via
-    AUTO-created opaque program-backed vars (`§qr-auto`).  For ``Img`` two closed-form gauges also
+    AUTO-created opaque program-backed vars.  For ``Img`` two closed-form gauges also
     exist: ``immersion`` ⇒ ``(J, ∂J)`` (the literal immersion); ``polar`` ⇒ ``(J·G^{-1/2},
     ∂(J·G^{-1/2}))``, ``G = JᵀJ`` (the ``Sqrt`` primitive).  An OPAQUE gauge with an explicit
     ``frame``/``frame_deriv`` ⇒ ``(frame, (∂Q/∂x)·h)``.  ``CoImg/Ker/CoKer`` have no such immersion
@@ -944,16 +972,18 @@ def _gauge_frame(J: Term, dJ: Term, sub: Space, kind: str, ctx: _DCtx) -> tuple[
 
 
 def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
-    """``d(embed(v, big))`` — embed IS ``di`` (the differential of the embedding).  When ``v``'s home
-    space ``Sub(J)`` has an x-dependent defining map ``J`` the derivative is
+    """``d(embed(v, big))`` — embed IS ``di``, the differential of the embedding.
+
+    When ``v``'s home space ``Sub(J)`` has an x-dependent defining map ``J`` the derivative is
 
         d(embed(v)) = embed(dv)  +  dQ·(Q⁺·embed(v)) ,
 
     where ``Q`` is the **gauge frame** of the subspace and ``dQ`` its motion — the realization is the
     frame's directional derivative applied to ``v``'s coordinates ``Q⁺·embed(v)`` (recovered through
-    the ambient).  The gauge is read from the subspace (`§gauge`); the **default `immersion` gauge**
-    (``Q = J``, ``dQ = ∂J``) reproduces ``embed(dv) + ∂J·(J⁺·embed v)`` exactly.  A constant ``J`` ⇒
-    the ordinary linear rule (``embed(dv)``).
+    the ambient).  The gauge is read from the subspace; the **default `qr` gauge** uses the opaque
+    ``ProjectedBasis`` frame, while ``immersion`` (``Q = J``, ``dQ = ∂J``) reproduces
+    ``embed(dv) + ∂J·(J⁺·embed v)`` exactly.  A constant ``J`` ⇒ the ordinary linear rule
+    (``embed(dv)``).
     """
     from grassmann.infer.synth import synth_space
 
@@ -972,8 +1002,10 @@ def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
 
 
 def _dd_project(z: Term, sub: Space, e: Term, ctx: _DCtx) -> Term:
-    """``d(project(z, Sub(J)))`` — project IS ``di⁺`` (the co-immersion / pseudoinverse of the gauge
-    frame ``Q``).  When the target subspace ``Sub(J)`` has an x-dependent defining map ``J``,
+    """``d(project(z, Sub(J)))`` — project IS ``di⁺``, the co-immersion / pseudoinverse.
+
+    ``di⁺`` is the pseudoinverse of the gauge frame ``Q``.  When the target subspace ``Sub(J)`` has
+    an x-dependent defining map ``J``,
 
         d(project(z)) = project(dz)  +  ∂(Q⁺)·z ,
 
@@ -1014,7 +1046,7 @@ def _dd_logdet_kernel(f: Term, ctx: _DCtx) -> Term | None:
 
     Returns ``None`` when ``f`` is x-independent (``df = 0``).  ``f⁻¹·df`` is the map ``Solve(f)``
     composed with the directional ``df`` (a value in ``V ⊸ V``); ``Trace(·, 1, 0)`` contracts its
-    primal/dual slots — the standard ``trace`` convention for an endomorphism (`§50`).
+    primal/dual slots — the standard ``trace`` convention for an endomorphism.
     """
     df = _dd(f, ctx)
     if isinstance(df, Zero):
@@ -1052,10 +1084,12 @@ def _dd_opaque(e: OpaqueApply, ctx: _DCtx) -> Term:
     return Eval(dF, (0,), (darg,))  # Df(arg) · d arg  ∈ op.cod
 
 
-def _alloc_opaque_jacobian(op: object, arg: Term, ctx: _DCtx) -> Var:
-    """Get-or-create the opaque map's Jacobian input ``Df`` at ``arg`` — a symbolic linear map
-    ``op.dom ⊸ op.cod`` (NOT ``X ⊸ cod``; the Jacobian lives in the op's own spaces and is then
-    composed with ``d arg`` by the chain rule).  Deduped by ``(op.name, arg)`` so repeated
+def _alloc_opaque_jacobian(op: OpaqueOp, arg: Term, ctx: _DCtx) -> Var:
+    """Get-or-create the opaque map's Jacobian input ``Df`` at ``arg``.
+
+    ``Df`` is a symbolic linear map ``op.dom ⊸ op.cod`` (NOT ``X ⊸ cod``; the Jacobian lives in
+    the op's own spaces and is then composed with ``d arg`` by the chain rule).  Deduped by
+    ``(op.name, arg)`` so repeated
     ``f(arg)`` shares one Jacobian input.  Provenance: a synthetic source ``Var(op.name, …)`` (the
     opaque function symbol) so :func:`enumerate_derivative_inputs` reports ``source.name == op.name``,
     order 1.
@@ -1103,8 +1137,10 @@ def _dd_pinv(e: Pinv, ctx: _DCtx) -> Term:
 
 
 def _dd_sqrt(e: Sqrt, ctx: _DCtx) -> Term:
-    """``d(√f)`` for an SPD endomorphism ``f : V ⊸ V`` — the symmetric operator-square-root
-    derivative.  ``dS`` (``S = √f``) is the unique solution of the Sylvester equation
+    """``d(√f)`` for an SPD endomorphism ``f : V ⊸ V``.
+
+    The symmetric operator-square-root derivative.  ``dS`` (``S = √f``) is the unique solution of
+    the Sylvester equation
 
         S·dS + dS·S = df ,
 
@@ -1138,7 +1174,7 @@ def _dd_sqrt(e: Sqrt, ctx: _DCtx) -> Term:
 
 
 def _pinv_map_grad(f: Term, df: Term) -> Term:
-    """The bare pseudoinverse-map derivative ``d(f⁺)`` (see :func:`_dd_pinv`)."""
+    """Give the bare pseudoinverse-map derivative ``d(f⁺)`` (see :func:`_dd_pinv`)."""
     from grassmann.infer.synth import synth_space
 
     fp = Pinv(f)
@@ -1152,10 +1188,12 @@ def _pinv_map_grad(f: Term, df: Term) -> Term:
     return Sum((lead, rank))
 
 
-def _map_dom_cod(space: Space):
-    """``(dom, cod)`` of a simple linear-map space ``OProd(Dual(dom), cod)``, else ``(None, None)``
-    (canonical strict peel, audit #18 — the old tolerance for a non-``Dual`` head silently read a
-    (2,0)-tensor as a map, the implicit-conversion class grassmann bans).
+def _map_dom_cod(space: Space) -> tuple[Space, Space] | tuple[None, None]:
+    """Give ``(dom, cod)`` of a simple linear-map space ``OProd(Dual(dom), cod)``.
+
+    Anything else gives ``(None, None)``.  The canonical strict peel: tolerating a non-``Dual``
+    head would silently read a (2,0)-tensor as a map — the implicit-conversion class grassmann
+    bans.
     """
     from grassmann.infer.subspace import split_map_space
 
@@ -1173,14 +1211,18 @@ def _dd_pinv_apply(e: PinvApply, ctx: _DCtx) -> Term:
     return _dd_inverse_apply(e, e.f, e.v, PinvApply, ctx)
 
 
-def _dd_inverse_apply(e: Term, f: Term, v: Term, apply_inv, ctx: _DCtx) -> Term:
-    """Shared ``d((inv f) v)`` rule for ``Solve``/``Pinv``. The ``dv`` term is built with the
-    **applied** inverse node (``apply_inv`` = ``SolveApply``/``PinvApply``) so it inverts ``f`` in
+def _dd_inverse_apply(
+    e: Term, f: Term, v: Term, apply_inv: Callable[[Term, Term], Term], ctx: _DCtx
+) -> Term:
+    """Apply the shared ``d((inv f) v)`` rule for ``Solve``/``Pinv``.
+
+    The ``dv`` term is built with the **applied** inverse node
+    (``apply_inv`` = ``SolveApply``/``PinvApply``) so it inverts ``f`` in
     the *same* operator convention as the primal ``e`` — routing through ``Eval(inv(f), …)``
     instead silently applies the *transpose* inverse (``Eval(f, ·)`` contracts the dom slot, so
     ``Eval(Solve(f), ·) = f⁻ᵀ·`` whereas ``SolveApply(f, ·) = f⁻¹·``).  Differentiating w.r.t. the
     inverted map itself (``df ≠ 0``) yields a higher tensor the substrate cannot yet thread
-    through the bulk op — that case is rejected (v1).
+    through the bulk op — that case is rejected.
     """
     parts: list[Term] = []
     dv = _dd(v, ctx)
@@ -1197,8 +1239,10 @@ def _dd_inverse_apply(e: Term, f: Term, v: Term, apply_inv, ctx: _DCtx) -> Term:
 
 
 def _dd_neval_lam(e: NEval, lam: Lam, positions: tuple[int, ...], args: tuple, ctx: _DCtx) -> Term:
-    """Value-``Lam`` chain rule (task 14). ``NEval(Lam([yₖ], body), pos, args)`` is
-    ``body[yₖ := args]``; its directional derivative differentiates the *body* with each bound var
+    """Apply the value-``Lam`` chain rule.
+
+    ``NEval(Lam([yₖ], body), pos, args)`` is ``body[yₖ := args]``; its directional derivative
+    differentiates the *body* with each bound var
     ``yₖ`` carrying the directional derivative of its argument, then re-binds the args:
 
         d(NEval(Lam([yₖ], body), pos, args)) = NEval(Lam([yₖ], d_body), pos, args)
@@ -1245,6 +1289,7 @@ def _dd_neval_lam(e: NEval, lam: Lam, positions: tuple[int, ...], args: tuple, c
 
 def _dd_llam(e: LLam, vars_: tuple[Var, ...], body: Term, ctx: _DCtx) -> Term:
     """Differentiate a (multi)linear map value: differentiate the body, keep the binder.
+
     ``x`` must not be one of the linear vars (those are not the differentiation variable).
     """
     if any(v.uid == ctx.x.uid for v in vars_):
@@ -1260,8 +1305,12 @@ def _dd_llam(e: LLam, vars_: tuple[Var, ...], body: Term, ctx: _DCtx) -> Term:
 # ===========================================================================
 
 
-def _covariant_section(e: Term, ctx: _DCtx):
-    """If ``e`` is a covariant *section* ``Remetric(sec, g)`` over a manifold ``M`` with an
+def _covariant_section(
+    e: Term, ctx: _DCtx
+) -> tuple[Term, Space, Callable[[Var], Term]] | None:
+    """Recognize a covariant section over an x-dependent metric, giving its connection builder.
+
+    If ``e`` is a covariant *section* ``Remetric(sec, g)`` over a manifold ``M`` with an
     **x-dependent** metric, return ``(sec, M, conn)`` where ``conn(h)`` builds the connection map
     ``Γ(h) : M ⊸ M``; otherwise ``None``.
 
@@ -1269,7 +1318,7 @@ def _covariant_section(e: Term, ctx: _DCtx):
 
     * a marked metric **Var** ``g`` (with gradient ``Dg`` via ``deps``) ⇒ the Levi-Civita
       connection from ``∂g`` (:func:`_connection_map`);
-    * a **chart-induced** metric ``g = JᵀJ`` with ``J`` a marked chart immersion (task 3) ⇒ the
+    * a **chart-induced** metric ``g = JᵀJ`` with ``J`` a marked chart immersion ⇒ the
       frame connection ``Γ(h) = J⁺·(∂J·h)`` (:func:`_frame_connection_map`), which needs no
       rank-3 metric gradient.
 
@@ -1304,8 +1353,10 @@ def _covariant_section(e: Term, ctx: _DCtx):
 
 
 def _chart_jacobian_var(g: Term) -> Var | None:
-    """If ``g`` is a chart-induced metric ``JᵀJ`` — ``Compose(Dagger(J),(0,),(J,))`` or
-    ``Compose(J,(0,),(Dagger(J),))`` for a single map ``Var J`` — return ``J``; else ``None``.
+    """Give the chart Jacobian ``J`` of a chart-induced metric ``JᵀJ``, else ``None``.
+
+    Recognized shapes: ``Compose(Dagger(J),(0,),(J,))`` or ``Compose(J,(0,),(Dagger(J),))`` for a
+    single map ``Var J``.
     """
     if isinstance(g, Compose) and len(g.gs) == 1:
         f, gg = g.f, g.gs[0]
@@ -1317,8 +1368,9 @@ def _chart_jacobian_var(g: Term) -> Var | None:
 
 
 def _chart_frame_of(g: Term, ctx: _DCtx) -> tuple[Var, Term] | None:
-    """If ``g`` is a chart metric ``JᵀJ`` over an **x-dependent** marked immersion ``J``, return
-    ``(J, DJ)`` — the frame and its derivative map ``∂J/∂x : X ⊸ (M ⊸ A)`` (from ``deps``, or a
+    """Give ``(J, DJ)`` for a chart metric ``JᵀJ`` over an **x-dependent** marked immersion ``J``.
+
+    ``DJ`` is the frame's derivative map ``∂J/∂x : X ⊸ (M ⊸ A)`` (from ``deps``, or a
     fresh symbolic map var for a ``None`` dep). ``None`` if ``g`` is not a chart metric or ``J``
     is x-independent (a constant chart ⇒ flat).
     """
@@ -1332,8 +1384,10 @@ def _chart_frame_of(g: Term, ctx: _DCtx) -> tuple[Var, Term] | None:
 
 
 def _manifold_of(s: Space) -> Space | None:
-    """The base manifold ``M`` of a (co)tangent (tensor) space: ``M``, ``M*``, or a tensor
-    product whose factors are all ``M`` / ``M*`` over a single ``M``; else ``None``.
+    """Give the base manifold ``M`` of a (co)tangent (tensor) space, else ``None``.
+
+    Recognized: ``M``, ``M*``, or a tensor product whose factors are all ``M`` / ``M*`` over a
+    single ``M``.
     """
     from grassmann.core.space import Dual, OProd
 
@@ -1347,9 +1401,9 @@ def _manifold_of(s: Space) -> Space | None:
 
 
 def _connection_correction(
-    sec: Term, sspace: Space, M: Space, conn_builder, ctx: _DCtx
+    sec: Term, sspace: Space, M: Space, conn_builder: Callable[[Var], Term], ctx: _DCtx
 ) -> Term:
-    """The Levi-Civita correction ``∇sec − d(sec)`` in direction ``h``, **basis-free**.
+    """Build the Levi-Civita correction ``∇sec − d(sec)`` in direction ``h``, **basis-free**.
 
     The tensor-product/Leibniz rule: apply the connection map ``Γ(h) : M ⊸ M`` (built by
     ``conn_builder(h)`` — metric or frame source) to each slot of the section — ``+Γ`` on a
@@ -1393,7 +1447,7 @@ def _connection_correction(
 
 
 def _connection_map(M: Space, g: Term, Dg: Term, h: Var) -> Term:
-    """The Levi-Civita connection map ``Γ(h) : M ⊸ M`` — **basis-free**.
+    """Build the Levi-Civita connection map ``Γ(h) : M ⊸ M`` — **basis-free**.
 
     ``Γ(h)^k_m = g^{kl}·½(∂ₘg_{il} + ∂ᵢg_{ml} − ∂ₗg_{mi}) hⁱ``. Built as ``g⁻¹ ∘ Glower``,
     where ``Glower : M ⊸ M*`` is the first-kind symbol contracted with ``h`` (the ``Permute``
@@ -1408,8 +1462,9 @@ def _connection_map(M: Space, g: Term, Dg: Term, h: Var) -> Term:
 
 
 def _frame_connection_map(M: Space, J: Term, DJ: Term, h: Var) -> Term:
-    """The Levi-Civita connection of a **chart immersion** ``J : M ⊸ A`` (a moving frame),
-    direction ``h`` — ``Γ(h) = J⁺·(∂J·h) : M ⊸ M`` (task 3).
+    """Build the Levi-Civita connection of a **chart immersion** ``J : M ⊸ A`` (a moving frame).
+
+    In direction ``h`` it is ``Γ(h) = J⁺·(∂J·h) : M ⊸ M``.
 
     For the induced (pullback) metric ``g = JᵀJ`` the Christoffel symbols are
     ``Γ^k_{mi} = (J⁺ ∂_i J)^k_m``, so ``Γ(h) = Pinv(J) ∘ Eval(DJ,(0,),h)`` — built from the bare
@@ -1423,10 +1478,11 @@ def _frame_connection_map(M: Space, J: Term, DJ: Term, h: Var) -> Term:
 
 
 def _metric_gradient(g: Term, M: Space, ctx: _DCtx) -> Term | None:
-    """The metric gradient ``Dg : M ⊸ (M*⊗M*)`` (``∂g/∂x``), as a *primitive* map, or
+    """Give the metric gradient ``Dg : M ⊸ (M*⊗M*)`` (``∂g/∂x``) as a *primitive* map.
+
     ``None`` when the metric does not depend on ``x`` (a constant/flat metric).
 
-    For v1 the metric must be a marked-dependent ``Var`` (its gradient supplied via ``deps``,
+    The metric must be a marked-dependent ``Var`` (its gradient supplied via ``deps``,
     or a fresh symbolic map var for ``None``); a constant metric ``Var`` (absent from
     ``deps``) yields ``None`` (the flat case). A more complex x-dependent metric expression
     is rejected — supply the metric (and its derivative) as a marked variable.
@@ -1460,8 +1516,9 @@ def _depends_on_x(node: object, ctx: _DCtx) -> bool:
 
 
 def _xdep_metric_space(space: Space, ctx: _DCtx) -> bool:
-    """True if ``space`` carries a ``WithInner`` metric that depends on ``x`` (so a musical operator
-    of that space is itself x-dependent).
+    """Report whether ``space`` carries a ``WithInner`` metric that depends on ``x``.
+
+    Such a metric makes a musical operator of that space itself x-dependent.
     """
     return (
         isinstance(space, WithInner)
@@ -1498,9 +1555,10 @@ def _add(a: Term, b: Term, space: Space) -> Term:
     return Sum((a, b))
 
 
-def _wrap_linear(ctor, dv: Term, e: Term, ctx: _DCtx) -> Term:
-    """A node linear in one child: its derivative is the same node over the child's
-    derivative (or ``Zero`` when the child is x-independent).
+def _wrap_linear(ctor: Callable[[Term], Term], dv: Term, e: Term, ctx: _DCtx) -> Term:
+    """Differentiate a node linear in one child — the same node over the child's derivative.
+
+    Gives ``Zero`` when the child is x-independent.
     """
     if isinstance(dv, Zero):
         return _zero(e, ctx)
@@ -1510,7 +1568,7 @@ def _wrap_linear(ctor, dv: Term, e: Term, ctx: _DCtx) -> Term:
 # --- scalar op builders (the nonlinear-rule coefficients) -------------------
 
 
-def _ext(name: str, fn, space: Space, *args: Term) -> External:
+def _ext(name: str, fn: Callable[..., np.ndarray], space: Space, *args: Term) -> External:
     from grassmann.lower.represent import ExternalOp
 
     return External(space, ExternalOp(name, fn), tuple(args))
@@ -1555,7 +1613,7 @@ def _sigmoid(u: Term, space: Space = Scalar()) -> External:
 
 
 def _ones(u: Term, space: Space) -> External:
-    """A constant value of ``1`` in ``space``, shaped like ``u`` (elementwise ``ones_like``).
+    """Build a constant value of ``1`` in ``space``, shaped like ``u`` (elementwise ``ones_like``).
 
     The constant-scalar leaf ``Lit`` lowers inconsistently for in-context scalars (the
     ``ScalarBasis≅ℝ¹`` cob seam), so derivative arms that need ``1±g(u)`` build the unit
@@ -1571,7 +1629,7 @@ def _one_minus_sq(u: Term, space: Space) -> Sum:
 
 
 def _hadamard(a: Term, b: Term, space: Space) -> External:
-    """The pointwise (Hadamard) product ``a ⊙ b`` in ``space`` (the goal-02 linear op)."""
+    """Build the pointwise (Hadamard) product ``a ⊙ b`` in ``space``."""
     return _ext("hadamard", np.multiply, space, a, b)
 
 
@@ -1591,8 +1649,10 @@ def _prod(a: Term, b: Term, space: Space) -> Term:
 
 
 def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None]) -> None:
-    """Reject an open term (free space variable / unresolved metavar), a ``Frame`` on the path, and
-    an x-dependent term in a *non-subspace* space position (a genuine space-function dependence).
+    """Reject an open term, a ``Frame`` on the path, or a non-subspace x-dependent space position.
+
+    That is: a free space variable / unresolved metavar, a ``Frame``, or an x-dependent term in a
+    *non-subspace* space position (a genuine space-function dependence).
 
     An x-dependent term in a **subspace** (``Img(J)/CoImg/Ker/CoKer`` with ``J`` x-dependent) is NOT
     rejected: ``embed`` IS ``di`` (the differential of the embedding), so the realizing arms
