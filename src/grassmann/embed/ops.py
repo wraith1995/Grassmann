@@ -2,15 +2,15 @@
 
 Every surface value is an :class:`Expr` that wraps exactly one core node (a Space,
 Term, or Basis) and tags which tower it lives in. Operators desugar **eagerly** to the
-IW1 smart constructors (`25 §F1`); we never mutate or re-implement the core.
+IW1 smart constructors; we never mutate or re-implement the core.
 
-Operator allocation (locked, `25 §F4` / `27 §1`):
+Operator allocation (locked):
 
 ``&``=⊕ · ``*``=⊗ · ``@``=Compose · ``+``=Sum · ``~``=Dual · ``>>``=linear-map space
-(auto right-re-associating, `27 Q1`) · ``()``=apply (Eval/NEval) · ``f[α]``=type
+(auto right-re-associating) · ``()``=apply (Eval/NEval) · ``f[α]``=type
 application.
 
-``__call__`` picks ``Eval`` vs ``NEval`` by the callee's INFERRED type (`27 Q-b`): it
+``__call__`` picks ``Eval`` vs ``NEval`` by the callee's INFERRED type: it
 runs IW3 synthesis — a value/linear map (a ``Space``) ⇒ ``Eval``, a ``Π``/dependent
 function (non-``Space``) ⇒ ``NEval`` — falling back to the structural guess (a literal
 ``Lam``) only when synthesis can't run (see :func:`_callee_is_neval`). Other operators
@@ -48,13 +48,12 @@ def _classify(node: object) -> str:
 
 
 def _callee_is_neval(node: object) -> bool:
-    """Decide ``Eval`` vs ``NEval`` for ``f(...)`` by the callee's INFERRED type (`27 Q-b`).
+    """Decide ``Eval`` vs ``NEval`` for ``f(...)`` by the callee's INFERRED type.
 
     A value or linear map synthesizes to a ``Space`` ⇒ ``Eval`` (linear contraction); a
     ``Π`` / dependent function (a non-``Space`` synth result — a ``Type`` or arrow ``Kind``)
-    ⇒ ``NEval``. Falls back to the old structural guess (a literal ``Lam`` node) when
-    inference can't run on a (possibly under-determined) callee — so dispatch is principled
-    where types are available and never worse than before.
+    ⇒ ``NEval``. Falls back to the structural guess (a literal ``Lam`` node) when
+    inference can't run on a (possibly under-determined) callee.
     """
     try:
         from grassmann.core.space import is_space
@@ -221,6 +220,7 @@ class Expr:
 
     # f(x, ...) : apply — Eval (linear) or NEval (dependent), picked by inferred type.
     def __call__(self, *args: object) -> Expr:
+        """Apply this handle — ``Eval`` when linear, ``NEval`` when dependent."""
         positions = tuple(range(len(args)))
         if _callee_is_neval(self.node):
             arg_nodes = tuple(_arg_node(a) for a in args)
@@ -228,8 +228,9 @@ class Expr:
         arg_terms = tuple(_term_node(a) for a in args)
         return wrap(_t.eval_(self.node, positions, *arg_terms))
 
-    # f[α] / f[α, β] : type application (space/nat args), 27 Q6.
+    # f[α] / f[α, β] : type application (space/nat args).
     def __getitem__(self, key: object) -> Expr:
+        """Apply this handle at the type level, ``f[α]`` / ``f[α, β]``."""
         args = key if isinstance(key, tuple) else (key,)
         positions = tuple(range(len(args)))
         arg_nodes = tuple(_arg_node(a) for a in args)
@@ -246,18 +247,22 @@ class Expr:
 
     @property
     def dual(self) -> Expr:
+        """Give the dual ``~self``."""
         return self.__invert__()
 
     @property
     def T(self) -> Expr:
+        """Give the adjoint ``self†`` (alias of :attr:`dagger`)."""
         return wrap(_t.dagger(self.node))
 
     @property
     def dagger(self) -> Expr:
+        """Give the adjoint ``self†``."""
         return wrap(_t.dagger(self.node))
 
     @property
     def flat(self) -> Expr:
+        """Give the musical ♭ map of this SPACE."""
         # v.flat — Flat reads the metric of v's space; surface form takes the term's
         # own space via Flat(space). We expose Flat keyed on the wrapped space when the
         # handle is a space, else build Flat over the term's declared space if known.
@@ -267,29 +272,36 @@ class Expr:
 
     @property
     def sharp(self) -> Expr:
+        """Give the musical ♯ map of this SPACE."""
         if self.tower == SPACE:
             return wrap(_t.sharp(self.node))
         raise EmbedError("`.sharp` is the musical ♯ map of a SPACE; use G.sharp(space)")
 
     @property
     def trace_(self) -> Expr:  # pragma: no cover - prefer .trace(i, j)
+        """Refuse the bare attribute — the trace needs its two slots."""
         raise EmbedError("use f.trace(i, j)")
 
     def trace(self, i: int, j: int) -> Expr:
+        """Contract slots ``i`` and ``j``."""
         return wrap(_t.trace(self.node, i, j))
 
     @property
     def solve(self) -> _SolveHandle:
+        """Give the ``Solve`` handle; call it to build ``SolveApply``."""
         return _SolveHandle(self.node)
 
     @property
     def pinv(self) -> _PinvHandle:
+        """Give the ``Pinv`` handle; call it to build ``PinvApply``."""
         return _PinvHandle(self.node)
 
     def remetric(self, g: object) -> Expr:
+        """Cross to the metric ``g`` explicitly."""
         return wrap(_t.remetric(self.node, _node(g)))
 
     def with_inner(self, g: object) -> Expr:
+        """Attach the metric ``g`` to this space or basis."""
         if self.tower == SPACE:
             return wrap(_s.with_inner(self.node, _node(g)))
         if self.tower == BASIS:
@@ -297,15 +309,19 @@ class Expr:
         raise EmbedError("`.with_inner` applies to a space or a basis")
 
     def as_(self, s: object) -> Expr:
+        """Assert this value lives in the space ``s``."""
         return wrap(_t.assert_(self.node, _node(s)))
 
     def at(self, positions: list[int] | tuple[int, ...]) -> _AtHandle:
+        """Pin the slot ``positions`` a following application contracts."""
         return _AtHandle(self.node, tuple(positions))
 
     def lift(self, fused: list[int] | tuple[int, ...], k: int | None = None) -> Expr:
+        """Fuse the slots ``fused`` into one."""
         return wrap(_t.lift(self.node, tuple(fused), k))
 
     def unlift(self, fused: list[int] | tuple[int, ...], k: int | None = None) -> Expr:
+        """Split a fused slot back into ``fused``."""
         return wrap(_t.inv_lift(self.node, tuple(fused), k))
 
 
@@ -426,11 +442,11 @@ def _arg_node(x: object) -> object:
 
 
 def _peel_map_space(node: object) -> tuple[list[object], object] | None:
-    """If ``node`` is a (possibly curried) linear-map space ``~a * (~b * (... * cod))``,
-    return ``([a, b, ...], cod)``; else ``None``.
+    """Peel a (possibly curried) linear-map space into its domains and codomain.
 
-    A linear-map space is ``OProd(Dual(dom), cod)`` (`linear_map_space`). We peel left
-    domains while the codomain is itself a map space, to support `>>` re-association.
+    Returns ``([a, b, ...], cod)`` for ``~a * (~b * (... * cod))``, else ``None``.  A
+    linear-map space is ``OProd(Dual(dom), cod)`` (``linear_map_space``).  Left domains are
+    peeled while the codomain is itself a map space, to support ``>>`` re-association.
     """
     doms: list[object] = []
     cur = node
