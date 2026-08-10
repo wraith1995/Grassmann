@@ -26,6 +26,7 @@ arities respected). Full *type* checking (dims/properties matching) is IW3.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, assert_never
 
@@ -39,7 +40,7 @@ class SpaceError(Exception):
     """Raised when a Space (or Dim) is structurally malformed."""
 
 
-def _tuple_repr(items) -> str:
+def _tuple_repr(items: Sequence[object]) -> str:
     """Repr a tuple field so it round-trips through the dataclass constructor.
 
     Produces ``()`` for empty, ``(x,)`` for one element, ``(x, y, ...)`` otherwise.
@@ -51,7 +52,7 @@ def _tuple_repr(items) -> str:
 
 
 # ===========================================================================
-# Symbolic dimensions (Dim) — a small Nat-expression algebra (`25 §1`).
+# Symbolic dimensions (Dim) — a small Nat-expression algebra.
 # ===========================================================================
 
 
@@ -98,7 +99,7 @@ class DimOf:
 
 @dataclass(frozen=True)
 class DimAtomRef:
-    """A runtime rank/dimension atom ``δ_f`` keyed by a term ``f`` (`25 §1`, F3).
+    """A runtime rank/dimension atom ``δ_f`` keyed by a term ``f``.
 
     Opaque Nat the SVD deduces at lowering; ``f`` is the keying term (a forward
     ref to ``Term`` to avoid a runtime term.py import cycle).
@@ -184,6 +185,7 @@ Dim = DimLit | DimVar | DimOf | DimAtomRef | DimSum | DimProd | DimNeg | DimMod
 
 
 def is_dim(d: object) -> bool:
+    """Report whether ``d`` is a Dim node."""
     return isinstance(
         d, (DimLit, DimVar, DimOf, DimAtomRef, DimSum, DimProd, DimNeg, DimMod)
     )
@@ -199,6 +201,7 @@ def as_dim(d: object) -> Dim:
 
 
 def dim_sum(*ds: object) -> Dim:
+    """Build the symbolic sum of ``ds`` (empty ⇒ ``0``, single ⇒ itself)."""
     parts = tuple(as_dim(d) for d in ds)
     if not parts:
         return DimLit(0)
@@ -208,6 +211,7 @@ def dim_sum(*ds: object) -> Dim:
 
 
 def dim_prod(*ds: object) -> Dim:
+    """Build the symbolic product of ``ds`` (empty ⇒ ``1``, single ⇒ itself)."""
     parts = tuple(as_dim(d) for d in ds)
     if not parts:
         return DimLit(1)
@@ -435,7 +439,7 @@ _meta_counter = itertools.count()
 
 @dataclass(frozen=True)
 class SpaceMeta:
-    """A space metavariable ``?α`` — an unsolved space hole used during elaboration (`25 §0`).
+    """A space metavariable ``?α`` — an unsolved space hole used during elaboration.
 
     A first-class Space node so it can sit inside ``Dual``/``OProd``/… while inference resolves it; the
     resolution store ``Θ`` lives in :mod:`grassmann.infer.unify`. ``uid`` is identity; ``hint`` a name for
@@ -526,28 +530,32 @@ def _ffs_repr(name: str, node: object) -> str:
 
 
 def scalar() -> Scalar:
+    """Build the scalar space ``ℝ`` — the only atom."""
     return Scalar()
 
 
 # ⊥ = OPlus()  (nullary ⊕)
 def bot() -> OPlus:
+    """Build the zero space ``⊥`` (the nullary ⊕)."""
     return OPlus(())
 
 
 def base(name: str, dim: object) -> OPlusRep:
-    """A primitive ``ℝⁿ`` — grounded on ``Scalar`` as ``⊕ⁿ ℝ`` (`Base` is gone; `Scalar` is the only atom).
+    """Build a primitive ``ℝⁿ``, grounded on ``Scalar`` as ``⊕ⁿ ℝ``.
 
-    ``name`` is accepted for call-site compatibility but carries no identity (two equal-dimension primitives
-    are the SAME space).
+    ``name`` is accepted for call-site compatibility but carries no identity: two
+    equal-dimension primitives are the SAME space.
     """
     return OPlusRep(as_dim(dim), Scalar())
 
 
 def svar(name: str) -> SVar:
+    """Build an abstract base space named ``name``."""
     return SVar(name)
 
 
 def dual(s: Space) -> Dual:
+    """Build the dual space ``~s``."""
     return Dual(s)
 
 
@@ -607,7 +615,7 @@ def spliced_oprod(*parts: Space) -> OProd:
 
 
 def drop_unit_factors(s: Space) -> Space:
-    """The tensor-unit law ``𝟙 ⊗ λ ≅ λ`` as an explicit, opt-in canonicalizer (`25 §1`).
+    """Apply the tensor-unit law ``𝟙 ⊗ λ ≅ λ`` — an explicit, opt-in canonicalizer.
 
     Drops the ⊗-unit ``Scalar`` factors of an ``OProd`` (``𝟙`` is the monoidal unit of ⊗,
     ``|𝟙| = 1``), returning the canonical space they multiply to:
@@ -643,7 +651,7 @@ def drop_unit_factors(s: Space) -> Space:
 
 
 def tensor_leaves(s: Space) -> list[Space]:
-    """The ordered ⊗-leaves of a (possibly nested) ``OProd``.
+    """Give the ordered ⊗-leaves of a (possibly nested) ``OProd``.
 
     The SPACE-level twin of ``lower.represent._basis_prod_leaves``.  ⊗ is associative on the
     underlying space, so ``a⊗(b⊗c)``, ``(a⊗b)⊗c`` and ``a⊗b⊗c`` all have THIS leaf sequence; what
@@ -693,34 +701,41 @@ def tensor_leaves(s: Space) -> list[Space]:
 
 
 def oplus_rep(count: object, space: Space) -> OPlusRep:
+    """Build the ``count``-fold replicated sum ``⊕^count space``."""
     return OPlusRep(as_dim(count), space)
 
 
 def ker(f: Term, source: Space | None = None, target: Space | None = None) -> Ker:
+    """Build the kernel space ``Ker(f)``."""
     return Ker(f, source, target)
 
 
 def img(f: Term, source: Space | None = None, target: Space | None = None) -> Img:
+    """Build the image space ``Img(f)``."""
     return Img(f, source, target)
 
 
 def coker(f: Term, source: Space | None = None, target: Space | None = None) -> CoKer:
+    """Build the cokernel space ``CoKer(f)``."""
     return CoKer(f, source, target)
 
 
 def coimg(f: Term, source: Space | None = None, target: Space | None = None) -> CoImg:
+    """Build the coimage space ``CoImg(f)``."""
     return CoImg(f, source, target)
 
 
 def with_inner(s: Space, metric: Term) -> WithInner:
+    """Build ``WithInner(s, metric)`` — ``s`` re-metricized, a DIFFERENT space."""
     return WithInner(s, metric)
 
 
 def space_app(g: Term, positions: tuple[int, ...], *args: Space | Dim | Term) -> App:
+    """Apply the space-level function ``g`` to ``args`` at ``positions``."""
     return App(g, tuple(positions), tuple(args))
 
 
-# Sugar: linear-map space  s0 ⊸ s1  ≡  ~s0 ⊗ s1  (`25 §F4`).
+# Sugar: linear-map space  s0 ⊸ s1  ≡  ~s0 ⊗ s1.
 def linear_map_space(s0: Space, s1: Space) -> OProd:
     """``s0 ⊸ s1 = ~s0 * s1`` — the space of linear maps ``s0 → s1``."""
     return oprod(dual(s0), s1)

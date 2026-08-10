@@ -26,6 +26,7 @@ for the metric (``WithInner``) case — realized by :func:`realize_ffs_basis`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import assert_never
 
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ import polyarray as pa
 from grassmann.core import basis as B
 from grassmann.core import props as P
 from grassmann.core import space as S
+from grassmann.core import term as T
 
 __all__ = [
     "space_basis",
@@ -54,7 +56,7 @@ __all__ = [
 
 
 def default_basis(space: S.Space) -> B.Basis:
-    """The default inner-product-orthonormal "standard" basis for ``space`` (`41 §1`)."""
+    """Give the default inner-product-orthonormal "standard" basis for ``space``."""
     match space:
         case S.Scalar():
             return B.scalar_basis()
@@ -93,7 +95,7 @@ def default_basis(space: S.Space) -> B.Basis:
             assert_never(unreachable)
 
 
-def map_basis(space: S.Space, choice) -> B.Basis:
+def map_basis(space: S.Space, choice: Callable[[S.Space], B.Basis | None]) -> B.Basis:
     """Structure-mirroring basis functor.
 
     A general basis CHOICE for ``space`` that mirrors the basis tower — ``choice(space) -> Basis | None`` is
@@ -124,7 +126,12 @@ def map_basis(space: S.Space, choice) -> B.Basis:
             assert_never(unreachable)
 
 
-def map_space(space: S.Space, choice, *, map_choice=None) -> S.Space:
+def map_space(
+    space: S.Space,
+    choice: Callable[[S.Space], S.Space | None],
+    *,
+    map_choice: Callable[[T.Term], T.Term | None] | None = None,
+) -> S.Space:
     """Structure-mirroring SPACE functor — the `Space -> Space` sibling of :func:`map_basis`.
 
     ``choice(space) -> Space | None`` is consulted at EVERY node first (``None`` = no override
@@ -175,16 +182,20 @@ def map_space(space: S.Space, choice, *, map_choice=None) -> S.Space:
             assert_never(unreachable)
 
 
-def _map_f(f, map_choice):
-    """An FFS node's defining map under the optional `map_choice`; unchanged when it declines."""
+def _map_f(f: T.Term, map_choice: Callable[[T.Term], T.Term | None] | None) -> T.Term:
+    """Give an FFS node's defining map under the optional `map_choice`; unchanged when it declines."""
     if map_choice is None:
         return f
     out = map_choice(f)
     return f if out is None else out
 
 
-def _map_opt(s: S.Space | None, choice, map_choice=None) -> S.Space | None:
-    """`map_space` on an FFS node's optional ENDPOINT space.
+def _map_opt(
+    s: S.Space | None,
+    choice: Callable[[S.Space], S.Space | None],
+    map_choice: Callable[[T.Term], T.Term | None] | None = None,
+) -> S.Space | None:
+    """Run `map_space` on an FFS node's optional ENDPOINT space.
 
     An FFS node is not a leaf of the walk: a buried immersion reaches the tower only through the
     `source`/`target` of the map that defines it. `Λᵏ(Img J) = Img(alt)` keeps its `Img(J)` in `alt`'s
@@ -407,8 +418,10 @@ def try_constant_ffs(
     program: pa.Program, which: str, f_matrix: pa.SymArray,
     dom_dim: int, cod_dim: int, *, probes: int = 3, atol: float = 1e-7,
 ) -> FfsRealization | None:
-    """If ``f_matrix`` is value-INVARIANT under the program's inputs, its FFS ``which`` basis
-    as a BUILD-TIME CONSTANT, else ``None``.  Invariance is verified by evaluating ONLY
+    """Give the FFS ``which`` basis as a BUILD-TIME CONSTANT, or ``None``.
+
+    Applies when ``f_matrix`` is value-INVARIANT under the program's inputs.  Invariance is
+    verified by evaluating ONLY
     ``f_matrix``'s dependency cone (``polyarray.evaluate_cone`` — safe on a big/partially-built
     shared program: only the cone runs, so an unrelated singular op / a dynamic input OUTSIDE
     the cone is never touched) at ``probes`` generic feeds and checking the value is identical;
@@ -451,7 +464,7 @@ def try_constant_ffs(
 
 
 def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
-    """A CANONICAL orthonormal basis of ``span(q)``.
+    """Build a CANONICAL orthonormal basis of ``span(q)``.
 
     A function of the SUBSPACE (and the ambient index order) alone, not of the factorization that produced
     ``q``.
@@ -514,10 +527,11 @@ def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
 def _const_ffs_from_svd(
     u: np.ndarray, vh: np.ndarray, r: int, which: str, *, op: str,
 ) -> FfsRealization:
-    """Given a numeric matrix ``M``'s full SVD ``M = U·diag(S)·Vh`` and its rank ``r``,
-    emit the BUILD-TIME-CONSTANT :class:`FfsRealization` for ``which`` — the SAME range/
-    complement column convention :func:`_realize_via_svd` slices from the runtime SVD
-    factors (`41 §1`):
+    """Emit the BUILD-TIME-CONSTANT :class:`FfsRealization` for ``which`` from a full SVD.
+
+    Takes a numeric matrix ``M``'s full SVD ``M = U·diag(S)·Vh`` and its rank ``r``, and uses
+    the SAME range/complement column convention :func:`_realize_via_svd` slices from the
+    runtime SVD factors:
 
     * ``img``   = first ``r`` columns of ``U``   (the orthonormal range basis);
     * ``coker`` = last  ``cod−r`` columns of ``U`` (its orthogonal complement);
@@ -543,8 +557,9 @@ def _const_ffs_from_svd(
 
 
 def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -> bool:
-    """Is ``f_matrix``'s value a PROVABLE build-time constant — soundly, by DEPENDENCY
-    (not by sampling)?
+    """Report whether ``f_matrix``'s value is a PROVABLE build-time constant.
+
+    Sound, by DEPENDENCY — not by sampling.
 
     Thin delegate to :func:`polyarray.is_structurally_constant` (the check moved to
     polyarray, since it uses ONLY polyarray machinery — ``dependency_cone``, the ref
@@ -565,8 +580,9 @@ def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -
 def _fold_constant_ffs(
     program: pa.Program, which: str, f_matrix: pa.SymArray,
 ) -> FfsRealization:
-    """Fold a PROVABLY-constant ``f_matrix`` (see :func:`_cone_is_structurally_constant`) to
-    its build-time-constant FFS ``which`` frame.  Evaluates ``f_matrix``'s cone ONCE at build
+    """Fold a PROVABLY-constant ``f_matrix`` to its build-time-constant FFS ``which`` frame.
+
+    See :func:`_cone_is_structurally_constant`.  Evaluates ``f_matrix``'s cone ONCE at build
     (:func:`polyarray.evaluate_cone` — the cone has no live inputs, so any binding gives the
     same matrix; a zero binding is used) → the numeric operator ``M``, then emits the constant
     range/complement basis via the SHARED :func:`_const_ffs_from_svd` core using ``M``'s SVD.
@@ -647,7 +663,7 @@ def _realize_via_qr(
 def _realize_via_gram(
     program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, label: str,
 ) -> FfsRealization:
-    """The LITERAL-COLUMN (Gram) realization of an injective map's image (`41 §1`).
+    """Build the LITERAL-COLUMN (Gram) realization of an injective map's image.
 
     The SECOND realization of the SAME FFS basis ("two realizations of the
     same ffs basis is fine"): ``cols = J`` itself — the map's own columns — with ``r = None``
@@ -684,7 +700,7 @@ class _QrSignConventionOp:
     ``Q·diag(s)``, ``diag(s)·R`` with ``s = sign(diag R)`` (zeros ⇒ +1) ⇒ ``R`` has a positive diagonal.
     """
 
-    def __call__(self, Q: np.ndarray, R: np.ndarray):  # noqa: N803
+    def __call__(self, Q: np.ndarray, R: np.ndarray) -> tuple[np.ndarray, np.ndarray]:  # noqa: N803
         Q = np.asarray(Q, dtype=float)
         R = np.asarray(R, dtype=float)
         s = np.sign(np.diag(R))
