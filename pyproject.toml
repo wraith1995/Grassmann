@@ -124,5 +124,4 @@ exclude = [
 "__init__.py" = ["F401"]
 
 "tests/**" = ["D", "ANN"]
-"src/grassmann/lower/represent.py" = ["D", "ANN"]
 "src/grassmann/transform/rewrite.py" = ["D", "ANN"]
