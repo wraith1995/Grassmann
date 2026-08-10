@@ -326,7 +326,8 @@ class Det:
 class LogDet:
     """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``
     (a ``Scalar``).  A dedicated node (not ``log(det f)``) because its derivative is the clean
-    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`."""
+    ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`.
+    """
 
     f: Term
 
@@ -498,7 +499,8 @@ class Sqrt:
     ``f : V ⊸ V`` (the unique SPD ``S`` with ``S·S = f``).  Lowers via an eigendecomposition and
     **fails loudly if ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization
     factor: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the
-    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame (`§ realization`)."""
+    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame (`§ realization`).
+    """
 
     f: Term
 

@@ -69,7 +69,8 @@ def op_renderers() -> dict:
     ``_QrSignConventionOp`` also carries its own ``__numpy_source__`` hook, which
     ``to_numpy_source`` discovers unaided — so a program containing it emits with no
     ``op_renderers=`` at all (an observability dump, say). Its entry here delegates to that hook,
-    and an explicit mapping still takes precedence over it."""
+    and an explicit mapping still takes precedence over it.
+    """
     return {
         "_ExternalOp": _external_op,
         # FFS / geometry realization

@@ -831,7 +831,8 @@ def rule_eta(node: Term) -> Term | None:
     """η-reduction (the inverse of β): ``λ⊸(x₀,…,xₙ₋₁). f(x₀,…,xₙ₋₁) → f`` when ``f`` does not
     mention the bound vars and applies them at slots ``0..n-1`` in order. Now **sound** because an
     ``LLam`` lowers identically to the stored map it expands (the FFS re-orientation).
-    Collapses an η-expanded map back to the map itself."""
+    Collapses an η-expanded map back to the map itself.
+    """
     match node:
         case LLam(vars=vars_, body=Eval() as body):
             n = len(vars_)
@@ -952,7 +953,8 @@ def _factor_inner(s: Space, a: Term, b: Term, dvar: Var) -> Term | None:
     """Fold ``λδ. ⟨a, b⟩`` (a *scalar* inner-product monomial) into its covector. Exactly one
     arm may mention δ (both ⇒ the nonlinear ``⟨δ,δ⟩``, rejected by the linearity gate before we
     get here; neither ⇒ not a δ-functional). The metric is symmetric, so the choice of which
-    arm is the input vs the Riesz arm is value-free."""
+    arm is the input vs the Riesz arm is value-free.
+    """
     uid = dvar.uid
     a_has, b_has = _mentions(a, uid), _mentions(b, uid)
     if a_has and not b_has:
@@ -1793,7 +1795,8 @@ def rule_dissolve_oplus(node: Term) -> Term | None:
 
 def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
     """Assemble the rule tuple selected by ``cfg`` (the always-valid algebraic cleanups run
-    unconditionally; everything else is gated)."""
+    unconditionally; everything else is gated).
+    """
     rules: list[Rule] = []
     if cfg.beta:
         rules += _BETA_RULES
@@ -1980,7 +1983,8 @@ def _normalize(term: Term, rules: tuple[Rule, ...]) -> Term:
 
 def rewrite(term: Term, rules: tuple[Rule, ...]) -> Term:
     """Normalize ``term`` to a fixpoint of a custom ``rules`` tuple (the open-ended entry
-    point; :func:`simplify` / :func:`sum_of_products` are the curated presets)."""
+    point; :func:`simplify` / :func:`sum_of_products` are the curated presets).
+    """
     if not is_term(term):
         raise RewriteError(f"rewrite: expected a Term, got {term!r}")
     return _normalize(term, rules)

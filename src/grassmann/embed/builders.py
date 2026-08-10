@@ -252,7 +252,8 @@ def pinv(f: object) -> Expr:
 
 def corestrict(f: object) -> Expr:
     """``G.corestrict(f)`` — the corestriction ``f~ : dom(f) ⊸ Img(f)`` of an INJECTIVE ``f``
-    (the first-isomorphism-theorem iso; ``G.pinv(G.corestrict(f))`` is its exact inverse)."""
+    (the first-isomorphism-theorem iso; ``G.pinv(G.corestrict(f))`` is its exact inverse).
+    """
     return wrap(_t.corestrict(_term(f)))
 
 
@@ -345,7 +346,8 @@ def pushforward(v: object, f: object) -> Expr:
     ``Img(f)`` (apply ``f``, corestrict to its image).  The map-driven dual of
     :func:`pullback`; the rational "transport" primitive (domain → image), distinct from
     the within-ambient ``embed``/``project``. See
-    :func:`grassmann.transform.transport.pushforward`."""
+    :func:`grassmann.transform.transport.pushforward`.
+    """
     from grassmann.transform.transport import pushforward as _pf
 
     return wrap(_pf(_term(v), _term(f)))
@@ -354,7 +356,8 @@ def pushforward(v: object, f: object) -> Expr:
 def pull_along(v: object, f: object) -> Expr:
     """``G.pull_along(v, f)`` — carry ``v : cod(f)`` back to ``dom(f)`` via ``f†`` (the
     ``Rᵗ`` side of the coordinate convert). See
-    :func:`grassmann.transform.transport.pull_along`."""
+    :func:`grassmann.transform.transport.pull_along`.
+    """
     from grassmann.transform.transport import pull_along as _pa
 
     return wrap(_pa(_term(v), _term(f)))

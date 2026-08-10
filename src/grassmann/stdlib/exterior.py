@@ -220,7 +220,8 @@ def interior(omega: Expr, v: Expr, k: int) -> Expr:  # noqa: E741
     decomposed into factors (``synth`` finds no dual slot); embedding ``ω ⊑ W⊗ᵏ`` exposes the factors, then
     the ordinary application ``·(v)`` contracts slot 0 ⇒ ``W⊗ᵏ⁻¹``, and ``project`` lands it on ``Λ^{k-1}``.
     Generalizes the dual pairing: ``k = 1`` is exactly ``⟨ω, v⟩`` (a scalar). No rescale needed — this is
-    the textbook ``ι_v`` (validated on the Leibniz identity ``ι_v(a∧b) = ⟨a,v⟩b − ⟨b,v⟩a``)."""
+    the textbook ``ι_v`` (validated on the Leibniz identity ``ι_v(a∧b) = ⟨a,v⟩b − ⟨b,v⟩a``).
+    """
     if k < 1:
         raise ValueError(f"interior: k must be >= 1, got k={k}")
     W = _base_space_of_exterior(omega, k)
