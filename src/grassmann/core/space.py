@@ -141,9 +141,11 @@ class DimProd:
 
 @dataclass(frozen=True)
 class DimNeg:
-    """``-d`` (negated dim) — appears only inside a ``DimSum`` to express subtraction,
-    e.g. ``|Ker f| = |dom| + (-rank)``. Keeps the ``Dim`` algebra closed under the
-    differences the FFS dimension laws require (`20 §5`)."""
+    """``-d`` (negated dim) — appears only inside a ``DimSum`` to express subtraction, e.g.
+
+    ``|Ker f| = |dom| + (-rank)``. Keeps the ``Dim`` algebra closed under the differences the FFS dimension
+    laws require (`20 §5`).
+    """
 
     term: Dim
 
@@ -156,12 +158,13 @@ class DimNeg:
 
 @dataclass(frozen=True)
 class DimMod:
-    """``a mod b`` (modular reduction of a dim) — closes the ``Dim`` algebra under
-    the cyclic/periodic dimensions that e.g. circulant or torus constructions need
-    (`20 §5`). Convention: Python-style non-negative remainder, so ``0 ≤ a mod b < b``
-    and ``a mod 0`` is undefined (rejected at construction). Mirrors :class:`DimNeg`'s
-    style: a thin frozen node; constant-folding happens in :mod:`grassmann.infer.dims`,
-    kept symbolic otherwise."""
+    """``a mod b`` (modular reduction of a dim).
+
+    Closes the ``Dim`` algebra under the cyclic/periodic dimensions that e.g. circulant or torus constructions
+    need (`20 §5`). Convention: Python-style non-negative remainder, so ``0 ≤ a mod b < b`` and ``a mod 0`` is
+    undefined (rejected at construction). Mirrors :class:`DimNeg`'s style: a thin frozen node;
+    constant-folding happens in :mod:`grassmann.infer.dims`, kept symbolic otherwise.
+    """
 
     term: Dim
     modulus: Dim
@@ -219,7 +222,8 @@ def dim_mod(term: object, modulus: object) -> Dim:
     Coerces ints to :class:`DimLit`. The modulus must be non-zero; a literal ``0``
     modulus is rejected here, and a symbolic-but-statically-zero modulus is caught by
     the constant-folder in :mod:`grassmann.infer.dims`. No folding is done here (kept
-    structural, mirroring :func:`dim_sum`/:func:`dim_prod`)."""
+    structural, mirroring :func:`dim_sum`/:func:`dim_prod`).
+    """
     m = as_dim(modulus)
     if isinstance(m, DimLit) and m.value == 0:
         raise SpaceError("DimMod: modulus must be non-zero")
@@ -431,10 +435,12 @@ _meta_counter = itertools.count()
 
 @dataclass(frozen=True)
 class SpaceMeta:
-    """A space metavariable ``?α`` — an unsolved space hole used during elaboration
-    (`25 §0`). A first-class Space node so it can sit inside ``Dual``/``OProd``/… while
-    inference resolves it; the resolution store ``Θ`` lives in
-    :mod:`grassmann.infer.unify`. ``uid`` is identity; ``hint`` a name for messages."""
+    """A space metavariable ``?α`` — an unsolved space hole used during elaboration (`25 §0`).
+
+    A first-class Space node so it can sit inside ``Dual``/``OProd``/… while inference resolves it; the
+    resolution store ``Θ`` lives in :mod:`grassmann.infer.unify`. ``uid`` is identity; ``hint`` a name for
+    messages.
+    """
 
     uid: int = field(default_factory=lambda: next(_meta_counter))
     hint: str = "α"
@@ -529,9 +535,11 @@ def bot() -> OPlus:
 
 
 def base(name: str, dim: object) -> OPlusRep:
-    """A primitive ``ℝⁿ`` — grounded on ``Scalar`` as ``⊕ⁿ ℝ`` (`Base` is gone; `Scalar` is
-    the only atom).  ``name`` is accepted for call-site compatibility but carries no identity
-    (two equal-dimension primitives are the SAME space)."""
+    """A primitive ``ℝⁿ`` — grounded on ``Scalar`` as ``⊕ⁿ ℝ`` (`Base` is gone; `Scalar` is the only atom).
+
+    ``name`` is accepted for call-site compatibility but carries no identity (two equal-dimension primitives
+    are the SAME space).
+    """
     return OPlusRep(as_dim(dim), Scalar())
 
 

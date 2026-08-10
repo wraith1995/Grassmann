@@ -43,7 +43,8 @@ from .dims import dim_eq
 
 def _expand_rep(s: Space) -> Space:
     """Expand a static-count ``OPlusRep(n, s)`` to the explicit ``OPlus(s, …, s)`` (else
-    pass through), so ``⊕ⁿ s`` and ``⊕(s,…,s)`` are unified as the same space."""
+    pass through), so ``⊕ⁿ s`` and ``⊕(s,…,s)`` are unified as the same space.
+    """
     if isinstance(s, OPlusRep) and isinstance(s.count, DimLit):
         return OPlus(tuple([s.space] * s.count.value))
     return s
@@ -110,7 +111,8 @@ class MetaStore:
         Descends into FFS defining maps / endpoints and ``App`` like
         :func:`grassmann.infer.subst.subst_space` — a metavar hiding inside
         ``Img(f, source=…)`` counts. ``WithInner.metric``
-        is skipped for parity with ``subst_space``; ``Dim``s carry no metavars."""
+        is skipped for parity with ``subst_space``; ``Dim``s carry no metavars.
+        """
         s = self.walk(s)
         match s:
             case SpaceMeta():
@@ -140,7 +142,8 @@ class MetaStore:
 
 def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
     """Occurs-check with the same FFS/``App`` descent as :meth:`MetaStore.has_unsolved`
-    (a cyclic ``m:= Img(f, source=…m…)`` solution must be rejected —)."""
+    (a cyclic ``m:= Img(f, source=…m…)`` solution must be rejected —).
+    """
     s = store.walk(s)
 
     def pred(sp: Space) -> bool:
@@ -173,9 +176,11 @@ def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
 
 
 def _space_pred_in_term(term: object, pred) -> bool:
-    """True iff ``pred(space)`` holds for some Space embedded in ``term`` — the same
-    dataclass-field descent as :func:`grassmann.infer.subst._subst_space_in_term`
-    (binder var spaces, asserted spaces, nested FFS maps, ``App`` args)."""
+    """True iff ``pred(space)`` holds for some Space embedded in ``term``.
+
+    The same dataclass-field descent as :func:`grassmann.infer.subst._subst_space_in_term` (binder var spaces,
+    asserted spaces, nested FFS maps, ``App`` args).
+    """
     from dataclasses import fields, is_dataclass
 
     from grassmann.core.term import is_term
@@ -342,7 +347,8 @@ def _solve_meta(m: SpaceMeta, s: Space, store: MetaStore) -> None:
 
 def _drop_scalar_factors(s: OProd) -> Space:
     """An ``OProd`` with its ``Scalar`` (⊗-unit) factors removed and a single-factor product
-    collapsed to its factor (``OProd((X,)) ≅ X``); an all-scalar product becomes ``Scalar``."""
+    collapsed to its factor (``OProd((X,)) ≅ X``); an all-scalar product becomes ``Scalar``.
+    """
     kept = tuple(x for x in s.spaces if not isinstance(x, Scalar))
     if not kept:
         return Scalar()
@@ -352,9 +358,11 @@ def _drop_scalar_factors(s: OProd) -> Space:
 
 
 def _ffs_map_alpha_eq(f: object, g: object) -> bool:
-    """Are two FFS keying maps α-equivalent (equal up to renaming of bound variables)?  Used so
-    independently-constructed FFS spaces (``Img(alt(V,k))`` etc.) unify.  Lazy import of
-    ``alpha_canon`` avoids an ``infer ← transform`` import cycle; only hit on a raw mismatch."""
+    """Are two FFS keying maps α-equivalent (equal up to renaming of bound variables)?
+
+    Used so independently-constructed FFS spaces (``Img(alt(V,k))`` etc.) unify.  Lazy import of
+    ``alpha_canon`` avoids an ``infer ← transform`` import cycle; only hit on a raw mismatch.
+    """
     try:
         from grassmann.transform.rewrite import alpha_canon
     except Exception:  # noqa: BLE001 - transform unavailable ⇒ fall back to raw inequality

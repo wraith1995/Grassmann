@@ -1,5 +1,7 @@
-"""``unparse`` — render a core node (term / space / basis, plus dim / kind / type /
-props) as round-trippable Unicode mathematical text.
+"""``unparse``.
+
+Render a core node (term / space / basis, plus dim / kind / type / props) as round-trippable Unicode
+mathematical text.
 
 The output is ``<preamble> ⊢ <body>`` when the node has free variables (each free term
 ``Var`` bound to its space, each free ``SVar`` / ``BVar`` / ``DimVar`` to its sort), or
@@ -589,7 +591,8 @@ def _emit_body(node: object) -> str:
 
 def unparse(x: object) -> str:
     """Render ``x`` (a core term/space/basis/dim/type/kind, or an embed ``Expr``)
-    as round-trippable Unicode text, with a typed-variable preamble for any free vars."""
+    as round-trippable Unicode text, with a typed-variable preamble for any free vars.
+    """
     node = _unwrap(x)
     acc = _Free()
     _collect(node, frozenset(), frozenset(), acc)

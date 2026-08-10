@@ -33,7 +33,8 @@ class Parameterization:
     Exposes the four geometric subspaces (``tangent``/``normal``/``cotangent``/``conormal``),
     a ``point`` in the parameter domain, ``tangent_vector`` fields, ``embed`` into the ambient,
     and ``covariant_diff`` (the immersion-gauge covariant derivative). Realize + evaluate with
-    ``basis_env`` + ``run`` against a numeric immersion (Jacobian ``dφ`` / Hessian ``d²φ``)."""
+    ``basis_env`` + ``run`` against a numeric immersion (Jacobian ``dφ`` / Hessian ``d²φ``).
+    """
 
     def __init__(self, name: str, param_dim: int, ambient_dim: int,
                  immersion=None, fd_step: float = 1e-4) -> None:
@@ -79,8 +80,11 @@ class Parameterization:
         return _T.var(name, self.param)
 
     def tangent_vector(self, name: str = "v") -> tuple[_T.Var, _T.Var]:
-        """A tangent vector field ``v : Img(J)`` and its derivative section ``Dv`` (the
-        directional derivative ``∂v/∂x``; zero for a constant coordinate section)."""
+        """A tangent vector field ``v .
+
+        Img(J)`` and its derivative section ``Dv`` (the directional derivative ``∂v/∂x``; zero for a constant
+        coordinate section).
+        """
         v = _T.var(name, self.tangent)
         dv = _T.var(f"d{name}", _S.oprod(_S.dual(self.param), self.tangent))
         return v, dv
@@ -92,9 +96,12 @@ class Parameterization:
     # -- covariant differentiation ------------------------------------------
 
     def covariant_diff(self, value: _T.Term, x: _T.Var, *, marks: dict) -> _T.Term:
-        """Differentiate ``value`` w.r.t. the point ``x`` under the **immersion gauge** — the
-        covariant derivative. ``marks`` maps each x-dependent value var to its derivative
-        section; ``J``/``DJ`` are marked automatically. Returns the derivative ``LLam`` map."""
+        """Differentiate ``value`` w.r.t.
+
+        the point ``x`` under the **immersion gauge** — the covariant derivative. ``marks`` maps each
+        x-dependent value var to its derivative section; ``J``/``DJ`` are marked automatically. Returns the
+        derivative ``LLam`` map.
+        """
         deps = {var.uid: dval for var, dval in marks.items()}
         deps[self.J.uid] = self.DJ
         clear_subspace_gauges()
@@ -108,7 +115,8 @@ class Parameterization:
 
     def basis_env(self, *fields: _T.Var) -> dict:
         """The basis environment realizing tangent values in ``ImageBasis(J)`` (the immersion
-        gauge's ``dφ``-column frame). Pass the tangent value vars (and their ``Dv``)."""
+        gauge's ``dφ``-column frame). Pass the tangent value vars (and their ``Dv``).
+        """
         ib = _B.ImageBasis(self.J)
         env: dict = {}
         dpb = _B.basis_prod(_B.dual_basis(default_basis(self.param)), ib)
@@ -119,7 +127,8 @@ class Parameterization:
 
     def run(self, term: _T.Term, env: dict, feed: dict):
         """Lower ``term`` (with the ImageBasis ``env``) and run it on the numeric ``feed``
-        (immersion Jacobian/Hessian + value coords, keyed ``f"{name}_{uid}"``)."""
+        (immersion Jacobian/Hessian + value coords, keyed ``f"{name}_{uid}"``).
+        """
         return represent(term, basis_env=env).run(feed)["result"]
 
     def key(self, var: _T.Var) -> str:
@@ -161,14 +170,18 @@ class Parameterization:
         return d2i
 
     def feed_at(self, u) -> dict:
-        """The auto-derived ``{J: dφ|_u, DJ: d²φ|_u}`` run-feed at point ``u`` — the user gives
-        φ, the immersion Jacobian/Hessian are differentiated for them."""
+        """The auto-derived ``{J.
+
+        Dφ|_u, DJ: d²φ|_u}`` run-feed at point ``u`` — the user gives φ, the immersion Jacobian/Hessian are
+        differentiated for them.
+        """
         return {self.key(self.J): self.jacobian_at(u), self.key(self.DJ): self.hessian_at(u)}
 
     def covariant_derivative(self, u, v_coords):
         """The covariant derivative ``∇v`` of a constant tangent vector with ambient coords
         ``embed(v)=dφ·v_coords``, at point ``u``, in tangent coordinates — ``∇v[a,c]`` for
-        direction ``a``. φ's Jacobian/Hessian are auto-derived; returns an ``(k, k)`` array."""
+        direction ``a``. φ's Jacobian/Hessian are auto-derived; returns an ``(k, k)`` array.
+        """
         import numpy as np
         v, dv = self.tangent_vector("v")
         w = _T.var("w", _S.dual(self.ambient))

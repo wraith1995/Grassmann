@@ -62,9 +62,12 @@ def _qr_sign_convention(op, a):  # _QrSignConventionOp(Q, R) -> (Q·s, s·R), s 
 
 
 def op_renderers() -> dict:
-    """The ``{op_class_name: (op, arg_exprs) -> python_expr}`` map for grassmann's remaining
-    Stmt ops (the generic array / linalg ops now render as polyarray builtins), to pass as
-    ``polyarray.to_numpy_source(..., op_renderers=op_renderers())``."""
+    """The ``{op_class_name.
+
+    (op, arg_exprs) -> python_expr}`` map for grassmann's remaining Stmt ops (the generic array / linalg ops
+    now render as polyarray builtins), to pass as ``polyarray.to_numpy_source(...,
+    op_renderers=op_renderers())``.
+    """
     return {
         "_ExternalOp": _external_op,
         # FFS / geometry realization
