@@ -1,4 +1,4 @@
-"""Kind tower + arrow kinds (`20 §3`).
+"""Kind tower + arrow kinds.
 
 ```
 Sort  σ ::= space | nat | *  |  s        -- binder domains: kind of spaces / nats /
@@ -73,12 +73,12 @@ class SpaceSort:
 
 @dataclass(frozen=True)
 class Arrow:
-    """An arrow kind ``domain -> result`` (`20 §3`).
+    """An arrow kind ``domain -> result``.
 
     ``domain`` is a :class:`Sort` / :class:`SpaceSort` (the kind of the argument);
     ``result`` is any :class:`Kind` (allowing curried multi-argument arrows, e.g.
     ``space -> space -> space``). Higher-order arrow *domains* (a function taking a
-    function) are deferred per `20 §9`, so ``domain`` is never itself an ``Arrow``.
+    function) are deferred, so ``domain`` is never itself an ``Arrow``.
     """
 
     domain: Kind
@@ -135,7 +135,7 @@ def space_value_sort(space: object) -> SpaceSort:
     return SpaceSort(space)
 
 
-# Convenience named arrow kinds from `20 §4` (documentation aliases).
+# Convenience named arrow kinds (documentation aliases).
 def space_to_space() -> Arrow:
     """``space -> space`` (e.g. ``λα. α⊗α``)."""
     return Arrow(SPACE, SPACE)

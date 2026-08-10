@@ -1,4 +1,4 @@
-"""Operator-precedence model shared by the printers (`27` LaTeX / goal 5 unparse).
+r"""Operator-precedence model shared by the LaTeX printer and the unparser.
 
 Deliberately LaTeX-agnostic at the *structure* level: an :class:`Op` carries both the
 precedence and the family of surface symbols (LaTeX now, a plaintext symbol for the
@@ -11,7 +11,7 @@ precedence ``min_prec`` is wrapped in parentheses iff its own precedence is belo
 minimum (:func:`paren`). Infix associative operators render their operands at the
 operator's own level (equal precedence ⇒ no parentheses, i.e. left/right associative is
 treated uniformly — every binary op here is associative or commutative). A postfix
-decoration (``^{\\dagger}``, ``^{*}``, …) renders its base at :data:`Prec.POSTFIX` so a
+decoration (``^{\dagger}``, ``^{*}``, …) renders its base at :data:`Prec.POSTFIX` so a
 looser base — and crucially another postfix — is parenthesized, avoiding illegal stacked
 superscripts.
 """

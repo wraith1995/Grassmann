@@ -1,7 +1,7 @@
 """IW5 — small linear-algebra conveniences (derived ops, NOT core IR).
 
 Thin wrappers over the :mod:`grassmann.embed` surface for the most common derived LA
-idioms (`27 §2`, `50 §A`). Like :mod:`grassmann.stdlib.exterior`, nothing here is a core
+idioms. Like :mod:`grassmann.stdlib.exterior`, nothing here is a core
 node — each function composes existing core ops (``Inner``/``Eval``, ``Pinv``,
 ``Compose``). Real-valued.
 """
@@ -15,7 +15,7 @@ __all__ = ["dot", "norm_sq", "orthogonal_projection", "least_squares"]
 
 
 def dot(x: Expr, y: Expr, space: Expr | None = None) -> Expr:
-    """``⟨x, y⟩`` — the inner product, a ``Scalar`` (`27 §2.3`).
+    """``⟨x, y⟩`` — the inner product, a ``Scalar``.
 
     ``Inner(s)`` is the metric bilinear form on ``s`` — an element of ``s* ⊗ s*`` with
     two covariant slots — so it is applied to the two vectors directly
@@ -33,7 +33,7 @@ def norm_sq(x: Expr, space: Expr | None = None) -> Expr:
 
 
 def orthogonal_projection(f: Expr) -> Expr:
-    """The orthogonal projector ``P_{img f} = f ∘ f† : W ⊸ W`` onto ``img f`` (`50 §A2`).
+    """Build the orthogonal projector ``P_{img f} = f ∘ f† : W ⊸ W`` onto ``img f``.
 
     ``f†`` is the Moore–Penrose pseudo-inverse; ``f ∘ f†`` is the orthogonal projection
     onto the image of ``f`` (idempotent, self-adjoint in the metric).
@@ -42,7 +42,7 @@ def orthogonal_projection(f: Expr) -> Expr:
 
 
 def least_squares(f: Expr, v: Expr) -> Expr:
-    """``f† v`` — the minimum-norm least-squares solution of ``f x = v`` (`50 §A2`)."""
+    """``f† v`` — the minimum-norm least-squares solution of ``f x = v``."""
     return f.pinv(v)
 
 

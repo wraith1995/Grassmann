@@ -1,4 +1,4 @@
-r"""Term/Space → LaTeX printer (`27` goal 4).
+r"""Term/Space → LaTeX printer.
 
 Renders any core :class:`~grassmann.core.term.Term` or
 :class:`~grassmann.core.space.Space` (and, transitively, a :func:`grassmann.transform.diff.diff`
@@ -352,7 +352,7 @@ def _render_dim(d: _s.Dim) -> tuple[str, int]:
 
 
 def _render_dim_sum(terms: tuple[_s.Dim, ...]) -> str:
-    """``a + b - c`` — fold ``DimNeg`` summands into subtraction for readability."""
+    """Render a dimension sum ``a + b - c``, folding ``DimNeg`` summands into ``-``."""
     out = _dim_sub(terms[0], Prec.SUM)
     for t in terms[1:]:
         if isinstance(t, _s.DimNeg):
