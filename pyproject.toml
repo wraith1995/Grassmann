@@ -126,5 +126,4 @@ exclude = [
 "tests/**" = ["D", "ANN"]
 "src/grassmann/lower/represent.py" = ["D", "ANN"]
 "src/grassmann/syntax/mcalc.py" = ["D", "ANN"]
-"src/grassmann/transform/diff.py" = ["D", "ANN"]
 "src/grassmann/transform/rewrite.py" = ["D", "ANN"]
