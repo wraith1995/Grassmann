@@ -95,11 +95,11 @@ _MAX_STEPS = 100_000
 
 @dataclass(frozen=True)
 class SoPConfig:
-    """Switches that select how aggressively :func:`sum_of_products` normalizes (and what
-    :func:`is_normalized_sop` then certifies). Each flag turns a rule group on/off; the
-    surface grows as the build ladder lands (contraction-push, ⊕-dissolve, up-to-iso ⊗/⊕
-    ordering, …). Confluence is *not* assumed — the engine just runs the chosen rules to a
-    fixpoint.
+    """Select how aggressively :func:`sum_of_products` normalizes.
+
+    Each flag turns a rule group on/off, and :func:`is_normalized_sop` then certifies exactly
+    what the enabled groups produce (contraction-push, ⊕-dissolve, up-to-iso ⊗/⊕ ordering, …).
+    Confluence is *not* assumed — the engine just runs the chosen rules to a fixpoint.
     """
 
     beta: bool = True            # β-reduce applied binders (Eval(LLam …) / NEval(Lam …))
@@ -134,7 +134,7 @@ RIESZ_SOP = SoPConfig(eta_advanced=True)
 
 
 def _child_terms(node: Term) -> tuple[Term, ...]:
-    """The immediate *Term* children of ``node`` (a ``Scale`` scalar may be one)."""
+    """Give the immediate *Term* children of ``node`` (a ``Scale`` scalar may be one)."""
     out: list[Term] = []
     for fld in fields(node):
         val = getattr(node, fld.name)
@@ -145,10 +145,10 @@ def _child_terms(node: Term) -> tuple[Term, ...]:
 
 
 def _rebuild(node: Term, f: Callable[[Term], Term]) -> Term:
-    """Reconstruct ``node`` with ``f`` applied to each *Term* child (spaces, dims, ints,
-    strings, the opaque ``External`` payload, and binder sorts pass through untouched).
+    """Reconstruct ``node`` with ``f`` applied to each *Term* child.
 
-    Returns ``node`` itself when nothing changed, so identity rewrites don't churn.
+    Spaces, dims, ints, strings, the opaque ``External`` payload and binder sorts pass through
+    untouched. Returns ``node`` itself when nothing changed, so identity rewrites don't churn.
     """
     changed = False
     new_fields: dict[str, object] = {}
@@ -189,7 +189,7 @@ def subst(term: Term, mapping: dict[int, Term]) -> Term:
     return go(term)
 
 
-def map_spaces_in_term(term: Term, on_space) -> Term:
+def map_spaces_in_term(term: Term, on_space: Callable[[Space], Space]) -> Term:
     """Apply a :func:`~grassmann.lower.space_basis.map_space` rewrite to EVERY space the term embeds.
 
     The general form of :func:`_subst_space_in_term`, which does this traversal but is hardwired to
@@ -210,8 +210,8 @@ def map_spaces_in_term(term: Term, on_space) -> Term:
     return _map_spaces(term, on_space)
 
 
-def _map_spaces(term: Term, on_space) -> Term:
-    """The shared traversal.
+def _map_spaces(term: Term, on_space: Callable[[Space], Space]) -> Term:
+    """Run the shared traversal.
 
     Rebuild `term`, applying `on_space` to every Space-typed field and recursing into every Term-typed one.
     Identity-preserving when nothing changes.
@@ -229,7 +229,7 @@ def _map_spaces(term: Term, on_space) -> Term:
                     changed = True
                 new_fields[fld.name] = new
             elif is_term(val):
-                nv = go(val)
+                nv: object = go(val)
                 if nv is not val:
                     changed = True
                 new_fields[fld.name] = nv
@@ -246,8 +246,9 @@ def _map_spaces(term: Term, on_space) -> Term:
 
 
 def _subst_space_in_term(term: Term, name: str, repl: Space) -> Term:
-    """Substitute the rigid space variable ``SVar(name) := repl`` through every space that
-    ``term`` embeds (used by space-binder β). Recurses into Term children and applies
+    """Substitute the rigid space variable ``SVar(name) := repl`` through every space ``term`` embeds.
+
+    Used by space-binder β. Recurses into Term children and applies
     :func:`grassmann.infer.subst.subst_space` to every Space-typed field.
     """
     from grassmann.infer.subst import subst_space
@@ -283,11 +284,12 @@ def _subst_space_in_term(term: Term, name: str, repl: Space) -> Term:
 
 
 def _subst_nat_in_term(term: Term, name: str, repl: object) -> Term:
-    """Substitute the nat parameter ``DimVar(name) := repl`` through every dimension that
-    ``term`` embeds (used by nat-binder β). A single generic structural walk over the whole
-    Term/Space/Dim tree — every ``DimVar(name)`` (in an ``OPlusRep`` count, an ``App``/``NEval``
-    nat arg, a ``DimSum``/``DimProd``/…) is replaced. (Capture under a shadowing inner nat
-    binder is not handled in v1 — nat binders are rare.)
+    """Substitute the nat parameter ``DimVar(name) := repl`` through every dimension ``term`` embeds.
+
+    Used by nat-binder β. A single generic structural walk over the whole Term/Space/Dim tree —
+    every ``DimVar(name)`` (in an ``OPlusRep`` count, an ``App``/``NEval`` nat arg, a
+    ``DimSum``/``DimProd``/…) is replaced. Capture under a shadowing inner nat binder is not
+    handled — nat binders are rare.
     """
     from grassmann.core.space import DimVar
 
@@ -410,9 +412,9 @@ def _has_binder(t: Term) -> bool:
 
 
 def _space(t: Term) -> Space | None:
-    """The synthesized space of ``t`` (or ``None`` if it does not type-check yet).
+    """Synthesize the space of ``t``, or give ``None`` if it does not type-check yet.
 
-    Used to give a fresh ``Zero`` its space. ``Zero(None)`` is a valid B1 placeholder, so a failure degrades
+    Used to give a fresh ``Zero`` its space. ``Zero(None)`` is a valid placeholder, so a failure degrades
     gracefully rather than aborting the rewrite.
     """
     from grassmann.infer.synth import synth_space
@@ -479,7 +481,7 @@ def normalize_space(s: Space) -> Space:
 
 
 def space_key(s: Space) -> str:
-    """A total, iso-invariant ordering key on Spaces.
+    """Give a total, iso-invariant ordering key on Spaces.
 
     ``repr`` of the :func:`normalize_space` form (so iso spaces share a key).
     """
@@ -487,15 +489,16 @@ def space_key(s: Space) -> str:
 
 
 def spaces_iso(a: Space, b: Space) -> bool:
-    """Whether two spaces are isomorphic (equal up to ``⊗``/``⊕`` reordering and term normalization) — i.e.
+    """Report whether two spaces are isomorphic.
 
+    Equal up to ``⊗``/``⊕`` reordering and term normalization — i.e.
     ``normalize_space(a) == normalize_space(b)``.
     """
     return normalize_space(a) == normalize_space(b)
 
 
 def _static_space_dim(s: Space) -> int | None:
-    """The static (concrete) dimension of a space, or ``None`` if it is symbolic."""
+    """Give the static (concrete) dimension of a space, or ``None`` if it is symbolic."""
     from grassmann.core.space import (
         App,
         CoImg,
@@ -612,7 +615,7 @@ def rule_beta_eval(node: Term) -> Term | None:
 
 
 def _term_var_for_binder(lam: Lam, idx: int) -> Var | None:
-    """The ``Var`` introduced by the ``idx``-th binder, if it is a value (``SpaceSort``) binder.
+    """Give the ``Var`` introduced by the ``idx``-th binder, if it is a value (``SpaceSort``) binder.
 
     ``term_vars`` lists those vars in binder order, skipping space/nat sorts.
     """
@@ -736,7 +739,9 @@ def rule_sum(node: Term) -> Term | None:
 
 
 def _gather_scalar_product(t: Term, num: float, syms: list[Term]) -> float:
-    """Flatten a product of scalars (nested ``Scale`` whose operands are all ``Scalar``-valued)
+    """Flatten a product of scalars into a numeric coefficient and symbolic factors.
+
+    A product of scalars is a nested ``Scale`` whose operands are all ``Scalar``-valued; it folds
     into a numeric coefficient ``num`` and a list of symbolic scalar-atom factors ``syms``.
     """
     match t:
@@ -828,10 +833,11 @@ def _mentions_vars(node: Term, uids: set[int]) -> bool:
 
 
 def rule_eta(node: Term) -> Term | None:
-    """η-reduction (the inverse of β): ``λ⊸(x₀,…,xₙ₋₁). f(x₀,…,xₙ₋₁) → f`` when ``f`` does not
-    mention the bound vars and applies them at slots ``0..n-1`` in order. Now **sound** because an
-    ``LLam`` lowers identically to the stored map it expands (the FFS re-orientation).
-    Collapses an η-expanded map back to the map itself.
+    """η-reduce ``λ⊸(x₀,…,xₙ₋₁). f(x₀,…,xₙ₋₁) → f`` — the inverse of β.
+
+    Fires when ``f`` does not mention the bound vars and applies them at slots ``0..n-1`` in
+    order. **Sound** because an ``LLam`` lowers identically to the stored map it expands (the
+    FFS re-orientation). Collapses an η-expanded map back to the map itself.
     """
     match node:
         case LLam(vars=vars_, body=Eval() as body):
@@ -854,7 +860,7 @@ def _mentions(t: object, uid: int) -> bool:
 
 
 def _peel_inner(arm: Term, r: Term, dvar: Var) -> Term | None:
-    """The covector core of advanced-η.
+    """Peel the covector core of advanced-η out of a δ-bearing inner-product arm.
 
     ``arm`` (the inner-product slot that contains the seed ``dvar``) and ``r`` (the δ-closed *Riesz arm*).
     Return the lambda-free covector ``M`` with ``⟨δ, evalₘ⟩``-style application equal to ``λδ. ⟨arm, r⟩`` —
@@ -903,9 +909,11 @@ def _hadamard_split(t: External, uid: int) -> tuple[Term, Term | None]:
 
 
 def _flatten_compose(t: Term) -> list[Term]:
-    """Flatten a binary ``Compose(f, (0,), (g,))`` chain into its factor list, descending BOTH
-    sides (composition is associative, so left- and right-nested spellings both flatten):
-    ``A∘B∘C`` → ``[A, B, C]``. A non-Compose, or a multi-slot ``Compose``, is a single factor.
+    """Flatten a binary ``Compose(f, (0,), (g,))`` chain into its factor list.
+
+    Descends BOTH sides (composition is associative, so left- and right-nested spellings both
+    flatten): ``A∘B∘C`` → ``[A, B, C]``. A non-Compose, or a multi-slot ``Compose``, is a
+    single factor.
     """
     if isinstance(t, Compose) and t.positions == (0,) and len(t.gs) == 1:
         return [*_flatten_compose(t.f), *_flatten_compose(t.gs[0])]
@@ -923,11 +931,13 @@ def _compose_chain(factors: list[Term], fallback_space: Space) -> Term:
 
 
 def _factor_trace(node: Trace, dvar: Var) -> Term | None:
-    """Fold a matrix-trace monomial ``tr(L ∘ δ ∘ R)`` (δ a square map, appearing once as a bare
-    ``δ`` or ``δ†`` factor) into its Frobenius covector. Cyclic invariance rotates δ to the end:
-    ``tr(L∘δ∘R) = tr((R∘L)∘δ) = ⟨δ, (R∘L)†⟩``  (and ``tr((R∘L)∘δ†) = ⟨δ, R∘L⟩``). This turns the
-    matrix-calculus trace derivatives into the inner-product form the covector peel already
-    handles. Bails (``None``) unless exactly one factor is a *bare* δ / δ† occurrence.
+    """Fold a matrix-trace monomial ``tr(L ∘ δ ∘ R)`` into its Frobenius covector.
+
+    δ is a square map, appearing once as a bare ``δ`` or ``δ†`` factor. Cyclic invariance
+    rotates δ to the end: ``tr(L∘δ∘R) = tr((R∘L)∘δ) = ⟨δ, (R∘L)†⟩``  (and
+    ``tr((R∘L)∘δ†) = ⟨δ, R∘L⟩``). This turns the matrix-calculus trace derivatives into the
+    inner-product form the covector peel already handles. Bails (``None``) unless exactly one
+    factor is a *bare* δ / δ† occurrence.
     """
     uid = dvar.uid
     factors = _flatten_compose(node.f)
@@ -950,10 +960,11 @@ def _factor_trace(node: Trace, dvar: Var) -> Term | None:
 
 
 def _factor_inner(s: Space, a: Term, b: Term, dvar: Var) -> Term | None:
-    """Fold ``λδ. ⟨a, b⟩`` (a *scalar* inner-product monomial) into its covector. Exactly one
-    arm may mention δ (both ⇒ the nonlinear ``⟨δ,δ⟩``, rejected by the linearity gate before we
-    get here; neither ⇒ not a δ-functional). The metric is symmetric, so the choice of which
-    arm is the input vs the Riesz arm is value-free.
+    """Fold ``λδ. ⟨a, b⟩``, a *scalar* inner-product monomial, into its covector.
+
+    Exactly one arm may mention δ (both ⇒ the nonlinear ``⟨δ,δ⟩``, rejected by the linearity
+    gate before we get here; neither ⇒ not a δ-functional). The metric is symmetric, so the
+    choice of which arm is the input vs the Riesz arm is value-free.
     """
     uid = dvar.uid
     a_has, b_has = _mentions(a, uid), _mentions(b, uid)
@@ -965,10 +976,10 @@ def _factor_inner(s: Space, a: Term, b: Term, dvar: Var) -> Term | None:
 
 
 def _factor_llam_body(node: Term, dvar: Var) -> Term | None:
-    """Find a lambda-free ``M`` with ``Eval(M, (0,), (dvar,)) ≡ node`` — i.e.
+    """Find a lambda-free ``M`` with ``Eval(M, (0,), (dvar,)) ≡ node``.
 
-    the linear map / covector that the seed-linear body ``node`` denotes. Returns ``None`` for any shape it
-    cannot express lambda-free (strictly conservative — the ``LLam`` is then left intact).
+    I.e. the linear map / covector that the seed-linear body ``node`` denotes. Returns ``None`` for any shape
+    it cannot express lambda-free (strictly conservative — the ``LLam`` is then left intact).
     """
     uid = dvar.uid
     match node:
@@ -1038,14 +1049,14 @@ def rule_eta_advanced(node: Term) -> Term | None:
 
 
 def rule_eval_compose_fold(node: Term) -> Term | None:
-    """Fold a nested application into a composition (application associativity, now unambiguous
-    under the normalized convention):
+    """Fold a nested application into a composition — application associativity.
 
         ``Eval(f, (0,), (Eval(h,(0,),(x,)),)) → Eval(Compose(f,(0,),(h,)), (0,), (x,))``.
 
-    Grouping the map algebra lets the map-level identities fire on the ``Compose`` — e.g.
-    ``Eval(Solve(g), Eval(g, x))`` folds to ``Eval(Solve(g)∘g, x) → Eval(Id, x) → x``. Direction:
-    compose maps before applying (value-exact).
+    Unambiguous under the normalized convention. Grouping the map algebra lets the map-level
+    identities fire on the ``Compose`` — e.g. ``Eval(Solve(g), Eval(g, x))`` folds to
+    ``Eval(Solve(g)∘g, x) → Eval(Id, x) → x``. Direction: compose maps before applying
+    (value-exact).
     """
     if not (isinstance(node, Eval) and node.positions == (0,) and len(node.args) == 1):
         return None
@@ -1056,8 +1067,9 @@ def rule_eval_compose_fold(node: Term) -> Term | None:
 
 
 def rule_eval_zero(node: Term) -> Term | None:
-    """``0·… → 0`` and ``f(…,0,…) → 0`` — a linear application with a zero map or a zero
-    argument vanishes.
+    """Reduce ``0·… → 0`` and ``f(…,0,…) → 0``.
+
+    A linear application with a zero map or a zero argument vanishes.
     """
     match node:
         case Eval() if isinstance(node.f, Zero) or any(isinstance(a, Zero) for a in node.args):
@@ -1110,10 +1122,12 @@ def rule_involution(node: Term) -> Term | None:
 
 
 def rule_dagger_push(node: Term) -> Term | None:
-    """Push the metric-transpose adjoint ``Dagger`` toward the leaves so it only ever wraps a
-    primitive map (the grammar's ``atom``): ``Id† → Id``, ``(f⊗g)† → f†⊗g†`` (``Kron``),
-    ``(f∘g)† → g†∘f†`` (``Compose``, single slot). Value-exact (verified). ``(f†)† → f`` is
-    handled by :func:`rule_involution`; ``Dagger`` over ``+``/``Scale`` by :func:`dist_unary`.
+    """Push the metric-transpose adjoint ``Dagger`` toward the leaves.
+
+    It then only ever wraps a primitive map (the grammar's ``atom``): ``Id† → Id``,
+    ``(f⊗g)† → f†⊗g†`` (``Kron``), ``(f∘g)† → g†∘f†`` (``Compose``, single slot). Value-exact
+    (verified). ``(f†)† → f`` is handled by :func:`rule_involution`; ``Dagger`` over
+    ``+``/``Scale`` by :func:`dist_unary`.
 
     Not done for ``Solve``/``Pinv``: ``Solve``'s argument must be a ``bij``-asserted *var* (it
     can never be a ``Compose``/``Kron``), and ``Pinv`` does **not** distribute over composition
@@ -1152,8 +1166,9 @@ def rule_musical(node: Term) -> Term | None:
 
 
 def rule_inverse_compose(node: Term) -> Term | None:
-    """Cancel an inverse/forward map pair in a composition toward ``Identity`` (the map-algebra
-    analogue of the musical ``g⁻¹∘g→Id``):
+    """Cancel an inverse/forward map pair in a composition toward ``Identity``.
+
+    The map-algebra analogue of the musical ``g⁻¹∘g→Id``:
 
     - ``Solve(g)∘g → Id(dom)`` and ``g∘Solve(g) → Id(cod)``    (``g`` asserted ``bij``);
     - ``Pinv(f)∘f → Id(dom)``  (``f`` asserted ``inj`` — left inverse) and
@@ -1233,7 +1248,7 @@ def rule_trace_identity(node: Term) -> Term | None:
 
 
 def _map_arity(t: Term) -> int | None:
-    """Number of top tensor factors of ``t``'s space (1 for a non-⊗), or ``None`` if untypable."""
+    """Give the number of top tensor factors of ``t``'s space (1 for a non-⊗), or ``None`` if untypable."""
     from grassmann.core.space import OProd
 
     sp = _space(t)
@@ -1301,7 +1316,7 @@ def rule_tuplepermute(node: Term) -> Term | None:
 
 
 def rule_tuple_roundtrip(node: Term) -> Term | None:
-    """The ``⊕`` injection/projection round-trip ``π_i ∘ ι_j``.
+    """Fold the ``⊕`` injection/projection round-trip ``π_i ∘ ι_j``.
 
     An **Iverson bracket** over the block indices times the identity, ``[i=j]·I`` (the bracket is purely
     index/dim data): ``Compose(TupleProject(s,i), TupleEmbed(s,j))`` is ``Identity(block_i)`` when ``i=j`` and
@@ -1326,9 +1341,9 @@ def rule_tuple_roundtrip(node: Term) -> Term | None:
 
 
 def _push_sum_then_scale(node: Term, slots: list[tuple[Term, Callable[[Term], Term]]]) -> Term | None:
-    """Generic distribution over a node that is **multilinear** in the given ``slots``
-    (each ``slot`` is a child plus a rebuild-with-new-child closure).
+    """Distribute over a node that is **multilinear** in the given ``slots``.
 
+    Each ``slot`` is a child plus a rebuild-with-new-child closure.
     Pushes a ``Sum`` outward (preferred — moves ``+`` toward the root) before pulling a
     scalar outward (``Scale``). Doing one slot per call lets the engine iterate to a
     fixpoint; trying sums across all slots first keeps the result a clean SoP.
@@ -1660,16 +1675,17 @@ _CONTRACTION_RULES: tuple[Rule, ...] = (dist_eval_oprod, dist_compose_oprod, dis
 
 
 def term_key(t: Term) -> str:
-    """A total, deterministic, **α-invariant** ordering key on Terms (used to sort ``Sum``
-    summands canonically). ``repr`` is injective over these frozen dataclasses; for terms
-    that contain a binder we key on the α-canonical form so α-equivalent atoms sort
-    identically (the common no-binder case takes the fast path).
+    """Give a total, deterministic, **α-invariant** ordering key on Terms.
+
+    Used to sort ``Sum`` summands canonically. ``repr`` is injective over these frozen
+    dataclasses; for terms that contain a binder we key on the α-canonical form so
+    α-equivalent atoms sort identically (the common no-binder case takes the fast path).
     """
     return repr(alpha_canon(t) if _has_binder(t) else t)
 
 
 def _atom_of(mono: Term) -> Term:
-    """The atom of a monomial.
+    """Give the atom of a monomial.
 
     Strip a leading *numeric* ``Scale`` coefficient (matching the grouping key :func:`rule_collect` uses via
     :func:`_split_num_scale`). A *symbolic* leading ``Scale`` is a genuine scalar-product factor and stays
@@ -1695,9 +1711,7 @@ def rule_sort_sum(node: Term) -> Term | None:
 
 
 def _top_arity(g: Term) -> int | None:
-    """Number of top-level tensor factors of ``g``'s space (1 for a non-⊗), or ``None`` if
-    untypable.
-    """
+    """Give the number of top-level tensor factors of ``g``'s space (1 for a non-⊗), or ``None`` if untypable."""
     sp = _space(g)
     if sp is None:
         return None
@@ -1705,8 +1719,10 @@ def _top_arity(g: Term) -> int | None:
 
 
 def _has_additive_structure(t: Term) -> bool:
-    """``t`` still carries additive / scalar / zero structure (``Sum``/``Scale``/``Zero``)
-    that distribution and scalar-pull must dissolve before an ordering rule may fire.
+    """Report whether ``t`` still carries additive / scalar / zero structure.
+
+    ``Sum``/``Scale``/``Zero`` structure that distribution and scalar-pull must dissolve
+    before an ordering rule may fire.
     """
     match t:
         case Sum() | Scale() | Zero():
@@ -1716,8 +1732,9 @@ def _has_additive_structure(t: Term) -> bool:
 
 
 def rule_order_otimes(node: Term) -> Term | None:
-    """Canonicalize the factor order of a tensor product **up to isomorphism**, restoring the
-    original layout with a ``Permute`` correction (the ``𝒞``):
+    """Canonicalize the factor order of a tensor product **up to isomorphism**.
+
+    The original layout is restored with a ``Permute`` correction (the ``𝒞``):
 
         ``OProdV(factors)  ≡  Permute(OProdV(sorted), σ⁻¹)``
 
@@ -1749,9 +1766,10 @@ def rule_order_otimes(node: Term) -> Term | None:
 
 
 def rule_order_oplus(node: Term) -> Term | None:
-    """Canonicalize the component order of a ``⊕`` stack **up to isomorphism**, restoring the
-    original block layout with a single ``TuplePermute`` correction (the ``⊕`` analogue of the
-    ``Permute`` used for ``⊗``):
+    """Canonicalize the component order of a ``⊕`` stack **up to isomorphism**.
+
+    The original block layout is restored with a single ``TuplePermute`` correction (the ``⊕``
+    analogue of the ``Permute`` used for ``⊗``):
 
         ``OPlusV(comps)  ≡  TuplePermute(OPlusV(sorted), σ⁻¹)``
 
@@ -1794,8 +1812,9 @@ def rule_dissolve_oplus(node: Term) -> Term | None:
 
 
 def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
-    """Assemble the rule tuple selected by ``cfg`` (the always-valid algebraic cleanups run
-    unconditionally; everything else is gated).
+    """Assemble the rule tuple selected by ``cfg``.
+
+    The always-valid algebraic cleanups run unconditionally; everything else is gated.
     """
     rules: list[Rule] = []
     if cfg.beta:
@@ -1825,7 +1844,7 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
 
 
 def _is_scalar_atom(a: Term) -> bool:
-    """A **scalar atom** of the scalar-polynomial normal form (when ``canon_scalars`` is on).
+    """Report whether ``a`` is a **scalar atom** of the scalar-polynomial normal form (when ``canon_scalars`` is on).
 
     A Scalar-valued Term that is *never* decomposed further — a scalar ``Var``, a scalar ``Eval`` contraction
     (a dot product), or a non-linear ``External`` application. A numeric ``Lit`` is NOT an atom (it folds into
@@ -1867,7 +1886,7 @@ def _is_canonical_scalar_product(a: Term) -> bool:
 
 
 def _is_atom_head(a: Term, canon_scalars: bool = False) -> bool:
-    """``a``'s *head* is a legal atom head.
+    """Report whether ``a``'s *head* is a legal atom head.
 
     Not additive/scalable/zero, and not a redex the normal form forbids (β or ``Id·v``). When
     ``canon_scalars`` is on, a **canonical scalar product** (a sorted right-nested ``Scale`` of scalar atoms)
@@ -1888,10 +1907,11 @@ def _is_atom_head(a: Term, canon_scalars: bool = False) -> bool:
 
 
 def _is_monomial(mono: Term, canon_scalars: bool = False) -> bool:
-    """``mono`` is ``atom`` or ``Scale(coeff, atom)`` with ``coeff ∉ {0, 1}`` (numeric) or a
-    sum-free scalar term (symbolic), and ``atom`` a legal atom head. With ``canon_scalars``
-    the atom may be a canonical scalar product, so ``Scale(2.0, Scale(a, b))`` (the scalar
-    monomial ``2·a·b``) is a monomial.
+    """Report whether ``mono`` is ``atom`` or ``Scale(coeff, atom)``.
+
+    ``coeff`` is ``∉ {0, 1}`` (numeric) or a sum-free scalar term (symbolic), and ``atom`` a
+    legal atom head. With ``canon_scalars`` the atom may be a canonical scalar product, so
+    ``Scale(2.0, Scale(a, b))`` (the scalar monomial ``2·a·b``) is a monomial.
     """
     match mono:
         case Sum() | Zero():
@@ -1913,9 +1933,10 @@ def _is_monomial(mono: Term, canon_scalars: bool = False) -> bool:
 
 
 def _fully_reduced(t: Term, rules: tuple[Rule, ...]) -> bool:
-    """No rule in ``rules`` fires anywhere in ``t`` (the operational "no redex remains" half
-    of the normal-form check; the additive *shape* is checked separately by
-    :func:`is_normalized_sop`).
+    """Report whether no rule in ``rules`` fires anywhere in ``t``.
+
+    The operational "no redex remains" half of the normal-form check; the additive *shape* is
+    checked separately by :func:`is_normalized_sop`.
     """
     for rule in rules:
         out = rule(t)
@@ -1925,14 +1946,13 @@ def _fully_reduced(t: Term, rules: tuple[Rule, ...]) -> bool:
 
 
 def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
-    """Decide whether ``t`` is in **sum-of-products normal form** under ``config`` (the
-    grammar above).
+    """Decide whether ``t`` is in **sum-of-products normal form** under ``config``.
 
-    Two independent checks: (1) the additive *shape* — ``Zero``, a lone monomial, or a
-    ``Sum`` of ≥2 monomials whose atoms are distinct (when ``collect``) and sorted by
-    :func:`term_key` (when ``order_sum``); and (2) *full reduction* — no enabled rule fires
-    anywhere. Together they make ``is_normalized_sop(sum_of_products(t, c), c)`` the
-    acceptance test for the normalizer.
+    The grammar above is the specification. Two independent checks: (1) the additive *shape* —
+    ``Zero``, a lone monomial, or a ``Sum`` of ≥2 monomials whose atoms are distinct (when
+    ``collect``) and sorted by :func:`term_key` (when ``order_sum``); and (2) *full
+    reduction* — no enabled rule fires anywhere. Together they make
+    ``is_normalized_sop(sum_of_products(t, c), c)`` the acceptance test for the normalizer.
     """
     if not is_term(t):
         return False
@@ -1982,8 +2002,16 @@ def _normalize(term: Term, rules: tuple[Rule, ...]) -> Term:
 
 
 def rewrite(term: Term, rules: tuple[Rule, ...]) -> Term:
-    """Normalize ``term`` to a fixpoint of a custom ``rules`` tuple (the open-ended entry
-    point; :func:`simplify` / :func:`sum_of_products` are the curated presets).
+    """Normalize ``term`` to a fixpoint of a custom ``rules`` tuple.
+
+    The open-ended entry point; :func:`simplify` / :func:`sum_of_products` are the curated
+    presets.
+
+    Raises
+    ------
+    RewriteError
+        If ``term`` is not a Term, or the rules do not reach a fixpoint within
+        :data:`_MAX_STEPS` local firings at some node.
     """
     if not is_term(term):
         raise RewriteError(f"rewrite: expected a Term, got {term!r}")
@@ -1991,15 +2019,18 @@ def rewrite(term: Term, rules: tuple[Rule, ...]) -> Term:
 
 
 def beta(term: Term) -> Term:
-    """β-reduce applied binders (``Eval(LLam …)`` / ``NEval(Lam …)``) to a fixpoint, with
-    no other simplification.
+    """β-reduce applied binders to a fixpoint, with no other simplification.
+
+    The applied binders are ``Eval(LLam …)`` and ``NEval(Lam …)``.
     """
     return rewrite(term, _BETA_RULES)
 
 
 def simplify(term: Term) -> Term:
-    """β-reduce and apply the always-valid algebraic cleanups (scalar/zero/identity laws,
-    sum flattening, involutions). Strictly shrinks the term; never distributes ``+``.
+    """β-reduce and apply the always-valid algebraic cleanups.
+
+    The cleanups are the scalar/zero/identity laws, sum flattening and involutions. Strictly
+    shrinks the term; never distributes ``+``.
     """
     return rewrite(term, _SIMPLIFY_RULES)
 
