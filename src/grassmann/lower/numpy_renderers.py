@@ -20,7 +20,18 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from .represent import _ExternalOp, _QrColsOp
+    from .space_basis import _QrSignConventionOp
+
+# A renderer turns an op plus its already-rendered argument expressions into one
+# python expression string.
+Renderer = Callable[..., str]
 
 # _ExternalOp.name -> a python-expression template over its (float-coerced) args.
 _UNARY = {
@@ -35,7 +46,8 @@ _UNARY = {
 _BINARY = {"div": "({x} / {y})", "hadamard": "({x} * {y})"}
 
 
-def _external_op(op, a):
+def _external_op(op: _ExternalOp, a: list[str]) -> str:
+    """Render an ``_ExternalOp`` — an elementwise numpy call, or a constant if nullary."""
     if not a:  # an argument-less External is a CONSTANT (e.g. a Hodge volume-form basis vector)
         import numpy as np
         val = np.asarray(op.fn(), dtype=float)
@@ -50,20 +62,24 @@ def _external_op(op, a):
 
 # -- FFS / geometry realization ops (orthonormal frames) ---------------------
 
-def _qr_cols(op, a):           # orthonormal columns, positive-R-diagonal sign convention
+def _qr_cols(op: _QrColsOp, a: list[str]) -> str:
+    """Render orthonormal columns under the positive-R-diagonal sign convention."""
     return ("(lambda _A: (lambda _q, _r: _q * np.where(np.sign(np.diag(_r)) == 0, 1.0, "
             f"np.sign(np.diag(_r))))(*np.linalg.qr(_A)))(np.asarray({a[0]}, dtype=float))")
 
 
-def _qr_sign_convention(op, a):  # _QrSignConventionOp(Q, R) -> (Q·s, s·R), s = sign(diag R) (0→1)
+def _qr_sign_convention(op: _QrSignConventionOp, a: list[str]) -> str:
+    """Render ``_QrSignConventionOp(Q, R) -> (Q·s, s·R)``, ``s = sign(diag R)`` (0→1)."""
     # Delegate to the op's own auto-discovery hook — single source of truth. This entry stays for
     # explicit ``op_renderers=`` threading; ``to_numpy_source`` finds the hook on its own.
     return op.__numpy_source__(a)
 
 
-def op_renderers() -> dict:
-    """The ``{op_class_name: (op, arg_exprs) -> python_expr}`` map for grassmann's remaining
-    Stmt ops (the generic array / linalg ops now render as polyarray builtins), to pass as
+def op_renderers() -> dict[str, Renderer]:
+    """Give the ``{op_class_name: renderer}`` map for grassmann's remaining Stmt ops.
+
+    The generic array / linalg ops now render as polyarray builtins, so only the
+    grassmann-specific ops appear here.  Pass the result as
     ``polyarray.to_numpy_source(..., op_renderers=op_renderers())``.
 
     ``_QrSignConventionOp`` also carries its own ``__numpy_source__`` hook, which

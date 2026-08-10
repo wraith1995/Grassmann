@@ -17,6 +17,7 @@ performs the occurs-check.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import assert_never
 
 from grassmann.core.space import (
@@ -43,8 +44,9 @@ from .dims import DimError, dim_eq, dim_of
 
 
 def _expand_rep(s: Space) -> Space:
-    """Expand a static-count ``OPlusRep(n, s)`` to the explicit ``OPlus(s, …, s)`` (else
-    pass through), so ``⊕ⁿ s`` and ``⊕(s,…,s)`` are unified as the same space.
+    """Expand a static-count ``OPlusRep(n, s)`` to the explicit ``OPlus(s, …, s)``.
+
+    Anything else passes through, so ``⊕ⁿ s`` and ``⊕(s,…,s)`` unify as the same space.
     """
     if isinstance(s, OPlusRep) and isinstance(s.count, DimLit):
         return OPlus(tuple([s.space] * s.count.value))
@@ -52,7 +54,7 @@ def _expand_rep(s: Space) -> Space:
 
 
 class UnifyError(Exception):
-    """Raised when two spaces cannot be unified (`25 §2` FAIL)."""
+    """Raised when two spaces cannot be unified."""
 
 
 class AssociationMismatch(UnifyError):
@@ -84,16 +86,19 @@ class MetaStore:
         return f"MetaStore({self._solved!r})"
 
     def is_solved(self, m: SpaceMeta) -> bool:
+        """Report whether the metavar ``m`` already has a solution."""
         return m.uid in self._solved
 
     def get(self, m: SpaceMeta) -> Space | None:
+        """Give the solution recorded for ``m``, or ``None`` if it is unsolved."""
         return self._solved.get(m.uid)
 
     def solve(self, m: SpaceMeta, s: Space) -> None:
+        """Record ``m := s`` in the solution set."""
         self._solved[m.uid] = s
 
     def copy(self) -> MetaStore:
-        """A detached copy of the solution set ``Θ``.
+        """Give a detached copy of the solution set ``Θ``.
 
         For TRIAL unifications whose bindings must not escape — see
         :func:`_leaves_pairwise_unifiable`, which asks "would these unify?" purely to classify a
@@ -137,7 +142,7 @@ class MetaStore:
         return s
 
     def has_unsolved(self, s: Space) -> bool:
-        """True iff ``resolve(s)`` still mentions an unsolved metavar (`25 §5`).
+        """Report whether ``resolve(s)`` still mentions an unsolved metavar.
 
         Descends into FFS defining maps / endpoints and ``App`` like
         :func:`grassmann.infer.subst.subst_space` — a metavar hiding inside
@@ -172,8 +177,10 @@ class MetaStore:
 
 
 def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
-    """Occurs-check with the same FFS/``App`` descent as :meth:`MetaStore.has_unsolved`
-    (a cyclic ``m:= Img(f, source=…m…)`` solution must be rejected —).
+    """Run the occurs-check for ``m`` in ``s``.
+
+    Descends into FFS defining maps and ``App`` exactly as :meth:`MetaStore.has_unsolved`
+    does, so a cyclic solution ``m := Img(f, source=…m…)`` is rejected.
     """
     s = store.walk(s)
 
@@ -206,8 +213,8 @@ def _occurs(store: MetaStore, m: SpaceMeta, s: Space) -> bool:
             assert_never(unreachable)
 
 
-def _space_pred_in_term(term: object, pred) -> bool:
-    """True iff ``pred(space)`` holds for some Space embedded in ``term``.
+def _space_pred_in_term(term: object, pred: Callable[[Space], bool]) -> bool:
+    """Report whether ``pred(space)`` holds for some Space embedded in ``term``.
 
     The same dataclass-field descent as :func:`grassmann.infer.subst._subst_space_in_term` (binder var spaces,
     asserted spaces, nested FFS maps, ``App`` args).
@@ -406,8 +413,10 @@ def _solve_meta(m: SpaceMeta, s: Space, store: MetaStore) -> None:
 
 
 def _drop_scalar_factors(s: OProd) -> Space:
-    """An ``OProd`` with its ``Scalar`` (⊗-unit) factors removed and a single-factor product
-    collapsed to its factor (``OProd((X,)) ≅ X``); an all-scalar product becomes ``Scalar``.
+    """Drop the ``Scalar`` (⊗-unit) factors of an ``OProd``.
+
+    A single-factor product collapses to its factor (``OProd((X,)) ≅ X``); an all-scalar
+    product becomes ``Scalar``.
     """
     kept = tuple(x for x in s.spaces if not isinstance(x, Scalar))
     if not kept:
@@ -476,8 +485,9 @@ def _leaves_pairwise_unifiable(
 
 
 def _axis_layout(s: OProd) -> str:
-    """``s``'s ARRAY layout — one axis per top-level ⊗ factor, exactly as
-    ``lower.represent._shape_of_space`` reads it.
+    """Give ``s``'s ARRAY layout — one axis per top-level ⊗ factor.
+
+    Read exactly as ``lower.represent._shape_of_space`` reads it.
 
     This is the whole point of the message: the leaves agree, so the two spaces are one space, and
     the ONLY thing that differs is this.  ``lower._dims.dim_of`` is the same static sizer
@@ -514,7 +524,7 @@ def _axis_layout(s: OProd) -> str:
 
 
 def _ffs_map_alpha_eq(f: object, g: object) -> bool:
-    """Are two FFS keying maps α-equivalent (equal up to renaming of bound variables)?
+    """Report whether two FFS keying maps are α-equivalent (equal up to bound renaming).
 
     Used so independently-constructed FFS spaces (``Img(alt(V,k))`` etc.) unify.  Lazy import of
     ``alpha_canon`` avoids an ``infer ← transform`` import cycle; only hit on a raw mismatch.
