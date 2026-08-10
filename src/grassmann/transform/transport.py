@@ -6,8 +6,7 @@ applies a map.  Carrying a value or basis **along a chart map** ``f : dom → co
 *different* operation: it must **apply ``f``** and corestrict to its image ``Img(f)``.
 This is the "coordinate convert" ``Rᵗ → Img(J)`` that ``pullback`` must **not** be used
 for: ``dom(f)`` and ``Img(f)`` are dim-equal but structurally unrelated, so ``pullback``
-would silently fall to a dim-equal ``Assert`` *relabel* (the §45 footgun) instead of
-applying ``f``.
+would silently fall to a dim-equal ``Assert`` *relabel* instead of applying ``f``.
 
 This module names that missing primitive — the **restriction of a map to produce values
 in its image space** (domain → image), as opposed to the within-ambient inclusion /
@@ -38,6 +37,7 @@ basis along the chart immersion, and chartLib is its numeric / symbolic realizat
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterator
 
 from grassmann.core.basis import (
     Basis,
@@ -101,12 +101,12 @@ def pull_along(v: Term, f: Term) -> Term:
 def transport_basis(
     b: Basis | None, f: Term, *, target: Basis | None = None
 ) -> ImageBasis:
-    """The reference basis ``b`` of ``dom(f)`` transported along ``f`` into ``Img(f)``.
+    """Transport the reference basis ``b`` of ``dom(f)`` along ``f`` into ``Img(f)``.
 
     Returns ``ImageBasis(f, source=b, target=target)`` — the **literal pushforward**
     columns ``f(bᵢ)``, *not* orthonormalized, so it stays rational.  ``b=None`` uses the
     standard basis of ``dom(f)``.  This is the grassmann-native object for "the fixed
-    reference basis carried into the chart" (the proposal's transported basis).
+    reference basis carried into the chart".
     """
     _require_map(f, "transport_basis")
     if b is not None and not is_basis(b):
@@ -117,7 +117,7 @@ def transport_basis(
 def transport_cobasis(
     b: Basis | None, f: Term, *, target: Basis | None = None
 ) -> DualBasis:
-    """The ``T^{-⋆}`` dual / functional side of :func:`transport_basis`.
+    """Transport the cobasis — the ``T^{-⋆}`` dual side of :func:`transport_basis`.
 
     Returns ``DualBasis(ImageBasis(f, source=b, target=target))`` — the dual of the
     transported reference basis, i.e. the covector / DOF-functional pullback ``f^{-⋆}``.
@@ -132,7 +132,7 @@ def transport_cobasis(
 _IRRATIONAL_NODES = (Sqrt, ProjectedBasis, OrthonormalBasis)
 
 
-def _walk(obj, seen: set) -> object:
+def _walk(obj: object, seen: set[int]) -> Iterator[object]:
     """Yield ``obj`` and every nested Term / Basis / Space dataclass field."""
     if id(obj) in seen:
         return
@@ -147,7 +147,7 @@ def _walk(obj, seen: set) -> object:
             yield from _walk(item, seen)
 
 
-def assert_rational(obj, *, ctx: str = "transport") -> None:
+def assert_rational(obj: object, *, ctx: str = "transport") -> None:
     """Assert a transported term/basis introduces no irrational atom (the litmus test).
 
     Scans for an orthonormalizing basis node

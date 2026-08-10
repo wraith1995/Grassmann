@@ -24,7 +24,7 @@ from .dims import dim_diff, dim_of, rank_of
 
 
 def map_props(f: object) -> MapProps | None:
-    """The asserted properties of a map term, if any (props live on ``Var``)."""
+    """Give the asserted properties of a map term, if any (props live on ``Var``)."""
     if isinstance(f, Var):
         p = f.props
         if p is not None and not p.is_empty():
@@ -33,6 +33,7 @@ def map_props(f: object) -> MapProps | None:
 
 
 def is_bijective(f: object) -> bool:
+    """Report whether ``f`` is asserted bijective (inverses of bijections count)."""
     p = map_props(f)
     if p is not None and p.bij:
         return True
@@ -45,18 +46,20 @@ def is_bijective(f: object) -> bool:
 
 
 def is_injective(f: object) -> bool:
+    """Report whether ``f`` is asserted injective."""
     p = map_props(f)
     return p is not None and p.inj
 
 
 def is_surjective(f: object) -> bool:
+    """Report whether ``f`` is asserted surjective."""
     p = map_props(f)
     return p is not None and p.surj
 
 
 @dataclass(frozen=True)
 class FFSDims:
-    """The four FFS dimensions of a map ``f`` (`25 §1`/§7)."""
+    """The four FFS dimensions of a map ``f``."""
 
     rank: Dim
     dim_ker: Dim

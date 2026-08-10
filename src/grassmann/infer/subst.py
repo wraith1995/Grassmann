@@ -75,9 +75,11 @@ def _subst_in_app_arg(a: object, name: str, repl: Space) -> object:
 
 
 def _subst_space_in_term(term: object, name: str, repl: Space) -> object:
-    """Substitute ``SVar(name) := repl`` through every Space embedded in a Term (the spaces of
-    binder vars, asserted spaces, nested FFS maps, …).  Local to :mod:`grassmann.infer` to avoid an
-    ``infer → transform`` import cycle; mirrors ``transform.rewrite._subst_space_in_term``.
+    """Substitute ``SVar(name) := repl`` through every Space embedded in a Term.
+
+    Covers the spaces of binder vars, asserted spaces, nested FFS maps, and so on.  Local to
+    :mod:`grassmann.infer` to avoid an ``infer → transform`` import cycle; mirrors
+    ``transform.rewrite._subst_space_in_term``.
     """
     from grassmann.core.term import is_term
 
@@ -115,11 +117,11 @@ def _subst_space_in_term(term: object, name: str, repl: Space) -> object:
 
 
 def space_occurs(needle: Space, haystack: Space) -> bool:
-    """Does the space ``needle`` occur anywhere in ``haystack``.
+    """Report whether the space ``needle`` occurs anywhere in ``haystack``.
 
-    Descending into FFS defining maps and ``App`` like :func:`subst_space`?  The "does a tangent ``Img(J)``
-    occur in this space?" traversal pointwise needs (e.g. to detect whether a value space still mentions the
-    chart).
+    Descends into FFS defining maps and ``App`` exactly as :func:`subst_space` does.  This is the
+    "does a tangent ``Img(J)`` occur in this space?" traversal — e.g. to detect whether a value
+    space still mentions the chart.
     """
     from grassmann.core.term import is_term
 

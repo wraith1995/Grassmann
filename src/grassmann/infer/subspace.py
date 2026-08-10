@@ -89,6 +89,7 @@ def is_subspace(sub: Space, amb: Space) -> bool:
 
 
 def is_subspace_or_eq(a: Space, b: Space) -> bool:
+    """Report whether ``a`` is a subspace of ``b`` or equal to it."""
     return _eq(a, b) or is_subspace(a, b)
 
 
@@ -132,7 +133,7 @@ def is_ffs(s: Space) -> TypeGuard[Img | Ker | CoImg | CoKer]:
 
 
 def ffs_defining_map(s: Space) -> object | None:
-    """The defining map ``f`` (a Term) of ``Img(f)/Ker(f)/CoImg(f)/CoKer(f)``, else ``None``."""
+    """Give the defining map ``f`` of ``Img(f)/Ker(f)/CoImg(f)/CoKer(f)``, else ``None``."""
     match s:
         case Img(f, _, _) | Ker(f, _, _) | CoImg(f, _, _) | CoKer(f, _, _):
             return f
@@ -143,7 +144,7 @@ def ffs_defining_map(s: Space) -> object | None:
 
 
 def ffs_kind(s: Space) -> FfsKind | None:
-    """The FFS kind of ``s``, else ``None``."""
+    """Give the FFS kind of ``s``, else ``None``."""
     match s:
         case Img():
             return "img"
@@ -160,9 +161,11 @@ def ffs_kind(s: Space) -> FfsKind | None:
 
 
 def ffs_superspace(s: Space) -> Space | None:
-    """The ambient an FFS embeds into (``Ker``/``CoImg`` ⊑ dom f; ``Img``/``CoKer`` ⊑ cod f),
-    from the explicit endpoint or decoded from ``f`` — ``None`` if ``s`` is not an FFS or the
-    map space cannot be decoded.
+    """Give the ambient space an FFS embeds into, else ``None``.
+
+    ``Ker``/``CoImg`` sit in ``dom f`` and ``Img``/``CoKer`` in ``cod f``; the ambient comes
+    from the explicit endpoint when the node carries one, otherwise it is decoded from ``f``.
+    ``None`` if ``s`` is not an FFS or the map space cannot be decoded.
     """
     match s:
         case Ker() | CoImg():

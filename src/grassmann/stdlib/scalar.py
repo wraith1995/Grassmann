@@ -59,7 +59,7 @@ __all__ = [
 
 
 def _is_euclidean(s: object) -> bool:
-    """Is ``s`` built purely from base/``Scalar`` spaces via ``Dual``/``OPlus``/``OProd``?
+    """Report whether ``s`` is built purely from base/``Scalar`` spaces via ``Dual``/``OPlus``/``OProd``.
 
     Euclidean = standard inner product, standard basis: ``Scalar``, an abstract base space
     (``SVar``), and any ``Dual``/``OPlus``/``OProd``/``OPlusRep`` thereof. Explicitly NOT
@@ -79,7 +79,7 @@ def _is_euclidean(s: object) -> bool:
 
 
 def _euclidean_space_of(x: Expr) -> _S.Space:
-    """The (Euclidean) space of operand ``x`` — the result space of an elementwise op.
+    """Give the (Euclidean) space of operand ``x`` — the result space of an elementwise op.
 
     Elementwise ops preserve the operand's space (``exp`` of a vector is a vector). We infer
     it with :func:`synth_space` and require it Euclidean, so the kernel runs in standard
@@ -95,7 +95,7 @@ def _euclidean_space_of(x: Expr) -> _S.Space:
 
 
 def _external(name: str, fn: object, *args: Expr) -> Expr:
-    """An ``External`` applying ``fn`` elementwise to ``args`` (`41 §3`).
+    """Build an ``External`` applying ``fn`` elementwise to ``args``.
 
     The result lives in the operand's (Euclidean) space — so these ops run elementwise on any
     value built from Euclidean spaces (scalars, vectors, matrices, ⊗/⊕ thereof), not just

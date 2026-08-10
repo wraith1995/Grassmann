@@ -60,7 +60,7 @@ def _flatten(node: object, attr: str) -> list:
 
 
 def _canon(x: object, m: dict) -> object:
-    """A hashable canonical form.
+    """Give a hashable canonical form of ``x``.
 
     Var identities → first-seen ordinals (α-equivalence), associative chains flattened, External numpy
     callables ignored (compared by name).
@@ -85,8 +85,10 @@ def _canon(x: object, m: dict) -> object:
 
 
 def alpha_equal(a: object, b: object) -> bool:
-    """``True`` iff ``a`` and ``b`` are equal up to α-renaming of bound (and free) term
-    variables and flattening of associative operators. Accepts core nodes or embed ``Expr``.
+    """Report whether ``a`` and ``b`` are equal up to α-renaming.
+
+    Bound *and* free term variables are renamed, and associative operators are flattened
+    before comparison.  Accepts core nodes or embed ``Expr`` handles.
     """
     a = getattr(a, "node", a)
     b = getattr(b, "node", b)

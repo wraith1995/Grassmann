@@ -94,7 +94,7 @@ def score_basis(
 
 
 def _operator_of(space: S.Space) -> object | None:
-    """The linear-map term whose structure ``space`` is built from (an FFS), or None."""
+    """Give the linear-map term whose structure ``space`` is built from (an FFS), or None."""
     from grassmann.infer.subspace import ffs_defining_map
 
     return ffs_defining_map(space)
@@ -111,7 +111,7 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
 
 
 def _is_orthonormal_default(space: S.Space, candidate: B.Basis) -> bool:
-    """True iff ``candidate`` is the inner-product-orthonormal standard basis of ``space``.
+    """Report whether ``candidate`` is the inner-product-orthonormal standard basis of ``space``.
 
     Imported lazily to avoid a cycle with :mod:`space_basis`.
     """

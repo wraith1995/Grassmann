@@ -56,7 +56,7 @@ def dim_of(space: S.Space) -> int:
 
 
 def _ffs_dim(space: S.Img | S.Ker | S.CoImg | S.CoKer) -> int:
-    """Static dim of an FFS space when the map's props pin its rank (`20 §5`), else raise.
+    """Give the static dim of an FFS space when the map's props pin its rank, else raise.
 
     Dimension laws: ``|Img| = |CoImg| = rank``, ``|Ker| = |dom| − rank``,
     ``|CoKer| = |cod| − rank``.  The rank is static iff the defining map carries an
@@ -77,7 +77,7 @@ def _ffs_dim(space: S.Img | S.Ker | S.CoImg | S.CoKer) -> int:
 
 
 def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
-    """The (domain, codomain) spaces of an FFS map, from ``source``/``target`` or ``f``.
+    """Give the (domain, codomain) spaces of an FFS map, from ``source``/``target`` or ``f``.
 
     Prefers the node's explicit ``source``/``target``; falls back to reading the map
     var's space ``~dom ⊗ cod`` (the ``OProd(Dual(dom), cod)`` linear-map encoding).
@@ -98,7 +98,7 @@ def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
 
 
 def _static_rank(space: S.Space, dom: S.Space, cod: S.Space) -> int:
-    """The map's static rank from its asserted props, or raise :class:`DynamicDim`."""
+    """Give the map's static rank from its asserted props, or raise :class:`DynamicDim`."""
     props = getattr(getattr(space, "f", None), "props", None)
     if props is not None:
         if props.rank is not None:
@@ -145,7 +145,7 @@ def _dim_int(d: S.Dim) -> int:
 
 
 def _list_basis_ambient(vectors: tuple) -> S.Space | None:
-    """The (ambient) space of a ``ListBasis``.
+    """Give the (ambient) space of a ``ListBasis``.
 
     Its vectors' ``synth_space``, or ``None`` when undeterminable (abstract vectors).  A ``ListBasis`` is
     always a full basis of this space.

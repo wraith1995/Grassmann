@@ -117,10 +117,12 @@ def as_type(t: object) -> Type:
 
 
 def space_as_type(s: Space) -> SpaceAsType:
+    """Lift a space into the type language as ``⟦s⟧``."""
     return SpaceAsType(s)
 
 
 def pi(binder: str, domain: Kind, codomain: object) -> Pi:
+    """Build the dependent function type ``Π(binder:domain). codomain``."""
     return Pi(binder, domain, as_type(codomain))
 
 
@@ -132,6 +134,7 @@ def fn(s0: Space, s1: Space) -> Pi:
 
 
 def type_app(g: object, positions: tuple[int, ...], *args: object) -> TypeApp:
+    """Apply the type-level function ``g`` to ``args`` at ``positions``."""
     return TypeApp(g, tuple(positions), tuple(args))
 
 
