@@ -64,10 +64,12 @@ class Usage:
 
     @staticmethod
     def empty() -> Usage:
+        """Give the empty usage — nothing consumed."""
         return Usage(Counter())
 
     @staticmethod
     def single(uid: int) -> Usage:
+        """Give the usage consuming the var ``uid`` exactly once."""
         return Usage(Counter({uid: 1}))
 
 
@@ -141,7 +143,7 @@ def _usage(node: object, tracked: set[int], names: dict[int, str]) -> Usage:
 
 
 def _term_children(node: object) -> list[object]:
-    """The child *Terms* of ``node`` (Spaces are not resource-bearing; skipped)."""
+    """Collect the child *Terms* of ``node`` (Spaces are not resource-bearing; skipped)."""
     if not is_term(node):
         return []
     out: list[object] = []

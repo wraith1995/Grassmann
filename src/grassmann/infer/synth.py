@@ -268,10 +268,11 @@ def _synth_value(v: Term, ctx: Ctx) -> Space:
 
 
 def _external_requires_standard(data: object) -> bool:
-    """Read the basis contract off an ``External``'s ``data`` payload without importing the
-    lowering layer (`71 §2.4`): an op carrying ``basis_req`` whose value is ``"standard"``
-    (the default :class:`~grassmann.lower.represent.BasisReq.STANDARD`) is meaningful only
-    in standard coordinates; one marked ``"equivariant"`` is basis-free.
+    """Read the basis contract off an ``External``'s ``data`` payload.
+
+    Done without importing the lowering layer: an op carrying ``basis_req`` whose value is
+    ``"standard"`` (the default :class:`~grassmann.lower.represent.BasisReq.STANDARD`) is
+    meaningful only in standard coordinates; one marked ``"equivariant"`` is basis-free.
     """
     req = getattr(data, "basis_req", None)
     if req is None:
@@ -315,12 +316,12 @@ def _synth_sum(e: Sum, ctx: Ctx) -> Space:
 
 
 # ===========================================================================
-# Application / composition / trace (contraction view, `25 §3`).
+# Application / composition / trace (contraction view).
 # ===========================================================================
 
 
 def _as_factors(s: Space) -> tuple[Space, ...]:
-    """A map's tensor factors (contraction view). A non-⊗ map is a single factor."""
+    """Split a map space into its tensor factors; a non-⊗ map is a single factor."""
     if isinstance(s, OProd):
         return s.spaces
     return (s,)
@@ -848,7 +849,7 @@ def _synth_llam(e: LLam, ctx: Ctx) -> Space:
 
 
 def _synth_lam(e: Lam, ctx: Ctx) -> SynthResult:
-    """``Lam`` synthesis (`25 §3`):
+    """Synthesize the classifier of a ``Lam``.
 
     - Term body ⇒ a curried ``Π(bᵢ:σᵢ). Xbody``.
     - Space body ⇒ an arrow Kind ``σ → space``.

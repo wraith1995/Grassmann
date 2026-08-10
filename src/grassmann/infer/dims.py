@@ -185,7 +185,7 @@ def dim_diff(a: Dim, b: Dim) -> Dim:
 
 
 def dim_eq(a: object, b: object) -> bool:
-    """``a ≡ b`` — equal normalized Nat polynomials (`25 §1`).
+    """Report whether ``a`` and ``b`` normalize to the same Nat polynomial.
 
     Opaque generators (``DimVar``, ``DimOf``, ``DimAtomRef``) are treated as
     indeterminates; ``δ_f ≡ δ_g`` iff ``f ≈ g`` (structural term equality, captured by
@@ -213,7 +213,7 @@ _Poly = dict[_Monomial, int]
 
 
 def _gen_key(d: DimVar | DimOf | DimAtomRef) -> Hashable:
-    """A hashable key identifying an opaque generator (so δ_f ≡ δ_g iff f≈g)."""
+    """Give a hashable key identifying an opaque generator (so δ_f ≡ δ_g iff f≈g)."""
     match d:
         case DimVar():
             return ("var", d.name)
@@ -283,7 +283,7 @@ def _mod_poly(d: DimMod) -> _Poly:
 
 
 def _poly_canon(p: _Poly) -> Hashable:
-    """A hashable, order-independent canonical form of a polynomial (for keying)."""
+    """Give a hashable, order-independent canonical form of a polynomial (for keying)."""
     return tuple(sorted(p.items(), key=lambda kv: repr(kv[0])))
 
 
@@ -367,7 +367,7 @@ def _gen_to_dim(gen: Hashable) -> Dim:
 
 
 def is_runtime_dim(d: object) -> bool:
-    """True iff ``d`` mentions a runtime rank atom ``δ_f`` (`25 §1` F3 seam)."""
+    """Report whether ``d`` mentions a runtime rank atom ``δ_f``."""
     if not is_dim(d):
         return False
     match d:
@@ -388,7 +388,7 @@ def is_runtime_dim(d: object) -> bool:
 
 
 def space_mentions_runtime_dim(s: object) -> bool:
-    """True iff ``|s|`` would mention a runtime atom (used by tests for the F3 seam)."""
+    """Report whether ``|s|`` would mention a runtime atom."""
     if not is_space(s):
         return False
     try:

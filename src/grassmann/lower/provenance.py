@@ -82,7 +82,7 @@ class LowerProv:
             )
 
     def note(self) -> str:
-        """The algebra-centric human-readable Stmt ``note`` (`41 §6b`).
+        """Give the algebra-centric human-readable Stmt ``note``.
 
         Shape: ``"<kind>:<why>"`` — e.g. ``"eval:contract@[0]"``, ``"cob:V->std"``,
         ``"ffs-basis:ImageBasis(f):inj=>QrOp"`` — matching the historical free-text
@@ -91,7 +91,7 @@ class LowerProv:
         return f"{self.kind}:{self.why}" if self.why else self.kind
 
     def to_polyarray(self) -> pa.Provenance:
-        """The polyarray :class:`~polyarray.Provenance` to attach to a ``Stmt``.
+        """Build the polyarray :class:`~polyarray.Provenance` to attach to a ``Stmt``.
 
         ``kind`` carries the algebra vocabulary; ``origin`` the core-IR node kind; ``label``
         the basis choice + why (the auditable "which coordinate choice produced this?").
