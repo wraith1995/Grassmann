@@ -117,11 +117,10 @@ exclude = [
     '\.__eq__$',
 ]
 
-# Modules still awaiting the docstring/annotation sweep. This list only shrinks;
-# adding an entry needs a reason.
+# Every module under src/ is swept: no source file is exempt from D or ANN. This
+# list only shrinks; adding an entry needs a reason.
 [tool.ruff.lint.per-file-ignores]
 # __init__.py intentionally re-exports the public API.
 "__init__.py" = ["F401"]
 
 "tests/**" = ["D", "ANN"]
-"src/grassmann/transform/rewrite.py" = ["D", "ANN"]
