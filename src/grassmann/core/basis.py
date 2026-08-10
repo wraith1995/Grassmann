@@ -1,4 +1,4 @@
-"""Basis tower (`20 §7`) — first-class, mirrors Space / Type / the Function layer.
+"""Basis tower — first-class, mirrors Space / Type / the Function layer.
 
 ```
 Basis  b ::=
@@ -61,7 +61,7 @@ class TargetBasis(Enum):
     concrete :class:`Basis`:
 
     * ``AUTO`` — free choice by the underlying system: each space keeps its natural basis
-      (a ``basis_env`` pin, else the `41 §1b` ★ min-symbolic ``choose``).  The default.
+      (a ``basis_env`` pin, else the min-symbolic ``choose``).  The default.
     * ``STD`` — the standard orthonormal basis of each space (``default_basis(space)``),
       propagated through the whole recursion so every node is expressed in it.
 
@@ -86,7 +86,7 @@ class BasisError(Exception):
 #
 # ``"image"`` is the **Q / orthonormal range** (the immersed side): the ``Q`` of ``QrOp``
 # when ``f`` is asserted injective (static rank ``=|dom|``, recovering the old ``IsoSpace``
-# path), else ``U[:, :δ_f]`` of ``SvdOp`` in general (`73 Topic 2`, `50 §A1`).  It is the
+# path), else ``U[:, :δ_f]`` of ``SvdOp`` in general.  It is the
 # **orthonormalized** counterpart of :class:`ImageBasis` (the raw map-application basis);
 # the two are related by ``QrOp.R`` / ``QrOp.Q`` (injective) or the SVD factors (general).
 PROJECTED_WHICH = ("image", "ker", "coimg", "coker")
@@ -195,7 +195,7 @@ class ProjectedBasis:
 
     ``which == "image"`` is the **Q / orthonormal range** of ``f`` (the immersed side):
     realized as the ``Q`` factor of ``QrOp`` when ``f`` is injective (static rank), else
-    ``U[:, :δ_f]`` of ``SvdOp`` (`73 Topic 2`). It is the orthonormalized counterpart of
+    ``U[:, :δ_f]`` of ``SvdOp``. It is the orthonormalized counterpart of
     the literal :class:`ImageBasis` (the raw map-application columns); the two are related
     by the ``QrOp.R``/``Q`` (injective) or SVD factors (general) change of basis.
     """
@@ -491,60 +491,73 @@ def _require_term(t: object, ctx: str) -> None:
 
 
 def scalar_basis() -> ScalarBasis:
+    """Give the standard basis of ``Scalar`` (ℝ)."""
     return ScalarBasis()
 
 
 def bvar(name: str) -> BVar:
+    """Build a basis variable named ``name``."""
     return BVar(name)
 
 
 def dual_basis(b: Basis) -> DualBasis:
+    """Build the dual (cobasis) of ``b``."""
     return DualBasis(b)
 
 
 def primal_basis(b: Basis) -> PrimalBasis:
+    """Build the primal basis underlying the cobasis ``b``."""
     return PrimalBasis(b)
 
 
 def basis_sum(*bases: Basis) -> BasisSum:
+    """Build the direct-sum basis of ``bases`` (the basis of ``⊕``)."""
     return BasisSum(tuple(bases))
 
 
 def basis_prod(*bases: Basis) -> BasisProd:
+    """Build the tensor-product basis of ``bases`` (the basis of ``⊗``)."""
     return BasisProd(tuple(bases))
 
 
 def basis_rep(count: object, b: Basis) -> BasisRep:
+    """Build the ``count``-fold replicated basis ``⊕^count b``."""
     return BasisRep(as_dim(count), b)
 
 
 def projected_basis(
     f: Term, which: str, source: Basis | None = None, target: Basis | None = None
 ) -> ProjectedBasis:
+    """Build the orthonormalized subspace basis of ``f`` selected by ``which``."""
     return ProjectedBasis(f, which, source, target)
 
 
 def image_basis(
     f: Term, source: Basis | None = None, target: Basis | None = None
 ) -> ImageBasis:
+    """Build the literal pushforward basis ``f(sᵢ)`` of ``Img(f)`` (not orthonormalized)."""
     return ImageBasis(f, source, target)
 
 
 def list_basis(*vectors: Term, backup: Basis | None = None,
                reduce: Reduce = Reduce.NONE) -> ListBasis:
+    """Build a basis from explicit ``vectors``."""
     return ListBasis(tuple(vectors), backup, reduce)
 
 
 def with_inner_basis(b: Basis, metric: Term) -> WithInnerBasis:
+    """Attach ``metric`` to ``b`` without orthonormalizing it."""
     return WithInnerBasis(b, metric)
 
 
 def orthonormal_basis(b: Basis) -> OrthonormalBasis:
+    """Orthonormalize ``b`` explicitly."""
     return OrthonormalBasis(b)
 
 
 def complete_basis(sub_basis: Basis, complement: Basis,
                    reduce: Reduce = Reduce.NONE) -> CompleteBasis:
+    """Complete ``sub_basis`` to a full basis with ``complement``."""
     return CompleteBasis(sub_basis, complement, reduce)
 
 
@@ -554,10 +567,12 @@ def blam(
     term_var: Var | None = None,
     basis_var: BVar | None = None,
 ) -> BLam:
+    """Build a basis-level lambda binding ``binders`` over ``body``."""
     return BLam(tuple(binders), body, term_var, basis_var)
 
 
 def bapp(f: Basis, positions: tuple[int, ...], *args: Term | Space | Dim | Basis) -> BApp:
+    """Apply the basis function ``f`` to ``args`` at ``positions``."""
     return BApp(f, tuple(positions), tuple(args))
 
 

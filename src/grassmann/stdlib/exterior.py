@@ -5,19 +5,19 @@ the standard exterior/symmetric algebra constructions. Nothing here is a core no
 ``exterior_power`` / ``wedge`` are *derived* functions composing the existing core ops
 (``LLam`` + ``Lift`` antisymmetrization, ``Img``, ``Embed``/``Project``, ``Scale``).
 
-Spec (`26 §2`, F2/F5):
+Spec:
 
 - :func:`alt` ``(V, k)`` — the ``k``-linear **antisymmetrizer**
   ``Alt = (1/k!) Σ_{σ∈Sₖ} sgn(σ)·P_σ : V⊗ᵏ ⊸ V⊗ᵏ``. Built **concretely** as a multi-var
   linear ``LLam`` whose ``k`` variables are permuted, then ``Lift`` (uncurry) fuses the
   ``k`` argument slots into one ``V⊗ᵏ`` input, and ``Scale(1/k!)`` normalizes.
 - :func:`exterior_power` ``(V, k)`` — ``Λᵏ(V) = Img(alt(V, k))``. ``|Λᵏ| = rank(Alt)`` is
-  either an asserted (symbolic) ``C(n,k)`` or the runtime SVD atom ``δ_Alt`` (`26 F3`).
+  either an asserted (symbolic) ``C(n,k)`` or the runtime SVD atom ``δ_Alt``.
 - :func:`wedge` ``(a, b, k, l)`` — the *derived* ``∧ : Λᵏ × Λˡ → Λ^{k+l}``:
   embed → tensor → antisymmetrize → project → ``Scale(C(k+l,k))``.
 
-Real-valued; exterior algebra is purely an **expressiveness test** for the core
-(`50 §0`), never a built-in.
+Real-valued; exterior algebra is purely an **expressiveness test** for the core, never a
+built-in.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def perms(k: int) -> list[tuple[int, ...]]:
 
 
 def sign(perm: tuple[int, ...]) -> int:
-    """The sign ``sgn(σ) ∈ {+1, -1}`` of a permutation (parity of its inversions)."""
+    """Give the sign ``sgn(σ) ∈ {+1, -1}`` of a permutation (parity of its inversions)."""
     inversions = sum(
         1
         for i in range(len(perm))
@@ -88,7 +88,7 @@ def _alt_body(vs: tuple[Expr, ...], indices: tuple[int, ...]) -> Expr:
 
 
 def alt(V: Expr, k: int) -> Expr:
-    """The ``k``-linear antisymmetrizer ``Alt : V⊗ᵏ ⊸ V⊗ᵏ`` (`26 §2`, F2).
+    """Build the ``k``-linear antisymmetrizer ``Alt : V⊗ᵏ ⊸ V⊗ᵏ``.
 
     Built concretely as the multi-var linear lambda permuting its ``k`` variables, then
     ``Lift`` (uncurry) fusing the ``k`` argument slots into one ``V⊗ᵏ`` input, then
@@ -122,10 +122,10 @@ _EXTPOW_CACHE: dict[object, Expr] = {}
 
 
 def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
-    """``Λᵏ(V) = Img(alt(V, k))`` — the ``k``-th exterior power (`26 §2`).
+    """Build the ``k``-th exterior power ``Λᵏ(V) = Img(alt(V, k))``.
 
     ``|Λᵏ(V)| = rank(Alt)``: by default (``rank is None``) the runtime SVD atom
-    ``δ_Alt`` (`26 F3`); if a (possibly symbolic) ``rank`` is supplied, the projector is
+    ``δ_Alt``; if a (possibly symbolic) ``rank`` is supplied, the projector is
     instead an explicitly rank-asserted ``Var`` of space ``V⊗ᵏ >> V⊗ᵏ`` so the dimension
     resolves *statically* to the asserted ``C(n,k)`` (since ``infer.rank_of`` reads
     ``props`` only off a ``Var``).
@@ -147,7 +147,7 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
     else:
         Vk = tensor_power(V, k)
         # `G.tensor(G.dual(Vk), Vk)` — the map space `Vk ⊸ Vk` spelled DIRECTLY, NOT via `Vk >> Vk`.
-        # `>>` deliberately re-associates (`27 Q1`: `V >> W >> R == V >> (W >> R)`): when its LEFT
+        # `>>` deliberately re-associates (`V >> W >> R == V >> (W >> R)`): when its LEFT
         # operand looks like a map space `~a ⊗ b` it peels the domain and curries. For a FORM base
         # (`V = Dual(...)`, every k-form) `Vk = V*⊗…⊗V*` has a `Dual` FIRST FACTOR, so
         # `_peel_map_space` mistakes the Λᵏ AMBIENT for a curried map and curries it — and
@@ -176,13 +176,13 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
 
 
 def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches the spec
-    """``a ∧ b : Λᵏ × Λˡ → Λ^{k+l}`` — embed → tensor → antisymmetrize → project → scale.
+    """Wedge ``a ∧ b : Λᵏ × Λˡ → Λ^{k+l}`` — embed, tensor, antisymmetrize, project, scale.
 
-    A *derived* library function (`26 §2`, F5), not a core primitive. ``a : Λᵏ(V)`` and
-    ``b : Λˡ(V)`` are embedded back into ``V⊗ᵏ`` / ``V⊗ˡ`` (FFS ``⊑`` ambient, `26 §6`),
+    A *derived* library function, not a core primitive. ``a : Λᵏ(V)`` and
+    ``b : Λˡ(V)`` are embedded back into ``V⊗ᵏ`` / ``V⊗ˡ`` (FFS ``⊑`` ambient),
     tensored to the **nested** product ``(V⊗ᵏ) ⊗ (V⊗ˡ)``, then **explicitly reassociated**
     into the flat ``V⊗^{k+l}`` via :func:`grassmann.embed.unlift` (an ``InvLift`` the core
-    lowers as a reshape — the core never silently flattens a nested ``⊗``, `26 §2`/F2).
+    lowers as a reshape — the core never silently flattens a nested ``⊗``).
     The flat tensor is antisymmetrized over all ``k + l`` factors by the single-slot
     ``Alt_{k+l} = alt(V, k+l)``, projected onto ``Λ^{k+l}(V)``, and scaled by ``C(k+l, k)``.
     Synthesizes to ``Λ^{k+l}(V)``.
@@ -213,8 +213,9 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
 
 
 def interior(omega: Expr, v: Expr, k: int) -> Expr:  # noqa: E741
-    """``ι_v(ω) : Λᵏ(W) × Dual(W) → Λ^{k-1}(W)`` — the **interior product** (contract the FIRST slot of a
-    ``k``-form ``ω`` with a covector-eating vector ``v ∈ Dual(W)``).
+    """Contract the FIRST slot of the ``k``-form ``ω`` with ``v ∈ Dual(W)``.
+
+    ``ι_v(ω) : Λᵏ(W) × Dual(W) → Λ^{k-1}(W)`` — the **interior product**.
 
     ``embed → eval → project``: a bare ``ω(v)`` fails because a ``k``-form's space ``Img(alt(W,k))`` is not
     decomposed into factors (``synth`` finds no dual slot); embedding ``ω ⊑ W⊗ᵏ`` exposes the factors, then
@@ -235,13 +236,15 @@ def interior(omega: Expr, v: Expr, k: int) -> Expr:  # noqa: E741
 
 
 def _ambient_dim(V: Expr) -> int:
-    """The (static) dimension ``n`` of the ambient space ``V = ℝⁿ``."""
+    """Give the (static) dimension ``n`` of the ambient space ``V = ℝⁿ``."""
     from grassmann.lower._dims import dim_of
     return dim_of(V.node if isinstance(V, Expr) else V)
 
 
 def _std_basis_vector(V: Expr, i: int, n: int) -> Expr:
-    """The ``i``-th standard basis vector ``eᵢ ∈ V = ℝⁿ`` as a constant (an ``External`` with no arguments).
+    """Build the ``i``-th standard basis vector ``eᵢ ∈ V = ℝⁿ`` as a constant.
+
+    An argument-less ``External``.
 
     The volume form tensors these and projects the whole ``V⊗ⁿ`` onto ``Λⁿ``.
     """
@@ -253,8 +256,9 @@ def _std_basis_vector(V: Expr, i: int, n: int) -> Expr:
 
 
 def hodge_star(omega: Expr, k: int) -> Expr:
-    """The **Hodge star** ``⋆ : Λᵏ(V) → Λⁿ⁻ᵏ(V)`` for the standard Euclidean metric and the
-    standard orientation of ``V = ℝⁿ`` (`Hodge`).
+    """Apply the **Hodge star** ``⋆ : Λᵏ(V) → Λⁿ⁻ᵏ(V)`` to ``omega``.
+
+    For the standard Euclidean metric and the standard orientation of ``V = ℝⁿ``.
 
     Characterised by ``α ∧ ⋆ω = ⟨α, ω⟩ · vol`` for every ``α ∈ Λᵏ(V)``, where ``vol`` is the
     **unit volume form** ``e₁∧…∧eₙ`` of the standard oriented basis.  Built coordinate-free as
@@ -312,8 +316,10 @@ def hodge_star(omega: Expr, k: int) -> Expr:
 
 
 def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
-    """The exterior derivative ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` of a ``k``-form FIELD ``ω`` over the point
-    ``x ∈ V`` (``Ωᵏ = Λᵏ(V*)``), by the coordinate formula ``dω = Σⱼ eʲ ∧ ∂ⱼω``:
+    """Differentiate the ``k``-form FIELD ``omega`` at the point ``x``.
+
+    ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` with ``Ωᵏ = Λᵏ(V*)``, by the coordinate formula
+    ``dω = Σⱼ eʲ ∧ ∂ⱼω``:
 
     - ``∂ⱼω = ∂ω/∂xⱼ`` — the partial derivative, ``diff(ω, x)`` applied to the ``j``-th basis
       vector ``eⱼ ∈ V``;
@@ -331,18 +337,18 @@ def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
     n = dim_of(V.node)
     L1 = exterior_power(Vstar, 1)
 
-    def evec(j):                                # eⱼ ∈ V  (to take the j-th partial)
+    def evec(j: int) -> Expr:                   # eⱼ ∈ V  (to take the j-th partial)
         a = np.zeros(n); a[j] = 1.0
         return G.external(V, ExternalOp(f"_e{j}", (lambda a=a: a)))
 
-    def eform(j):                               # eʲ ∈ Λ¹(V*)  (the dual basis 1-form)
+    def eform(j: int) -> Expr:                  # eʲ ∈ Λ¹(V*)  (the dual basis 1-form)
         a = np.zeros(n); a[j] = 1.0
         return G.project(G.external(Vstar, ExternalOp(f"_ef{j}", (lambda a=a: a))), L1)
 
     if k == 0:                                  # d of a 0-form = its differential, a clean 1-form
         return G.project(G.diff(omega, x), L1)
 
-    def partial(j):
+    def partial(j: int) -> Expr:
         return G.diff(omega, x)(evec(j))        # ∂ω/∂xⱼ ∈ Λᵏ(V*)
 
     return G.sum(*[wedge(eform(j), partial(j), 1, k) for j in range(n)])
@@ -351,7 +357,7 @@ def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
 def _base_space_of_exterior(a: Expr, k: int) -> Expr:
     """Recover the ambient base space ``V`` from a value ``a : Λᵏ(V) = Img(alt(V, k))``.
 
-    F1: if ``a`` carries an OPTIONAL ``base_space`` note (set by :func:`exterior_power`),
+    If ``a`` carries an OPTIONAL ``base_space`` note (set by :func:`exterior_power`),
     use it directly — no structural re-derivation. Otherwise (a bare var, an un-annotated
     handle, etc.) fall back to reading ``V`` off the ``Img(Scale(1/k!, Lift(LLam([v:V, …],
     …), …)))`` node — the first bound linear variable's space.
