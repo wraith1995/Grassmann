@@ -136,9 +136,12 @@ def _pb(v: Term, source: Space, target: Space, primitives=None) -> Term:
 
 
 def _pb_oplus(v: Term, S: OPlus, T: OPlus, primitives=None) -> Term:
-    """``⊕`` at the value level: slice block ``k`` out of ``v`` (``TupleProject``), transport
-    it, re-pad into ``T`` (``TupleEmbed``), and sum the blocks. Recursing on the *value*
-    lets each block use any transport (incl. generic ``Project``/``Embed``)."""
+    """``⊕`` at the value level.
+
+    Slice block ``k`` out of ``v`` (``TupleProject``), transport it, re-pad into ``T`` (``TupleEmbed``), and
+    sum the blocks. Recursing on the *value* lets each block use any transport (incl. generic
+    ``Project``/``Embed``).
+    """
     blocks: list[Term] = []
     for k, (s_k, t_k) in enumerate(zip(S.spaces, T.spaces, strict=True)):
         sliced = Eval(TupleProject(S, k), (0,), (v,))
@@ -161,8 +164,11 @@ def _pb_ffs(v: Term, S: Space, T: Space, primitives=None) -> Term:
 
 
 def _pb_fallback(v: Term, S: Space, T: Space) -> Term:
-    """No relation/shared constructor: accept only a statically dim-equal pass-through (an
-    honest change-of-coordinates ``Assert``); otherwise error."""
+    """No relation/shared constructor.
+
+    Accept only a statically dim-equal pass-through (an honest change-of-coordinates ``Assert``); otherwise
+    error.
+    """
     from grassmann.lower._dims import DynamicDim, dim_of
 
     try:
@@ -187,10 +193,12 @@ def _pb_fallback(v: Term, S: Space, T: Space) -> Term:
 
 
 def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
-    """A reusable transport map ``source ⊸ target`` as a *primitive* (``Eval``-applicable)
-    map term. Supports the structural cases expressible without an ``LLam``; a leaf that the
-    structure cannot build is taken from the caller-supplied ``primitives(source, target)``
-    (opt-in), else raises :class:`PullbackError` — apply :func:`pullback` to a *value* instead."""
+    """A reusable transport map ``source ⊸ target`` as a *primitive* (``Eval``-applicable) map term.
+
+    Supports the structural cases expressible without an ``LLam``; a leaf that the structure cannot build is
+    taken from the caller-supplied ``primitives(source, target)`` (opt-in), else raises :class:`PullbackError`
+    — apply :func:`pullback` to a *value* instead.
+    """
     S = _normalize(source)
     T = _normalize(target)
     from grassmann.infer.subspace import is_subspace
@@ -340,8 +348,9 @@ def endomorphism_map(space: Space, *, primitives) -> Term:
 
 
 def _ffs_immersion(S: Space, T: Space) -> Term | None:
-    """The `Img(f) ↔ ambient` transport, built from the map that DEFINES the image — the canonical
-    BAIL for a subspace pair where neither side is a direct ⊕-summand.
+    """The `Img(f) ↔ ambient` transport, built from the map that DEFINES the image.
+
+    The canonical BAIL for a subspace pair where neither side is a direct ⊕-summand.
 
     `Img(f)` is a subspace of `cod(f)` but not a *summand* of it, so `_summand_index` returns `None`
     and both subspace arms used to fall straight to `_leaf_primitive` — i.e. they demanded a
@@ -407,8 +416,9 @@ def _corestrictable(f: Term) -> bool:
 
 
 def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
-    """The `Img(f_A) ⊸ Img(f_B)` MAP for two immersions of the SAME ambient — the chart-to-chart convert,
-    out of A's own coordinates, through the ambient, into B's:
+    """The `Img(f_A) ⊸ Img(f_B)` MAP for two immersions of the SAME ambient.
+
+    The chart-to-chart convert, out of A's own coordinates, through the ambient, into B's:
 
         ``f~_B ∘ f_B⁺ ∘ f_A ∘ f~_A⁺``   :   `Img(f_A) → dom(f_A) → ambient → dom(f_B) → Img(f_B)`
 
@@ -477,8 +487,11 @@ def _img_ambient(img: Space) -> Space:
 
 
 def _leaf_primitive(S: Space, T: Space, primitives, why: str) -> Term:
-    """A leaf ``transport_map`` cannot build structurally: take the caller-supplied primitive map
-    (``primitives(S, T)``) if any, else raise. Keeps the classic error when no ``primitives`` given."""
+    """A leaf ``transport_map`` cannot build structurally.
+
+    Take the caller-supplied primitive map (``primitives(S, T)``) if any, else raise. Keeps the classic error
+    when no ``primitives`` given.
+    """
     if primitives is not None:
         m = primitives(S, T)
         if m is not None:
@@ -502,8 +515,10 @@ def _transpose_map(f: Term, sd: Space, td: Space) -> Term:
 
 
 def _tensor_map(S: OProd, T: OProd, primitives=None) -> Term:
-    """``⊗`` — the tensor product of the factor maps, as a right-nested ``Kron`` (a
-    primitive ``(dom,cod)`` map)."""
+    """``⊗``.
+
+    The tensor product of the factor maps, as a right-nested ``Kron`` (a primitive ``(dom,cod)`` map).
+    """
     ms = [transport_map(s_i, t_i, primitives=primitives)
           for s_i, t_i in zip(S.spaces, T.spaces, strict=True)]
     out = ms[-1]
@@ -546,7 +561,8 @@ def _strip(s: Space) -> Space:
 
 def _summand_index(component: Space, whole: Space) -> int | None:
     """Index ``i`` with ``whole.spaces[i] == component`` (a *direct* ⊕-summand); else
-    ``None``."""
+    ``None``.
+    """
     if isinstance(whole, OPlus):
         for i, s in enumerate(whole.spaces):
             if s == component:
@@ -566,7 +582,8 @@ def euclidean_superspace(s: Space) -> Space:
     resolves to the tensor power ``V⊗ᵏ`` (an ``OProd`` of ``k`` factors); a direct sum stays an ``OPlus``;
     a ``Dual`` distributes; a ``WithInner`` drops its (non-structural) metric. Reading a form's DEGREE is
     then just counting the tensor factors of this superspace (a ``k``-form ⊑ ``V⊗ᵏ``). Idempotent on
-    FFS-free (already-euclidean) spaces. Exhaustive over ``space._SPACE_TYPES`` (``assert_never`` backstop)."""
+    FFS-free (already-euclidean) spaces. Exhaustive over ``space._SPACE_TYPES`` (``assert_never`` backstop).
+    """
     from typing import assert_never
 
     from grassmann.core import space as S

@@ -71,13 +71,14 @@ markers = [
 target-version = "py313"
 
 [tool.ruff.lint]
-extend-select = ["UP", "I"]
+extend-select = ["UP", "I", "D", "ANN"]
+extend-ignore = [
+    "D105",   # magic methods: the language fixes their meaning
+    "D107",   # __init__: documented by the class docstring
+    "D203",   # incompatible with D211 (no blank line before a class docstring)
+    "D213",   # summary starts on the first line, not the second
+]
 
-[tool.ruff.lint.per-file-ignores]
-# __init__.py intentionally re-exports the public API.
-"__init__.py" = ["F401"]
-
-# mypy — chartLib's config is the model (fem CLAUDE.md rule 3); run: .venv/bin/mypy
 [tool.mypy]
 python_version = "3.13"
 files = ["src"]
@@ -87,3 +88,75 @@ warn_redundant_casts = true
 no_implicit_optional = true
 check_untyped_defs = true
 strict_optional = true
+
+# ---------------------------------------------------------------------------
+# Documentation + annotation gate: `make lint-docs`. Deliberately narrow — it
+# enforces the docstring and typing contract, not general style.
+# ---------------------------------------------------------------------------
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+# numpydoc validation: consistency, not completeness — whatever sections a
+# docstring declares must match the signature.
+[tool.numpydoc_validation]
+checks = [
+    "GL06",  # unknown section name
+    "GL07",  # sections out of order
+    "GL09",  # deprecation warning misplaced
+    "SS03",  # summary lacks a period
+    "PR02",  # a documented parameter that is not in the signature
+    "PR03",  # documented parameters out of signature order
+    "RT02",  # return section names a variable where it should give a type
+]
+# Module docstrings carry free-form prose sections (Sphinx renders them); the
+# section vocabulary above applies to callables and classes only.
+exclude = [
+    '^[A-Za-z_][A-Za-z_0-9]*$',  # the module node itself (an undotted name)
+    '\.__init__$',
+    '\.__repr__$',
+    '\.__eq__$',
+]
+
+# Modules still awaiting the docstring/annotation sweep. This list only shrinks;
+# adding an entry needs a reason.
+[tool.ruff.lint.per-file-ignores]
+# __init__.py intentionally re-exports the public API.
+"__init__.py" = ["F401"]
+
+"tests/**" = ["D", "ANN"]
+"src/grassmann/core/basis.py" = ["D", "ANN"]
+"src/grassmann/core/kinds.py" = ["D", "ANN"]
+"src/grassmann/core/props.py" = ["D", "ANN"]
+"src/grassmann/core/space.py" = ["D", "ANN"]
+"src/grassmann/core/term.py" = ["D", "ANN"]
+"src/grassmann/core/types.py" = ["D", "ANN"]
+"src/grassmann/embed/builders.py" = ["D", "ANN"]
+"src/grassmann/embed/ops.py" = ["D", "ANN"]
+"src/grassmann/infer/check.py" = ["D", "ANN"]
+"src/grassmann/infer/dims.py" = ["D", "ANN"]
+"src/grassmann/infer/linearity.py" = ["D", "ANN"]
+"src/grassmann/infer/properties.py" = ["D", "ANN"]
+"src/grassmann/infer/subspace.py" = ["D", "ANN"]
+"src/grassmann/infer/subst.py" = ["D", "ANN"]
+"src/grassmann/infer/synth.py" = ["D", "ANN"]
+"src/grassmann/infer/unify.py" = ["D", "ANN"]
+"src/grassmann/lower/_dims.py" = ["D", "ANN"]
+"src/grassmann/lower/choose.py" = ["D", "ANN"]
+"src/grassmann/lower/numpy_renderers.py" = ["D", "ANN"]
+"src/grassmann/lower/provenance.py" = ["D", "ANN"]
+"src/grassmann/lower/represent.py" = ["D", "ANN"]
+"src/grassmann/lower/space_basis.py" = ["D", "ANN"]
+"src/grassmann/printer/latex.py" = ["D", "ANN"]
+"src/grassmann/printer/precedence.py" = ["D", "ANN"]
+"src/grassmann/stdlib/exterior.py" = ["D", "ANN"]
+"src/grassmann/stdlib/linalg.py" = ["D", "ANN"]
+"src/grassmann/stdlib/scalar.py" = ["D", "ANN"]
+"src/grassmann/syntax/__init__.py" = ["D", "ANN"]
+"src/grassmann/syntax/geometry.py" = ["D", "ANN"]
+"src/grassmann/syntax/mcalc.py" = ["D", "ANN"]
+"src/grassmann/syntax/parse.py" = ["D", "ANN"]
+"src/grassmann/syntax/unparse.py" = ["D", "ANN"]
+"src/grassmann/transform/diff.py" = ["D", "ANN"]
+"src/grassmann/transform/pullback.py" = ["D", "ANN"]
+"src/grassmann/transform/rewrite.py" = ["D", "ANN"]
+"src/grassmann/transform/transport.py" = ["D", "ANN"]

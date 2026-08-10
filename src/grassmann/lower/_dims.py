@@ -145,8 +145,11 @@ def _dim_int(d: S.Dim) -> int:
 
 
 def _list_basis_ambient(vectors: tuple) -> S.Space | None:
-    """The (ambient) space of a ``ListBasis`` — its vectors' ``synth_space``, or ``None`` when
-    undeterminable (abstract vectors).  A ``ListBasis`` is always a full basis of this space."""
+    """The (ambient) space of a ``ListBasis``.
+
+    Its vectors' ``synth_space``, or ``None`` when undeterminable (abstract vectors).  A ``ListBasis`` is
+    always a full basis of this space.
+    """
     if not vectors:
         return None
     try:

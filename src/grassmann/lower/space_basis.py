@@ -94,12 +94,14 @@ def default_basis(space: S.Space) -> B.Basis:
 
 
 def map_basis(space: S.Space, choice) -> B.Basis:
-    """Structure-mirroring basis functor: a general basis CHOICE
-    for ``space`` that mirrors the basis tower — ``choice(space) -> Basis | None`` is consulted
-    at EVERY node first (``None`` = no override there); un-overridden structural wrappers
-    (``Dual``/``OPlus``/``OProd``/``OPlusRep``/``WithInner``) mirror and recurse; every other
-    un-overridden node falls to :func:`default_basis`. Consumers supply ONLY their leaf policy
-    (e.g. pointwise's immersed-tangent ``ImageBasis`` pin) instead of hand-rolling the tower walk."""
+    """Structure-mirroring basis functor.
+
+    A general basis CHOICE for ``space`` that mirrors the basis tower — ``choice(space) -> Basis | None`` is
+    consulted at EVERY node first (``None`` = no override there); un-overridden structural wrappers
+    (``Dual``/``OPlus``/``OProd``/``OPlusRep``/``WithInner``) mirror and recurse; every other un-overridden
+    node falls to :func:`default_basis`. Consumers supply ONLY their leaf policy (e.g. pointwise's
+    immersed-tangent ``ImageBasis`` pin) instead of hand-rolling the tower walk.
+    """
     picked = choice(space)
     if picked is not None:
         return picked
@@ -188,7 +190,8 @@ def _map_opt(s: S.Space | None, choice, map_choice=None) -> S.Space | None:
     `source`/`target` of the map that defines it. `Λᵏ(Img J) = Img(alt)` keeps its `Img(J)` in `alt`'s
     endpoints, so treating `Img` as a leaf made a σ readout on a FACE (a 2-form moment) find nothing to
     substitute — `tgt == src`, no transport, and every `O_σ` came back `I`. `_immersed_basis`/
-    `_immersed_endpoints` already recurse this way on the BASIS side; this is the Space-side match."""
+    `_immersed_endpoints` already recurse this way on the BASIS side; this is the Space-side match.
+    """
     return None if s is None else map_space(s, choice, map_choice=map_choice)
 
 
@@ -415,7 +418,8 @@ def try_constant_ffs(
     axes: ``build_runtime_bindings`` requires a value for every declared input, but one outside
     the cone is never read — the placeholder just satisfies the binder (an FFS-typed value
     input, sized by a runtime rank, sits OUTSIDE the ``f_matrix`` cone of a geometry-only
-    factorisation)."""
+    factorisation).
+    """
     import numpy as np
 
     from polyarray import evaluate_cone
@@ -447,8 +451,10 @@ def try_constant_ffs(
 
 
 def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
-    """A CANONICAL orthonormal basis of ``span(q)`` — a function of the SUBSPACE (and the ambient
-    index order) alone, not of the factorization that produced ``q``.
+    """A CANONICAL orthonormal basis of ``span(q)``.
+
+    A function of the SUBSPACE (and the ambient index order) alone, not of the factorization that produced
+    ``q``.
 
     Why this exists (`73 Topic 2`). ``U[:,:r]`` is only determined up to a
     rotation *inside* each degenerate singular subspace, so it is a **discontinuous** function of
@@ -479,7 +485,8 @@ def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
     chart-to-chart ``convert`` in the middle of ``_pb_ffs`` (``Project ∘ convert ∘ Embed``), where
     it belongs and where it was measured correct (single-factor convert, ``det = −1``): with
     ``P_S = P_T = p`` the composite is ``pᵀ(det M · p) = det M = ±1``.  Making the two endpoints
-    agree is exactly what turns that into a clean sign."""
+    agree is exactly what turns that into a clean sign.
+    """
     n, r = q.shape
     if r <= 0:
         return np.zeros((n, 0))
@@ -520,7 +527,8 @@ def _const_ffs_from_svd(
     ``cols`` is a build-time-constant numeric SymArray; ``rank``/``rank_dim`` are ``None``
     (the axis is static — the numeric rank is known at build).  Shared by the sampling
     (:func:`try_constant_ffs`) and structural (:func:`realize_ffs_basis`) constant paths so
-    both produce an IDENTICAL frame for the same numeric ``M``."""
+    both produce an IDENTICAL frame for the same numeric ``M``.
+    """
     if which in ("img", "coker"):
         cols = u[:, :r] if which == "img" else u[:, r:]
     else:                                                        # coimg / ker: right factor V = Vhᵀ
@@ -549,7 +557,8 @@ def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -
     EXACT, not heuristic: never mistakes a feed-varying operator for a constant.
     Conservative: any ref/generator that cannot be positively classified constant-safe —
     or a cone that fails to enumerate — forces ``False``, so a frame with any live input
-    dependency is left to the SVD/QR/GSVD seam."""
+    dependency is left to the SVD/QR/GSVD seam.
+    """
     return pa.is_structurally_constant(program, f_matrix)
 
 
@@ -563,7 +572,8 @@ def _fold_constant_ffs(
     range/complement basis via the SHARED :func:`_const_ffs_from_svd` core using ``M``'s SVD.
     The result is byte-for-byte the frame :func:`_realize_via_svd` would produce for this ``M``
     (same full SVD, same ``matrix_rank`` tolerance as :class:`~polyarray.SvdOp`, same column
-    convention) — but as a constant, with NO SvdOp/rank Stmt emitted."""
+    convention) — but as a constant, with NO SvdOp/rank Stmt emitted.
+    """
     from polyarray import evaluate_cone
     binding: dict[str, np.ndarray] = {}
     for inp in program.inputs:
@@ -600,8 +610,11 @@ def realize_image_application(
 
 
 def _sb_signs_zero_to_one(low: object, signs: object) -> object:
-    """``where(signs == 0, 1.0, signs)`` — the +diagonal-R sign convention (0 ⇒ +1) as a pyab expr
-    (space_basis-local twin of the numeric ``s[s == 0] = 1.0``)."""
+    """``where(signs == 0, 1.0, signs)``.
+
+    The +diagonal-R sign convention (0 ⇒ +1) as a pyab expr (space_basis-local twin of the numeric ``s[s == 0]
+    = 1.0``).
+    """
     c = low.core
     zero = c.ArrayExpr(obj=c.FloatLit(value=0.0), dtype=low._dtype_f64())
     one = c.ArrayExpr(obj=c.FloatLit(value=1.0), dtype=low._dtype_f64())
@@ -666,8 +679,10 @@ def _realize_via_gram(
 
 @dataclass(frozen=True)
 class _QrSignConventionOp:
-    """Apply the +diagonal-R sign convention to a ``(Q, R)`` factorization: ``Q·diag(s)``,
-    ``diag(s)·R`` with ``s = sign(diag R)`` (zeros ⇒ +1) ⇒ ``R`` has a positive diagonal."""
+    """Apply the +diagonal-R sign convention to a ``(Q, R)`` factorization.
+
+    ``Q·diag(s)``, ``diag(s)·R`` with ``s = sign(diag R)`` (zeros ⇒ +1) ⇒ ``R`` has a positive diagonal.
+    """
 
     def __call__(self, Q: np.ndarray, R: np.ndarray):  # noqa: N803
         Q = np.asarray(Q, dtype=float)
@@ -699,9 +714,12 @@ class _QrSignConventionOp:
                 f"(np.asarray({args[0]}, dtype=float), np.asarray({args[1]}, dtype=float))")
 
     def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
-        """pyab op-carried lowering: the +diagonal-R sign convention ``(Q·s, s[:,None]·R)`` with
-        ``s = sign(diag R)`` (0 ⇒ +1) (twin of the ``_qr_sign_convention`` numpy renderer /
-        :meth:`__call__`; same math as chartlib's ``QrSignFixOp`` but on given ``(Q, R)``)."""
+        """Pyab op-carried lowering.
+
+        The +diagonal-R sign convention ``(Q·s, s[:,None]·R)`` with ``s = sign(diag R)`` (0 ⇒ +1) (twin of the
+        ``_qr_sign_convention`` numpy renderer / :meth:`__call__`; same math as chartlib's ``QrSignFixOp`` but
+        on given ``(Q, R)``).
+        """
         c = low.core
         q, r = args
         raw = low._ns_call("sign", (low._ns_call("diag", (r,)),))

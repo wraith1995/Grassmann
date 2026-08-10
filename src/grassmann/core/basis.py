@@ -314,7 +314,8 @@ class WithInnerBasis:
     Carries the metric ``g`` as metadata; it is **not** assumed ``g``-orthonormal — it is just
     ``b`` living in the metricized space.  To get the ``g``-orthonormal basis, wrap it in
     :class:`OrthonormalBasis` (the explicit dual of ``remetric`` — orthonormalization is never
-    implicit in a change of basis)."""
+    implicit in a change of basis).
+    """
 
     basis: Basis
     metric: Term
@@ -333,7 +334,8 @@ class OrthonormalBasis:
 
     An **explicit** basis node (the dual of ``remetric``): orthonormalizes ``b`` w.r.t. its
     metric when ``b`` is a :class:`WithInnerBasis` (g-orthonormal), else w.r.t. the standard
-    inner product.  Makes orthonormalization a written step, never an implicit cob."""
+    inner product.  Makes orthonormalization a written step, never an implicit cob.
+    """
 
     basis: Basis
 
@@ -346,8 +348,10 @@ class OrthonormalBasis:
 
 @dataclass(frozen=True)
 class CompleteBasis:
-    """``CompleteBasis(subBasis, complement, reduce?)`` — complete a basis of an EXPLICIT
-    subspace to its ambient, by filling the missing directions from ``complement``.
+    """``CompleteBasis(subBasis, complement, reduce?)``.
+
+    Complete a basis of an EXPLICIT subspace to its ambient, by filling the missing directions from
+    ``complement``.
 
     ``complement`` is a :class:`Basis` (e.g. the ambient standard basis) — the source of the
     completing directions.  ``reduce`` (:class:`Reduce`) selects how ``[sub | complement]`` is
@@ -359,7 +363,8 @@ class CompleteBasis:
     :class:`ProjectedBasis` of ``Img(f)``), realized via its AMBIENT immersion when completed.
     To make a full ambient basis from an explicit short term frame, prefer a
     :class:`ListBasis`-with-backup (``ListBasis(*vecs, backup=…, reduce=RREF)``) — a
-    ``ListBasis`` is always a full basis of its ambient — rather than wrapping the frame here."""
+    ``ListBasis`` is always a full basis of its ambient — rather than wrapping the frame here.
+    """
 
     sub_basis: Basis
     complement: Basis
