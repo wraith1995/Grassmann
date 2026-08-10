@@ -81,7 +81,8 @@ class Parameterization:
 
     def tangent_vector(self, name: str = "v") -> tuple[_T.Var, _T.Var]:
         """A tangent vector field ``v : Img(J)`` and its derivative section ``Dv`` (the
-        directional derivative ``∂v/∂x``; zero for a constant coordinate section)."""
+        directional derivative ``∂v/∂x``; zero for a constant coordinate section).
+        """
         v = _T.var(name, self.tangent)
         dv = _T.var(f"d{name}", _S.oprod(_S.dual(self.param), self.tangent))
         return v, dv
@@ -168,7 +169,8 @@ class Parameterization:
 
     def feed_at(self, u) -> dict:
         """The auto-derived ``{J: dφ|_u, DJ: d²φ|_u}`` run-feed at point ``u`` — the user gives
-        φ, the immersion Jacobian/Hessian are differentiated for them."""
+        φ, the immersion Jacobian/Hessian are differentiated for them.
+        """
         return {self.key(self.J): self.jacobian_at(u), self.key(self.DJ): self.hessian_at(u)}
 
     def covariant_derivative(self, u, v_coords):

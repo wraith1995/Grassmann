@@ -984,7 +984,8 @@ def _emit_ffs_sibling_assert(
     ``(which, |dom|, |cod|)`` so two *alpha-equivalent* spaces (whose binder uids differ ⇒ raw
     space objects compare unequal) are still recognised as the same FFS ⇒ same δ.  Shared by
     the dynamic (:func:`_make_dynamic_ffs_input`) and static (:func:`_make_static_ffs_input`)
-    input paths."""
+    input paths.
+    """
     key = _ffs_sibling_key(space)
     sibling = ctx.ffs_input_siblings.get(key) if key is not None else None
     if key is not None and sibling is None:
@@ -7964,7 +7965,8 @@ def _short(b: B.Basis) -> str:
 
 def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
     """Structural basis equality that recurses into basis-valued fields (so e.g. a
-    :class:`CompleteBasis` whose ``complement`` is a basis compares structurally)."""
+    :class:`CompleteBasis` whose ``complement`` is a basis compares structurally).
+    """
     if type(a) is not type(b):
         return False
     match (a, b):

@@ -136,7 +136,8 @@ _OPAQUE_JAC_BY_KEY: dict[tuple[str, Term], Var] = {}  # (op.name, arg) -> Jacobi
 class DerivInput:
     """Provenance of a symbolic derivative-map input that ``diff`` allocated for a ``deps=None``
     tracer.  ``var`` is the Program-input map ``∂ᵒʳᵈᵉʳsource/∂xᵒʳᵈᵉʳ``; ``source`` is the base
-    tracer ``Var`` it ultimately differentiates; ``order`` is the derivative order (1 = first)."""
+    tracer ``Var`` it ultimately differentiates; ``order`` is the derivative order (1 = first).
+    """
 
     var: Var
     source: Var
@@ -199,7 +200,8 @@ def _alloc_deriv_input(source: Var, ctx: _DCtx, space: Space | None = None) -> V
     chain reports ``(base, n)``).
 
     The space is the FLAT tower spelling (:func:`_tower_space`), so an order-``n`` input has ``n``
-    seed axes followed by the value's own — ``(d, d, 1)`` at order 2, not ``(d, d)``."""
+    seed axes followed by the value's own — ``(d, d, 1)`` at order 2, not ``(d, d)``.
+    """
     key = (source.uid, ctx.x.uid)
     existing = _DERIV_INPUT_BY_KEY.get(key)
     if existing is not None:
@@ -218,7 +220,8 @@ def enumerate_derivative_inputs(term: Term) -> list[DerivInput]:
     each with provenance ``(base tracer var, derivative order)``.  A requirements pass reads this
     after lowering to sample exactly the chart/field derivatives actually used — and to confirm
     pruning unreferenced tracers leaves a valid program.  Deterministic order: by ``(source name,
-    order, uid)``."""
+    order, uid)``.
+    """
     seen: dict[int, DerivInput] = {}
 
     def walk(n: object) -> None:
@@ -233,7 +236,8 @@ def enumerate_derivative_inputs(term: Term) -> list[DerivInput]:
 
 def clear_deriv_inputs() -> None:
     """Drop all recorded derivative-input provenance + dedup keys (test hygiene / a fresh tracer
-    session).  Safe to omit — keys are globally unique Var uids, so stale reuse cannot occur."""
+    session).  Safe to omit — keys are globally unique Var uids, so stale reuse cannot occur.
+    """
     _DERIV_INPUTS.clear()
     _DERIV_INPUT_BY_KEY.clear()
     _OPAQUE_JAC_BY_KEY.clear()
@@ -278,7 +282,8 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
 
 def _dd(e: Term, ctx: _DCtx) -> Term:
     """The directional derivative of ``e`` in direction ``ctx.h`` — a value in
-    ``space(e)``."""
+    ``space(e)``.
+    """
     match e:
         case Var():
             return _dd_var(e, ctx)
@@ -472,7 +477,8 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
 
 def _dd_scale(e: Scale, ctx: _DCtx) -> Term:
     """``d(r·v) = (dr)·v + r·(dv)`` — product rule (``r`` may be a constant or a scalar
-    term)."""
+    term).
+    """
     r, v = e.scalar, e.vector
     dv = _dd(v, ctx)
     parts: list[Term] = []
@@ -487,7 +493,8 @@ def _dd_scale(e: Scale, ctx: _DCtx) -> Term:
 
 def _dd_multilinear_tuple(ctor, vs: tuple[Term, ...], ctx: _DCtx, e: Term) -> Term:
     """Leibniz rule for an n-ary multilinear tuple node (``OProdV``): differentiate one
-    factor at a time, keeping the others."""
+    factor at a time, keeping the others.
+    """
     parts: list[Term] = []
     for k in range(len(vs)):
         dvk = _dd(vs[k], ctx)
@@ -501,7 +508,8 @@ def _dd_multilinear_tuple(ctor, vs: tuple[Term, ...], ctx: _DCtx, e: Term) -> Te
 
 def _dd_eval(e: Eval, ctx: _DCtx) -> Term:
     """``d(f(args)) = (df)(args) + Σₖ f(…, dargₖ, …)`` — product rule over the map and
-    every argument (the multilinear-form case)."""
+    every argument (the multilinear-form case).
+    """
     f, pos, args = e.f, e.positions, e.args
     parts: list[Term] = []
     df = _dd(f, ctx)
@@ -537,7 +545,8 @@ def _dd_compose(e: Compose, ctx: _DCtx) -> Term:
 def _subspace_defining_map(space: object) -> Term | None:
     """The defining map ``f`` of a term-dependent subspace, else ``None`` (canonical, audit #18).
     Callers pass ``sub_or_J`` (a Space OR the map Term itself); a non-Space is simply not a
-    subspace node — the canonical probe is Space-strict."""
+    subspace node — the canonical probe is Space-strict.
+    """
     from grassmann.core.space import is_space
     from grassmann.infer.subspace import ffs_defining_map
 
@@ -557,7 +566,8 @@ _FFS_AMBIENT = {"img": "cod", "coimg": "dom", "ker": "dom", "coker": "cod"}
 
 def _ffs_kind(sub: object) -> str | None:
     """The FFS kind string of a moving-subspace node, else ``None`` (canonical, audit #18).
-    Tolerates a Term (callers pass ``sub_or_J``) — a Term has no FFS kind."""
+    Tolerates a Term (callers pass ``sub_or_J``) — a Term has no FFS kind.
+    """
     from grassmann.core.space import is_space
     from grassmann.infer.subspace import ffs_kind
 
@@ -584,7 +594,8 @@ def _ffs_frame_value(kind: str, Jval: np.ndarray, rank: int | None = None) -> np
     rank subspace (e.g. a non-injective ``Img(J)``) must pass the DECLARED rank: the Taylor-reconstructed
     ``Jm`` drifts off the rank-``r`` manifold at finite δ, so its numeric rank jumps (spurious small
     singular values) and the slice width would change between FD steps — fixing ``rank`` keeps δ constant
-    (the §ffs-frame-drift subtlety)."""
+    (the §ffs-frame-drift subtlety).
+    """
     Jm = Jval.T  # ambient immersion columns, cod×dom
     if rank is None:
         rank = np.linalg.matrix_rank(Jm)
@@ -642,7 +653,8 @@ def set_subspace_gauge(
       program-backed variables (see :func:`_qr_gauge_vars`); seed them with :func:`qr_gauge_feed`.
     * any other OPAQUE gauge — pass ``frame`` (the realization frame ``Q`` as a term/var) and
       ``frame_deriv`` (``∂Q/∂x`` as a map term/var); ``diff`` forms the directional
-      ``dQ = (∂Q/∂x)·h`` exactly as it does for any marked variable."""
+      ``dQ = (∂Q/∂x)·h`` exactly as it does for any marked variable.
+    """
     _SUBSPACE_GAUGE[defining_map.uid] = (gauge, frame, frame_deriv)
 
 
@@ -705,7 +717,8 @@ def _qr_next(e: Var, ctx: _DCtx) -> Var:
 
 def _qr_pos(M: np.ndarray):
     """Positive-diagonal (``R``) QR of ``M`` — the unique factorization ``M = Q·R`` with
-    ``diag(R) > 0`` (so ``Q`` is a deterministic orthonormal frame, == grassmann ``ProjectedBasis``)."""
+    ``diag(R) > 0`` (so ``Q`` is a deterministic orthonormal frame, == grassmann ``ProjectedBasis``).
+    """
     q, r = np.linalg.qr(M)
     s = np.sign(np.diag(r))
     s[s == 0] = 1.0
@@ -719,7 +732,8 @@ def _qr_dQ(Q: np.ndarray, R: np.ndarray, dJm: np.ndarray) -> np.ndarray:
         M = Qᵀ·dJm·R⁻¹ ,   Ω = tril(M,−1) − tril(M,−1)ᵀ ,   dQ = Q·Ω + (I − Q·Qᵀ)·dJm·R⁻¹ .
 
     Verified against a central finite difference of :func:`_qr_pos` (square and rectangular,
-    full-column-rank ``Jm``)."""
+    full-column-rank ``Jm``).
+    """
     Rinv = np.linalg.inv(R)
     Mt = Q.T @ dJm @ Rinv
     low = np.tril(Mt, -1)
@@ -738,7 +752,8 @@ def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
     For ``Img`` the coordinate space IS ``J``'s domain, so ``Q₀ : J.space`` exactly reproduces the
     prior Img path (byte-identical).  For ``CoImg/Ker/CoKer`` the coordinate space is the moving
     subspace ITSELF, so ``Q₀ : oprod(dual(sub), ambient)`` — the roundtrip ``Q·(Q⁺·embed) == embed``
-    lowers (probed)."""
+    lowers (probed).
+    """
     from grassmann.core.space import dual, oprod
     from grassmann.infer.properties import is_injective
     from grassmann.infer.synth import synth_space
@@ -773,7 +788,8 @@ def _nth_deriv_tensor(f, x0: np.ndarray, order: int, eps: float | None = None) -
     level uses ``(4·D(h/2) − D(h))/3`` (``D`` the central difference), cancelling the ``O(eps²)``
     truncation ⇒ ``O(eps⁴)`` per level — sharp enough that the fed ``∂ⁿQ`` tower is accurate, not
     smoke-accurate.  Returns shape ``(nX,)*order + f(x0).shape`` (axis ``aᵢ`` = the i-th direction);
-    mixed partials are symmetric, so it is symmetric in its first ``order`` axes."""
+    mixed partials are symmetric, so it is symmetric in its first ``order`` axes.
+    """
     if order == 0:
         return np.asarray(f(x0), dtype=float)
     if eps is None:
@@ -813,7 +829,8 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
 
     SVD ordering must be consistent across the tiny FD steps — pick a generic ``J`` with well-separated
     singular values (degenerate spectra rotate the frame discontinuously).  Call after ``diff`` so the
-    tower vars exist; merge the result into the program feed."""
+    tower vars exist; merge the result into the program feed.
+    """
     if isinstance(J_deriv_tower, Term):
         J_deriv_tower = [J_deriv_tower]
     J = _subspace_defining_map(sub_or_J) if _ffs_kind(sub_or_J) is not None else sub_or_J
@@ -874,7 +891,8 @@ def ffs_gauge_feed(sub_or_J, J_deriv_tower, feed: dict) -> dict:
 def qr_gauge_feed(J: Term, J_deriv_tower, feed: dict) -> dict:
     """Back-compat ``Img`` alias of :func:`ffs_gauge_feed` — fills the opaque ``ProjectedBasis`` (QR)
     frame tower of ``Img(J)`` (the default gauge).  ``J`` is the bare defining map; see
-    :func:`ffs_gauge_feed` for the general FFS cases (pass the subspace node)."""
+    :func:`ffs_gauge_feed` for the general FFS cases (pass the subspace node).
+    """
     return ffs_gauge_feed(J, J_deriv_tower, feed)
 
 
@@ -888,7 +906,8 @@ def _gauge_frame(J: Term, dJ: Term, sub: Space, kind: str, ctx: _DCtx) -> tuple[
     ∂(J·G^{-1/2}))``, ``G = JᵀJ`` (the ``Sqrt`` primitive).  An OPAQUE gauge with an explicit
     ``frame``/``frame_deriv`` ⇒ ``(frame, (∂Q/∂x)·h)``.  ``CoImg/Ker/CoKer`` have no such immersion
     closed form (the frame is an SVD slice with no substrate-threadable derivative) — they go through
-    the default opaque ``qr`` tower only."""
+    the default opaque ``qr`` tower only.
+    """
     from grassmann.infer.properties import is_injective
 
     entry = _SUBSPACE_GAUGE.get(getattr(J, "uid", None))
@@ -934,7 +953,8 @@ def _dd_embed(v: Term, big: Space, e: Term, ctx: _DCtx) -> Term:
     frame's directional derivative applied to ``v``'s coordinates ``Q⁺·embed(v)`` (recovered through
     the ambient).  The gauge is read from the subspace (`§gauge`); the **default `immersion` gauge**
     (``Q = J``, ``dQ = ∂J``) reproduces ``embed(dv) + ∂J·(J⁺·embed v)`` exactly.  A constant ``J`` ⇒
-    the ordinary linear rule (``embed(dv)``)."""
+    the ordinary linear rule (``embed(dv)``).
+    """
     from grassmann.infer.synth import synth_space
 
     dv = _dd(v, ctx)
@@ -959,7 +979,8 @@ def _dd_project(z: Term, sub: Space, e: Term, ctx: _DCtx) -> Term:
 
     with ``∂(Q⁺)`` the pseudoinverse-map derivative (:func:`_pinv_map_grad`) of the **gauge frame**.
     The **default `qr` gauge** uses the opaque ``ProjectedBasis`` frame; ``immersion`` reproduces
-    ``project(dz) + ∂(J⁺)·z`` exactly."""
+    ``project(dz) + ∂(J⁺)·z`` exactly.
+    """
     dz = _dd(z, ctx)
     frozen = None if isinstance(dz, Zero) else Project(dz, sub)
     J = _subspace_defining_map(sub)
@@ -993,7 +1014,8 @@ def _dd_logdet_kernel(f: Term, ctx: _DCtx) -> Term | None:
 
     Returns ``None`` when ``f`` is x-independent (``df = 0``).  ``f⁻¹·df`` is the map ``Solve(f)``
     composed with the directional ``df`` (a value in ``V ⊸ V``); ``Trace(·, 1, 0)`` contracts its
-    primal/dual slots — the standard ``trace`` convention for an endomorphism (`§50`)."""
+    primal/dual slots — the standard ``trace`` convention for an endomorphism (`§50`).
+    """
     df = _dd(f, ctx)
     if isinstance(df, Zero):
         return None
@@ -1021,7 +1043,8 @@ def _dd_opaque(e: OpaqueApply, ctx: _DCtx) -> Term:
 
     ``Df(arg)`` is the Jacobian of ``f`` *at* ``arg`` — a linear map ``dom ⊸ cod`` the engine
     auto-allocates as a symbolic tracer input (the user never declares it).  It is fed numerically
-    later; :func:`enumerate_derivative_inputs` surfaces it with ``source.name == op.name``."""
+    later; :func:`enumerate_derivative_inputs` surfaces it with ``source.name == op.name``.
+    """
     darg = _dd(e.arg, ctx)  # directional derivative of the argument, a value in op.dom
     if isinstance(darg, Zero):
         return _zero(e, ctx)
@@ -1035,7 +1058,8 @@ def _alloc_opaque_jacobian(op: object, arg: Term, ctx: _DCtx) -> Var:
     composed with ``d arg`` by the chain rule).  Deduped by ``(op.name, arg)`` so repeated
     ``f(arg)`` shares one Jacobian input.  Provenance: a synthetic source ``Var(op.name, …)`` (the
     opaque function symbol) so :func:`enumerate_derivative_inputs` reports ``source.name == op.name``,
-    order 1."""
+    order 1.
+    """
     key = (op.name, arg)
     existing = _OPAQUE_JAC_BY_KEY.get(key)
     if existing is not None:
@@ -1054,7 +1078,8 @@ def _dd_solve(e: Solve, ctx: _DCtx) -> Term:
     Built term→term from ``Solve``/``Compose``: the seed in ``df`` flows through the einsum
     ``Compose``s, NEVER the bulk ``SolveOp`` (which only ever sees the seed-free ``f``), so it
     threads in both llam modes — unlike the *applied* ``Solve(f)·v`` where the seed enters the
-    bulk op directly."""
+    bulk op directly.
+    """
     df = _dd(e.f, ctx)
     if isinstance(df, Zero):
         return _zero(e, ctx)
@@ -1069,7 +1094,8 @@ def _dd_pinv(e: Pinv, ctx: _DCtx) -> Term:
     (``f f⁺ = I``), so the same formula is exact for square *and* injective (full-column-rank)
     ``f``. Pure ``Pinv``/``Dagger``/``Compose`` — the seed threads through the einsum ``Compose``s
     (the bulk ``PinvOp`` only sees the seed-free ``f``).  This is what makes ``project`` through a
-    moving ``Img(J)`` differentiate term→term (``project ≡ Eval(Pinv(J), ·)``)."""
+    moving ``Img(J)`` differentiate term→term (``project ≡ Eval(Pinv(J), ·)``).
+    """
     df = _dd(e.f, ctx)
     if isinstance(df, Zero):
         return _zero(e, ctx)
@@ -1089,7 +1115,8 @@ def _dd_sqrt(e: Sqrt, ctx: _DCtx) -> Term:
 
     with ``Sᵈ = ♭∘S∘♯ : V* ⊸ V*`` the action of ``S`` on covariant indices.  Then
     ``dS = Pinv(L)·df`` lands directly in ``V⊸V``.  ``L`` is SPD (eigenvalues ``√λᵢ + √λⱼ > 0``),
-    and the seed in ``df`` enters only the final ``Eval`` einsum — ``L`` itself is seed-free."""
+    and the seed in ``df`` enters only the final ``Eval`` einsum — ``L`` itself is seed-free.
+    """
     from grassmann.core.space import dual
     from grassmann.infer.synth import synth_space
 
@@ -1128,7 +1155,8 @@ def _pinv_map_grad(f: Term, df: Term) -> Term:
 def _map_dom_cod(space: Space):
     """``(dom, cod)`` of a simple linear-map space ``OProd(Dual(dom), cod)``, else ``(None, None)``
     (canonical strict peel, audit #18 — the old tolerance for a non-``Dual`` head silently read a
-    (2,0)-tensor as a map, the implicit-conversion class grassmann bans)."""
+    (2,0)-tensor as a map, the implicit-conversion class grassmann bans).
+    """
     from grassmann.infer.subspace import split_map_space
 
     split = split_map_space(space)
@@ -1152,7 +1180,8 @@ def _dd_inverse_apply(e: Term, f: Term, v: Term, apply_inv, ctx: _DCtx) -> Term:
     instead silently applies the *transpose* inverse (``Eval(f, ·)`` contracts the dom slot, so
     ``Eval(Solve(f), ·) = f⁻ᵀ·`` whereas ``SolveApply(f, ·) = f⁻¹·``).  Differentiating w.r.t. the
     inverted map itself (``df ≠ 0``) yields a higher tensor the substrate cannot yet thread
-    through the bulk op — that case is rejected (v1)."""
+    through the bulk op — that case is rejected (v1).
+    """
     parts: list[Term] = []
     dv = _dd(v, ctx)
     if not isinstance(dv, Zero):
@@ -1181,7 +1210,8 @@ def _dd_neval_lam(e: NEval, lam: Lam, positions: tuple[int, ...], args: tuple, c
     binder), so the re-binding leaves them untouched.
 
     Only a **value**-producing ``Lam`` is differentiable: a Space/Type body (a SpaceFunction) or a
-    space/nat binder/argument is genuinely higher-order and stays a :class:`DiffError`."""
+    space/nat binder/argument is genuinely higher-order and stays a :class:`DiffError`.
+    """
     from grassmann.core.kinds import SpaceSort
 
     if not is_term(lam.body):
@@ -1215,7 +1245,8 @@ def _dd_neval_lam(e: NEval, lam: Lam, positions: tuple[int, ...], args: tuple, c
 
 def _dd_llam(e: LLam, vars_: tuple[Var, ...], body: Term, ctx: _DCtx) -> Term:
     """Differentiate a (multi)linear map value: differentiate the body, keep the binder.
-    ``x`` must not be one of the linear vars (those are not the differentiation variable)."""
+    ``x`` must not be one of the linear vars (those are not the differentiation variable).
+    """
     if any(v.uid == ctx.x.uid for v in vars_):
         raise DiffError("diff: the differentiation variable is bound by an LLam in the term")
     dbody = _dd(body, ctx)
@@ -1243,7 +1274,8 @@ def _covariant_section(e: Term, ctx: _DCtx):
       rank-3 metric gradient.
 
     A constant metric (``Dg``/``J`` not x-dependent) is *not* covariant — the plain total
-    derivative is correct — so it falls through to the ordinary path."""
+    derivative is correct — so it falls through to the ordinary path.
+    """
     from functools import partial
 
     from grassmann.infer.synth import synth_space
@@ -1273,7 +1305,8 @@ def _covariant_section(e: Term, ctx: _DCtx):
 
 def _chart_jacobian_var(g: Term) -> Var | None:
     """If ``g`` is a chart-induced metric ``JᵀJ`` — ``Compose(Dagger(J),(0,),(J,))`` or
-    ``Compose(J,(0,),(Dagger(J),))`` for a single map ``Var J`` — return ``J``; else ``None``."""
+    ``Compose(J,(0,),(Dagger(J),))`` for a single map ``Var J`` — return ``J``; else ``None``.
+    """
     if isinstance(g, Compose) and len(g.gs) == 1:
         f, gg = g.f, g.gs[0]
         if isinstance(f, Dagger) and isinstance(f.f, Var) and gg == f.f:
@@ -1287,7 +1320,8 @@ def _chart_frame_of(g: Term, ctx: _DCtx) -> tuple[Var, Term] | None:
     """If ``g`` is a chart metric ``JᵀJ`` over an **x-dependent** marked immersion ``J``, return
     ``(J, DJ)`` — the frame and its derivative map ``∂J/∂x : X ⊸ (M ⊸ A)`` (from ``deps``, or a
     fresh symbolic map var for a ``None`` dep). ``None`` if ``g`` is not a chart metric or ``J``
-    is x-independent (a constant chart ⇒ flat)."""
+    is x-independent (a constant chart ⇒ flat).
+    """
     J = _chart_jacobian_var(g)
     if J is None or J.uid not in ctx.deps:
         return None
@@ -1299,7 +1333,8 @@ def _chart_frame_of(g: Term, ctx: _DCtx) -> tuple[Var, Term] | None:
 
 def _manifold_of(s: Space) -> Space | None:
     """The base manifold ``M`` of a (co)tangent (tensor) space: ``M``, ``M*``, or a tensor
-    product whose factors are all ``M`` / ``M*`` over a single ``M``; else ``None``."""
+    product whose factors are all ``M`` / ``M*`` over a single ``M``; else ``None``.
+    """
     from grassmann.core.space import Dual, OProd
 
     def base(f: Space) -> Space:
@@ -1325,7 +1360,8 @@ def _connection_correction(
     - ``(1,1)`` tensor ``T : M ⊸ M`` → ``Γ(h)∘T − T∘Γ(h)``       (the commutator)
 
     Everything is built from ``Eval``/``Compose`` of the bare connection map, so no metric
-    basis is ever realized (the lowering stays in standard coordinates)."""
+    basis is ever realized (the lowering stays in standard coordinates).
+    """
     from grassmann.core.space import OProd, dual
 
     conn = conn_builder(ctx.h)  # Γ(h) : M ⊸ M, bare
@@ -1363,7 +1399,8 @@ def _connection_map(M: Space, g: Term, Dg: Term, h: Var) -> Term:
     where ``Glower : M ⊸ M*`` is the first-kind symbol contracted with ``h`` (the ``Permute``
     supplies the one transpose the reshape-only ``Lift`` cannot). The inverse metric is the
     **bare** map ``Pinv(g)`` — ``g`` decodes as the flat map ``M ⊸ M*`` — so the connection
-    carries no metric basis tag and the whole derivative stays coordinate-free."""
+    carries no metric basis tag and the whole derivative stays coordinate-free.
+    """
     t1 = Eval(Dg, (0,), (h,))  # ∂ᵢg_{jl} hⁱ, indexed (j, l)
     t2 = Eval(Dg, (1,), (h,))  # ∂ⱼg_{il} hⁱ, indexed (j, l)
     g_lower_map = Scale(0.5, Sum((t1, t2, Scale(-1.0, Permute(t2, (1, 0))))))  # M ⊸ M*
@@ -1380,7 +1417,8 @@ def _frame_connection_map(M: Space, J: Term, DJ: Term, h: Var) -> Term:
     gradient (sidestepping the nested-⊗ substrate gap that ``∂(JᵀJ)`` would hit).  Numerically
     identical to :func:`_connection_map` fed ``g = JᵀJ``, ``Dg = ∂(JᵀJ)`` (verified), so it plugs
     into the same per-slot :func:`_connection_correction`.  Assumes a true chart Jacobian
-    (``J = ∂Φ`` ⇒ ``∂J`` symmetric in direction ↔ tangent slot ⇒ a torsion-free connection)."""
+    (``J = ∂Φ`` ⇒ ``∂J`` symmetric in direction ↔ tangent slot ⇒ a torsion-free connection).
+    """
     return Compose(Pinv(J), (0,), (Eval(DJ, (0,), (h,)),))  # J⁺ ∘ (∂J·h) : M ⊸ M
 
 
@@ -1391,7 +1429,8 @@ def _metric_gradient(g: Term, M: Space, ctx: _DCtx) -> Term | None:
     For v1 the metric must be a marked-dependent ``Var`` (its gradient supplied via ``deps``,
     or a fresh symbolic map var for ``None``); a constant metric ``Var`` (absent from
     ``deps``) yields ``None`` (the flat case). A more complex x-dependent metric expression
-    is rejected — supply the metric (and its derivative) as a marked variable."""
+    is rejected — supply the metric (and its derivative) as a marked variable.
+    """
     if isinstance(g, Var):
         if g.uid not in ctx.deps:
             return None  # metric does not depend on x ⇒ flat
@@ -1422,7 +1461,8 @@ def _depends_on_x(node: object, ctx: _DCtx) -> bool:
 
 def _xdep_metric_space(space: Space, ctx: _DCtx) -> bool:
     """True if ``space`` carries a ``WithInner`` metric that depends on ``x`` (so a musical operator
-    of that space is itself x-dependent)."""
+    of that space is itself x-dependent).
+    """
     return (
         isinstance(space, WithInner)
         and is_term(space.metric)
@@ -1460,7 +1500,8 @@ def _add(a: Term, b: Term, space: Space) -> Term:
 
 def _wrap_linear(ctor, dv: Term, e: Term, ctx: _DCtx) -> Term:
     """A node linear in one child: its derivative is the same node over the child's
-    derivative (or ``Zero`` when the child is x-independent)."""
+    derivative (or ``Zero`` when the child is x-independent).
+    """
     if isinstance(dv, Zero):
         return _zero(e, ctx)
     return ctor(dv)
@@ -1557,7 +1598,8 @@ def _guard_closed_and_first_order(e: Term, x: Var, deps: dict[int, Term | None])
     rejected: ``embed`` IS ``di`` (the differential of the embedding), so the realizing arms
     differentiate it term→term — ``embed``/``project`` add the immersion-derivative term, and the
     musical maps raise their own specific error.  Only x flowing into a non-subspace space (an SVar
-    / a space made to depend on x by a Frame/SpaceFunction) is genuinely higher-order."""
+    / a space made to depend on x by a Frame/SpaceFunction) is genuinely higher-order.
+    """
     from grassmann.core.space import is_space
     from grassmann.infer.subspace import is_ffs
     from grassmann.infer.synth import InferError, synth_space
