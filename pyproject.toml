@@ -124,11 +124,9 @@ exclude = [
 "__init__.py" = ["F401"]
 
 "tests/**" = ["D", "ANN"]
-"src/grassmann/core/space.py" = ["D", "ANN"]
 "src/grassmann/core/term.py" = ["D", "ANN"]
 "src/grassmann/embed/builders.py" = ["D", "ANN"]
 "src/grassmann/lower/represent.py" = ["D", "ANN"]
-"src/grassmann/lower/space_basis.py" = ["D", "ANN"]
 "src/grassmann/syntax/geometry.py" = ["D", "ANN"]
 "src/grassmann/syntax/mcalc.py" = ["D", "ANN"]
 "src/grassmann/syntax/parse.py" = ["D", "ANN"]
