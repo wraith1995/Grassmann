@@ -505,11 +505,9 @@ _TRANSPOSE_COUNTER = itertools.count()
 
 
 def _transpose_map(f: Term, sd: Space, td: Space) -> Term:
-    """The metric-free transpose ``f* : Dual(sd) ⊸ Dual(td)`` of ``f : td ⊸ sd``, as the DERIVED form ``λω.
-
-    ω ∘ f`` (LLam + Compose — definable in the calculus, no new node). In any bases the stored matrix is
-    exactly ``fᵀ``; no Gram is consulted anywhere.
-    """
+    """The metric-free transpose ``f* : Dual(sd) ⊸ Dual(td)`` of ``f : td ⊸ sd``, as the
+    DERIVED form ``λω. ω ∘ f`` (LLam + Compose — definable in the calculus, no new node).
+    In any bases the stored matrix is exactly ``fᵀ``; no Gram is consulted anywhere."""
     from grassmann.core.term import Compose, LLam, var
 
     w = var(f"transp_w{next(_TRANSPOSE_COUNTER)}", Dual(sd))

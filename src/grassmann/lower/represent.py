@@ -979,13 +979,12 @@ def _emit_ffs_sibling_assert(
     ctx: _Ctx, e: T.Var, space: S.Space, arr: pa.SymArray,
     out_shape: tuple[int | pa.DimAtom, ...],
 ) -> None:
-    """Emit the `42 §C4` sibling-agreement ``shape_eq`` AssertOp: FFS inputs that must share a δ (e.g.
-
-    ``a, b : Λᵏ``) match shapes.  Keyed structurally by the defining FFS map's ``(which, |dom|, |cod|)`` so
-    two *alpha-equivalent* spaces (whose binder uids differ ⇒ raw space objects compare unequal) are still
-    recognised as the same FFS ⇒ same δ.  Shared by the dynamic (:func:`_make_dynamic_ffs_input`) and static
-    (:func:`_make_static_ffs_input`) input paths.
-    """
+    """Emit the `42 §C4` sibling-agreement ``shape_eq`` AssertOp: FFS inputs that must share a
+    δ (e.g. ``a, b : Λᵏ``) match shapes.  Keyed structurally by the defining FFS map's
+    ``(which, |dom|, |cod|)`` so two *alpha-equivalent* spaces (whose binder uids differ ⇒ raw
+    space objects compare unequal) are still recognised as the same FFS ⇒ same δ.  Shared by
+    the dynamic (:func:`_make_dynamic_ffs_input`) and static (:func:`_make_static_ffs_input`)
+    input paths."""
     key = _ffs_sibling_key(space)
     sibling = ctx.ffs_input_siblings.get(key) if key is not None else None
     if key is not None and sibling is None:
@@ -7886,10 +7885,8 @@ def _short(b: B.Basis) -> str:
 
 
 def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
-    """Structural basis equality that recurses into basis-valued fields (so e.g.
-
-    a :class:`CompleteBasis` whose ``complement`` is a basis compares structurally).
-    """
+    """Structural basis equality that recurses into basis-valued fields (so e.g. a
+    :class:`CompleteBasis` whose ``complement`` is a basis compares structurally)."""
     if type(a) is not type(b):
         return False
     match (a, b):

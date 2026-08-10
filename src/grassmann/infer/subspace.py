@@ -160,11 +160,9 @@ def ffs_kind(s: Space) -> FfsKind | None:
 
 
 def ffs_superspace(s: Space) -> Space | None:
-    """The ambient an FFS embeds into (``Ker``/``CoImg`` ⊑ dom f.
-
-    ``Img``/``CoKer`` ⊑ cod f), from the explicit endpoint or decoded from ``f`` — ``None`` if ``s`` is not an
-    FFS or the map space cannot be decoded.
-    """
+    """The ambient an FFS embeds into (``Ker``/``CoImg`` ⊑ dom f; ``Img``/``CoKer`` ⊑ cod f),
+    from the explicit endpoint or decoded from ``f`` — ``None`` if ``s`` is not an FFS or the
+    map space cannot be decoded."""
     match s:
         case Ker() | CoImg():
             return _ffs_dom(s)
