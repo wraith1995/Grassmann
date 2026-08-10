@@ -10,6 +10,7 @@ glyph/precedence table. Parse errors carry the offending source offset.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from grassmann.core import basis as B
@@ -58,12 +59,15 @@ _ATOM_OPS = {G.SCALAR, G.OPLUS_BOT, G.SCALAR_BASIS}
 
 @dataclass
 class Tok:
+    """One lexed token: its class, its source text, and its source offset."""
+
     kind: str  # "NUM" | "NAME" | "OP" | "EOF"
     text: str
     pos: int
 
 
 def tokenize(src: str) -> list[Tok]:
+    """Lex ``src`` into tokens, ending with an ``EOF`` token."""
     toks: list[Tok] = []
     i, n = 0, len(src)
     while i < n:
@@ -113,24 +117,32 @@ def tokenize(src: str) -> list[Tok]:
 
 @dataclass
 class Name:
+    """An identifier."""
+
     text: str
     pos: int = 0
 
 
 @dataclass
 class Num:
+    """A numeric literal, kept as text until the resolver knows its sort."""
+
     text: str
     pos: int = 0
 
 
 @dataclass
 class ListN:
+    """A bracketed list, e.g. the position list of an application."""
+
     items: list
     pos: int = 0
 
 
 @dataclass
 class Bin:
+    """An infix application ``left op right``."""
+
     op: str
     left: object
     right: object
@@ -139,6 +151,8 @@ class Bin:
 
 @dataclass
 class Post:
+    """A postfix decoration ``operand op`` (dagger, inverse, pinv, …)."""
+
     op: str
     operand: object
     pos: int = 0
@@ -146,6 +160,8 @@ class Post:
 
 @dataclass
 class Pre:
+    """A prefix operator ``op operand`` (dual, negation, √, …)."""
+
     op: str
     operand: object
     pos: int = 0
@@ -153,6 +169,8 @@ class Pre:
 
 @dataclass
 class App:
+    """An application ``fn(args, kwargs)`` (round) or ``fn[args]`` (square)."""
+
     fn: object
     args: list
     kwargs: dict
@@ -162,6 +180,8 @@ class App:
 
 @dataclass
 class InnerN:
+    """An inner pairing ``⟨left, right⟩``."""
+
     left: object
     right: object
     pos: int = 0
@@ -169,6 +189,8 @@ class InnerN:
 
 @dataclass
 class BracketN:
+    """A bracketed sort coercion, e.g. ``⟦s⟧``."""
+
     glyph: str  # "⟦"
     inner: object
     pos: int = 0
@@ -176,6 +198,8 @@ class BracketN:
 
 @dataclass
 class LamN:
+    """A binder node — λ / Λ / frame / basisfn / Π — with its binder list and body."""
+
     glyph: str  # "λ" | "Λ" | "frame" | "Π"
     binders: list  # list[(name, annot_node|None)]
     body: object
@@ -334,6 +358,7 @@ class _Parser:
 
 
 def parse_ast(src: str) -> object:
+    """Parse ``src`` into the generic AST, before any sort-directed resolution."""
     p = _Parser(tokenize(src), src)
     node = p.expr(0)
     if p.peek().kind != "EOF":
@@ -357,7 +382,7 @@ class _Env:
     def put(self, name: str, val: tuple) -> None:
         self.m[name] = val
 
-    def get(self, name: str):
+    def get(self, name: str) -> tuple | None:
         e = self
         while e is not None:
             if name in e.m:
@@ -431,7 +456,7 @@ class _Resolver:
 
     # -- kinds ---------------------------------------------------------------
 
-    def kind(self, node: object, env: _Env):
+    def kind(self, node: object, env: _Env) -> K.Kind:
         if isinstance(node, Name) and node.text in ("Space", "Nat", "Type"):
             return {"Space": K.SPACE, "Nat": K.NAT, "Type": K.STAR}[node.text]
         if isinstance(node, Bin) and node.op == G.ARROW:
@@ -509,7 +534,9 @@ class _Resolver:
                 return self._basis_head(h, args, kw, env, node)
         raise self.err("expected a basis expression", node)
 
-    def _basis_head(self, h, args, kw, env, node) -> B.Basis:
+    def _basis_head(
+        self, h: str, args: list, kw: dict, env: _Env, node: object
+    ) -> B.Basis:
         if h == "primal":
             return B.PrimalBasis(self.basis(args[0], env))
         if h == "pbasis":
@@ -622,15 +649,15 @@ class _Resolver:
                                tuple(self.arg(a, env) for a in args))
         raise self.err("expected a term/vector expression", node)
 
-    def _scalar(self, node: object, env: _Env):
-        """A ``Scale`` scalar: a (possibly negative) numeric literal, or a scalar term."""
+    def _scalar(self, node: object, env: _Env) -> float | T.Term:
+        """Resolve a ``Scale`` scalar — a (possibly negative) numeric literal, or a term."""
         if isinstance(node, Num):
             return float(node.text)
         if isinstance(node, Pre) and node.op == "-" and isinstance(node.operand, Num):
             return -float(node.operand.text)
         return self.term(node, env)
 
-    def _inner(self, lhs, rhs, env) -> T.Term:
+    def _inner(self, lhs: object, rhs: object, env: _Env) -> T.Term:
         x = self.term(lhs, env)
         s = getattr(x, "space", None)
         if not (s is not None and S.is_space(s)):
@@ -638,7 +665,9 @@ class _Resolver:
                 "⟨x, y⟩ needs x to carry a space; use Eval(inner(S), [0,1], x, y)", lhs)
         return T.Eval(T.Inner(s), (0, 1), (x, self.term(rhs, env)))
 
-    def _term_head(self, h, args, kw, env, node) -> T.Term:  # noqa: C901
+    def _term_head(  # noqa: C901
+        self, h: str, args: list, kw: dict, env: _Env, node: object
+    ) -> T.Term:
         if h in G.EXTERNAL_OPS:
             return self._external(h, args, env)
         if h == "id":
@@ -716,7 +745,9 @@ class _Resolver:
 
     # -- binders -------------------------------------------------------------
 
-    def _bind(self, node: LamN, env: _Env, *, basis_ctx: bool):
+    def _bind(
+        self, node: LamN, env: _Env, *, basis_ctx: bool
+    ) -> tuple[list, _Env, T.Var | None, B.BVar | None]:
         """Build the core binder list + a child env.
 
         Returns ``(binders, child_env, term_var, basis_var)`` (the last two for BLam).
@@ -759,7 +790,8 @@ class _Resolver:
         body = self._lam_body(node.body, child)
         return T.Lam(tuple(binders), body, term_vars)
 
-    def _lam_body(self, node: object, env: _Env):
+    def _lam_body(self, node: object, env: _Env) -> T.Term | S.Space | S.Dim | TY.Type:
+        """Resolve a Lam body as a term, space, dim or type — the first that parses."""
         for fn in (self.term, self.space, self.dim, self.type_):
             try:
                 return fn(node, env)
@@ -798,7 +830,7 @@ class _Resolver:
 
     # -- application args (term | space | dim, and basis for BApp) -----------
 
-    def arg(self, node: object, env: _Env):
+    def arg(self, node: object, env: _Env) -> T.Term | S.Space | S.Dim:
         if isinstance(node, Num):
             return S.DimLit(int(node.text)) if "." not in node.text else T.Lit(float(node.text))
         if isinstance(node, Name):
@@ -814,7 +846,7 @@ class _Resolver:
                 continue
         raise self.err("could not resolve application argument", node)
 
-    def barg(self, node: object, env: _Env):
+    def barg(self, node: object, env: _Env) -> T.Term | S.Space | S.Dim | B.Basis:
         try:
             return self.basis(node, env)
         except ParseError:
@@ -822,7 +854,13 @@ class _Resolver:
 
     # -- flatten helper for associative n-ary operators ----------------------
 
-    def _flat(self, op: str, node: object, resolve, env: _Env) -> list:
+    def _flat(
+        self,
+        op: str,
+        node: object,
+        resolve: Callable[[object, _Env], object],
+        env: _Env,
+    ) -> list:
         if isinstance(node, Bin) and node.op == op:
             return (self._flat(op, node.left, resolve, env)
                     + self._flat(op, node.right, resolve, env))
@@ -899,7 +937,7 @@ def _parse_props(p: _Parser, src: str, env: _Env) -> P.MapProps:
     return P.MapProps(inj=flags["inj"], surj=flags["surj"], bij=flags["bij"], **kw)
 
 
-def parse(src: str, sort: str | None = None):
+def parse(src: str, sort: str | None = None) -> object:
     """Parse Unicode surface text into a core node (term / space / basis / dim / type).
 
     ``sort`` may pin the expected sort (``"term"``/``"space"``/``"basis"``/``"dim"``/

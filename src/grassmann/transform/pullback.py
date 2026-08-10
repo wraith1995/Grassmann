@@ -23,6 +23,7 @@ purely from primitive maps and value-level moves, never an ``LLam``-and-apply.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable
 
 from grassmann.core.space import (
     CoImg,
@@ -62,7 +63,15 @@ class PullbackError(Exception):
     """Raised when no transport between two spaces can be built."""
 
 
-def pullback(v: Term, target: Space, *, primitives=None) -> Term:
+# A caller-supplied leaf transport: given the (source, target) pair the structural
+# recursion could not handle, return a map term, or ``None`` to decline.
+LeafPrimitives = Callable[[Space, Space], Term | None]
+
+# A caller-supplied leaf SELF-map, keyed on one space (see :func:`endomorphism_map`).
+SelfPrimitives = Callable[[Space], Term | None]
+
+
+def pullback(v: Term, target: Space, *, primitives: LeafPrimitives | None = None) -> Term:
     """Transport the value ``v`` into ``target`` (the public entry point).
 
     Synthesizes ``v``'s source space and builds the transported value. An identity
@@ -88,7 +97,7 @@ def pullback(v: Term, target: Space, *, primitives=None) -> Term:
     return out
 
 
-def _pb(v: Term, source: Space, target: Space, primitives=None) -> Term:
+def _pb(v: Term, source: Space, target: Space, primitives: LeafPrimitives | None = None) -> Term:
     """Build the transported value ``v : source ⤳ target`` (value-level recursion)."""
     S = _normalize(source)
     T = _normalize(target)
@@ -135,7 +144,9 @@ def _pb(v: Term, source: Space, target: Space, primitives=None) -> Term:
     return _pb_fallback(v, S, T)
 
 
-def _pb_oplus(v: Term, S: OPlus, T: OPlus, primitives=None) -> Term:
+def _pb_oplus(
+    v: Term, S: OPlus, T: OPlus, primitives: LeafPrimitives | None = None
+) -> Term:
     """``⊕`` at the value level.
 
     Slice block ``k`` out of ``v`` (``TupleProject``), transport it, re-pad into ``T`` (``TupleEmbed``), and
@@ -150,8 +161,10 @@ def _pb_oplus(v: Term, S: OPlus, T: OPlus, primitives=None) -> Term:
     return Sum(tuple(blocks))
 
 
-def _pb_ffs(v: Term, S: Space, T: Space, primitives=None) -> Term:
-    """FFS ``S`` to ``T`` via their ambients: ``project(convert(embed(v)))``."""
+def _pb_ffs(
+    v: Term, S: Space, T: Space, primitives: LeafPrimitives | None = None
+) -> Term:
+    """Transport an FFS ``S`` to ``T`` via their ambients: ``project(convert(embed(v)))``."""
     sup_S = _ffs_superspace(S)
     sup_T = _ffs_superspace(T)
     if sup_S is None or sup_T is None:
@@ -192,8 +205,12 @@ def _pb_fallback(v: Term, S: Space, T: Space) -> Term:
 # ---------------------------------------------------------------------------
 
 
-def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
-    """A reusable transport map ``source ⊸ target`` as a *primitive* (``Eval``-applicable) map term.
+def transport_map(
+    source: Space, target: Space, *, primitives: LeafPrimitives | None = None
+) -> Term:
+    """Build a reusable transport map ``source ⊸ target`` as a *primitive* map term.
+
+    Primitive means ``Eval``-applicable.
 
     Supports the structural cases expressible without an ``LLam``; a leaf that the structure cannot build is
     taken from the caller-supplied ``primitives(source, target)`` (opt-in), else raises :class:`PullbackError`
@@ -251,8 +268,8 @@ def transport_map(source: Space, target: Space, *, primitives=None) -> Term:
             return _leaf_primitive(S, T, primitives, "no primitive map")
 
 
-def endomorphism_map(space: Space, *, primitives) -> Term:
-    """The functorial SELF-map of ``space`` induced by caller-supplied leaf self-maps.
+def endomorphism_map(space: Space, *, primitives: SelfPrimitives) -> Term:
+    """Build the functorial SELF-map of ``space`` induced by caller-supplied leaf self-maps.
 
     ``transport_map``'s structural recursion cannot carry an AUTOMORPHISM: its first arm
     short-circuits ``S == T`` to ``Identity``, and an automorphism (e.g. a reference-cell
@@ -348,7 +365,7 @@ def endomorphism_map(space: Space, *, primitives) -> Term:
 
 
 def _ffs_immersion(S: Space, T: Space) -> Term | None:
-    """The `Img(f) ↔ ambient` transport, built from the map that DEFINES the image.
+    """Build the `Img(f) ↔ ambient` transport from the map that DEFINES the image.
 
     The canonical BAIL for a subspace pair where neither side is a direct ⊕-summand.
 
@@ -409,14 +426,14 @@ def _ffs_immersion(S: Space, T: Space) -> Term | None:
 
 
 def _corestrictable(f: Term) -> bool:
-    """May `Corestrict(f)` be formed? (`f` asserted `inj` — the node's injective-only scope.)"""
+    """Report whether `Corestrict(f)` may be formed — `f` must be asserted `inj`."""
     from grassmann.infer.properties import is_injective
 
     return is_injective(f)
 
 
 def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
-    """The `Img(f_A) ⊸ Img(f_B)` MAP for two immersions of the SAME ambient.
+    """Build the `Img(f_A) ⊸ Img(f_B)` MAP for two immersions of the SAME ambient.
 
     The chart-to-chart convert, out of A's own coordinates, through the ambient, into B's:
 
@@ -478,7 +495,7 @@ def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
 
 
 def _img_ambient(img: Space) -> Space:
-    """The ambient space an `Img(f)` sits inside — its declared `target`, else `cod(f)`."""
+    """Give the ambient space an `Img(f)` sits inside — its declared `target`, else `cod(f)`."""
     from grassmann.infer.synth import map_domain_codomain
 
     if img.target is not None:
@@ -486,11 +503,13 @@ def _img_ambient(img: Space) -> Space:
     return map_domain_codomain(img.f)[1]
 
 
-def _leaf_primitive(S: Space, T: Space, primitives, why: str) -> Term:
-    """A leaf ``transport_map`` cannot build structurally.
+def _leaf_primitive(
+    S: Space, T: Space, primitives: LeafPrimitives | None, why: str
+) -> Term:
+    """Take the caller-supplied primitive map for a leaf the structure cannot build.
 
-    Take the caller-supplied primitive map (``primitives(S, T)``) if any, else raise. Keeps the classic error
-    when no ``primitives`` given.
+    Uses ``primitives(S, T)`` if any, else raises :class:`PullbackError` with the plain
+    "no transport" message.
     """
     if primitives is not None:
         m = primitives(S, T)
@@ -505,9 +524,10 @@ _TRANSPOSE_COUNTER = itertools.count()
 
 
 def _transpose_map(f: Term, sd: Space, td: Space) -> Term:
-    """The metric-free transpose ``f* : Dual(sd) ⊸ Dual(td)`` of ``f : td ⊸ sd``, as the
-    DERIVED form ``λω. ω ∘ f`` (LLam + Compose — definable in the calculus, no new node).
-    In any bases the stored matrix is exactly ``fᵀ``; no Gram is consulted anywhere.
+    """Build the metric-free transpose ``f* : Dual(sd) ⊸ Dual(td)`` of ``f : td ⊸ sd``.
+
+    As the DERIVED form ``λω. ω ∘ f`` (LLam + Compose — definable in the calculus, no new
+    node). In any bases the stored matrix is exactly ``fᵀ``; no Gram is consulted anywhere.
     """
     from grassmann.core.term import Compose, LLam, var
 
@@ -515,10 +535,12 @@ def _transpose_map(f: Term, sd: Space, td: Space) -> Term:
     return LLam((w,), Compose(w, (0,), (f,)))
 
 
-def _tensor_map(S: OProd, T: OProd, primitives=None) -> Term:
-    """``⊗``.
+def _tensor_map(
+    S: OProd, T: OProd, primitives: LeafPrimitives | None = None
+) -> Term:
+    """Build the ``⊗`` transport — the factor maps as a right-nested ``Kron``.
 
-    The tensor product of the factor maps, as a right-nested ``Kron`` (a primitive ``(dom,cod)`` map).
+    The result is a primitive ``(dom, cod)`` map.
     """
     ms = [transport_map(s_i, t_i, primitives=primitives)
           for s_i, t_i in zip(S.spaces, T.spaces, strict=True)]
@@ -561,8 +583,9 @@ def _strip(s: Space) -> Space:
 
 
 def _summand_index(component: Space, whole: Space) -> int | None:
-    """Index ``i`` with ``whole.spaces[i] == component`` (a *direct* ⊕-summand); else
-    ``None``.
+    """Give the index ``i`` with ``whole.spaces[i] == component``, else ``None``.
+
+    Only a *direct* ⊕-summand matches.
     """
     if isinstance(whole, OPlus):
         for i, s in enumerate(whole.spaces):
@@ -578,12 +601,15 @@ from grassmann.infer.subspace import is_ffs as _is_ffs
 
 
 def euclidean_superspace(s: Space) -> Space:
-    """A tensor-product + direct-sum space that is a SUPERSPACE of ``s``, with every FFS (``Ker``/``Img``/
-    ``CoImg``/``CoKer``) replaced by its ambient, RECURSIVELY. So an exterior power ``Λᵏ(V) = Img(alt(V,k))``
-    resolves to the tensor power ``V⊗ᵏ`` (an ``OProd`` of ``k`` factors); a direct sum stays an ``OPlus``;
-    a ``Dual`` distributes; a ``WithInner`` drops its (non-structural) metric. Reading a form's DEGREE is
-    then just counting the tensor factors of this superspace (a ``k``-form ⊑ ``V⊗ᵏ``). Idempotent on
-    FFS-free (already-euclidean) spaces. Exhaustive over ``space._SPACE_TYPES`` (``assert_never`` backstop).
+    """Give a tensor-product + direct-sum SUPERSPACE of ``s`` with every FFS resolved.
+
+    Every FFS (``Ker``/``Img``/``CoImg``/``CoKer``) is replaced by its ambient, RECURSIVELY.
+    So an exterior power ``Λᵏ(V) = Img(alt(V,k))`` resolves to the tensor power ``V⊗ᵏ`` (an
+    ``OProd`` of ``k`` factors); a direct sum stays an ``OPlus``; a ``Dual`` distributes; a
+    ``WithInner`` drops its (non-structural) metric. Reading a form's DEGREE is then just
+    counting the tensor factors of this superspace (a ``k``-form ⊑ ``V⊗ᵏ``). Idempotent on
+    FFS-free (already-euclidean) spaces. Exhaustive over the Space sum type
+    (``assert_never`` backstop).
     """
     from typing import assert_never
 
