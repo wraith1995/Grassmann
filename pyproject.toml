@@ -50,7 +50,7 @@ where = ["src"]
 
 [tool.uv.sources]
 polyarray = { path = "../polyarray", editable = true }
-chartlib = { path = "../chartlib", editable = true }
+chartlib = { path = "../chartLib", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
