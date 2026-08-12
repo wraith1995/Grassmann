@@ -239,6 +239,7 @@ def represent(
     basis_env: dict[int, B.Basis] | None = None,
     target: B.TargetBasis | B.Basis = B.AUTO,
     supplied_frames: dict[tuple[str, int], tuple[str, int, int]] | None = None,
+    literal_frames: bool = False,
 ) -> pa.Program:
     """Lower a typed core ``term`` to a :class:`polyarray.Program`.
 
@@ -267,9 +268,25 @@ def represent(
     re-factorization to an input reference).  ``None`` (the default) ⇒ no supplied frames ⇒
     byte-identical to the historical lowering.
 
+    ``literal_frames`` (optional) PROPAGATES the exact/rational FFS-frame lane for the whole
+    lowering — the argument form of the :func:`literal_ffs_frames` context (and the
+    ``GRASSMANN_FFS_FRAME=literal`` env escape hatch it subsumes).  When ``True``: (i) an
+    un-pinned injective ``Img(f)`` leaf is chosen (:mod:`grassmann.lower.choose`) in the literal,
+    RATIONAL ``ImageBasis(f)`` rather than the orthonormalizing ``ProjectedBasis`` — so the
+    algebraic-irrational QR ``R`` never enters and polyarray's exact/certificate lane carries the
+    program; (ii) any injective image FRAME that must be REALIZED uses its literal columns (the
+    Gram solve, :func:`~grassmann.lower.space_basis._realize_via_gram`) instead of the QR ``Q``.
+    Same subspace, a RATIONAL frame; the price is conditioning (``κ(J)²`` through the Gram) — so
+    this is the SYMBOLIC/CERTIFICATE consumer's opt-in and ``False`` (the default) keeps the
+    well-conditioned orthonormal numeric lane byte-identical to the historical lowering.
+
     The program is built under polyarray's ``force_stmts`` budget and the
     post-pass (``partial_eval``) is applied before returning.
     """
+    if literal_frames:
+        with literal_ffs_frames(True):
+            return represent(term, basis_env=basis_env, target=target,
+                             supplied_frames=supplied_frames)
     prog = pa.Program("represent", budget=_lowering_budget())
     ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={},
                supplied_frames=supplied_frames or {})
