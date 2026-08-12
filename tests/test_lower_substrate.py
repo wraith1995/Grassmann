@@ -454,6 +454,74 @@ def test_choose_absorbs_operator_structure() -> None:
     assert chosen.f is f
 
 
+def test_choose_prefers_rational_image_frame_under_propagated_lane() -> None:
+    """F1 — the fold-preserving scorer, gated on the propagated rational-frame lane.
+
+    At an un-pinned INJECTIVE ``Img(f)`` leaf: OFF (default) the orthonormalizing
+    ``ProjectedBasis`` (QR/SVD) wins — byte-identical to history; ON (the ``literal_ffs_frames``
+    lane the exact/certificate consumer propagates) the RATIONAL literal ``ImageBasis`` wins, so
+    the algebraic-irrational QR ``R`` never enters and polyarray's exact lane survives.  A
+    NON-injective image (rank-deficient literal columns) keeps the orthonormal default on BOTH
+    lanes (nothing rational to prefer).
+    """
+    from grassmann.lower.represent import literal_ffs_frames
+
+    V, W = C.base("V", 2), C.base("W", 4)
+    f = C.var("f", C.linear_map_space(V, W), P.inj)          # an INJECTIVE immersion
+    sp = C.img(f, source=V, target=W)
+    _, cands = space_basis(sp)
+    off = choose(sp, cands, term=f)
+    assert isinstance(off, C.ProjectedBasis) and off.which == "image"   # numeric default unmoved
+    with literal_ffs_frames(True):
+        on = choose(sp, cands, term=f)
+    assert isinstance(on, C.ImageBasis) and (on.f is f)                 # rational frame, fold survives
+
+    # a non-injective image has no rational alternative ⇒ orthonormal default on both lanes.
+    g = C.var("g", C.linear_map_space(C.base("A", 3), C.base("B", 3)))  # no inj assertion
+    spg = C.img(g)
+    _, candsg = space_basis(spg)
+    with literal_ffs_frames(True):
+        assert isinstance(choose(spg, candsg, term=g), C.ProjectedBasis)
+
+
+def test_propagated_literal_frames_drops_the_qr_radical() -> None:
+    """F2 — the artifact: an injective-image lowering emits the QR radical by DEFAULT and NONE
+    of it under the propagated rational lane, with the SAME physical result (`assert-on-the-artifact`).
+
+    ``project(v, Img(J))`` on a live injective ``J`` realizes ``Img(J)``'s frame.  Default =
+    ``QrOp`` (the fold-blocking radical); ``represent(literal_frames=True)`` = zero ``QrOp`` (the
+    rational literal/Gram frame).  Both reconstruct the SAME ambient projection (basis-independent),
+    so the change is a frame swap, not a value change.
+    """
+    import grassmann as G
+    from grassmann.lower.represent import represent as g_represent
+
+    rng = np.random.default_rng(3)
+    Rt, Re = G.space("Rt", 2), G.space("Re", 4)
+    J = G.var("J", Rt >> Re, props=G.inj)
+    v = G.var("v", Re)
+    term = G.project(v, G.img(J)).node
+
+    def _qr(prog: pa.Program) -> int:
+        return sum(1 for st in prog.statements if "Qr" in type(st.fn).__name__)
+
+    p_off = g_represent(term)
+    p_on = g_represent(term, literal_frames=True)
+    assert _qr(p_off) >= 1, "the default injective-image frame should realize a QR"
+    assert _qr(p_on) == 0, "the propagated rational lane must emit NO QR radical"
+
+    Jv, vv = rng.standard_normal((2, 4)), rng.standard_normal(4)
+    A = Jv.T                                                  # literal image columns (edim, tdim)
+    amb_off = A @ np.linalg.pinv(A) @ vv                     # oracle: orthogonal projection onto Img(J)
+    fk = {f"J_{J.node.uid}": Jv, f"v_{v.node.uid}": vv}
+    c_off = np.asarray(p_off.run(fk)["result"], float).ravel()
+    c_on = np.asarray(p_on.run(fk)["result"], float).ravel()
+    from chartlib.covariant import qr_sign_fix
+    Q, _ = qr_sign_fix(Jv.T)
+    np.testing.assert_allclose(Q @ c_off, amb_off, atol=1e-9)   # orthonormal-coords reconstruction
+    np.testing.assert_allclose(A @ c_on, amb_off, atol=1e-9)    # ImageBasis-coords reconstruction
+
+
 def test_choose_parametric_in_out_same_basis() -> None:
     V = C.base("V", 3)
     sp = C.oprod(C.dual(V), V)  # an endomorphism's space
