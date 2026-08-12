@@ -72,13 +72,38 @@ def score_basis(
 
     # ── Absorb operator structure: an FFS/SVD basis of the operator behind `space`.
     op = _operator_of(space)
-    if op is not None and _is_operator_basis_of(candidate, op):
+    is_op_basis = op is not None and _is_operator_basis_of(candidate, op)
+    if is_op_basis:
         # numeric-result-wins: in the operator's own basis the coordinates are numeric.
         score += 40
 
     # ── Keep cob numeric / identity metric: the orthonormal standard default.
-    #   The default is orthonormal (metric = identity), so it is the baseline.
-    if _is_orthonormal_default(space, candidate):
+    #   The orthonormal default makes the metric the identity (a numeric ``Inner``/
+    #   ``Dagger``/``Solve``), which is a CONVENIENCE, not a correctness requirement.  At an
+    #   un-pinned FFS ``Img(f)`` leaf that default is the ``ProjectedBasis`` — the
+    #   ORTHONORMALIZING QR/SVD frame whose ``R``/``√`` factor is ALGEBRAIC-IRRATIONAL in the
+    #   inputs, so it kills polyarray's exact (rational) lane (the "fold").  The literal
+    #   ``ImageBasis(f)`` (``f(eᵢ)`` columns) spans the SAME subspace, is RATIONAL, and keeps
+    #   the fold alive.  So award the +10 orthonormal bonus only where it is FREE — a space
+    #   with no rational fold-preserving alternative (its default is already rational) — or
+    #   where ``term`` genuinely pairs the value through a metric/orthonormality-consuming op
+    #   (`_demands_orthonormal`); otherwise route the +10 to the rational frame (below).
+    #
+    #   GATED ON THE PROPAGATED RATIONAL-FRAME LANE (`literal_ffs_frames`).  Off by default the
+    #   scorer is BYTE-IDENTICAL to the historical orthonormal-default choice — the numeric lane
+    #   must not move, and a global leaf-flip is UNSOUND (it re-frames un-pinned ``Img`` leaves
+    #   that feed the metric/gauge/Λᵏ-inner paths, which currently require the orthonormal frame).
+    #   A consumer that wants the exact/rational lane opts in by PROPAGATION (pointwise's
+    #   immersed-FEEC certificate path), and only then does the fold-preserving ``ImageBasis`` win.
+    demands = _demands_orthonormal(term)
+    fold_alt = _rational_frame_lane() and _fold_preserving_alternative_exists(space)
+    if _is_orthonormal_default(space, candidate) and (not fold_alt or demands):
+        score += 10
+    # ── Fold-preservation: the RATIONAL literal image frame of an un-pinned ``Img`` leaf, when
+    #   no metric/orthonormality demand forces the orthonormal frame.  Symmetric with the +10
+    #   above (exactly one of the two operator bases earns it), so the rational ``ImageBasis``
+    #   now WINS (50 vs 40) where the orthonormal ``ProjectedBasis`` used to (`73 Topic 2`).
+    elif is_op_basis and isinstance(candidate, B.ImageBasis) and fold_alt and not demands:
         score += 10
 
     # ── g-orthonormal default for a metric space (identity metric ⇒ numeric Inner/dot).
@@ -108,6 +133,73 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
             return f is op or f == op
         case _:  # audit: ok EX-WILDCARD — safe direction: False only skips a scoring bonus [approved 2026-07-03]
             return False
+
+
+def _rational_frame_lane() -> bool:
+    """Whether the PROPAGATED rational (literal-FFS) frame lane is active for this lowering.
+
+    The scorer's fold-preservation preference is opt-in — the exact/certificate consumer
+    propagates it (``represent(literal_ffs_frames=True)`` / the ``literal_ffs_frames`` context),
+    exactly the same switch that makes the frame REALIZATION rational.  OFF by default, so the
+    orthonormal-default choice is byte-identical to the historical behaviour.  Imported lazily to
+    avoid the ``represent`` ⇄ ``choose`` import cycle.
+    """
+    from .represent import _literal_ffs_frames
+
+    return _literal_ffs_frames()
+
+
+def _fold_preserving_alternative_exists(space: S.Space) -> bool:
+    """Whether ``space`` offers a RATIONAL, fold-preserving frame beside its orthonormal default.
+
+    An un-pinned ``Img(f)`` of an **injective** map is the one case: its orthonormal default
+    (``ProjectedBasis``) is the QR frame whose ``R`` is algebraic-irrational (kills the exact
+    lane), while the literal ``ImageBasis(f)`` (``f(eᵢ)`` columns) is RATIONAL and — because
+    ``f`` is injective, full column rank — a genuine basis of the SAME image.  A NON-injective
+    image's literal columns are rank-deficient (not a basis), so its SVD ``ProjectedBasis``
+    stays the honest default; ``Ker``/``CoImg``/``CoKer`` and non-FFS spaces offer no literal
+    frame at all (``candidate_bases`` adds ``ImageBasis`` only for ``Img``).
+    """
+    from grassmann.infer.properties import map_props
+
+    if not isinstance(space, S.Img):
+        return False
+    p = map_props(space.f)
+    return p is not None and p.inj
+
+
+# Term nodes whose coordinates are simplest (numeric) in an ORTHONORMAL frame — the metric /
+# orthonormality-consuming ops.  Their presence in ``term`` is what makes the orthonormal
+# default's identity-metric a genuine win worth the QR/SVD radical; absent them, the rational
+# fold-preserving frame is preferred at an ``Img`` leaf.  (Trace/Det/LogDet are basis-independent
+# scalars; Project/Embed/Corestrict act in any basis — none demands orthonormality.)
+def _demands_orthonormal(term: object | None) -> bool:
+    """Whether ``term`` pairs the value through a metric/orthonormality-consuming op.
+
+    Scans ``term`` (a core-IR Term) for an ``Inner``/``Dagger``/``Solve``/``Pinv``/
+    ``SolveApply``/``PinvApply``/``Flat``/``Sharp``/``Remetric`` node.  Conservative: ``None``
+    or an unrecognized shape ⇒ ``False`` (no demand), which keeps the fold-preserving frame —
+    the SAFE direction for the exact lane.  Uses the generic reflective child walk
+    (:func:`grassmann.core.term._children`), so it is a membership predicate, not a partial
+    dispatch ladder over the ``Term`` sum type.
+    """
+    if term is None:
+        return False
+    from grassmann.core import term as T
+
+    demanding = (T.Inner, T.Dagger, T.Solve, T.Pinv, T.SolveApply, T.PinvApply,
+                 T.Flat, T.Sharp, T.Remetric)
+    seen: set[int] = set()
+    stack: list[object] = [term]
+    while stack:
+        node = stack.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, demanding):
+            return True
+        stack.extend(T._children(node))
+    return False
 
 
 def _is_orthonormal_default(space: S.Space, candidate: B.Basis) -> bool:
