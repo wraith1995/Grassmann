@@ -75,6 +75,46 @@ def test_constant_is_zero_map() -> None:
     assert isinstance(J, T.Zero)
 
 
+def test_xindependent_direct_sum_is_zero_map() -> None:
+    """An x-independent ``OPlusV`` differentiates to the zero map, not an unused-seed ``LLam``.
+
+    The ``OPlusV`` arm builds ``⊕ᵢ dvᵢ``; when every component is x-independent that is
+    ``⊕ᵢ 0``, which must collapse to ``Zero`` (as the ``Sum`` / ``OProdV`` arms do).  A
+    regression guard: it previously produced ``OPlusV(Zero, Zero)`` and the diff wrapper then
+    wrapped it in ``LLam((h,), …)`` over an unused seed, which ``LLam`` rejects
+    (``linear variable(s) do not occur in the body``).
+    """
+    A = S.base("A", 2)
+    x = T.var("x", S.base("X", 2))
+    c1, c2 = T.var("c1", A), T.var("c2", A)
+    assert isinstance(diff(T.OPlusV((c1, c2)), x), T.Zero)
+    # also through a nonlinearity on a constant component
+    assert isinstance(diff(T.OPlusV((L.tanh(c1).node, c2)), x), T.Zero)
+
+
+def test_mixed_direct_sum_derivative_matches_fd() -> None:
+    """A direct sum with one x-dependent component differentiates correctly (the x-independent
+    block reads zero), confirming the all-zero collapse did not disturb the mixed case."""
+    A = S.base("A", 2)
+    X = S.base("X", 2)
+    x = T.var("x", X)
+    M = T.var("M", S.oprod(S.dual(X), A))
+    c = T.var("c", A)  # x-independent block
+    F = T.OPlusV((T.Eval(M, (0,), (x,)), c))  # (M x) ⊕ c
+    J = diff(F, x)
+    assert isinstance(J, T.LLam)
+    Mval, cval, xval = np.random.randn(2, 2), np.random.randn(2), np.random.randn(2)
+    feed = {f"M_{M.uid}": Mval, f"c_{c.uid}": cval, _xkey(x): xval}
+    h = np.random.randn(2)
+    seed = J.vars[0]
+    got = _run(J.body, {**feed, f"{seed.name}_{seed.uid}": h}).ravel()
+    fd = _fd_jacobian(F, x, feed, 2) @ h
+    np.testing.assert_allclose(got, fd, atol=1e-5)
+    # the map lowers as xᵀM (value shape (dom, cod)), so d(M x)·h = Mᵀh in the first block;
+    # the constant block is 0
+    np.testing.assert_allclose(got, np.concatenate([Mval.T @ h, np.zeros(2)]), atol=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # Product / chain rule vs finite differences.
 # ---------------------------------------------------------------------------
