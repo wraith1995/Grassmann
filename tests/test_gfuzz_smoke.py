@@ -29,8 +29,8 @@ from gfuzz.runner import run  # noqa: E402
 # real crash the fuzzer surfaces on the current tree; the test allows them so a *new*
 # regression still turns red.  When one is fixed upstream, its entry simply goes unused.
 KNOWN_BUGS = (
-    # A: diff(OPlusV(...), x) for an x-independent F builds an LLam over an unused seed
-    "LLam: linear variable",
+    # (A — diff(OPlusV, x) for x-independent F — is FIXED in transform/diff.py; a regression
+    #  would re-introduce "LLam: linear variable …" and this test would then correctly fail.)
     # B: an OPlus/direct-sum lowers to an inconsistent total dimension (synth accepts)
     "bulk Stmt output",
     # C: the same space realizes to different numeric shapes (unit tensor axes) → Sum assert

@@ -316,7 +316,14 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
         case Sum(vs):
             return _sum([_dd(v, ctx) for v in vs], e, ctx)
         case OPlusV(vs):
-            return OPlusV(tuple(_dd(v, ctx) for v in vs))
+            # d(⊕ᵢ vᵢ)[h] = ⊕ᵢ dvᵢ[h].  When every component is x-independent the whole
+            # direct sum is, so collapse to the zero VALUE in space(e) — otherwise the caller
+            # wraps an OPlusV-of-Zeros in an LLam over an unused seed (an invalid linear map).
+            # Mirrors the all-zero collapse of the Sum / OProdV arms via _zero / _sum.
+            ds = tuple(_dd(v, ctx) for v in vs)
+            if all(isinstance(d, Zero) for d in ds):
+                return _zero(e, ctx)
+            return OPlusV(ds)
         case OProdV(vs):
             return _dd_multilinear_tuple(OProdV, vs, ctx, e)
         case Eval():
