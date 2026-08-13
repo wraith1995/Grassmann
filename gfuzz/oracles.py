@@ -34,7 +34,7 @@ import grassmann.stdlib as L
 from grassmann.core import space as S
 from grassmann.core import term as T
 from grassmann.transform.diff import DiffError, diff
-from grassmann.infer.synth import InferError
+from grassmann.infer.synth import InferError, synth_space
 
 from .generate import Case, _node
 
@@ -53,7 +53,10 @@ def _vk(v: T.Var) -> str:
 
 
 def _run(term: T.Term, feed: dict) -> np.ndarray:
-    return np.asarray(G.compile(term).run(feed)["result"], float)
+    prog = G.compile(term)
+    names = {i.name for i in prog.inputs}
+    sub = {k: v for k, v in feed.items() if k in names}
+    return np.asarray(prog.run(sub)["result"], float)
 
 
 # Loud, acceptable bails: grassmann refusing an out-of-scope build (an inference refusal or
@@ -155,6 +158,66 @@ def rewrite_invariant(case: Case, rng: np.random.Generator, *, atol: float = 1e-
                           f"{name} changed the value: {name}(F)={np.ravel(val)} vs F={np.ravel(base)}",
                           got=val, ref=base)
     return Result("rewrite", "ok", got=base)
+
+
+# ---------------------------------------------------------------------------
+# Method D — type-checking probe (inference soundness / preservation).
+# ---------------------------------------------------------------------------
+
+
+def typecheck(case: Case, rng: np.random.Generator) -> Result:
+    """Cross-check the *type checker* against the *lowering*, three ways.
+
+    1. **Acceptance.**  If inference (:func:`synth_space`) rejects the term, that is a
+       candidate *false rejection* — a well-formed construction the checker refused.  It is
+       recorded as ``skip`` with a ``rejected:`` tag so the runner can surface examples for
+       human review (there is no automatic oracle for "should this have type-checked?").
+
+    2. **Soundness.**  If inference *accepts* the term, lowering it must not *crash*.  A clean
+       ``RepresentError`` is a known lowering gap (``lower_gap:``, a skip — represent has
+       documented runtime-raise fall-throughs).  But an *unexpected* exception (``IndexError``,
+       ``AttributeError``, a numpy error, …) on a term the checker called well-typed is a real
+       defect — reported as a **bug** (``UNSOUND``).
+
+    3. **Preservation.**  ``simplify`` is value- *and* type-preserving, so
+       ``synth_space(simplify(F))`` must equal ``synth_space(F)``.  A changed space is a bug.
+    """
+    RepresentError = _represent_error()
+    # (1) acceptance
+    try:
+        sp = synth_space(case.term)
+    except InferError as e:
+        return Result("typecheck", "skip", f"rejected: {_short(e)}")
+    except Exception as e:  # a crash *inside* inference is itself a defect
+        return Result("typecheck", "bug", f"UNSOUND: inference crashed: {type(e).__name__}: {_short(e)}")
+
+    # (2) soundness: accepted ⇒ lowering must not crash unexpectedly
+    try:
+        val = _run(case.term, case.feed())
+    except RepresentError as e:
+        return Result("typecheck", "skip", f"lower_gap: {_short(e)}")
+    except DiffError as e:
+        return Result("typecheck", "skip", f"lower_gap: {_short(e)}")
+    except Exception as e:
+        return Result("typecheck", "bug",
+                      f"UNSOUND: synth accepted but lowering raised {type(e).__name__}: {_short(e)}")
+    if not np.all(np.isfinite(val)):
+        return Result("typecheck", "skip", "non-finite")
+
+    # (3) type preservation under simplify
+    try:
+        simp = _node(G.simplify(case.term))
+        sp2 = synth_space(simp)
+    except Exception as e:
+        return Result("typecheck", "bug", f"simplify broke inference: {type(e).__name__}: {_short(e)}")
+    if sp != sp2:
+        return Result("typecheck", "bug", f"simplify changed the type: {sp!r} -> {sp2!r}")
+    return Result("typecheck", "ok")
+
+
+def _short(e: object, k: int = 160) -> str:
+    s = str(e).replace("\n", " ")
+    return s if len(s) <= k else s[:k] + "…"
 
 
 # ---------------------------------------------------------------------------

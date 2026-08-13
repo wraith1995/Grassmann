@@ -1,19 +1,20 @@
-"""Typed random generator of closed grassmann terms over a single value variable ``x``.
+"""Typed, *space-aware* random generator of closed grassmann terms.
 
-The generator threads a *space kind* (``VEC`` / ``SCALAR`` / ``MAT``) through a recursive
-production table, so every subterm it emits is well typed by construction — no rejection
-sampling on the type system.  Every leaf ``Var`` it mints is recorded together with a
-concrete numeric value (well-conditioned matrices for the invertible ops), so a generated
-:class:`Case` carries its own reproducible feed.
+The generator draws a random **space** from the grassmann zoo — base Euclidean spaces of
+several dimensions, ``Dual``, direct sums ``OPlus``, tensor products ``OProd``, replicated
+``OPlusRep``, and linear-map spaces ``oprod(dual(A), B)`` (including *rectangular* maps
+``A ⊸ B`` with ``A ≠ B``) — and then builds a well-typed value of that space by a recursive,
+structure-directed production table.  Because every subterm is typed as it is built, no
+rejection sampling on the type system is needed.
 
-The distinguished variable ``x : V`` is the differentiation variable for the AD oracle; a
-term may or may not actually depend on it (a term independent of ``x`` is a valid case —
-its derivative is the zero map, which the oracle checks against a ~0 finite difference).
+Feeds are not hand-shaped: a generated term is compiled once and its
+:class:`polyarray.SymInput` shapes are read off, so a value of *any* composite space is fed
+correctly (``OPlus`` → a flat vector, ``OProd`` → a matrix, a map → a ``(dom, cod)`` array).
+Only the differentiation variable ``x`` and the matrices that must be invertible (``bij`` for
+``solve``, SPD for the operator root) carry *controlled* values; everything else is random.
 
-Domain-restricted scalar ops (``sqrt``/``log``/``reciprocal``/``div``) are emitted through
-*guarded* arguments (``sqrt(t²+1)`` etc.) so the value and its finite differences stay
-finite without rejecting the op — the point is to exercise the lowering, not to trip on a
-branch cut.
+Domain-restricted scalar ops (``sqrt``/``log``/``div``/``reciprocal``) are emitted through
+guarded arguments (``t²+1``) so values and their finite differences stay finite.
 """
 
 from __future__ import annotations
@@ -22,17 +23,11 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+import grassmann as G
 import grassmann.stdlib as L
 from grassmann.core import space as S
 from grassmann.core import term as T
 from grassmann.core.props import bij as _BIJ
-
-# --- the fixed space palette ------------------------------------------------
-
-VEC = "vec"
-SCALAR = "scalar"
-MAT = "mat"
-KINDS = (VEC, SCALAR, MAT)
 
 
 def _node(e: object) -> T.Term:
@@ -40,202 +35,341 @@ def _node(e: object) -> T.Term:
     return e.node if hasattr(e, "node") else e  # type: ignore[return-value]
 
 
+# ---------------------------------------------------------------------------
+# Space helpers.
+# ---------------------------------------------------------------------------
+
+
+def space_dim(sp: S.Space) -> int:
+    """Total numeric dimension of a Euclidean space (product/sum over its structure)."""
+    match sp:
+        case S.Scalar():
+            return 1
+        case S.SVar():
+            return 1
+        case S.Dual(space=inner):
+            return space_dim(inner)
+        case S.OPlus(spaces=ss):
+            return sum(space_dim(t) for t in ss)
+        case S.OProd(spaces=ss):
+            out = 1
+            for t in ss:
+                out *= space_dim(t)
+            return out
+        case S.OPlusRep(space=inner, count=k):
+            return _dim_int(k) * space_dim(inner)
+        case _:
+            return space_dim(sp.space) if hasattr(sp, "space") else 1
+
+
+def _dim_int(d: object) -> int:
+    if isinstance(d, int):
+        return d
+    if isinstance(d, S.DimLit):
+        return int(d.value)
+    return int(getattr(d, "value", 1))
+
+
+def as_map(sp: S.Space):
+    """``(A, B)`` if ``sp`` is a linear-map space ``oprod(dual(A), B)`` = ``A ⊸ B``, else None."""
+    if isinstance(sp, S.OProd) and len(sp.spaces) == 2 and isinstance(sp.spaces[0], S.Dual):
+        return sp.spaces[0].space, sp.spaces[1]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Case.
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class Case:
-    """A generated closed term ``F`` with its differentiation variable and a concrete feed."""
+    """A generated closed term ``F`` with its differentiation variable and a complete feed.
+
+    ``feed0`` maps every input name of ``term`` to a concrete value at the sample point
+    (including ``x``).  ``bij_names`` / ``spd_names`` record the leaves whose values must be
+    invertible; the runner keeps them controlled when it re-samples.
+    """
 
     term: T.Term
     x: T.Var
     x0: np.ndarray
-    consts: dict[T.Var, np.ndarray] = field(default_factory=dict)
+    feed0: dict[str, np.ndarray]
+    x_name: str
+    bij_names: set[str] = field(default_factory=set)
+    spd_names: set[str] = field(default_factory=set)
     n: int = 3
 
     def feed(self, x0: np.ndarray | None = None) -> dict:
-        f = {f"{v.name}_{v.uid}": val for v, val in self.consts.items()}
-        f[f"{self.x.name}_{self.x.uid}"] = self.x0 if x0 is None else x0
+        if x0 is None:
+            return dict(self.feed0)
+        f = dict(self.feed0)
+        f[self.x_name] = x0
         return f
 
 
+class _Regen(Exception):
+    """A production that cannot proceed; caught upstream to fall back to a leaf."""
+
+
+# ---------------------------------------------------------------------------
+# Generator.
+# ---------------------------------------------------------------------------
+
+
 class Generator:
-    """Draws well-typed random terms of a requested kind, recording leaf values as it goes."""
+    """Draws well-typed random terms of a requested space, recording leaf roles as it goes."""
 
     def __init__(self, rng: np.random.Generator, n: int = 3, max_depth: int = 4):
         self.rng = rng
         self.n = n
-        self.V = S.base("V", n)
-        self.Sc = S.Scalar()
-        self.Mat = S.oprod(S.dual(self.V), self.V)
         self.max_depth = max_depth
+        # a small palette of base Euclidean spaces (interned so equality holds)
+        dims = sorted({2, 3, max(2, min(n, 4))})
+        self.bases = [S.base(f"R{d}", d) for d in dims]
+        self.Sc = S.Scalar()
         self._uid = 0
-        self.consts: dict[T.Var, np.ndarray] = {}
-        self.x = T.var("x", self.V)
+        self.bij_names: set[str] = set()
+        self.spd_names: set[str] = set()
+        # the differentiation variable lives in a base Euclidean space
+        self.X = S.base("X", n)
+        self.x = T.var("x", self.X)
         self.x0 = rng.standard_normal(n)
 
-    # -- leaves --------------------------------------------------------------
+    # -- names / leaves ------------------------------------------------------
 
     def _fresh(self, base: str) -> str:
         self._uid += 1
         return f"{base}{self._uid}"
 
-    def _const_vec(self) -> T.Term:
-        v = T.var(self._fresh("c"), self.V)
-        self.consts[v] = self.rng.standard_normal(self.n)
+    def _leaf(self, sp: S.Space) -> T.Term:
+        # bias so x actually appears where its space fits
+        if sp == self.X and self.rng.random() < 0.5:
+            return self.x
+        return T.var(self._fresh("v"), sp)
+
+    def _endo_space(self) -> S.Space:
+        w = self._pick_base()
+        return S.oprod(S.dual(w), w)
+
+    def _pick_base(self) -> S.Space:
+        # include X so x-dependence can thread through maps/inner
+        pool = [*self.bases, self.X]
+        return pool[self.rng.integers(len(pool))]
+
+    def _bij_leaf(self, endo: S.Space) -> T.Term:
+        v = T.var(self._fresh("M"), endo, props=_BIJ)
+        self.bij_names.add(f"{v.name}_{v.uid}")
         return v
 
-    def _const_scalar(self) -> T.Term:
-        v = T.var(self._fresh("s"), self.Sc)
-        self.consts[v] = np.asarray(self.rng.standard_normal())  # shape () scalar
+    def _spd_leaf(self, endo: S.Space) -> T.Term:
+        v = T.var(self._fresh("S"), endo)
+        self.spd_names.add(f"{v.name}_{v.uid}")
         return v
 
-    def _well_conditioned(self) -> np.ndarray:
-        """An invertible, positive-determinant matrix (safe for solve/det/logdet/pinv)."""
-        return 1.5 * np.eye(self.n) + 0.3 * self.rng.standard_normal((self.n, self.n))
+    # -- random space --------------------------------------------------------
 
-    def _spd(self) -> np.ndarray:
-        """A symmetric-positive-definite matrix (safe for the operator square root)."""
-        a = self.rng.standard_normal((self.n, self.n))
-        return a @ a.T + self.n * np.eye(self.n)
-
-    def _const_mat(self, kind: str = "generic") -> T.Term:
-        # `bij` matrices are invertible by construction (well-conditioned draw), so asserting
-        # it is honest — and Solve requires the assertion.
-        props = _BIJ if kind in ("generic", "bij", "spd") else None
-        v = T.var(self._fresh("M"), self.Mat, props=props)
-        self.consts[v] = self._spd() if kind == "spd" else self._well_conditioned()
-        return v
-
-    # -- guarded scalars (kept in a safe domain for FD) ----------------------
-
-    def _positive(self, t: T.Term) -> T.Term:
-        """``t² + 1`` — a strictly positive scalar for sqrt/log domains."""
-        sq = _node(L.square(t))
-        return T.sum_(sq, T.Lit(1.0))
-
-    def _nonzero(self, t: T.Term) -> T.Term:
-        """``t² + 1`` — a scalar bounded away from 0 for reciprocal/div denominators."""
-        return self._positive(t)
-
-    # -- productions ---------------------------------------------------------
-
-    def gen(self, kind: str, depth: int) -> T.Term:
-        if depth <= 0:
-            return self._leaf(kind)
-        prods = self._PRODUCTIONS[kind]
-        # Bias toward leaves as depth shrinks; always allow the leaf fallback.
-        builder = self.rng.choice(len(prods))
+    def random_space(self, depth: int, *, euclidean: bool = True, max_dim: int = 8) -> S.Space:
+        if depth <= 0 or self.rng.random() < 0.35:
+            return self.Sc if self.rng.random() < 0.25 else self._pick_base()
+        choice = self.rng.choice(["dual", "oplus", "oprod", "rep", "map", "base"])
         try:
-            return prods[builder](self, depth - 1)
-        except _Regen:
-            return self._leaf(kind)
+            if choice == "dual":
+                return S.dual(self.random_space(depth - 1, max_dim=max_dim))
+            if choice == "oplus":
+                k = int(self.rng.integers(2, 4))
+                parts = [self.random_space(depth - 1, max_dim=max_dim) for _ in range(k)]
+                sp = S.oplus(*parts)
+            elif choice == "oprod":
+                parts = [self.random_space(depth - 1, max_dim=3) for _ in range(2)]
+                sp = S.oprod(*parts)
+            elif choice == "rep":
+                k = int(self.rng.integers(2, 4))
+                sp = S.oplus_rep(k, self._pick_base())
+            elif choice == "map":
+                a, b = self._pick_base(), self._pick_base()
+                sp = S.oprod(S.dual(a), b)
+            else:
+                sp = self._pick_base()
+            return sp if space_dim(sp) <= max_dim else self._pick_base()
+        except Exception:
+            return self._pick_base()
 
-    def _leaf(self, kind: str) -> T.Term:
-        if kind == VEC:
-            # bias so x actually appears
-            return self.x if self.rng.random() < 0.5 else self._const_vec()
-        if kind == SCALAR:
-            return self._const_scalar()
-        return self._const_mat()
+    # -- value of a given space ---------------------------------------------
 
-    # VEC productions
-    def _vec_matapply(self, d: int) -> T.Term:
-        return T.Eval(self.gen(MAT, d), (0,), (self.gen(VEC, d),))
+    def gen(self, sp: S.Space, depth: int) -> T.Term:
+        if depth <= 0:
+            return self._leaf(sp)
+        builders = self._applicable(sp)
+        b = builders[self.rng.integers(len(builders))]
+        try:
+            return b(sp, depth - 1)
+        except (_Regen, Exception):
+            return self._leaf(sp)
 
-    def _vec_sum(self, d: int) -> T.Term:
-        return T.sum_(self.gen(VEC, d), self.gen(VEC, d))
+    def _applicable(self, sp: S.Space):
+        gen = [self._b_leaf, self._b_sum, self._b_scale, self._b_linapply]
+        if _is_euclidean(sp):
+            gen.append(self._b_elementwise)
+        if isinstance(sp, S.Scalar):
+            gen += [self._b_inner, self._b_mul, self._b_nonlin, self._b_guarded,
+                    self._b_div, self._b_trace, self._b_det, self._b_logdet]
+        if isinstance(sp, S.OPlus):
+            gen.append(self._b_oplusv)
+        if isinstance(sp, S.OProd):
+            gen.append(self._b_oprodv)
+        m = as_map(sp)
+        if m is not None:
+            gen.append(self._b_dagger)
+            if m[0] == m[1]:
+                gen.append(self._b_solve_map)
+        return gen
 
-    def _vec_scale(self, d: int) -> T.Term:
-        return T.scale(float(self.rng.uniform(-2, 2)), self.gen(VEC, d))
+    # generic
+    def _b_leaf(self, sp, d):
+        return self._leaf(sp)
 
-    def _vec_elementwise(self, d: int) -> T.Term:
+    def _b_sum(self, sp, d):
+        return T.sum_(self.gen(sp, d), self.gen(sp, d))
+
+    def _b_scale(self, sp, d):
+        return T.scale(float(self.rng.uniform(-2, 2)), self.gen(sp, d))
+
+    def _b_linapply(self, sp, d):
+        # A : T ⊸ sp  applied to a value of T  (rectangular maps included)
+        t = self._pick_base()
+        A = T.var(self._fresh("A"), S.oprod(S.dual(t), sp))
+        return T.Eval(A, (0,), (self.gen(t, d),))
+
+    def _b_elementwise(self, sp, d):
         op = self.rng.choice(["tanh", "sin", "cos", "square", "sigmoid"])
-        return _node(getattr(L, op)(self.gen(VEC, d)))
+        return _node(getattr(L, op)(self.gen(sp, d)))
 
-    def _vec_solve(self, d: int) -> T.Term:
-        # solve M·y = v with a well-conditioned const M ⇒ y is x-dependent through v
-        return T.SolveApply(self._const_mat(), self.gen(VEC, d))
+    # scalar
+    def _b_inner(self, sp, d):
+        w = self._pick_base()
+        return T.Eval(T.inner(w), (0, 1), (self.gen(w, d), self.gen(w, d)))
 
-    def _vec_pinvapply(self, d: int) -> T.Term:
-        return T.PinvApply(self._const_mat(), self.gen(VEC, d))
+    def _b_mul(self, sp, d):
+        return T.Eval(T.inner(self.Sc), (0, 1), (self.gen(self.Sc, d), self.gen(self.Sc, d)))
 
-    def _vec_daggerapply(self, d: int) -> T.Term:
-        return T.Eval(T.dagger(self.gen(MAT, d)), (0,), (self.gen(VEC, d),))
-
-    # SCALAR productions
-    def _sca_inner(self, d: int) -> T.Term:
-        return T.Eval(T.inner(self.V), (0, 1), (self.gen(VEC, d), self.gen(VEC, d)))
-
-    def _sca_mul(self, d: int) -> T.Term:
-        return T.Eval(T.inner(self.Sc), (0, 1), (self.gen(SCALAR, d), self.gen(SCALAR, d)))
-
-    def _sca_sum(self, d: int) -> T.Term:
-        return T.sum_(self.gen(SCALAR, d), self.gen(SCALAR, d))
-
-    def _sca_nonlin(self, d: int) -> T.Term:
+    def _b_nonlin(self, sp, d):
         op = self.rng.choice(["tanh", "sin", "cos", "exp", "square", "sigmoid", "softplus"])
-        return _node(getattr(L, op)(self.gen(SCALAR, d)))
+        return _node(getattr(L, op)(self.gen(self.Sc, d)))
 
-    def _sca_guarded(self, d: int) -> T.Term:
+    def _b_guarded(self, sp, d):
         op = self.rng.choice(["sqrt", "log", "reciprocal"])
-        return _node(getattr(L, op)(self._positive(self.gen(SCALAR, d))))
+        return _node(getattr(L, op)(self._positive(self.gen(self.Sc, d))))
 
-    def _sca_div(self, d: int) -> T.Term:
-        return _node(L.div(self.gen(SCALAR, d), self._nonzero(self.gen(SCALAR, d))))
+    def _b_div(self, sp, d):
+        return _node(L.div(self.gen(self.Sc, d), self._positive(self.gen(self.Sc, d))))
 
-    def _sca_trace(self, d: int) -> T.Term:
-        return T.Trace(self.gen(MAT, d), 0, 1)
+    def _b_trace(self, sp, d):
+        return T.Trace(self._xdep_endo(d), 0, 1)
 
-    def _sca_det(self, d: int) -> T.Term:
-        # determinant of a *const* well-conditioned matrix (x-independent ⇒ derivative 0),
-        # OR of an x-perturbed one built to stay invertible at x0
-        return T.Det(self._xdep_invertible_mat(d))
+    def _b_det(self, sp, d):
+        return T.Det(self._xdep_endo(d))
 
-    def _sca_logdet(self, d: int) -> T.Term:
-        return T.LogDet(self._xdep_invertible_mat(d))
+    def _b_logdet(self, sp, d):
+        return T.LogDet(self._xdep_endo(d))
 
-    # MAT productions
-    def _mat_dagger(self, d: int) -> T.Term:
-        return T.dagger(self.gen(MAT, d))
+    # oplus / oprod
+    def _b_oplusv(self, sp, d):
+        return T.OPlusV(tuple(self.gen(part, d) for part in sp.spaces))
 
-    def _mat_sum(self, d: int) -> T.Term:
-        return T.sum_(self.gen(MAT, d), self.gen(MAT, d))
+    def _b_oprodv(self, sp, d):
+        return T.OProdV(tuple(self.gen(part, d) for part in sp.spaces))
 
-    def _mat_rank1(self, d: int) -> T.Term:
-        """``u♭ ⊗ v`` — an x-dependent rank-1 matrix (covector ⊗ vector)."""
-        u = self.gen(VEC, d)
-        v = self.gen(VEC, d)
-        return T.oprod_v(G_flat(u, self.V), v)
+    # maps
+    def _b_dagger(self, sp, d):
+        a, b = as_map(sp)
+        return T.dagger(self.gen(S.oprod(S.dual(b), a), d))  # (B⊸A)† : A⊸B
 
-    def _xdep_invertible_mat(self, d: int) -> T.Term:
-        """A well-conditioned const matrix plus a *small* x-dependent rank-1 bump, so det/logdet
-        depend on x yet stay invertible and positive at the sample point."""
-        base = self._const_mat()
-        u = self.gen(VEC, max(d - 1, 0))
-        v = self.gen(VEC, max(d - 1, 0))
-        bump = T.scale(0.05, T.oprod_v(G_flat(u, self.V), v))
+    def _b_solve_map(self, sp, d):
+        a, _ = as_map(sp)
+        return T.solve(self._bij_leaf(S.oprod(S.dual(a), a)))
+
+    # helpers
+    def _positive(self, t):
+        return T.sum_(_node(L.square(t)), T.Lit(1.0))
+
+    def _xdep_endo(self, d):
+        """A well-conditioned endomorphism plus a *small* x-dependent rank-1 bump, so det/trace
+        depend on x yet stay well-behaved at the sample point."""
+        w = self._pick_base()
+        endo = S.oprod(S.dual(w), w)
+        base = self._bij_leaf(endo)
+        u = self.gen(w, max(d - 1, 0))
+        v = self.gen(w, max(d - 1, 0))
+        bump = T.scale(0.05, T.oprod_v(T.Eval(T.flat(w), (0,), (u,)), v))
         return T.sum_(base, bump)
 
-    _PRODUCTIONS = {
-        VEC: [_vec_matapply, _vec_sum, _vec_scale, _vec_elementwise,
-              _vec_solve, _vec_pinvapply, _vec_daggerapply],
-        SCALAR: [_sca_inner, _sca_mul, _sca_sum, _sca_nonlin, _sca_guarded,
-                 _sca_div, _sca_trace, _sca_det, _sca_logdet],
-        MAT: [_mat_dagger, _mat_sum, _mat_rank1],
-    }
+
+def _is_euclidean(sp: S.Space) -> bool:
+    match sp:
+        case S.Scalar() | S.SVar():
+            return True
+        case S.Dual(space=inner) | S.OPlusRep(space=inner):
+            return _is_euclidean(inner)
+        case S.OPlus(spaces=ss) | S.OProd(spaces=ss):
+            return all(_is_euclidean(t) for t in ss)
+        case _:
+            return False
 
 
-class _Regen(Exception):
-    """Raised by a production that cannot proceed; caught upstream to fall back to a leaf."""
+# ---------------------------------------------------------------------------
+# Feed construction (introspected shapes).
+# ---------------------------------------------------------------------------
 
 
-def G_flat(v: T.Term, V: S.Space) -> T.Term:
-    """``v♭`` — lower a vector to a covector in ``dual(V)`` via the musical flat map."""
-    return T.Eval(T.flat(V), (0,), (v,))
+def _well_conditioned(n: int, rng) -> np.ndarray:
+    return 1.5 * np.eye(n) + 0.3 * rng.standard_normal((n, n))
+
+
+def _spd(n: int, rng) -> np.ndarray:
+    a = rng.standard_normal((n, n))
+    return a @ a.T + n * np.eye(n)
+
+
+def _fill_feed(g: Generator, term: T.Term, rng: np.random.Generator) -> dict:
+    """Read the compiled term's input shapes and draw a value for each — controlled for the
+    diff var and the invertible/SPD leaves, random otherwise."""
+    prog = G.compile(term)
+    feed: dict[str, np.ndarray] = {}
+    x_name = f"{g.x.name}_{g.x.uid}"
+    for inp in prog.inputs:
+        name, shape = inp.name, tuple(int(s) for s in inp.shape)
+        if name == x_name:
+            feed[name] = g.x0
+        elif name in g.bij_names:
+            # bij leaves are always square endomorphisms (shape (n, n))
+            feed[name] = _well_conditioned(shape[0], rng)
+        elif name in g.spd_names:
+            feed[name] = _spd(shape[0], rng)
+        else:
+            feed[name] = rng.standard_normal(shape)
+    return feed
 
 
 def generate(rng: np.random.Generator, *, n: int = 3, max_depth: int = 4,
-             out_kind: str | None = None) -> Case:
-    """Draw one random :class:`Case`.  ``out_kind`` fixes the output kind (default: SCALAR or VEC)."""
+             out_space=None) -> Case:
+    """Draw one random :class:`Case`.
+
+    ``out_space`` fixes the output space (default: a random Euclidean space, biased toward
+    Scalar/vector so the AD oracle has a value to finite-difference)."""
     g = Generator(rng, n=n, max_depth=max_depth)
-    kind = out_kind or rng.choice([SCALAR, VEC])
-    term = g.gen(kind, max_depth)
-    return Case(term=term, x=g.x, x0=g.x0, consts=dict(g.consts), n=n)
+    if out_space is None:
+        r = rng.random()
+        if r < 0.4:
+            sp = g.Sc
+        elif r < 0.7:
+            sp = g._pick_base()
+        else:
+            sp = g.random_space(2, max_dim=8)
+    else:
+        sp = out_space
+    term = g.gen(sp, max_depth)
+    x_name = f"{g.x.name}_{g.x.uid}"
+    feed0 = _fill_feed(g, term, rng)
+    return Case(term=term, x=g.x, x0=g.x0, feed0=feed0, x_name=x_name,
+                bij_names=set(g.bij_names), spd_names=set(g.spd_names), n=n)

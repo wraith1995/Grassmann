@@ -70,12 +70,15 @@ def _leafize(case: Case, sub: T.Term) -> T.Term | None:
     except Exception:
         return None
     v = T.var(f"z{id(sub) & 0xffff}", sp)
-    case.consts[v] = val
+    case.feed0[f"{v.name}_{v.uid}"] = val
     return v
 
 
 def _value(case: Case, sub: T.Term) -> np.ndarray:
-    return np.asarray(G.compile(sub).run(case.feed())["result"], float)
+    prog = G.compile(sub)
+    names = {i.name for i in prog.inputs}
+    feed = {k: v for k, v in case.feed().items() if k in names}
+    return np.asarray(prog.run(feed)["result"], float)
 
 
 def _synth_space(sub: T.Term) -> S.Space:
@@ -117,7 +120,9 @@ def shrink(case: Case, still_fails: Callable[[Case], bool], *, rounds: int = 40)
             if isinstance(sub, T.Var) or isinstance(sub, T.Lit):
                 continue
             trial = Case(term=best.term, x=best.x, x0=best.x0,
-                         consts=dict(best.consts), n=best.n)
+                         feed0=dict(best.feed0), x_name=best.x_name,
+                         bij_names=set(best.bij_names), spd_names=set(best.spd_names),
+                         n=best.n)
             leaf = _leafize(trial, sub)
             if leaf is None:
                 continue
