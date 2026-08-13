@@ -49,6 +49,17 @@ adjoint definition `⟨Mx, y⟩ = ⟨x, Mᵀy⟩`, `dagger∘dagger = id`, `M·s
 Moore–Penrose `M M† M = M`, `logdet = log∘det`, cyclic trace `tr(MN) = tr(NM)`, and inner
 symmetry.
 
+### 4. Type-checking probe  (`oracles.typecheck`)
+
+Cross-checks the *type checker* (`synth_space`) against the *lowering* three ways:
+**acceptance** (an inference rejection is logged as a `rejected:` skip — a candidate false
+rejection for human review, since there is no automatic oracle for "should this have
+type-checked?"); **soundness** (if inference accepts a term, lowering must not *crash* — a
+clean `RepresentError` is a known gap logged as `lower_gap:`, but an unexpected exception on
+a term the checker called well-typed is reported `UNSOUND`); and **preservation**
+(`synth_space(simplify(F)) == synth_space(F)`). Run `--skips` to see the rejection / gap
+breakdown — the "look at the rejected ones" view.
+
 ## How it's built
 
 - **`generate.py`** — a *typed* generator. It threads a space kind (`VEC`/`SCALAR`/`MAT`)
@@ -74,3 +85,27 @@ the other methods.
 `tests/test_gfuzz_smoke.py` runs a small seeded batch in CI **and** proves the harness has
 teeth — with a deliberately corrupted `diff` (a 1.5× Jacobian) the AD oracle does report a
 bug. A guard that can never fail is worthless; this guards the guard.
+
+## Findings on the current tree (~11.5k trials, seeds 0–3 + 10)
+
+Every failure found is a **crash** on composite-space lowering that inference *accepts* —
+there were **no** silent-wrong numeric AD/rewrite errors and **no** identity failures. Three
+distinct defects (each independently surfaced by more than one method):
+
+- **A — `diff` of an x-independent direct sum.** `diff(OPlusV(c₁, c₂), x)` where the term
+  does not depend on `x` builds an `LLam` over an unused seed (`TermError: linear variable
+  'dx' does not occur in the body`) instead of the zero map. Root cause:
+  `transform/diff.py` `case OPlusV(vs): return OPlusV(tuple(_dd(v, ctx) …))` does not
+  collapse an all-`Zero` result to `Zero`, unlike the sibling `OProdV` arm
+  (`_dd_multilinear_tuple`, which `continue`s on `Zero` factors). Minimal:
+  `diff(OPlusV((c1, c2)), x)`.
+- **B/C — a space realizes to inconsistent numeric shapes.** For spaces carrying unit
+  (`Scalar`) tensor factors or nested sums, `represent` gives the *same* grassmann space
+  different array shapes from different producing nodes, so a downstream `Sum`/`OPlus`
+  shape check fails — while `synth_space` accepts the term (the `typecheck` oracle flags it
+  `UNSOUND`). Minimal (C): `z1 : ℝ³⊗ℝ, v2 : ℝ, z2 : (ℝ³⊗ℝ)⊗ℝ ⊢ (z1 ⊗ v2) + z2` — the
+  compiled program declares `z2 : (3,1)` but realizes `z1⊗v2` as `(3,1,1)` and asserts
+  `(3,1,1) != (3,1)`. `space.drop_unit_factors` exists but is not applied at the numeric
+  boundary. B is the direct-sum analog (`bulk Stmt output 'oplus': expected (m,) got (n,)`).
+
+These are reported for the maintainer's triage — the fuzzer does not patch grassmann.

@@ -27,12 +27,14 @@ def main(argv=None) -> int:
     p.add_argument("--dim", type=int, default=3, help="dimension of the vector space V")
     p.add_argument("--only", type=int, default=None, help="run a single trial index (repro)")
     p.add_argument("--no-shrink", action="store_true", help="do not shrink failing cases")
+    p.add_argument("--skips", action="store_true",
+                   help="print the skip breakdown (what inference rejected / lowering gaps)")
     args = p.parse_args(argv)
 
     rep = run(seed=args.seed, n_trials=args.trials, methods=tuple(args.methods),
               max_depth=args.max_depth, dim=args.dim, only=args.only,
               do_shrink=not args.no_shrink)
-    print(rep.summary())
+    print(rep.summary(skips=args.skips))
     return 1 if rep.n_bugs else 0
 
 
