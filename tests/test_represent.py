@@ -22,6 +22,7 @@ import os
 
 import numpy as np
 import polyarray as pa
+import pytest
 
 import grassmann.core as C
 import grassmann.core.props as P
@@ -662,3 +663,52 @@ def test_oplusv_of_multiaxis_summand_matches_canonical_length() -> None:
     assert _canon(F) == (8,)
     out = represent(F).run({_var_key(A): np.ones((2, 3)), _var_key(Bv): np.ones(2)})["result"]
     assert out.shape == (8,)
+
+
+# Canonical-shape invariant HOOK — off by default (zero cost), fires at the producing node.
+# (`represent` in this module is the re-exported FUNCTION; the module object — carrying the hook
+#  globals — is fetched separately, since the package shadows the submodule name.)
+import importlib as _importlib
+
+_rep_mod = _importlib.import_module("grassmann.lower.represent")
+
+
+def test_shape_hook_is_off_by_default() -> None:
+    assert _rep_mod._SHAPE_CHECK is False
+
+
+def test_shape_hook_fires_on_noncanonical_shape(monkeypatch) -> None:
+    """With the hook on, a node whose realized shape ≠ `_shape_of_space` raises AT that node.
+
+    Simulated by making `_shape_of_space` disagree with the (correct) realizer for `OProd`,
+    so the hook catches the divergence the way it would a real `_rep_*` regression."""
+    from grassmann.core import space as S
+
+    prev = _rep_mod.set_shape_check(True)
+    try:
+        orig = _rep_mod._shape_of_space
+        monkeypatch.setattr(
+            _rep_mod, "_shape_of_space",
+            lambda sp: orig(sp) + (1,) if isinstance(sp, S.OProd) else orig(sp),
+        )
+        u = C.var("u", C.base("V", 2))
+        v = C.var("v", C.base("W", 3))
+        with pytest.raises(_rep_mod.RepresentError, match="canonical-shape invariant"):
+            represent(C.OProdV((u, v)))
+    finally:
+        _rep_mod.set_shape_check(prev)
+
+
+def test_shape_hook_on_passes_canonical_terms() -> None:
+    """With the hook on, ordinary well-formed terms (incl. the fixed OProd/OPlus cases) lower fine."""
+    prev = _rep_mod.set_shape_check(True)
+    try:
+        R3 = C.base("R3", 3)
+        z1 = C.var("z1", C.oprod(R3, C.scalar()))
+        v2 = C.var("v2", C.scalar())
+        represent(C.OProdV((z1, v2))).run({_var_key(z1): np.ones((3, 1)), _var_key(v2): np.ones(())})
+        A = C.var("A", C.oprod(C.dual(C.base("R2", 2)), R3))
+        Bv = C.var("B", C.dual(C.base("R2", 2)))
+        represent(C.OPlusV((A, Bv))).run({_var_key(A): np.ones((2, 3)), _var_key(Bv): np.ones(2)})
+    finally:
+        _rep_mod.set_shape_check(prev)

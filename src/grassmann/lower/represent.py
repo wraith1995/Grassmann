@@ -575,6 +575,47 @@ class _Ctx:
 # ===========================================================================
 
 
+# ---------------------------------------------------------------------------
+# Canonical-shape invariant hook (debug/fuzz — OFF by default, zero cost when off).
+#
+# The invariant: a grassmann Space has exactly ONE canonical numeric shape,
+# ``_shape_of_space(space)``, and every node that realizes a value of that space MUST produce
+# an array whose (space) axes equal it.  When enabled, this fires at the PRODUCING node —
+# catching a shape divergence there rather than downstream at a Sum/Concat.  Toggle via
+# ``GRASSMANN_REP_SHAPE_CHECK=1`` or :func:`set_shape_check`.
+# ---------------------------------------------------------------------------
+
+_SHAPE_CHECK: bool = os.environ.get("GRASSMANN_REP_SHAPE_CHECK", "") not in ("", "0", "false", "no")
+
+
+def set_shape_check(on: bool) -> bool:
+    """Enable/disable the canonical-shape invariant hook at runtime; returns the previous value."""
+    global _SHAPE_CHECK
+    prev, _SHAPE_CHECK = _SHAPE_CHECK, bool(on)
+    return prev
+
+
+def _assert_canonical_shape(rep: Rep, e: T.Term) -> None:
+    """Assert ``rep``'s realized space-axes == ``_shape_of_space(rep.space)`` (static case only)."""
+    shape = _shape_of(rep.array)
+    n_space = len(shape) - len(rep.free_labels)
+    space_axes = tuple(shape[:n_space])
+    if not all(isinstance(d, int) for d in space_axes):
+        return  # dynamic/FFS axes carry runtime atoms — not statically comparable
+    try:
+        canon = tuple(_shape_of_space(rep.space))
+    except (RepresentError, S.SpaceError):
+        return  # no static canonical shape (SVar/App/dynamic) — nothing to compare
+    if not all(isinstance(d, int) for d in canon):
+        return
+    if space_axes != canon:
+        raise RepresentError(
+            f"canonical-shape invariant violated: {type(e).__name__} of space {rep.space!r} "
+            f"realized space-axes {space_axes} but _shape_of_space is {canon} "
+            f"(a node lowered its space to a non-canonical shape)"
+        )
+
+
 def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     """``⟦e⟧ ⇒ Rep`` — represent ``e``, then re-express it in the ``target`` basis.
 
@@ -592,6 +633,8 @@ def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     # The node sees ``target`` and realizes directly in it where it cheaply can (a Var declares
     # its input in that basis; a Sum/Scale builds its operands in it) — so no cob is needed.
     rep = _rep_node(e, ctx, target)
+    if _SHAPE_CHECK:
+        _assert_canonical_shape(rep, e)
     # Safety net: any node that produced a different (natural) basis is cob'd here — a no-op when
     # the node already honored ``target``.
     want = _resolve_target(ctx, rep.space, target)
