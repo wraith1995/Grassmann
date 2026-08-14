@@ -74,11 +74,15 @@ must not *crash* — a clean `RepresentError` is a known gap logged as `lower_ga
 unexpected exception is `UNSOUND`); and **preservation** (`synth_space(simplify(F)) ==
 synth_space(F)`). Run `--skips` to see the rejection / gap breakdown.
 
-**The canonical-shape hook.** Every fuzz run enables grassmann's `represent.set_shape_check`
-hook (add `--no-shape-hook` to disable), which asserts at *each producing node* that its
-realized array shape equals `_shape_of_space(space)` — so a shape/type divergence (the B/C
-class) raises where it originates instead of downstream. Off by default in normal use (zero
-cost); the fuzzer turns it on so type-shape violations "fall under the hook."
+### 6. Canonical-shape hook  (`oracles.shape_hook`)
+
+Arms grassmann's `represent.set_shape_check` hook and compiles `F`: the hook asserts, at *each
+producing node*, that its realized shape equals `_shape_of_space(space)` (static dims) or, for
+the symbolic `DimVar` lane, that the *rank* matches — so a divergence (the B/C class) raises at
+the node that caused it, as a `ShapeInvariantError`, which this oracle reports as a **bug**. The
+hook is off by default in normal grassmann use (one bool test per node when off); the oracle
+arms it only for its own compile and restores it after (`--no-shape-hook` drops the oracle).
+This is the *localizing* companion to `shape_canonical` (post-run, silent case only).
 
 ## How it's built
 

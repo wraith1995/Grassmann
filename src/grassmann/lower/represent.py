@@ -113,6 +113,15 @@ class RepresentError(Exception):
     """Raised when a term cannot be lowered to a polyarray ``Program``."""
 
 
+class ShapeInvariantError(RepresentError):
+    """The canonical-shape hook found a node realizing its space to a non-canonical shape.
+
+    A *subclass* of :class:`RepresentError` (it is a lowering-invariant violation), but a distinct
+    type so a debug/fuzz harness can tell a genuine defect from a clean "not-yet-wired" bail.  Only
+    raised when the hook is armed (:func:`set_shape_check`), which is off by default.
+    """
+
+
 @dataclass
 class Rep:
     """The lowering of one subterm: its coordinate array + the basis/space it lives in.
@@ -596,24 +605,42 @@ def set_shape_check(on: bool) -> bool:
 
 
 def _assert_canonical_shape(rep: Rep, e: T.Term) -> None:
-    """Assert ``rep``'s realized space-axes == ``_shape_of_space(rep.space)`` (static case only)."""
+    """Assert ``rep``'s realized space-axes match the canonical shape of ``rep.space``.
+
+    Static case (all axes concrete): the exact shape must equal ``_shape_of_space``.  Dynamic case
+    (a symbolic/``DimAtom`` axis, from the ``DimVar`` n-generic lane): the concrete sizes are not
+    known at compile time, so the check falls back to the **rank** (axis count), which must equal
+    the space's canonical axis count.  Rank is computed with ``_space_axes`` — pure structure, so
+    no FFS realization is triggered (the hook must not mutate the program).
+    """
     shape = _shape_of(rep.array)
     n_space = len(shape) - len(rep.free_labels)
     space_axes = tuple(shape[:n_space])
-    if not all(isinstance(d, int) for d in space_axes):
-        return  # dynamic/FFS axes carry runtime atoms — not statically comparable
-    try:
-        canon = tuple(_shape_of_space(rep.space))
-    except (RepresentError, S.SpaceError):
-        return  # no static canonical shape (SVar/App/dynamic) — nothing to compare
-    if not all(isinstance(d, int) for d in canon):
-        return
-    if space_axes != canon:
-        raise RepresentError(
-            f"canonical-shape invariant violated: {type(e).__name__} of space {rep.space!r} "
-            f"realized space-axes {space_axes} but _shape_of_space is {canon} "
-            f"(a node lowered its space to a non-canonical shape)"
-        )
+    if all(isinstance(d, int) for d in space_axes):
+        try:
+            canon = tuple(_shape_of_space(rep.space))
+        except (RepresentError, S.SpaceError):
+            return  # no static canonical shape (SVar/App) — nothing to compare
+        if not all(isinstance(d, int) for d in canon):
+            return
+        if space_axes != canon:
+            raise ShapeInvariantError(
+                f"canonical-shape invariant violated: {type(e).__name__} of space {rep.space!r} "
+                f"realized space-axes {space_axes} but _shape_of_space is {canon} "
+                f"(a node lowered its space to a non-canonical shape)"
+            )
+    else:
+        # dynamic axes present ⇒ compare the RANK (side-effect-free structural axis count).
+        try:
+            want_rank = len(_space_axes(rep.space))
+        except Exception:  # noqa: BLE001 — an unshaped space just skips the check
+            return
+        if n_space != want_rank:
+            raise ShapeInvariantError(
+                f"canonical-shape invariant violated: {type(e).__name__} of space {rep.space!r} "
+                f"realized {n_space} space-axis/es but the canonical rank is {want_rank} "
+                f"(a node lowered its space to a non-canonical rank, dynamic-dim lane)"
+            )
 
 
 def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:

@@ -24,7 +24,7 @@ from . import oracles as O
 from .generate import generate
 from .shrink import shrink
 
-METHODS = ("ad_vs_fd", "rewrite", "typecheck", "shape", "identity")
+METHODS = ("ad_vs_fd", "rewrite", "typecheck", "shape", "hook", "identity")
 
 
 @dataclass
@@ -143,32 +143,25 @@ def _still_fails_shape(case, seed, i, sig):
     return res.status == "bug" and _sig("shape", res.detail) == sig
 
 
-def _set_shape_hook(on: bool) -> bool:
-    """Toggle grassmann's canonical-shape invariant hook so a non-canonical realization raises at
-    the producing node during every compile the oracles perform.  Returns the previous state."""
-    import importlib
-
-    represent = importlib.import_module("grassmann.lower.represent")
-    if hasattr(represent, "set_shape_check"):
-        return represent.set_shape_check(on)
-    return False
+def _still_fails_hook(case, seed, i, sig):
+    r = np.random.default_rng([seed, i, 15])
+    res = _safe("hook", O.shape_hook, case, r)
+    return res.status == "bug" and _sig("hook", res.detail) == sig
 
 
 def run(seed: int = 0, n_trials: int = 500, *, methods=METHODS, max_depth: int = 4,
         dim: int = 3, only: int | None = None, do_shrink: bool = True,
         quiet_warnings: bool = True, keep_skip_examples: int = 3,
         shape_hook: bool = True, dynamic: bool = False) -> Report:
+    if not shape_hook:
+        methods = tuple(m for m in methods if m != "hook")  # drop the canonical-shape hook oracle
     rep = Report(seed=seed, n_trials=n_trials,
                  counts={m: {"ok": 0, "bug": 0, "skip": 0} for m in methods},
                  skip_reasons={m: Counter() for m in methods},
                  skip_examples={})
     indices = [only] if only is not None else range(n_trials)
-    _prev_hook = _set_shape_hook(shape_hook)
-    try:
-        _run_trials(rep, indices, seed, dim, max_depth, methods, do_shrink,
-                    keep_skip_examples, quiet_warnings, dynamic)
-    finally:
-        _set_shape_hook(_prev_hook)
+    _run_trials(rep, indices, seed, dim, max_depth, methods, do_shrink,
+                keep_skip_examples, quiet_warnings, dynamic)
     return rep
 
 
@@ -202,6 +195,11 @@ def _run_trials(rep, indices, seed, dim, max_depth, methods, do_shrink,
                 sig = _sig("shape", res.detail)
                 _record(rep, "shape", i, seed, res, case, do_shrink,
                         lambda c, s=sig: _still_fails_shape(c, seed, i, s), keep_skip_examples)
+            if "hook" in methods:
+                res = _safe("hook", O.shape_hook, case, r)
+                sig = _sig("hook", res.detail)
+                _record(rep, "hook", i, seed, res, case, do_shrink,
+                        lambda c, s=sig: _still_fails_hook(c, seed, i, s), keep_skip_examples)
             if "identity" in methods:
                 _record(rep, "identity", i, seed,
                         _safe("identity", lambda: O.identity_holds(r, n=dim)),

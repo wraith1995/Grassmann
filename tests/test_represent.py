@@ -693,8 +693,9 @@ def test_shape_hook_fires_on_noncanonical_shape(monkeypatch) -> None:
         )
         u = C.var("u", C.base("V", 2))
         v = C.var("v", C.base("W", 3))
-        with pytest.raises(_rep_mod.RepresentError, match="canonical-shape invariant"):
+        with pytest.raises(_rep_mod.ShapeInvariantError, match="canonical-shape invariant"):
             represent(C.OProdV((u, v)))
+        assert issubclass(_rep_mod.ShapeInvariantError, _rep_mod.RepresentError)
     finally:
         _rep_mod.set_shape_check(prev)
 

@@ -240,6 +240,31 @@ def _short(e: object, k: int = 160) -> str:
 # ---------------------------------------------------------------------------
 
 
+def shape_hook(case: Case, rng: np.random.Generator) -> Result:
+    """Arm grassmann's canonical-shape invariant hook and compile ``F``: a ``ShapeInvariantError``
+    means a node realized its space to a non-canonical shape/rank *at the producing node*.
+
+    Distinct from :func:`shape_canonical` (which is post-run and catches only the *silent* case):
+    the hook fires mid-lowering, so it localizes the divergence to the node that caused it.  Any
+    *other* lowering exception is left to the crash oracles (skip) — the hook owns only its own
+    invariant."""
+    from grassmann.lower.represent import ShapeInvariantError, set_shape_check
+
+    RepresentError = _represent_error()
+    prev = set_shape_check(True)
+    try:
+        _run(case.term, case.feed())
+    except ShapeInvariantError as e:
+        return Result("hook", "bug", f"canonical-shape hook fired: {_short(e)}")
+    except (RepresentError, *_BAILS):
+        return Result("hook", "skip", "lower_gap")
+    except Exception as e:  # noqa: BLE001 — a plain crash belongs to typecheck/ad_vs_fd
+        return Result("hook", "skip", f"other: {type(e).__name__}")
+    finally:
+        set_shape_check(prev)
+    return Result("hook", "ok")
+
+
 def shape_canonical(case: Case, rng: np.random.Generator) -> Result:
     """The realized array of ``F`` must have the canonical shape of ``space(F)``.
 
