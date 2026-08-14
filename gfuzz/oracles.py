@@ -247,6 +247,45 @@ def _short(e: object, k: int = 160) -> str:
 # ---------------------------------------------------------------------------
 
 
+def diff_second(case: Case, rng: np.random.Generator) -> Result:
+    """The second derivative ``diff(diff(F,x),x)`` must be well-formed: either the zero map, a
+    Hessian that type-checks, or a *clean* ``DiffError`` refusal.  An unclean crash leaking from
+    the second differentiation (a ``TermError``/linearity violation), or an ill-typed Hessian, is a
+    diff soundness bug — the 2nd-order analog of the ill-typed-Jacobian and unused-seed-LLam classes.
+    First-order crashes are owned by :func:`ad_vs_fd` (skip here)."""
+    RepresentError = _represent_error()
+    try:
+        _run(case.term, case.feed())  # F must itself lower (else it's not a 2nd-order question)
+    except Exception:  # noqa: BLE001
+        return Result("diff2", "skip", "F did not lower")
+    try:
+        J = diff(case.term, case.x, None)
+    except Exception:  # noqa: BLE001 — a 1st-order diff issue is ad_vs_fd's to report
+        return Result("diff2", "skip", "1st-order diff issue (ad_vs_fd owns it)")
+    if isinstance(J, T.Zero):
+        return Result("diff2", "ok")  # F linear in x ⇒ 2nd derivative is 0
+    try:
+        H = diff(J, case.x, None)
+    except DiffError:
+        return Result("diff2", "skip", "2nd diff refused (DiffError)")
+    except (InferError, UnifyError, SpaceError) as e:
+        return Result("diff2", "skip", f"2nd diff inference bail: {_short(e)}")
+    except Exception as e:  # noqa: BLE001 — LinearityError / TermError etc. leaking = a real defect
+        return Result("diff2", "bug",
+                      f"diff(diff(F,x),x) crashed uncleanly: {type(e).__name__}: {_short(e)}")
+    body = H
+    for _ in range(2):
+        if isinstance(body, T.LLam):
+            body = body.body
+    try:
+        synth_space(body)
+    except (InferError, UnifyError, SpaceError) as e:
+        return Result("diff2", "bug", f"diff produced an ill-typed Hessian: {_short(e)}")
+    except Exception:  # noqa: BLE001
+        return Result("diff2", "skip", "Hessian synth other")
+    return Result("diff2", "ok")
+
+
 def shape_hook(case: Case, rng: np.random.Generator) -> Result:
     """Arm grassmann's canonical-shape invariant hook and compile ``F``: a ``ShapeInvariantError``
     means a node realized its space to a non-canonical shape/rank *at the producing node*.

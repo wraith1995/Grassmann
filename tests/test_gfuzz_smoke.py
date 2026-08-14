@@ -29,9 +29,11 @@ from gfuzz.runner import run  # noqa: E402
 # real crash the fuzzer surfaces on the current tree; the test allows them so a *new*
 # regression still turns red.  When one is fixed upstream, its entry simply goes unused.
 KNOWN_BUGS: tuple[str, ...] = (
-    # A/B/C (diff unused-seed LLam; OPlus/OProd shape divergence) and the diff det/logdet
-    # ill-typed-Jacobian are all FIXED upstream.  The allowlist is empty: any bug the small
-    # batch finds now is a NEW regression.
+    # A/B/C, and the diff det/logdet ill-typed-Jacobian, are all FIXED upstream.
+    # Reported-but-unfixed (FINDINGS-shape-bugs.md): the SECOND derivative of a nonlinear
+    # function of a multiply-used direction (e.g. diff(diff(sqrt(...(x⊕x)...)))) leaks a
+    # LinearityError instead of a clean DiffError.  Allowed so a *new* regression still fails.
+    "diff(diff(F,x),x) crashed uncleanly",
 )
 
 

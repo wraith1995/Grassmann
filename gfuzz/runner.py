@@ -24,7 +24,7 @@ from . import oracles as O
 from .generate import generate
 from .shrink import shrink
 
-METHODS = ("ad_vs_fd", "rewrite", "typecheck", "shape", "hook", "identity")
+METHODS = ("ad_vs_fd", "diff2", "rewrite", "typecheck", "shape", "hook", "identity")
 
 
 @dataclass
@@ -125,6 +125,12 @@ def _still_fails_ad(case, seed, i, sig):
     return res.status == "bug" and _sig("ad_vs_fd", res.detail) == sig
 
 
+def _still_fails_diff2(case, seed, i, sig):
+    r = np.random.default_rng([seed, i, 17])
+    res = _safe("diff2", O.diff_second, case, r)
+    return res.status == "bug" and _sig("diff2", res.detail) == sig
+
+
 def _still_fails_rewrite(case, seed, i, sig):
     r = np.random.default_rng([seed, i, 9])
     res = _safe("rewrite", O.rewrite_invariant, case, r)
@@ -180,6 +186,11 @@ def _run_trials(rep, indices, seed, dim, max_depth, methods, do_shrink,
                 sig = _sig("ad_vs_fd", res.detail)
                 _record(rep, "ad_vs_fd", i, seed, res, case, do_shrink,
                         lambda c, s=sig: _still_fails_ad(c, seed, i, s), keep_skip_examples)
+            if "diff2" in methods:
+                res = _safe("diff2", O.diff_second, case, r)
+                sig = _sig("diff2", res.detail)
+                _record(rep, "diff2", i, seed, res, case, do_shrink,
+                        lambda c, s=sig: _still_fails_diff2(c, seed, i, s), keep_skip_examples)
             if "rewrite" in methods:
                 res = _safe("rewrite", O.rewrite_invariant, case, r)
                 sig = _sig("rewrite", res.detail)
