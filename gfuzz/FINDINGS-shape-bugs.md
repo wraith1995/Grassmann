@@ -333,3 +333,22 @@ Alternatively `synth` could require `logdet`'s argument to be invertible. Report
 The `ad_vs_fd` oracle now reports "diff produced an ill-typed Jacobian" as a **bug** (any inference
 error when lowering `J·h`, given `F` itself lowered) — so this class can no longer hide behind the
 `InferError` bail.
+
+---
+
+## Skip-mining round 2: second-derivative crash + non-finite is clean
+
+Continuing the skip audit ("bugs hide behind acceptable bails") into two more areas:
+
+**Non-finite skips — legitimate (no hidden bug).** The `non-finite` skips are genuine domain
+issues (a `sqrt`/`log`/`div`/`det` that goes singular after the ±ε perturbation); the generator's
+guards keep them rare (0–4 per ~1500 trials). Nothing masked.
+
+**Second derivative — a new `diff` robustness bug (reported, not fixed).** `diff(diff(F, x), x)`
+leaks a `LinearityError` (an *unclean* crash, not a `DiffError` refusal) when `F` is a **nonlinear
+function of a direction that `x` enters more than once** — e.g. `sqrt`/`tanh` of a term containing
+`x ⊕ x` (or `NEval(Λ a. tanh(A·a), Solve(...))`). The first derivative is fine; the second
+differentiation produces an `LLam` whose seed `dx` is consumed twice, which `diff`'s own linearity
+check rejects. Same shape as bug A (a construction-invariant crash leaking from `diff` instead of a
+clean refusal) — the maintainer should decide whether to support the bilinear Hessian or refuse
+cleanly with `DiffError`. Now guarded by the `diff2` oracle.
