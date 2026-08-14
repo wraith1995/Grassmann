@@ -28,13 +28,12 @@ from gfuzz.runner import run  # noqa: E402
 # Substrings that identify a *known, reported* grassmann defect (not a fuzzer bug).  Each is a
 # real crash the fuzzer surfaces on the current tree; the test allows them so a *new*
 # regression still turns red.  When one is fixed upstream, its entry simply goes unused.
-KNOWN_BUGS = (
-    # (A — diff(OPlusV, x) for x-independent F — is FIXED in transform/diff.py; a regression
-    #  would re-introduce "LLam: linear variable …" and this test would then correctly fail.)
-    # B: an OPlus/direct-sum lowers to an inconsistent total dimension (synth accepts)
-    "bulk Stmt output",
-    # C: the same space realizes to different numeric shapes (unit tensor axes) → Sum assert
-    "assert:sum-shapes",
+KNOWN_BUGS: tuple[str, ...] = (
+    # All three defects the fuzzer originally found are now FIXED upstream:
+    #   A — diff(OPlusV, x) for x-independent F   → transform/diff.py (unused-seed LLam)
+    #   B — OPlus inconsistent total dimension    → lower/represent.py _rep_oplus
+    #   C — same space, two numeric shapes        → lower/represent.py _rep_oprod
+    # The allowlist is empty: any bug the small batch finds now is a NEW regression.
 )
 
 
