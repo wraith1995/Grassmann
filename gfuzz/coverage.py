@@ -23,7 +23,7 @@ import grassmann.core.props as P
 import grassmann.core.space as S
 import grassmann.core.term as T
 
-from .generate import Generator
+from .generate import generate
 
 
 def _term_kinds() -> set[str]:
@@ -94,16 +94,12 @@ def measure(seed: int = 0, trials: int = 3000, dim: int = 3, max_depth: int = 4)
     ext_ctr: Counter = Counter()
     for i in range(trials):
         rng = np.random.default_rng([seed, i])
-        g = Generator(rng, n=dim, max_depth=max_depth)
-        r = rng.random()
-        sp = g.Sc if r < 0.4 else (g._pick_base() if r < 0.7 else g.random_space(2, max_dim=8))
         try:
-            term = g.gen(sp, max_depth)
+            case = generate(rng, n=dim, max_depth=max_depth)  # the SAME path the runner uses
         except Exception:
             continue
-        # count the diff var's space too
-        walk_space(g.X, space_ctr)
-        walk_term(term, term_ctr, space_ctr, prop_ctr, ext_ctr)
+        walk_space(case.x.space, space_ctr)  # the diff var's space
+        walk_term(case.term, term_ctr, space_ctr, prop_ctr, ext_ctr)
     return dict(term=term_ctr, space=space_ctr, prop=prop_ctr, ext=ext_ctr)
 
 
