@@ -25,6 +25,7 @@ import numpy as np
 
 import grassmann as G
 import grassmann.stdlib as L
+from grassmann.core import props as P
 from grassmann.core import space as S
 from grassmann.core import term as T
 from grassmann.core.props import bij as _BIJ
@@ -131,6 +132,7 @@ class Generator:
         self._uid = 0
         self.bij_names: set[str] = set()
         self.spd_names: set[str] = set()
+        self.rank_specs: dict[str, tuple[int, int, int]] = {}  # name -> (dom, cod, rank)
         # the differentiation variable lives in a base Euclidean space
         self.X = S.base("X", n)
         self.x = T.var("x", self.X)
@@ -172,8 +174,24 @@ class Generator:
     def random_space(self, depth: int, *, euclidean: bool = True, max_dim: int = 8) -> S.Space:
         if depth <= 0 or self.rng.random() < 0.35:
             return self.Sc if self.rng.random() < 0.25 else self._pick_base()
-        choice = self.rng.choice(["dual", "oplus", "oprod", "rep", "map", "base"])
+        # "oplus" weighted up: direct sums were under-generated, and are where the OPlus
+        # shape-realization bug lives.
+        choice = self.rng.choice(["dual", "oplus", "oplus", "oprod", "rep", "map", "base",
+                                  "subspace", "withinner"])
         try:
+            if choice == "withinner":
+                # a re-metricized base: WithInner(W, g) with g an SPD 2-covariant tensor (fed SPD)
+                w = self._pick_base()
+                g = T.var(self._fresh("g"), S.oprod(S.dual(w), S.dual(w)))
+                self.spd_names.add(f"{g.name}_{g.uid}")
+                return S.with_inner(w, g)
+            if choice == "subspace":
+                # a fundamental subspace of a fresh (honest-prop) defining map J : A ⊸ B
+                a, b = self._pick_base(), self._pick_base()
+                J = self._map_leaf(a, b, props=None)
+                which = self.rng.choice(["img", "ker", "coimg", "coker"])
+                sp = getattr(S, which)(J)
+                return sp if 1 <= space_dim(sp) <= max_dim else self._pick_base()
             if choice == "dual":
                 return S.dual(self.random_space(depth - 1, max_dim=max_dim))
             if choice == "oplus":
@@ -208,22 +226,36 @@ class Generator:
             return self._leaf(sp)
 
     def _applicable(self, sp: S.Space):
-        gen = [self._b_leaf, self._b_sum, self._b_scale, self._b_linapply]
+        gen = [self._b_leaf, self._b_sum, self._b_scale, self._b_linapply, self._b_zero]
         if _is_euclidean(sp):
             gen.append(self._b_elementwise)
         if isinstance(sp, S.Scalar):
             gen += [self._b_inner, self._b_mul, self._b_nonlin, self._b_guarded,
                     self._b_div, self._b_trace, self._b_det, self._b_logdet]
+        if self._is_base(sp):
+            # base Euclidean vector target: the endo/musical/subspace machinery lives here
+            gen += [self._b_identity_apply, self._b_sharp, self._b_solveapply,
+                    self._b_pinvapply, self._b_sqrt_apply, self._b_pinv_apply,
+                    self._b_project_embed, self._b_lowrank_apply, self._b_assert,
+                    self._b_corestrict]
+        if isinstance(sp, S.WithInner):
+            gen.append(self._b_remetric)
         if isinstance(sp, S.OPlus):
-            gen.append(self._b_oplusv)
+            gen += [self._b_oplusv, self._b_tuple_embed]
         if isinstance(sp, S.OProd):
-            gen.append(self._b_oprodv)
+            gen += [self._b_oprodv, self._b_permute]
+            if len(sp.spaces) == 2:
+                gen.append(self._b_kron)
         m = as_map(sp)
         if m is not None:
             gen.append(self._b_dagger)
+            gen.append(self._b_compose)
             if m[0] == m[1]:
                 gen.append(self._b_solve_map)
         return gen
+
+    def _is_base(self, sp: S.Space) -> bool:
+        return sp == self.X or sp in self.bases
 
     # generic
     def _b_leaf(self, sp, d):
@@ -236,10 +268,13 @@ class Generator:
         return T.scale(float(self.rng.uniform(-2, 2)), self.gen(sp, d))
 
     def _b_linapply(self, sp, d):
-        # A : T ⊸ sp  applied to a value of T  (rectangular maps included)
+        # A : T ⊸ sp  applied to a value of T  (rectangular maps included, with honest props)
         t = self._pick_base()
-        A = T.var(self._fresh("A"), S.oprod(S.dual(t), sp))
+        A = self._map_leaf(t, sp)
         return T.Eval(A, (0,), (self.gen(t, d),))
+
+    def _b_zero(self, sp, d):
+        return T.zero(sp)
 
     def _b_elementwise(self, sp, d):
         op = self.rng.choice(["tanh", "sin", "cos", "square", "sigmoid"])
@@ -288,6 +323,120 @@ class Generator:
     def _b_solve_map(self, sp, d):
         a, _ = as_map(sp)
         return T.solve(self._bij_leaf(S.oprod(S.dual(a), a)))
+
+    # -- new: base-target machinery (musical / solve / pinv / sqrt / identity / metric) ----
+
+    def _map_leaf(self, dom, cod, *, props=None):
+        """A fresh map var ``dom ⊸ cod`` with *honest* props: a random (introspected) value is
+        generically full rank, so ``bij`` (square), ``inj`` (dom≤cod), ``surj`` (dom≥cod) all
+        hold almost surely.  This exercises the props dimension without asserting a property the
+        value does not have."""
+        from grassmann.core.props import inj as _INJ, surj as _SURJ
+        da, db = space_dim(dom), space_dim(cod)
+        if props is None and self.rng.random() < 0.6:
+            props = _BIJ if da == db else (_INJ if da < db else _SURJ)
+        v = T.var(self._fresh("A"), S.oprod(S.dual(dom), cod), props=props)
+        if props is _BIJ:
+            self.bij_names.add(f"{v.name}_{v.uid}")
+        return v
+
+    def _rank_leaf(self, dom, cod):
+        """A map ``dom ⊸ cod`` fed as an *exactly* rank-r product (r < min dim), asserting one of
+        the rank-family props HONESTLY — so `rank`/`dim_img`/`dim_ker` inference is exercised."""
+        da, db = space_dim(dom), space_dim(cod)
+        r = int(self.rng.integers(1, min(da, db))) if min(da, db) > 1 else 1
+        flavor = self.rng.choice(["rank", "dim_img", "dim_ker"])
+        if flavor == "rank":
+            props = P.rank(r)
+        elif flavor == "dim_img":
+            props = P.dim_img(r)
+        else:
+            props = P.dim_ker(da - r)
+        v = T.var(self._fresh("K"), S.oprod(S.dual(dom), cod), props=props)
+        self.rank_specs[f"{v.name}_{v.uid}"] = (da, db, r)
+        return v
+
+    def _b_lowrank_apply(self, sp, d):
+        t = self._pick_base()
+        return T.Eval(self._rank_leaf(t, sp), (0,), (self.gen(t, d),))
+
+    def _b_assert(self, sp, d):
+        # Assert(v, sp): re-assert a value already of space sp (coercion node, identity here)
+        return T.assert_(self.gen(sp, d), sp)
+
+    def _b_identity_apply(self, sp, d):
+        return T.Eval(T.identity(sp), (0,), (self.gen(sp, d),))
+
+    def _b_sharp(self, sp, d):
+        # ♯ : sp* ⊸ sp, applied to a covector
+        return T.Eval(T.sharp(sp), (0,), (self.gen(S.dual(sp), d),))
+
+    def _b_solveapply(self, sp, d):
+        return T.SolveApply(self._bij_leaf(S.oprod(S.dual(sp), sp)), self.gen(sp, d))
+
+    def _b_pinvapply(self, sp, d):
+        t = self._pick_base()
+        return T.PinvApply(self._map_leaf(t, sp, props=None), self.gen(t, d))
+
+    def _b_sqrt_apply(self, sp, d):
+        return T.Eval(T.sqrt(self._spd_leaf(S.oprod(S.dual(sp), sp))), (0,), (self.gen(sp, d),))
+
+    def _b_pinv_apply(self, sp, d):
+        t = self._pick_base()
+        return T.Eval(T.pinv(self._map_leaf(t, sp)), (0,), (self.gen(t, d),))
+
+    def _b_remetric(self, sp, d):
+        # sp is WithInner(inner, g): Remetric(sec, g) re-metricizes a section of `inner` into it,
+        # reusing the SAME metric term the space carries (honest typing).
+        inner, g = sp.space, sp.metric
+        return T.Remetric(self.gen(inner, d), g)
+
+    def _b_project_embed(self, sp, d):
+        # project a value onto Img(J), then embed back to the ambient sp: a subspace round-trip
+        t = self._pick_base()
+        J = self._map_leaf(t, sp, props=None)
+        z = self.gen(sp, d)
+        return T.embed(T.project(z, S.img(J)), sp)
+
+    def _b_permute(self, sp, d):
+        # sp is OProd(parts): build a value of the reversed arrangement and permute it back
+        parts = list(sp.spaces)
+        k = len(parts)
+        perm = tuple(range(k - 1, -1, -1))
+        v = self.gen(S.oprod(*[parts[i] for i in perm]), d)
+        return T.permute(v, perm)
+
+    def _b_kron(self, sp, d):
+        # sp = OProd(A, B): (MA ⊗ MB) applied to a tensor value in dom_A ⊗ dom_B
+        a, b = sp.spaces
+        ta, tb = self._pick_base(), self._pick_base()
+        ma = self._map_leaf(ta, a)
+        mb = self._map_leaf(tb, b)
+        arg = T.OProdV((self.gen(ta, d), self.gen(tb, d)))
+        return T.Eval(T.kron(ma, mb), (0,), (arg,))
+
+    def _b_tuple_embed(self, sp, d):
+        # embed a value of the i-th summand into the OPlus space sp
+        i = int(self.rng.integers(len(sp.spaces)))
+        return T.Eval(T.tuple_embed(sp, i), (0,), (self.gen(sp.spaces[i], d),))
+
+    def _b_corestrict(self, sp, d):
+        # Corestrict(J~) : t ⊸ Img(J) for an INJECTIVE J: t ⊸ sp (t smaller), embedded back to sp
+        smaller = [s for s in (*self.bases, self.X) if space_dim(s) < space_dim(sp)]
+        if not smaller:
+            raise _Regen
+        t = smaller[self.rng.integers(len(smaller))]
+        from grassmann.core.props import inj as _INJ
+        J = T.var(self._fresh("A"), S.oprod(S.dual(t), sp), props=_INJ)
+        return T.embed(T.Eval(T.corestrict(J), (0,), (self.gen(t, d),)), sp)
+
+    def _b_compose(self, sp, d):
+        # sp is a map A ⊸ B: build (M2 ∘ M1) with M1: A⊸C, M2: C⊸B for a random middle C
+        a, b = as_map(sp)
+        c = self._pick_base()
+        m1 = self._map_leaf(a, c)
+        m2 = self._map_leaf(c, b)
+        return T.compose(m2, (0,), m1)
 
     # helpers
     def _positive(self, t):
@@ -346,6 +495,9 @@ def _fill_feed(g: Generator, term: T.Term, rng: np.random.Generator) -> dict:
             feed[name] = _well_conditioned(shape[0], rng)
         elif name in g.spd_names:
             feed[name] = _spd(shape[0], rng)
+        elif name in g.rank_specs:
+            da, db, r = g.rank_specs[name]
+            feed[name] = (rng.standard_normal((da, r)) @ rng.standard_normal((r, db))).reshape(shape)
         else:
             feed[name] = rng.standard_normal(shape)
     return feed

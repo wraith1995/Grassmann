@@ -35,6 +35,8 @@ from grassmann.core import space as S
 from grassmann.core import term as T
 from grassmann.transform.diff import DiffError, diff
 from grassmann.infer.synth import InferError, synth_space
+from grassmann.infer.unify import UnifyError
+from grassmann.core.space import SpaceError
 
 from .generate import Case, _node
 
@@ -59,10 +61,12 @@ def _run(term: T.Term, feed: dict) -> np.ndarray:
     return np.asarray(prog.run(sub)["result"], float)
 
 
-# Loud, acceptable bails: grassmann refusing an out-of-scope build (an inference refusal or
-# a diff-scope refusal), or a numerically singular draw.  These are correct behavior, not
-# bugs — the fuzzer records them as skips.
-_BAILS = (DiffError, InferError)
+# Loud, acceptable bails: grassmann refusing an out-of-scope build.  An inference *rejection*
+# (InferError / UnifyError / SpaceError — "this does not type-check") and a diff-scope refusal
+# (DiffError) are correct behavior, recorded as skips.  NOTE: TermError is deliberately NOT
+# here — a construction-invariant violation (e.g. an LLam over an unused seed) is a real bug we
+# want surfaced, not swallowed.
+_BAILS = (DiffError, InferError, UnifyError, SpaceError)
 
 
 def _represent_error():
@@ -186,7 +190,7 @@ def typecheck(case: Case, rng: np.random.Generator) -> Result:
     # (1) acceptance
     try:
         sp = synth_space(case.term)
-    except InferError as e:
+    except (InferError, UnifyError, SpaceError) as e:
         return Result("typecheck", "skip", f"rejected: {_short(e)}")
     except Exception as e:  # a crash *inside* inference is itself a defect
         return Result("typecheck", "bug", f"UNSOUND: inference crashed: {type(e).__name__}: {_short(e)}")
@@ -218,6 +222,37 @@ def typecheck(case: Case, rng: np.random.Generator) -> Result:
 def _short(e: object, k: int = 160) -> str:
     s = str(e).replace("\n", " ")
     return s if len(s) <= k else s[:k] + "…"
+
+
+# ---------------------------------------------------------------------------
+# Method E — shape canonicality (a Space has ONE numeric shape).
+# ---------------------------------------------------------------------------
+
+
+def shape_canonical(case: Case, rng: np.random.Generator) -> Result:
+    """The realized array of ``F`` must have the canonical shape of ``space(F)``.
+
+    A grassmann space has exactly one numeric shape, ``_shape_of_space(space)``; every node
+    realizing that space must match it.  This is the *silent* companion to the crash-based
+    oracles: when ``represent`` builds an operand with the wrong number of axes (the unit /
+    nested-tensor divergence) but the program still runs, the result comes back mis-shaped
+    instead of raising.  Any exception here is left to the crash oracles (skip)."""
+    from grassmann.lower.represent import _shape_of_space
+
+    try:
+        sp = synth_space(case.term)
+        val = _run(case.term, case.feed())
+    except Exception:  # noqa: BLE001 — crashes belong to typecheck/ad_vs_fd; this method is silent-only
+        return Result("shape", "skip", "lowered with an exception (crash oracles own it)")
+    if not np.all(np.isfinite(val)):
+        return Result("shape", "skip", "non-finite")
+    canon = tuple(int(x) for x in _shape_of_space(sp))
+    got = tuple(np.asarray(val).shape)
+    if got == canon:
+        return Result("shape", "ok")
+    return Result("shape", "bug",
+                  f"silent shape divergence: ran to shape {got} but canonical shape of "
+                  f"{sp!r} is {canon}", got=got, ref=canon)
 
 
 # ---------------------------------------------------------------------------

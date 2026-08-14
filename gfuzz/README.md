@@ -49,6 +49,15 @@ adjoint definition `⟨Mx, y⟩ = ⟨x, Mᵀy⟩`, `dagger∘dagger = id`, `M·s
 Moore–Penrose `M M† M = M`, `logdet = log∘det`, cyclic trace `tr(MN) = tr(NM)`, and inner
 symmetry.
 
+### 5. Shape canonicality  (`oracles.shape_canonical`)
+
+A grassmann space has exactly **one** numeric shape, `_shape_of_space(space)`; every node
+realizing it must match. This is the *silent* companion to the crash oracles: when
+`represent` builds an operand with the wrong number of axes but the program still runs, the
+result comes back mis-shaped instead of raising. (Crashes are left to methods 1/4; this one
+owns the silent case.) The invariant came out of the root-cause of bugs B/C — see
+`FINDINGS-shape-bugs.md`.
+
 ### 4. Type-checking probe  (`oracles.typecheck`)
 
 Cross-checks the *type checker* (`synth_space`) against the *lowering* three ways:
@@ -74,6 +83,9 @@ breakdown — the "look at the rejected ones" view.
   value-carrying leaves while the failure persists, yielding a small reproducer.
 - **`runner.py` / `__main__.py`** — the seeded batch driver, reporting, and CLI. Trial `i`
   derives its own RNG from `(seed, i)`, so a reported trial index reproduces exactly.
+- **`coverage.py`** — walks generated terms and reports which Term/Space/`MapProps` kinds are
+  exercised vs never generated (`python -m gfuzz.coverage`). See `COVERAGE.md` for the current
+  audit (31/40 Term nodes, 6/6 props, 10/13 spaces) and the reasoned gaps.
 
 ## Reproducing and regressing a failure
 

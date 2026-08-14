@@ -52,7 +52,11 @@ def test_only_known_bugs_in_small_batch():
 
 
 def test_ad_oracle_has_teeth(monkeypatch):
-    """A 1.5×-wrong Jacobian must be caught by ad_vs_fd on at least one random case."""
+    """A 1.5×-wrong Jacobian must be caught by ad_vs_fd.  Uses a fixed term with a known
+    nonzero Jacobian (⟨Mx, x⟩) so the test does not depend on the generator's draws."""
+    import grassmann.core.space as S
+    from gfuzz.generate import Case
+
     orig = O.diff
 
     def wrong(e, x, deps=None):
@@ -62,13 +66,14 @@ def test_ad_oracle_has_teeth(monkeypatch):
         return T.LLam(J.vars, body=T.scale(1.5, J.body))
 
     monkeypatch.setattr(O, "diff", wrong)
-    caught = 0
-    for i in range(40):
-        r = np.random.default_rng([0, i])
-        case = generate(r)
-        if O.ad_vs_fd(case, r).status == "bug":
-            caught += 1
-    assert caught > 0, "planted 1.5x Jacobian bug went undetected — the oracle is blind"
+    V = S.base("X", 3)
+    x = T.var("x", V)
+    M = T.var("M", S.oprod(S.dual(V), V))
+    F = T.Eval(T.inner(V), (0, 1), (T.Eval(M, (0,), (x,)), x))  # ⟨Mx, x⟩
+    rng = np.random.default_rng(0)
+    feed0 = {f"x_{x.uid}": rng.standard_normal(3), f"M_{M.uid}": rng.standard_normal((3, 3))}
+    case = Case(term=F, x=x, x0=feed0[f"x_{x.uid}"], feed0=feed0, x_name=f"x_{x.uid}", n=3)
+    assert O.ad_vs_fd(case, rng).status == "bug", "planted 1.5x Jacobian went undetected — oracle is blind"
 
 
 def test_reproducible_by_index():
