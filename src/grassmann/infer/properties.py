@@ -18,14 +18,21 @@ from typing import assert_never
 from grassmann.core.props import MapProps
 from grassmann.core.space import CoImg, Dim, Img, Ker, Space
 from grassmann.core.space import CoKer as _CoKer
-from grassmann.core.term import Dagger, Pinv, Solve, Var
+from grassmann.core.term import Assert, Dagger, Pinv, Solve, Var
 
 from .dims import dim_diff, dim_of, rank_of
 
 
 def map_props(f: object) -> MapProps | None:
-    """Give the asserted properties of a map term, if any (props live on ``Var``)."""
+    """Give the asserted properties of a map term, if any.
+
+    Props live on a ``Var`` or on an ``Assert`` (the assertion node can carry map properties for a
+    *derived* map — e.g. ``diff`` asserts its ``det``/``logdet`` operand ``bij`` for the inverse)."""
     if isinstance(f, Var):
+        p = f.props
+        if p is not None and not p.is_empty():
+            return p
+    if isinstance(f, Assert):
         p = f.props
         if p is not None and not p.is_empty():
             return p
