@@ -100,6 +100,7 @@ class Case:
     x_name: str
     bij_names: set[str] = field(default_factory=set)
     spd_names: set[str] = field(default_factory=set)
+    dims: dict[str, int] = field(default_factory=dict)  # DimVar name -> concrete size (dynamic mode)
     n: int = 3
 
     def feed(self, x0: np.ndarray | None = None) -> dict:
@@ -122,22 +123,34 @@ class _Regen(Exception):
 class Generator:
     """Draws well-typed random terms of a requested space, recording leaf roles as it goes."""
 
-    def __init__(self, rng: np.random.Generator, n: int = 3, max_depth: int = 4):
+    def __init__(self, rng: np.random.Generator, n: int = 3, max_depth: int = 4,
+                 dynamic: bool = False):
         self.rng = rng
         self.n = n
         self.max_depth = max_depth
-        # a small palette of base Euclidean spaces (interned so equality holds)
-        dims = sorted({2, 3, max(2, min(n, 4))})
-        self.bases = [S.base(f"R{d}", d) for d in dims]
+        self.dynamic = dynamic
         self.Sc = S.Scalar()
         self._uid = 0
         self.bij_names: set[str] = set()
         self.spd_names: set[str] = set()
         self.rank_specs: dict[str, tuple[int, int, int]] = {}  # name -> (dom, cod, rank)
-        # the differentiation variable lives in a base Euclidean space
-        self.X = S.base("X", n)
-        self.x = T.var("x", self.X)
-        self.x0 = rng.standard_normal(n)
+        # `dims` maps each symbolic DimVar name to the CONCRETE size chosen for this case's feed
+        # (empty in the static mode).  The compiled program is dimension-generic; the feed picks n.
+        self.dims: dict[str, int] = {}
+        if dynamic:
+            # abstract ℝⁿ bases over distinct DimVars — the dimension-polymorphic (`DimVar`) lane.
+            names = ["na", "nb"]
+            self.dims = {nm: int(rng.integers(2, 5)) for nm in names}
+            self.bases = [S.oplus_rep(S.DimVar(nm), self.Sc) for nm in names]
+            self.X = self.bases[0]
+            self.x = T.var("x", self.X)
+            self.x0 = rng.standard_normal(self.dims["na"])
+        else:
+            dims = sorted({2, 3, max(2, min(n, 4))})
+            self.bases = [S.base(f"R{d}", d) for d in dims]
+            self.X = S.base("X", n)
+            self.x = T.var("x", self.X)
+            self.x0 = rng.standard_normal(n)
 
     # -- names / leaves ------------------------------------------------------
 
@@ -238,16 +251,19 @@ class Generator:
             # base Euclidean vector target: the endo/musical/subspace machinery lives here
             gen += [self._b_identity_apply, self._b_sharp, self._b_solveapply,
                     self._b_pinvapply, self._b_sqrt_apply, self._b_pinv_apply,
-                    self._b_project_embed, self._b_lowrank_apply, self._b_assert,
-                    self._b_corestrict]
+                    self._b_project_embed, self._b_assert, self._b_corestrict]
+            if not self.dynamic:
+                gen.append(self._b_lowrank_apply)  # rank/dim props need a concrete rank
         if isinstance(sp, S.WithInner):
             gen.append(self._b_remetric)
         if isinstance(sp, S.OPlus):
             gen += [self._b_oplusv, self._b_tuple_embed, self._b_tuple_permute]
         if isinstance(sp, S.OProd):
-            gen += [self._b_oprodv, self._b_permute]
+            gen += [self._b_oprodv, self._b_permute, self._b_invlift]
             if len(sp.spaces) == 2:
                 gen.append(self._b_kron)
+        if isinstance(sp, S.Dual) and isinstance(sp.space, S.OProd):
+            gen.append(self._b_lift)
         m = as_map(sp)
         if m is not None:
             gen += [self._b_dagger, self._b_compose, self._b_llam]
@@ -371,8 +387,11 @@ class Generator:
         hold almost surely.  This exercises the props dimension without asserting a property the
         value does not have."""
         from grassmann.core.props import inj as _INJ, surj as _SURJ
-        da, db = space_dim(dom), space_dim(cod)
-        if props is None and self.rng.random() < 0.6:
+        if props is None and self.dynamic:
+            # symbolic dims have no comparable size — only a square (same-DimVar) map is honestly bij
+            props = _BIJ if dom == cod and self.rng.random() < 0.6 else None
+        elif props is None and self.rng.random() < 0.6:
+            da, db = space_dim(dom), space_dim(cod)
             props = _BIJ if da == db else (_INJ if da < db else _SURJ)
         v = T.var(self._fresh("A"), S.oprod(S.dual(dom), cod), props=props)
         if props is _BIJ:
@@ -444,6 +463,17 @@ class Generator:
         perm = tuple(range(k - 1, -1, -1))
         v = self.gen(S.oprod(*[parts[i] for i in perm]), d)
         return T.permute(v, perm)
+
+    def _b_lift(self, sp, d):
+        # sp = Dual(OProd(parts)): Lift fuses the OProd factors into one functional (curry).
+        inner = sp.space
+        v = self.gen(inner, d)
+        return T.lift(v, tuple(range(len(inner.spaces))))
+
+    def _b_invlift(self, sp, d):
+        # InvLift(v, (0,), None) reshapes factor 0 back — space-preserving here (uncurry);
+        # the oracles then check it also preserves the VALUE.
+        return T.inv_lift(self.gen(sp, d), (0,), None)
 
     def _b_kron(self, sp, d):
         # sp = OProd(A, B): (MA ⊗ MB) applied to a tensor value in dom_A ⊗ dom_B
@@ -525,8 +555,19 @@ def _fill_feed(g: Generator, term: T.Term, rng: np.random.Generator) -> dict:
     prog = G.compile(term)
     feed: dict[str, np.ndarray] = {}
     x_name = f"{g.x.name}_{g.x.uid}"
+
+    def _concrete(axis: object) -> int:
+        # a DimAtom (symbolic ℝⁿ axis) resolves to this case's chosen concrete size; ints pass through
+        if isinstance(axis, int):
+            return axis
+        nm = getattr(axis, "name", None)
+        if nm in g.dims:
+            return g.dims[nm]
+        return int(axis)  # a concrete DimLit-like axis
+
     for inp in prog.inputs:
-        name, shape = inp.name, tuple(int(s) for s in inp.shape)
+        name = inp.name
+        shape = tuple(_concrete(s) for s in inp.shape)
         if name == x_name:
             feed[name] = g.x0
         elif name in g.bij_names:
@@ -543,12 +584,14 @@ def _fill_feed(g: Generator, term: T.Term, rng: np.random.Generator) -> dict:
 
 
 def generate(rng: np.random.Generator, *, n: int = 3, max_depth: int = 4,
-             out_space=None) -> Case:
+             out_space=None, dynamic: bool = False) -> Case:
     """Draw one random :class:`Case`.
 
     ``out_space`` fixes the output space (default: a random Euclidean space, biased toward
-    Scalar/vector so the AD oracle has a value to finite-difference)."""
-    g = Generator(rng, n=n, max_depth=max_depth)
+    Scalar/vector so the AD oracle has a value to finite-difference).  ``dynamic=True`` builds
+    over symbolic ``ℝⁿ`` bases (``DimVar``): the compiled program is dimension-generic and the
+    feed picks a concrete size per ``DimVar`` — exercising grassmann's n-generic lowering."""
+    g = Generator(rng, n=n, max_depth=max_depth, dynamic=dynamic)
     if out_space is None:
         r = rng.random()
         if r < 0.35:
@@ -566,4 +609,5 @@ def generate(rng: np.random.Generator, *, n: int = 3, max_depth: int = 4,
     x_name = f"{g.x.name}_{g.x.uid}"
     feed0 = _fill_feed(g, term, rng)
     return Case(term=term, x=g.x, x0=g.x0, feed0=feed0, x_name=x_name,
-                bij_names=set(g.bij_names), spd_names=set(g.spd_names), n=n)
+                bij_names=set(g.bij_names), spd_names=set(g.spd_names),
+                dims=dict(g.dims), n=n)

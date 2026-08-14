@@ -12,7 +12,12 @@ Run it from inside the grassmann repo with the workspace venv:
 ../.venv/bin/python -m gfuzz --seed 0 --trials 500
 ../.venv/bin/python -m gfuzz --methods ad_vs_fd --trials 2000 --max-depth 5
 ../.venv/bin/python -m gfuzz --seed 0 --only 137        # re-run one trial to reproduce
+../.venv/bin/python -m gfuzz --dynamic --seed 0         # symbolic-dim (n-generic) mode
 ```
+
+**Dynamic-shape mode** (`--dynamic`) builds terms over symbolic `ℝⁿ` bases (`DimVar`), so the
+compiled program is dimension-generic and the feed picks a concrete size per `DimVar` — exercising
+grassmann's n-generic lowering, which the concrete-dimension mode can't reach. See `COVERAGE.md`.
 
 Exit code is non-zero iff a bug was found.
 

@@ -122,7 +122,7 @@ def shrink(case: Case, still_fails: Callable[[Case], bool], *, rounds: int = 40)
             trial = Case(term=best.term, x=best.x, x0=best.x0,
                          feed0=dict(best.feed0), x_name=best.x_name,
                          bij_names=set(best.bij_names), spd_names=set(best.spd_names),
-                         n=best.n)
+                         dims=dict(best.dims), n=best.n)
             leaf = _leafize(trial, sub)
             if leaf is None:
                 continue

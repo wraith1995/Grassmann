@@ -66,8 +66,9 @@ def _run(term: T.Term, feed: dict) -> np.ndarray:
 # (InferError / UnifyError / SpaceError — "this does not type-check") and a diff-scope refusal
 # (DiffError) are correct behavior, recorded as skips.  NOTE: TermError is deliberately NOT
 # here — a construction-invariant violation (e.g. an LLam over an unused seed) is a real bug we
-# want surfaced, not swallowed.
-_BAILS = (DiffError, InferError, UnifyError, SpaceError)
+# want surfaced, not swallowed.  KeyError is a skip: a value-preserving rewrite can expose an
+# input that was dead in the original term (so absent from the feed) — a feed-coverage gap.
+_BAILS = (DiffError, InferError, UnifyError, SpaceError, KeyError)
 
 
 def _represent_error():
@@ -252,11 +253,12 @@ def shape_canonical(case: Case, rng: np.random.Generator) -> Result:
     try:
         sp = synth_space(case.term)
         val = _run(case.term, case.feed())
+        canon_raw = _shape_of_space(sp)  # raises on a symbolic/dynamic space — not comparable
     except Exception:  # noqa: BLE001 — crashes belong to typecheck/ad_vs_fd; this method is silent-only
-        return Result("shape", "skip", "lowered with an exception (crash oracles own it)")
+        return Result("shape", "skip", "lowered with an exception, or symbolic shape (crash oracles own it)")
     if not np.all(np.isfinite(val)):
         return Result("shape", "skip", "non-finite")
-    canon = tuple(int(x) for x in _shape_of_space(sp))
+    canon = tuple(int(x) for x in canon_raw)
     got = tuple(np.asarray(val).shape)
     if got == canon:
         return Result("shape", "ok")

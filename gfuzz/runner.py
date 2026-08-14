@@ -157,7 +157,7 @@ def _set_shape_hook(on: bool) -> bool:
 def run(seed: int = 0, n_trials: int = 500, *, methods=METHODS, max_depth: int = 4,
         dim: int = 3, only: int | None = None, do_shrink: bool = True,
         quiet_warnings: bool = True, keep_skip_examples: int = 3,
-        shape_hook: bool = True) -> Report:
+        shape_hook: bool = True, dynamic: bool = False) -> Report:
     rep = Report(seed=seed, n_trials=n_trials,
                  counts={m: {"ok": 0, "bug": 0, "skip": 0} for m in methods},
                  skip_reasons={m: Counter() for m in methods},
@@ -166,20 +166,20 @@ def run(seed: int = 0, n_trials: int = 500, *, methods=METHODS, max_depth: int =
     _prev_hook = _set_shape_hook(shape_hook)
     try:
         _run_trials(rep, indices, seed, dim, max_depth, methods, do_shrink,
-                    keep_skip_examples, quiet_warnings)
+                    keep_skip_examples, quiet_warnings, dynamic)
     finally:
         _set_shape_hook(_prev_hook)
     return rep
 
 
 def _run_trials(rep, indices, seed, dim, max_depth, methods, do_shrink,
-                keep_skip_examples, quiet_warnings):
+                keep_skip_examples, quiet_warnings, dynamic=False):
     with warnings.catch_warnings():
         if quiet_warnings:
             warnings.simplefilter("ignore")
         for i in indices:
             r = _trial_rng(seed, i)
-            case = _safe_generate(r, dim, max_depth)
+            case = _safe_generate(r, dim, max_depth, dynamic)
             if case is None:
                 continue
             if "ad_vs_fd" in methods:
@@ -209,9 +209,9 @@ def _run_trials(rep, indices, seed, dim, max_depth, methods, do_shrink,
     return rep
 
 
-def _safe_generate(rng, dim, max_depth):
+def _safe_generate(rng, dim, max_depth, dynamic=False):
     try:
-        return generate(rng, n=dim, max_depth=max_depth)
+        return generate(rng, n=dim, max_depth=max_depth, dynamic=dynamic)
     except Exception:
         return None
 
