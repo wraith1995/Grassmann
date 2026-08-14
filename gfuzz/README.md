@@ -60,14 +60,20 @@ owns the silent case.) The invariant came out of the root-cause of bugs B/C — 
 
 ### 4. Type-checking probe  (`oracles.typecheck`)
 
-Cross-checks the *type checker* (`synth_space`) against the *lowering* three ways:
+Cross-checks the *type checker* (`synth_space`) against the *lowering* four ways:
 **acceptance** (an inference rejection is logged as a `rejected:` skip — a candidate false
-rejection for human review, since there is no automatic oracle for "should this have
-type-checked?"); **soundness** (if inference accepts a term, lowering must not *crash* — a
-clean `RepresentError` is a known gap logged as `lower_gap:`, but an unexpected exception on
-a term the checker called well-typed is reported `UNSOUND`); and **preservation**
-(`synth_space(simplify(F)) == synth_space(F)`). Run `--skips` to see the rejection / gap
-breakdown — the "look at the rejected ones" view.
+rejection for human review); **bidirectional consistency** (if synth *synthesizes* space `S`,
+then *checking* the term against `S` via `infer.check` must succeed — the two directions of
+inference must agree on the same term); **soundness** (if inference accepts a term, lowering
+must not *crash* — a clean `RepresentError` is a known gap logged as `lower_gap:`, an
+unexpected exception is `UNSOUND`); and **preservation** (`synth_space(simplify(F)) ==
+synth_space(F)`). Run `--skips` to see the rejection / gap breakdown.
+
+**The canonical-shape hook.** Every fuzz run enables grassmann's `represent.set_shape_check`
+hook (add `--no-shape-hook` to disable), which asserts at *each producing node* that its
+realized array shape equals `_shape_of_space(space)` — so a shape/type divergence (the B/C
+class) raises where it originates instead of downstream. Off by default in normal use (zero
+cost); the fuzzer turns it on so type-shape violations "fall under the hook."
 
 ## How it's built
 

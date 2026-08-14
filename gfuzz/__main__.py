@@ -29,11 +29,13 @@ def main(argv=None) -> int:
     p.add_argument("--no-shrink", action="store_true", help="do not shrink failing cases")
     p.add_argument("--skips", action="store_true",
                    help="print the skip breakdown (what inference rejected / lowering gaps)")
+    p.add_argument("--no-shape-hook", action="store_true",
+                   help="disable grassmann's canonical-shape invariant hook (on by default)")
     args = p.parse_args(argv)
 
     rep = run(seed=args.seed, n_trials=args.trials, methods=tuple(args.methods),
               max_depth=args.max_depth, dim=args.dim, only=args.only,
-              do_shrink=not args.no_shrink)
+              do_shrink=not args.no_shrink, shape_hook=not args.no_shape_hook)
     print(rep.summary(skips=args.skips))
     return 1 if rep.n_bugs else 0
 

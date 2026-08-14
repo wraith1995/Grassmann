@@ -35,6 +35,7 @@ from grassmann.core import space as S
 from grassmann.core import term as T
 from grassmann.transform.diff import DiffError, diff
 from grassmann.infer.synth import InferError, synth_space
+from grassmann.infer.check import check as _check_against
 from grassmann.infer.unify import UnifyError
 from grassmann.core.space import SpaceError
 
@@ -194,6 +195,15 @@ def typecheck(case: Case, rng: np.random.Generator) -> Result:
         return Result("typecheck", "skip", f"rejected: {_short(e)}")
     except Exception as e:  # a crash *inside* inference is itself a defect
         return Result("typecheck", "bug", f"UNSOUND: inference crashed: {type(e).__name__}: {_short(e)}")
+
+    # (1b) bidirectional consistency: if synth SYNTHESIZES space `sp`, CHECKING the term against
+    # `sp` must succeed — otherwise the two directions of inference disagree on the same term.
+    try:
+        _check_against(case.term, sp)
+    except (InferError, UnifyError, SpaceError) as e:
+        return Result("typecheck", "bug",
+                      f"synth/check disagree: synth gave {sp!r} but check(term, that) raised "
+                      f"{type(e).__name__}: {_short(e)}")
 
     # (2) soundness: accepted ⇒ lowering must not crash unexpectedly
     try:
