@@ -29,11 +29,9 @@ from gfuzz.runner import run  # noqa: E402
 # real crash the fuzzer surfaces on the current tree; the test allows them so a *new*
 # regression still turns red.  When one is fixed upstream, its entry simply goes unused.
 KNOWN_BUGS: tuple[str, ...] = (
-    # A/B/C (diff unused-seed LLam; OPlus/OProd shape divergence) are FIXED upstream.
-    # This one is reported-but-unfixed (see gfuzz/FINDINGS-shape-bugs.md): diff of det/logdet
-    # of an x-dependent non-`bij` endomorphism builds a Solve without the bij assertion, so the
-    # Jacobian does not type-check.  Allowed here so a *new* regression still turns the test red.
-    "diff produced an ill-typed Jacobian",
+    # A/B/C (diff unused-seed LLam; OPlus/OProd shape divergence) and the diff det/logdet
+    # ill-typed-Jacobian are all FIXED upstream.  The allowlist is empty: any bug the small
+    # batch finds now is a NEW regression.
 )
 
 

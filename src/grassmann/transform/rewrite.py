@@ -1587,6 +1587,12 @@ def dist_unary(node: Term) -> Term | None:
             return _unary_linear(node, node.vector, lambda v: Project(v, node.space))
         case Embed():
             return _unary_linear(node, node.vector, lambda v: Embed(v, node.space))
+        case Assert() if node.props is not None:
+            # a prop-carrying Assert is a claim about the WHOLE map (e.g. ``bij``), and such props
+            # are NOT distributive over + / · — ``Assert(a+b, bij)`` ≠ ``Assert(a,bij)+Assert(b,bij)``
+            # (the summands need not be bijective).  Keep it atomic so a downstream ``Solve`` keeps
+            # its license; the operand is still normalized by the traversal into ``node.vector``.
+            return None
         case Assert():
             return _unary_linear(node, node.vector, lambda v: Assert(v, node.space))
         case Lift():

@@ -2332,3 +2332,38 @@ def test_noninj_img_immersion_gauge_raises() -> None:
                 diff(e, x, deps={v.uid: Dv, J.uid: DJ})
         finally:
             clear_subspace_gauges()
+
+
+def test_diff_logdet_det_of_nonbij_endomorphism_is_welltyped() -> None:
+    """diff of det/logdet of an x-dependent square endomorphism that is NOT a bij-asserted Var
+    (here ``M0{bij} + bump(x)``, a Sum) must produce a WELL-TYPED Jacobian.
+
+    Jacobi's formula ``d det = det·tr(f⁻¹ df)`` needs ``f⁻¹`` = ``Solve(f)``, which requires ``f``
+    asserted ``bij``.  ``diff`` now emits that assertion (``Assert(f, …, bij)``); regression guard
+    that (a) the derivative type-checks, (b) it matches finite differences, (c) the load-bearing
+    assertion survives ``simplify``/``normal_form``/``beta``."""
+    from grassmann.core.props import bij
+    from grassmann.infer.synth import synth_space
+    import grassmann as G
+
+    V = S.base("V", 3)
+    x = T.var("x", V)
+    M0 = T.var("M0", S.oprod(S.dual(V), V), props=bij)
+    bump = T.scale(0.05, T.oprod_v(T.Eval(T.flat(V), (0,), (x,)), x))
+    Mx = T.sum_(M0, bump)  # an x-dependent square endomorphism; NOT itself asserted bij
+
+    M0v = 1.5 * np.eye(3) + 0.3 * np.random.randn(3, 3)
+    for build in (T.LogDet, T.Det):
+        F = build(Mx)
+        J = diff(F, x)
+        assert isinstance(J, T.LLam)
+        synth_space(J.body)  # must type-check (raised InferError before the fix)
+        feed = {"M0_%d" % M0.uid: M0v, _xkey(x): np.random.randn(3)}
+        h = np.random.randn(3)
+        got = _run(J.body, {**feed, "%s_%d" % (J.vars[0].name, J.vars[0].uid): h}).ravel()
+        fd = _fd_jacobian(F, x, feed, 3) @ h
+        np.testing.assert_allclose(got, fd, atol=1e-4)
+        # the bij assertion must survive every value-preserving rewrite
+        for rw in (G.simplify, G.normal_form, G.beta):
+            r = rw(J.body)
+            synth_space(r.node if hasattr(r, "node") else r)

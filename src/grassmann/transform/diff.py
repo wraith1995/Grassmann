@@ -1058,7 +1058,15 @@ def _dd_logdet_kernel(f: Term, ctx: _DCtx) -> Term | None:
     df = _dd(f, ctx)
     if isinstance(df, Zero):
         return None
-    return Trace(Compose(Solve(f), (0,), (df,)), 1, 0)  # tr(f⁻¹·df), a Scalar
+    # Jacobi's formula ``d det = det·tr(f⁻¹ df)`` presupposes ``f`` invertible — det/logdet are only
+    # differentiable at an invertible point.  ``f`` (the operand) need not be a ``bij``-asserted
+    # ``Var`` (e.g. a ``Sum``), so ASSERT bijectivity for the ``Solve``; otherwise the derivative
+    # fails to type-check with "Solve requires bij".
+    from grassmann.core.props import MapProps
+    from grassmann.infer.synth import synth_space
+
+    f_bij = Assert(f, synth_space(f), MapProps(bij=True))
+    return Trace(Compose(Solve(f_bij), (0,), (df,)), 1, 0)  # tr(f⁻¹·df), a Scalar
 
 
 def _dd_det(e: Det, ctx: _DCtx) -> Term:
