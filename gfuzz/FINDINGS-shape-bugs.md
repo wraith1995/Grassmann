@@ -295,3 +295,41 @@ Both live in `lower/represent.py`'s n-generic path (the `_rep_oprod`/`Kron`/`Per
 construction with `DimAtom` axes). They are lower-priority than B/C (dynamic lowering is
 explicitly only partially wired), and are left for the maintainer — the fuzzer reports, it does not
 fix. Reproduce: `python -m gfuzz --dynamic --seed 1` (shrinks to the terms above).
+
+---
+
+## `diff` of `det`/`logdet` produces an ill-typed Jacobian (found by mining the skips)
+
+Discovered by auditing the *skip* population — the lesson from the shape hook is that a real bug
+can hide behind an "acceptable bail". The `ad_vs_fd` oracle was classifying this as an
+`InferError` skip; it is a genuine `diff` soundness bug.
+
+**Symptom.** For a well-typed `F` containing `det(M)` / `logdet(M)` where `M` is an x-dependent
+*square endomorphism that is not asserted `bij`* (e.g. `M = M0{bij} + bump(x)` — a `Sum`, which
+`synth` accepts for `det`/`logdet` since a determinant is defined for any square matrix),
+`diff(F, x)` returns a Jacobian whose body **does not type-check**:
+`InferError: Solve requires the map to be asserted 'bij'`.
+
+**Minimal reproducer.**
+```python
+V = S.base('V', 3); x = T.var('x', V)
+Mb = T.var('M', S.oprod(S.dual(V), V), props=bij)
+Mx = T.sum_(Mb, T.scale(0.05, T.oprod_v(T.Eval(T.flat(V),(0,),(x,)), x)))  # x-dependent, NOT bij
+synth_space(T.LogDet(Mx))         # OK — logdet of a square endomorphism type-checks
+synth_space(diff(T.LogDet(Mx), x).body)   # InferError: Solve requires bij
+```
+
+**Root cause.** `transform/diff.py::_dd_logdet_kernel` (~line 1061) builds the derivative
+`tr(f⁻¹·df)` as `Trace(Compose(Solve(f), (0,), (df,)), 1, 0)`. `Solve(f)` requires `f` provably
+`bij`, but `f` (the det/logdet argument) need not be. `det`'s rule (`_dd_det`) uses the same
+kernel; `trace`'s derivative doesn't need the inverse, so it is unaffected.
+
+**Fix direction (a maintainer call — touches the invertibility assumption).** Jacobi's formula
+`d det(X) = det(X)·tr(X⁻¹ dX)` presupposes `X` invertible; det/logdet are only differentiable at an
+invertible point. So `diff` should construct the `Solve` under a `bij` assumption on `f` (assert
+`bij` on the operand for the derivative), rather than requiring the *original* term to carry it.
+Alternatively `synth` could require `logdet`'s argument to be invertible. Reported, not fixed.
+
+The `ad_vs_fd` oracle now reports "diff produced an ill-typed Jacobian" as a **bug** (any inference
+error when lowering `J·h`, given `F` itself lowered) — so this class can no longer hide behind the
+`InferError` bail.
