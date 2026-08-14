@@ -31,11 +31,15 @@ def main(argv=None) -> int:
                    help="print the skip breakdown (what inference rejected / lowering gaps)")
     p.add_argument("--no-shape-hook", action="store_true",
                    help="disable grassmann's canonical-shape invariant hook (on by default)")
+    p.add_argument("--dynamic", action="store_true",
+                   help="dynamic-shape mode: build over symbolic ℝⁿ (DimVar) bases and exercise "
+                        "grassmann's dimension-generic lowering (feed picks a concrete size)")
     args = p.parse_args(argv)
 
     rep = run(seed=args.seed, n_trials=args.trials, methods=tuple(args.methods),
               max_depth=args.max_depth, dim=args.dim, only=args.only,
-              do_shrink=not args.no_shrink, shape_hook=not args.no_shape_hook)
+              do_shrink=not args.no_shrink, shape_hook=not args.no_shape_hook,
+              dynamic=args.dynamic)
     print(rep.summary(skips=args.skips))
     return 1 if rep.n_bugs else 0
 

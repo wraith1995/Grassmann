@@ -269,3 +269,29 @@ gfuzz already generates the offending terms.
 - `drop_unit_factors` defined `core/space.py:617`; only textual mention in
   `lower/represent.py` is the comment at line 4140 — not applied at the numeric
   boundary.
+
+---
+
+## Dynamic-shape mode — n-generic lowering gaps (found later, NOT fixed)
+
+The `gfuzz --dynamic` mode builds terms over symbolic `ℝⁿ` bases (`OPlusRep(DimVar, Scalar)`) so
+the compiled program is dimension-generic. Most nodes cleanly bail on symbolic dims
+(`RepresentError: … has a runtime/symbolic dimension` — an expected skip). But a few nodes crash
+*uncleanly* (an `AssertionError`/`ValueError`, not a clean refusal) on terms that are
+**bidirectionally well-typed** (both `synth_space` and `infer.check` accept them) — i.e. the type
+checker says the term is fine but the n-generic realizer mis-sizes a tensor axis. These are the
+dynamic analog of bugs B/C (the same tensor-axis-realization family), reported for triage:
+
+- **`Kron` applied over symbolic dims** — `kron(A, B)(u ⊗ v)` raises
+  `AssertionError: assert:eval-dim@0[rank_eq] 4 != 2` (a fused product axis `2·2=4` contracted
+  against a single `2`). Bidirectionally typed. (Minimal core: a `kron` of two symbolic-dim maps
+  applied to an `OProdV`.)
+- **Double `permute` of a symbolic tensor product** — `permute(permute(remetric(v, g) ⊗ w, [1,0]),
+  [1,0])` (which should be the identity) raises
+  `ValueError: Einstein sum subscript a does not contain the correct number of indices`. The
+  permute→einsum for a multi-axis operand with a symbolic axis emits a malformed spec.
+
+Both live in `lower/represent.py`'s n-generic path (the `_rep_oprod`/`Kron`/`Permute` einsum
+construction with `DimAtom` axes). They are lower-priority than B/C (dynamic lowering is
+explicitly only partially wired), and are left for the maintainer — the fuzzer reports, it does not
+fix. Reproduce: `python -m gfuzz --dynamic --seed 1` (shrinks to the terms above).

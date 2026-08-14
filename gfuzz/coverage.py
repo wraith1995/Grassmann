@@ -87,7 +87,8 @@ def _iter_space_terms(sp):
                 yield child
 
 
-def measure(seed: int = 0, trials: int = 3000, dim: int = 3, max_depth: int = 4) -> dict:
+def measure(seed: int = 0, trials: int = 3000, dim: int = 3, max_depth: int = 4,
+            dynamic: bool = False) -> dict:
     term_ctr: Counter = Counter()
     space_ctr: Counter = Counter()
     prop_ctr: Counter = Counter()
@@ -95,7 +96,7 @@ def measure(seed: int = 0, trials: int = 3000, dim: int = 3, max_depth: int = 4)
     for i in range(trials):
         rng = np.random.default_rng([seed, i])
         try:
-            case = generate(rng, n=dim, max_depth=max_depth)  # the SAME path the runner uses
+            case = generate(rng, n=dim, max_depth=max_depth, dynamic=dynamic)  # same path as runner
         except Exception:
             continue
         walk_space(case.x.space, space_ctr)  # the diff var's space
@@ -136,8 +137,9 @@ def main(argv=None) -> int:
     p.add_argument("--trials", type=int, default=3000)
     p.add_argument("--dim", type=int, default=3)
     p.add_argument("--max-depth", type=int, default=4)
+    p.add_argument("--dynamic", action="store_true", help="measure the symbolic-dim (DimVar) mode")
     a = p.parse_args(argv)
-    print(report(measure(a.seed, a.trials, a.dim, a.max_depth)))
+    print(report(measure(a.seed, a.trials, a.dim, a.max_depth, a.dynamic)))
     return 0
 
 
