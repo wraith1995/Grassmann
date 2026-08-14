@@ -28,6 +28,7 @@ import grassmann.stdlib as L
 from grassmann.core import props as P
 from grassmann.core import space as S
 from grassmann.core import term as T
+from grassmann.core.kinds import SpaceSort
 from grassmann.core.props import bij as _BIJ
 
 
@@ -226,7 +227,8 @@ class Generator:
             return self._leaf(sp)
 
     def _applicable(self, sp: S.Space):
-        gen = [self._b_leaf, self._b_sum, self._b_scale, self._b_linapply, self._b_zero]
+        gen = [self._b_leaf, self._b_sum, self._b_scale, self._b_linapply, self._b_zero,
+               self._b_neval, self._b_tuple_project]
         if _is_euclidean(sp):
             gen.append(self._b_elementwise)
         if isinstance(sp, S.Scalar):
@@ -241,15 +243,14 @@ class Generator:
         if isinstance(sp, S.WithInner):
             gen.append(self._b_remetric)
         if isinstance(sp, S.OPlus):
-            gen += [self._b_oplusv, self._b_tuple_embed]
+            gen += [self._b_oplusv, self._b_tuple_embed, self._b_tuple_permute]
         if isinstance(sp, S.OProd):
             gen += [self._b_oprodv, self._b_permute]
             if len(sp.spaces) == 2:
                 gen.append(self._b_kron)
         m = as_map(sp)
         if m is not None:
-            gen.append(self._b_dagger)
-            gen.append(self._b_compose)
+            gen += [self._b_dagger, self._b_compose, self._b_llam]
             if m[0] == m[1]:
                 gen.append(self._b_solve_map)
         return gen
@@ -275,6 +276,36 @@ class Generator:
 
     def _b_zero(self, sp, d):
         return T.zero(sp)
+
+    def _b_neval(self, sp, d):
+        """``(λ a:T. body(a)) applied to an arg`` — a nonlinear binder (``Lam`` + ``NEval``).
+        The body genuinely uses ``a`` so β-reduction (checked by the rewrite oracle) is exercised."""
+        t = self._pick_base()
+        a = T.var(self._fresh("a"), t)
+        if isinstance(sp, S.Scalar):
+            body = T.Eval(T.inner(t), (0, 1), (a, self.gen(t, d)))  # ⟨a, w⟩
+        else:
+            body = T.Eval(self._map_leaf(t, sp), (0,), (a,))        # A·a : sp
+            if _is_euclidean(sp):
+                body = _node(L.tanh(body))
+        lam = T.lam(((a.name, SpaceSort(t)),), body, (a,))
+        return T.neval(lam, (0,), self.gen(t, d))
+
+    def _b_tuple_project(self, sp, d):
+        """Extract summand ``sp`` from an ``OPlus`` that contains it — the ``TupleProject`` map."""
+        other = self._pick_base()
+        i = int(self.rng.integers(2))
+        parts = (sp, other) if i == 0 else (other, sp)
+        osp = S.oplus(*parts)
+        return T.Eval(T.TupleProject(osp, i), (0,), (self.gen(osp, d),))
+
+    def _b_tuple_permute(self, sp, d):
+        """Reverse the summands of an ``OPlus`` value (the ``TuplePermute`` node)."""
+        parts = list(sp.spaces)
+        k = len(parts)
+        perm = tuple(range(k - 1, -1, -1))
+        v = self.gen(S.oplus(*[parts[i] for i in perm]), d)
+        return T.TuplePermute(v, perm)
 
     def _b_elementwise(self, sp, d):
         op = self.rng.choice(["tanh", "sin", "cos", "square", "sigmoid"])
@@ -323,6 +354,14 @@ class Generator:
     def _b_solve_map(self, sp, d):
         a, _ = as_map(sp)
         return T.solve(self._bij_leaf(S.oprod(S.dual(a), a)))
+
+    def _b_llam(self, sp, d):
+        """``λ⊸ x:A. (B·x)`` — the LINEAR binder (a map ``A ⊸ B`` realized as its matrix).  The
+        body uses ``x`` (so the LLam is well-formed), the same node ``diff`` itself emits."""
+        a_sp, b_sp = as_map(sp)
+        x = T.var(self._fresh("x"), a_sp)
+        body = T.Eval(self._map_leaf(a_sp, b_sp), (0,), (x,))  # B·x, linear in x
+        return T.LLam((x,), body)
 
     # -- new: base-target machinery (musical / solve / pinv / sqrt / identity / metric) ----
 
@@ -512,10 +551,13 @@ def generate(rng: np.random.Generator, *, n: int = 3, max_depth: int = 4,
     g = Generator(rng, n=n, max_depth=max_depth)
     if out_space is None:
         r = rng.random()
-        if r < 0.4:
+        if r < 0.35:
             sp = g.Sc
-        elif r < 0.7:
+        elif r < 0.6:
             sp = g._pick_base()
+        elif r < 0.72:
+            # a linear-map output — exercises the map-valued nodes (LLam / Dagger / Compose / Solve)
+            sp = S.oprod(S.dual(g._pick_base()), g._pick_base())
         else:
             sp = g.random_space(2, max_dim=8)
     else:
