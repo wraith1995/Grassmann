@@ -24,7 +24,7 @@ from . import oracles as O
 from .generate import generate
 from .shrink import shrink
 
-METHODS = ("ad_vs_fd", "rewrite", "typecheck", "identity")
+METHODS = ("ad_vs_fd", "rewrite", "typecheck", "shape", "identity")
 
 
 @dataclass
@@ -137,6 +137,12 @@ def _still_fails_typecheck(case, seed, i, sig):
     return res.status == "bug" and _sig("typecheck", res.detail) == sig
 
 
+def _still_fails_shape(case, seed, i, sig):
+    r = np.random.default_rng([seed, i, 13])
+    res = _safe("shape", O.shape_canonical, case, r)
+    return res.status == "bug" and _sig("shape", res.detail) == sig
+
+
 def run(seed: int = 0, n_trials: int = 500, *, methods=METHODS, max_depth: int = 4,
         dim: int = 3, only: int | None = None, do_shrink: bool = True,
         quiet_warnings: bool = True, keep_skip_examples: int = 3) -> Report:
@@ -168,6 +174,11 @@ def run(seed: int = 0, n_trials: int = 500, *, methods=METHODS, max_depth: int =
                 sig = _sig("typecheck", res.detail)
                 _record(rep, "typecheck", i, seed, res, case, do_shrink,
                         lambda c, s=sig: _still_fails_typecheck(c, seed, i, s), keep_skip_examples)
+            if "shape" in methods:
+                res = _safe("shape", O.shape_canonical, case, r)
+                sig = _sig("shape", res.detail)
+                _record(rep, "shape", i, seed, res, case, do_shrink,
+                        lambda c, s=sig: _still_fails_shape(c, seed, i, s), keep_skip_examples)
             if "identity" in methods:
                 _record(rep, "identity", i, seed,
                         _safe("identity", lambda: O.identity_holds(r, n=dim)),
