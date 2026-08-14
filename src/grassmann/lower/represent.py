@@ -1265,10 +1265,19 @@ def _rep_oplus(
     # the concat's length is the SUM of the operand lengths — derive it from the realized
     # operands (a runtime sum atom when any is dynamic) so a symbolic ℝⁿ ⊕ ℝⁿ sizes correctly.
     _arrs = [r.array for r in reps]
-    # A 0-d SCALAR summand (e.g. euclidean built as ⊕ⁿ Scalar) contributes length 1 — consistent with
-    # `_ConcatOp`, which flattens every operand (`reshape(-1)`), so a scalar rides as a single element.
-    _dims = [(_shape_of(a)[0] if _shape_of(a) else 1) for a in _arrs]
-    _sum = _combined_dim(ctx, _dims, "sum", _arrs, 0, label="oplus")
+    # `_ConcatOp` flattens every operand (`reshape(-1)`), so each summand contributes its
+    # FLATTENED length — a 0-d Scalar rides as one element, a multi-axis (⊗-typed) summand as its
+    # full product.  Reading axis 0 only (`_shape_of(a)[0]`) undercounts a multi-axis summand, so
+    # the declared concat length disagreed with the (correct) flattened data — e.g. a ``(2,3)``
+    # summand counted as 2, declaring ``(4,)`` where the concat produced 8.  Size from the flattened
+    # total instead; it also equals ``_shape_of_space(⊕)`` = ``Σ|sᵢ|``.
+    _shapes = [_shape_of(a) for a in _arrs]
+    if all(all(isinstance(dax, int) for dax in sh) for sh in _shapes):
+        _sum: int | pa.DimAtom = sum(int(np.prod(sh)) if sh else 1 for sh in _shapes)
+    else:
+        # dynamic summands are single-axis ℝⁿ (axis 0 IS the flattened length); keep that path.
+        _dims = [(sh[0] if sh else 1) for sh in _shapes]
+        _sum = _combined_dim(ctx, _dims, "sum", _arrs, 0, label="oplus")
     [out] = ctx.prog.emit_stmt(
         pa.ConcatOp(), _arrs, [pa.OutSpec("oplus", (_sum,))], note="oplus:concat",
     )
@@ -1291,19 +1300,21 @@ def _rep_oprod(
 ) -> Rep:
     """``v1 * … * vn`` — the outer-product over the per-factor axes.
 
-    Each factor's *space* axes (a factor may itself be tensored, e.g. ``V⊗ᵏ``) get fresh
-    einsum labels and stack into the output; any *free* (basis-index) labels a factor
-    carries — the ``LLam``→coordinate-tensor binding — ride through verbatim to
-    the output, so the outer product of LLam-bound matrix operands is the full map tensor.
+    Each factor's *space* axes get fresh einsum labels and stack into the output; any *free*
+    (basis-index) labels a factor carries — the ``LLam``→coordinate-tensor binding — ride
+    through verbatim to the output, so the outer product of LLam-bound matrix operands is the
+    full map tensor.
 
-    A ``Scalar`` factor is PRESENT in the output as its own singleton axis:
-    ``_shape_of_space``'s ⊗ contract is one axis per factor, and a bare ``Var`` of the same
-    ``OProd`` space already declares that way — so a value REDUCED from an ``OProdV`` must
-    match, else the same space lowers to two shapes depending on the term's syntactic form
-    (measured: the σ readout's ``Eval(Kron(Identity(Scalar()), …))`` produced ``(1, 1)``
-    where the canonical weighted body produced ``(1,)``, and the two rows could not stack).
-    The scalar's array is 0-axis, so the einsum cannot mint the axis; a bulk-preserving
-    ``ReshapeOp`` inserts the singletons after the fold.
+    The output is then reshaped to the **canonical** ⊗ shape — ONE axis per top-level factor,
+    exactly what ``_shape_of_space`` assigns the space (``⊗(sᵢ) → (|s₀|, …)``) and what a bare
+    ``Var`` of the same ``OProd`` space declares.  A factor that itself realizes multi-axis (a
+    nested tensor, most easily a unit ``Scalar`` factor such as ``V⊗𝟙``) is FUSED down to its
+    single flattened axis; a 0-axis ``Scalar`` factor is GIVEN its unit axis.  Without this the
+    same space lowered to two shapes depending on the term's syntactic form — a bare ``Var`` at
+    ``_shape_of_space`` rank, an ``OProdV`` at a higher rank — and the two could not stack
+    (measured: the σ readout's ``Eval(Kron(Identity(Scalar()), …))``; and ``(V⊗𝟙)⊗𝟙`` realizing
+    ``(3,1,1)`` where its ``Var`` realized ``(3,1)``).  The einsum cannot mint/fuse these axes,
+    so a bulk-preserving ``ReshapeOp`` fixes the shape after the fold.
     """
     space = _synth(e)
     # (B) structural split: a BasisProd target of matching arity ⇒ build each factor in its
@@ -1331,10 +1342,20 @@ def _rep_oprod(
         space_labels += these_space
         free_labels += r.free_labels
         space_dims.extend(ashape[:n_space])
-        if n_space == 0 and isinstance(_synth(v), S.Scalar):
-            canonical_dims.append(1)                  # the ⊗-unit still owns an output axis
+        # Canonical shape = ONE axis per top-level ⊗ factor, mirroring ``_shape_of_space``
+        # (``⊗(sᵢ) → (|s₀|, …)``), so an ``OProdV`` and a bare ``Var`` of the SAME space realize
+        # to the same shape.  A factor that itself realizes multi-axis — a nested tensor, most
+        # easily produced by a unit ``Scalar`` factor (``R3⊗𝟙``) — is FUSED to its flattened dim;
+        # a 0-axis ``Scalar`` factor still owns a unit axis.  (Without this, a ``V⊗𝟙`` factor kept
+        # its inner unit axis and the value lowered to a higher rank than its space's shape.)
+        factor_axes = ashape[:n_space]
+        if n_space == 0:
+            if isinstance(_synth(v), S.Scalar):
+                canonical_dims.append(1)              # the ⊗-unit still owns an output axis
+        elif all(isinstance(dax, int) for dax in factor_axes):
+            canonical_dims.append(int(np.prod(factor_axes)))   # fuse a multi-axis factor to one
         else:
-            canonical_dims.extend(ashape[:n_space])
+            canonical_dims.extend(factor_axes)        # dynamic multi-axis factor: leave unfused
     out_labels = space_labels + free_labels
     spec = ",".join(operand_specs) + "->" + out_labels
     free_dims = tuple(_dim_of_free(reps))
