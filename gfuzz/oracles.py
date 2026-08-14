@@ -120,7 +120,14 @@ def ad_vs_fd(case: Case, rng: np.random.Generator, *, eps: float = 1e-6,
         seed = J.vars[0]
         try:
             got = _run(J.body, {**feed, _vk(seed): h})
-        except (RepresentError, *_BAILS) as e:
+        except (InferError, UnifyError, SpaceError) as e:
+            # diff SUCCEEDED (returned a Jacobian) but its output does not type-check — F was
+            # well-typed (its base value lowered above), so diff produced an ILL-TYPED term.
+            # This is a diff soundness bug, NOT an acceptable inference bail; report it.
+            return Result("ad_vs_fd", "bug",
+                          f"diff produced an ill-typed Jacobian: synth of J·h raised "
+                          f"{type(e).__name__}: {_short(e)}")
+        except (RepresentError, DiffError, KeyError) as e:
             return Result("ad_vs_fd", "skip", f"J lower: {type(e).__name__}: {e}")
     got = np.ravel(got)
     fd = np.ravel(fd)
