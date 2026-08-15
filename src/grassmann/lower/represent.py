@@ -1424,8 +1424,16 @@ def _rep_oprod(
                 canonical_dims.append(1)              # the ⊗-unit still owns an output axis
         elif all(isinstance(dax, int) for dax in factor_axes):
             canonical_dims.append(int(np.prod(factor_axes)))   # fuse a multi-axis factor to one
+        elif len(factor_axes) == 1:
+            canonical_dims.append(factor_axes[0])     # already one axis (possibly a DimAtom)
         else:
-            canonical_dims.extend(factor_axes)        # dynamic multi-axis factor: leave unfused
+            # dynamic multi-axis factor: fuse to its product ``DimAtom`` (the n-generic canonical
+            # shape — one axis per top-level ⊗ factor), so a bare Var and an OProdV of the same
+            # symbolic space realize alike and a downstream Permute/Sum axis-count matches.
+            try:
+                canonical_dims.append(_combine_atom_dims(ctx, list(factor_axes), "prod"))
+            except RepresentError:
+                canonical_dims.extend(factor_axes)    # non-input-sourced ⇒ leave unfused (bail)
     out_labels = space_labels + free_labels
     spec = ",".join(operand_specs) + "->" + out_labels
     free_dims = tuple(_dim_of_free(reps))
@@ -1434,12 +1442,17 @@ def _rep_oprod(
         pa.EinsumStmtOp(spec), [r.array for r in reps],
         [pa.OutSpec("oprod", out_shape)], note="oprod:outer-einsum",
     )
-    if canonical_dims != space_dims:                  # some Scalar factor lacked its axis ⇒ insert it
-        [out] = ctx.prog.emit_stmt(
-            pa.ReshapeOp(tuple(canonical_dims) + free_dims), [out],
-            [pa.OutSpec("oprod", tuple(canonical_dims) + free_dims)],
-            note="oprod:scalar-factor-axes",
-        )
+    if canonical_dims != space_dims:                  # a factor realized to a non-canonical rank
+        _canon_shape = tuple(canonical_dims) + free_dims
+        if all(isinstance(d, int) for d in _canon_shape):
+            [out] = ctx.prog.emit_stmt(
+                pa.ReshapeOp(_canon_shape), [out], [pa.OutSpec("oprod", _canon_shape)],
+                note="oprod:scalar-factor-axes",
+            )
+        else:  # symbolic canonical dims ⇒ dynamic reshape (leave unfused if not input-sourced)
+            dyn = _dyn_reshape(ctx, out, _canon_shape, note="oprod:fuse-factors-dyn") if not free_dims else None
+            if dyn is not None:
+                out = dyn
     rep = Rep(out, basis, space, free_labels=free_labels)
     if subs is not None:
         return rep  # already in `want`
@@ -2829,7 +2842,7 @@ def _rep_eval(
             arg_rep = _reconcile_pairing(
                 ctx, _slot_basis_at(f_rep.basis, pos), arg_rep, note=f"eval-reconcile@{pos}",
             )
-        arg_rep = _fuse_arg_to_slot(ctx, f_rep.array, pos, arg_rep)
+        arg_rep = _fuse_arg_to_slot(ctx, f_rep.array, pos, arg_rep, slot_space=f_factors[pos])
         # dim-agreement assert at the contraction site.
         _assert_axis_dims(ctx, f_rep.array, pos, arg_rep, note=f"assert:eval-dim@{pos}")
         operands.append(arg_rep.array)
@@ -2886,12 +2899,23 @@ def _rep_eval(
             return _match_result(ctx, rep, target)
 
 
+def _slot_covers_arg(slot_space: S.Space | None, arg_space: S.Space) -> bool:
+    """Does ``f``'s dual slot span the arg's WHOLE space (a fused map-operator slot, e.g. a
+    ``Kron``/``Lift`` domain ``dual(A⊗B)``) rather than a single sub-factor (a partial
+    contraction, ``dual(A)`` against a value in ``A⊗B``)?  Structural — works for symbolic dims,
+    where the static ``slot == ∏(arg axes)`` dim test cannot decide."""
+    if slot_space is None:
+        return False
+    primal = slot_space.space if isinstance(slot_space, S.Dual) else slot_space
+    return _norm_space(primal) == _norm_space(arg_space)
+
+
 def _fuse_arg_to_slot(
-    ctx: _Ctx, f_arr: pa.SymArray, pos: int, arg_rep: Rep,
+    ctx: _Ctx, f_arr: pa.SymArray, pos: int, arg_rep: Rep, slot_space: S.Space | None = None,
 ) -> Rep:
     """Fuse ``arg_rep``'s space axes into one when ``f``'s slot ``pos`` is a fused dual.
 
-    A map produced by ``alt``/``Lift`` has a single fused input slot of dim ``nᵏ``;
+    A map produced by ``alt``/``Lift``/``Kron`` has a single fused input slot of dim ``nᵏ``;
     a value of ``V⊗ᵏ`` arrives over ``k`` separate axes. When the slot dim equals the
     product of the arg's *space* axes (and doesn't already match its leading axis), reshape
     those axes into one fused axis (the free/basis axes are untouched). No-op otherwise, so
@@ -2899,7 +2923,29 @@ def _fuse_arg_to_slot(
     """
     fshape = _shape_of(f_arr)
     ashape = _shape_of(arg_rep.array)
-    if pos >= len(fshape) or not isinstance(fshape[pos], int):
+    if pos >= len(fshape):
+        return arg_rep
+    if not isinstance(fshape[pos], int):
+        # DYNAMIC (DimVar) slot: the static ``slot == ∏(axes)`` test can't decide, so fuse iff f's
+        # slot STRUCTURALLY spans the arg's whole space (a Kron/Lift/alt fused domain) — then reshape
+        # the arg's symbolic space axes into one via a product ``DimAtom``.
+        n_free = len(arg_rep.free_labels)
+        n_space = len(ashape) - n_free
+        free_dims = ashape[n_space:]
+        if (n_space > 1 and _slot_covers_arg(slot_space, arg_rep.space)
+                and all(isinstance(d, int) for d in free_dims)):
+            try:
+                fused = _combine_atom_dims(ctx, list(ashape[:n_space]), "prod")  # symbolic product dim
+            except RepresentError:
+                return arg_rep  # non-input-sourced atom ⇒ can't form the product; let the assert speak
+            # ``ReshapeOp`` is static, but numpy ``-1`` infers the fused length at run; the OutSpec
+            # carries the symbolic product ``DimAtom`` so downstream dim tracking is exact.
+            op_shape = (-1, *[int(d) for d in free_dims])
+            [out] = ctx.prog.emit_stmt(
+                pa.ReshapeOp(op_shape), [arg_rep.array],
+                [pa.OutSpec("fuse-arg-dyn", (fused, *free_dims))], note=f"eval:fuse-arg-dyn@{pos}",
+            )
+            return Rep(out, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
         return arg_rep
     slot = fshape[pos]
     n_free = len(arg_rep.free_labels)
@@ -2949,6 +2995,63 @@ def _fuse_arg_to_slot(
     return Rep(fused, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
 
 
+def _dyn_reshape(ctx: _Ctx, arr: pa.SymArray, target: tuple[object, ...], *, note: str) -> pa.SymArray | None:
+    """Reshape ``arr`` to ``target`` with a :class:`polyarray.DynReshapeOp`.
+
+    Each target axis becomes a ``spec`` entry: a static ``int`` (kind 0), an input-sourced
+    ``DimAtom`` read from its source input (kind 1), or numpy ``-1`` (kind 2, *infer*) for a
+    computed/product atom that is not a single input axis.  ``None`` if more than one axis would
+    need inferring (numpy allows a single ``-1``), so the caller leaves the array unreshaped."""
+    spec: list[tuple[int, int]] = []
+    refs: list[pa.SymArray] = [arr]
+    infer_used = False
+    for d in target:
+        if isinstance(d, int):
+            spec.append((0, int(d)))
+        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "in":
+            _, in_name, axis = d.source
+            ref = ctx.prog.input_arrays.get(in_name)
+            if ref is None:
+                return None
+            spec.append((1, int(axis)))
+            refs.append(ref)
+        else:  # a computed/non-input atom (e.g. a product nₐ·n_b) — let numpy infer it
+            if infer_used:
+                return None
+            infer_used = True
+            spec.append((2, 0))
+    [out] = ctx.prog.emit_stmt(
+        pa.DynReshapeOp(tuple(spec)), refs, [pa.OutSpec(note, tuple(target))], note=note,
+    )
+    return out
+
+
+def _dyn_unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
+    """Un-fuse a symbolic-dim ``Eval`` result whose surviving map-operator slot came back as one
+    fused axis (the ``DimVar`` mirror of :func:`_unfuse_eval_result`).
+
+    The result space's per-factor dynamic axes are sized from their source inputs at run via a
+    :class:`polyarray.DynReshapeOp`.  Bails (leaves the fused array) on any FFS factor (avoid an
+    SVD realization here), a static/non-input-sourced axis, or a trailing free (basis) axis — those
+    stay the documented n-generic gaps rather than a wrong reshape."""
+    if rep.free_labels:
+        return rep  # a trailing free axis would be dropped by the space-only reshape
+    axes_spaces = _space_axes(rep.space)
+    if any(isinstance(s, (S.Img, S.Ker, S.CoImg, S.CoKer)) for s in axes_spaces):
+        return rep  # an FFS factor would realize an SVD/QR — not this pass's job
+    try:
+        target = _shape_of_space_dyn(rep.space, ctx)
+    except (RepresentError, S.SpaceError):
+        return rep
+    n_space = len(_shape_of(rep.array))
+    if n_space >= len(target) or len(target) < 2:
+        return rep  # already unfused (or single-axis) — nothing to do
+    out = _dyn_reshape(ctx, rep.array, tuple(target), note="eval:unfuse-dyn")
+    if out is None:
+        return rep  # a static / non-input-sourced factor dim (mixed) — leave fused
+    return Rep(out, rep.basis, rep.space, free_labels=rep.free_labels)
+
+
 def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     """Reshape an ``Eval`` result whose surviving slot is a *fused* map-space axis.
 
@@ -2967,9 +3070,9 @@ def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     try:
         want_space_shape = _shape_of_space(rep.space)
     except RepresentError:
-        return rep  # dynamic/FFS axis ⇒ single-axis, nothing to un-fuse (the intended bail)
+        return _dyn_unfuse_eval_result(ctx, rep)  # symbolic (DimVar) axes ⇒ dynamic un-fuse
     if not all(isinstance(d, int) for d in want_space_shape):
-        return rep
+        return _dyn_unfuse_eval_result(ctx, rep)
     ashape = _shape_of(rep.array)
     n_free = len(rep.free_labels)
     n_space = len(ashape) - n_free
