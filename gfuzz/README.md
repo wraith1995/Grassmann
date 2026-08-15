@@ -49,10 +49,19 @@ point. No external reference needed — any divergence is a rewrite bug.
 
 ### 3. Algebraic identities  (`oracles.identity_holds`)
 
-Targeted laws with random operands, each checked against its own right-hand side:
-adjoint definition `⟨Mx, y⟩ = ⟨x, Mᵀy⟩`, `dagger∘dagger = id`, `M·solve(M,b) = b`,
-Moore–Penrose `M M† M = M`, `logdet = log∘det`, cyclic trace `tr(MN) = tr(NM)`, and inner
-symmetry.
+Targeted laws with random operands **over a random operand space** (a base of varied dimension
+or a direct sum — single-axis so endomorphisms stay 2-D), each checked against its own
+right-hand side: adjoint definition `⟨Mx, y⟩ = ⟨x, Mᵀy⟩`, `dagger∘dagger = id`,
+`M·solve(M,b) = b`, Moore–Penrose `M M† M = M`, `logdet = log∘det`, cyclic trace
+`tr(MN) = tr(NM)`, and inner symmetry.
+
+### 7. Second derivative  (`oracles.diff_second`)
+
+`diff(diff(F,x),x)` must be well-formed: the zero map, a Hessian that type-checks, or a clean
+`DiffError` refusal. An unclean crash leaking from the second differentiation (a `TermError` /
+linearity violation) or an ill-typed Hessian is a diff soundness bug (the 2nd-order analog of
+the ill-typed-Jacobian and unused-seed-LLam classes). For a **scalar** `F` it additionally
+checks **Hessian symmetry** — mixed partials commute, `H(a,b) = H(b,a)`.
 
 ### 5. Shape canonicality  (`oracles.shape_canonical`)
 

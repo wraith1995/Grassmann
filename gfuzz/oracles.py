@@ -39,7 +39,7 @@ from grassmann.infer.check import check as _check_against
 from grassmann.infer.unify import UnifyError
 from grassmann.core.space import SpaceError
 
-from .generate import Case, _node
+from .generate import Case, _node, space_dim
 
 
 @dataclass
@@ -283,6 +283,25 @@ def diff_second(case: Case, rng: np.random.Generator) -> Result:
         return Result("diff2", "bug", f"diff produced an ill-typed Hessian: {_short(e)}")
     except Exception:  # noqa: BLE001
         return Result("diff2", "skip", "Hessian synth other")
+
+    # Hessian symmetry: for a SCALAR F, mixed partials commute — H(a,b) == H(b,a).  H is the nested
+    # LLam((h2,), LLam((h1,), d²body)); seed the two directions both ways and compare.
+    if (isinstance(synth_space(case.term), S.Scalar)
+            and isinstance(H, T.LLam) and isinstance(H.body, T.LLam)):
+        h2, h1, d2 = H.vars[0], H.body.vars[0], H.body.body
+        a = rng.standard_normal(case.x0.shape)
+        b = rng.standard_normal(case.x0.shape)
+        feed = case.feed()
+        try:
+            v_ab = _run(d2, {**feed, _vk(h2): a, _vk(h1): b})
+            v_ba = _run(d2, {**feed, _vk(h2): b, _vk(h1): a})
+        except (RepresentError, *_BAILS):
+            return Result("diff2", "ok")  # Hessian type-checks but won't lower — nothing to compare
+        if (np.all(np.isfinite(v_ab)) and np.all(np.isfinite(v_ba))
+                and not np.allclose(np.ravel(v_ab), np.ravel(v_ba), atol=1e-5, rtol=1e-5)):
+            return Result("diff2", "bug",
+                          f"Hessian is NOT symmetric: H(a,b)={np.ravel(v_ab)} != H(b,a)={np.ravel(v_ba)}",
+                          got=v_ab, ref=v_ba)
     return Result("diff2", "ok")
 
 
@@ -343,9 +362,21 @@ def shape_canonical(case: Case, rng: np.random.Generator) -> Result:
 # ---------------------------------------------------------------------------
 
 
+def _pick_operand_space(rng: np.random.Generator, n: int) -> S.Space:
+    """A random *single-axis* Euclidean operand space for the algebraic laws — a base of varied
+    dimension, or a direct sum (still single-axis, so an endomorphism realizes as a 2-D matrix and
+    ``solve``/``det``/``trace`` stay well-defined).  Broadens the laws beyond a fixed ``ℝⁿ``."""
+    b2, b3, bn = S.base("W2", 2), S.base("W3", 3), S.base("Wn", n)
+    r = rng.random()
+    if r < 0.6:
+        return (b2, b3, bn)[int(rng.integers(3))]
+    return S.oplus(b2, b3)  # a composite Euclidean operand (dim 5)
+
+
 def identity_holds(rng: np.random.Generator, *, n: int = 3, atol: float = 1e-7) -> Result:
-    """Draw one random algebraic law and check it numerically against its own RHS."""
-    V = S.base("V", n)
+    """Draw one random algebraic law over a random operand space and check it against its own RHS."""
+    V = _pick_operand_space(rng, n)
+    n = space_dim(V)  # the operand-space dimension; the law bodies below size their arrays by it
     Sc = S.Scalar()
     Mat = S.oprod(S.dual(V), V)
 
