@@ -2367,3 +2367,27 @@ def test_diff_logdet_det_of_nonbij_endomorphism_is_welltyped() -> None:
         for rw in (G.simplify, G.normal_form, G.beta):
             r = rw(J.body)
             synth_space(r.node if hasattr(r, "node") else r)
+
+
+def test_direct_sum_diagonal_is_linear_and_second_diff_is_zero() -> None:
+    """``x ⊕ x`` uses x twice, so its Jacobian is the direct-sum DIAGONAL ``h ↦ h⊕h``.  ``⊕`` is
+    additive (parallel slots), so that is a valid LINEAR map (h consumed once, not twice), and the
+    second derivative of the linear ``Mo(x⊕x)`` is the zero map.  Regression: the exactly-once
+    linearity check used to treat OPlusV as multiplicative and reject ``h⊕h`` (a LinearityError
+    leaked from the second differentiation)."""
+    from grassmann.infer.linearity import check_linearity, LinearityError
+
+    V = S.base("V", 3)
+    h = T.var("h", V)
+    check_linearity(T.LLam((h,), T.OPlusV((h, h))))                 # diagonal: linear
+    check_linearity(T.LLam((h,), T.OPlusV((h, T.zero(V)))))         # injection: linear
+    with pytest.raises(LinearityError):                            # tensor diagonal: nonlinear
+        check_linearity(T.LLam((h,), T.OProdV((h, h))))
+    with pytest.raises(LinearityError):                            # nonzero const slot: affine
+        check_linearity(T.LLam((h,), T.OPlusV((h, T.var("c", V)))))
+
+    x = T.var("x", V)
+    W = S.oplus(V, V)
+    Mo = T.var("Mo", S.oprod(S.dual(W), V))
+    F = T.Eval(Mo, (0,), (T.OPlusV((x, x)),))  # linear in x
+    assert isinstance(diff(diff(F, x), x), T.Zero)  # 2nd derivative of a linear term is 0
