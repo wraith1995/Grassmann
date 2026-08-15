@@ -1345,9 +1345,12 @@ def _rep_oplus(
     if all(all(isinstance(dax, int) for dax in sh) for sh in _shapes):
         _sum: int | pa.DimAtom = sum(int(np.prod(sh)) if sh else 1 for sh in _shapes)
     else:
-        # dynamic summands are single-axis ℝⁿ (axis 0 IS the flattened length); keep that path.
-        _dims = [(sh[0] if sh else 1) for sh in _shapes]
-        _sum = _combined_dim(ctx, _dims, "sum", _arrs, 0, label="oplus")
+        # `_ConcatOp` flattens every summand and produces Σ|sᵢ| = _shape_of_space(⊕) directly, so
+        # declare the length as a fresh runtime atom sourced from THIS concat and let _bind_output
+        # size it from the realized array.  Reading one summand axis (the old path) both crashed on
+        # a 0-d Scalar (no axis 0) and undercounted a multi-axis ⊗-typed summand (n for ℝⁿ⊗ℝⁿ, not
+        # n²); self-sizing from the produced concat is right for every summand shape.
+        _sum = pa.DimAtom(name="oplus-len", source=("stmt", len(ctx.prog.statements), 0))
     [out] = ctx.prog.emit_stmt(
         pa.ConcatOp(), _arrs, [pa.OutSpec("oplus", (_sum,))], note="oplus:concat",
     )
