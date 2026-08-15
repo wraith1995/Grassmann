@@ -352,3 +352,33 @@ differentiation produces an `LLam` whose seed `dx` is consumed twice, which `dif
 check rejects. Same shape as bug A (a construction-invariant crash leaking from `diff` instead of a
 clean refusal) — the maintainer should decide whether to support the bilinear Hessian or refuse
 cleanly with `DiffError`. Now guarded by the `diff2` oracle.
+
+---
+
+## Dynamic-shape mode: n-generic tensor lowering (found, FIXED)
+
+The `--dynamic` fuzzer generates terms over an abstract `ℝⁿ` (`OPlusRep(DimVar('n'),
+Scalar())`), exercising the symbolic-dim lowering the static conventions never reach. It
+surfaced a family of crashes where a compound-space operand over `ℝⁿ` was lowered by code
+that assumed a *single* symbolic axis — the dynamic analog of Bugs B/C above. All fixed:
+
+- **`Eval`-of-`Kron`/`Lift` over `ℝⁿ`** — the fused↔unfused seam (`_fuse_arg_to_slot` /
+  `_unfuse_eval_result`) only handled concrete dims. Extended to the symbolic case: fuse a
+  map-operator slot's arg axes when `dual(slot space) == arg space` (a *structural* test,
+  since the static `slot == prod(axes)` dim test can't decide symbolically), and un-fuse the
+  result via a new polyarray `DynReshapeOp` (a runtime-sized reshape). *(grassmann `112c35c`,
+  polyarray `19dfd6d`.)*
+- **`OProd` / `Permute` of a symbolic multi-axis factor** — `_rep_oprod` now fuses such a
+  factor to its product `DimAtom`, so an `OProdV` and a bare `Var` of the same `ℝⁿ`-tensor
+  space realize alike (the n-generic analog of the Bug-C fix).
+- **`⊕` (direct sum) dynamic sizing** — `_rep_oplus`'s symbolic branch sized the concat from
+  one summand axis, which (a) crashed on a 0-d `Scalar` summand (no axis 0 — an `IndexError`)
+  and (b) undercounted a multi-axis `⊗`-typed summand (`n` for `ℝⁿ⊗ℝⁿ`, not `n²`) — the
+  dynamic Bug B, now a *silent wrong length* rather than a static assert. Fixed by
+  self-sizing the concat from the array `_ConcatOp` actually produces (`Σ|sᵢ|`) via a fresh
+  runtime `DimAtom`. *(grassmann `ddc0f1f`.)*
+
+**Status.** `gfuzz --dynamic` over 7 seeds × 400 trials reports **0 bugs across all seven
+oracles**, including `ad_vs_fd` (the AD-vs-finite-difference check confirms the symbolic-dim
+Jacobians are numerically correct). Static fuzzer unaffected; grassmann suite 2490 passed,
+polyarray 356 passed.
