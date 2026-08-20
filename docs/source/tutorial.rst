@@ -203,6 +203,51 @@ derivative, it is nilpotent — ``d ∘ d = 0`` — in every dimension:
    >>> bool(all(d_squared_zero(n) for n in (2, 3, 4)))
    True
 
+The codifferential
+------------------
+
+The **codifferential** ``δ`` is the formal adjoint of ``d``: it lowers the degree
+by one, ``δ : Ωᵏ → Ωᵏ⁻¹``, and is built as ``δ = ± ⋆ d ⋆``. On a 1-form it is the
+divergence up to sign, and — being ``d`` conjugated by the star — it is nilpotent
+too, ``δ ∘ δ = 0``:
+
+.. doctest::
+
+   >>> def codifferential(omega, x, k, n):        # δ = ⋆ d ⋆ : Ωᵏ → Ωᵏ⁻¹
+   ...     return hodge_star(exterior_derivative(hodge_star(omega, k), x, n - k), n - k + 1)
+   >>> def delta_squared_zero(n):
+   ...     W = R(n)
+   ...     x, A = G.var("x", W), G.var("A", W >> W)
+   ...     omega = hodge_star(G.flat(W)(A(x)), 1)      # ⋆♭(A·x): an (n-1)-form field
+   ...     dd = codifferential(codifferential(omega, x, n - 1, n), x, n - 2, n)
+   ...     return np.allclose(run(dd, A=np.eye(n), x=rng.standard_normal(n)), 0.0, atol=1e-8)
+   >>> bool(delta_squared_zero(3))
+   True
+
+Moving a value between spaces
+-----------------------------
+
+Not every transport needs a metric or a derivative. ``pullback(v, target)`` moves
+a value into a related target space, inserting whatever projection, embedding, or
+change of basis the relationship calls for — coordinate-free. Projecting onto a
+summand of a direct sum keeps its coordinates and drops the rest; embedding into a
+larger space pads with zeros; and embedding then projecting is the identity on the
+subspace:
+
+.. doctest::
+
+   >>> A3, B2 = G.space("A", 3), G.space("B", 2)
+   >>> S = G.osum(A3, B2)                          # the direct sum A ⊕ B = ℝ⁵
+   >>> z = G.var("z", S)
+   >>> run(G.pullback(z, A3), z=np.array([1., 2., 3., 4., 5.])).ravel()      # project A⊕B → A
+   array([1., 2., 3.])
+   >>> p = G.var("p", A3)
+   >>> run(G.pullback(p, S), p=np.array([7., 8., 9.])).ravel()               # embed A → A⊕B (pad)
+   array([7., 8., 9., 0., 0.])
+   >>> bool(np.allclose(run(G.pullback(G.pullback(p, S), A3),
+   ...                      p=np.array([7., 8., 9.])).ravel(), [7., 8., 9.]))   # embed then project = id
+   True
+
 What these operators are, concretely
 ------------------------------------
 
@@ -229,9 +274,15 @@ before, so the metric identifications hold up to that scale (for instance
    * - ``⋆(u ∧ v)``
      - ``Λ² → Λ¹`` in ``ℝ³``
      - the cross product ``u × v``
+   * - ``⋆(u ∧ v ∧ w)``
+     - ``Λ³ → Λ⁰`` in ``ℝ³``
+     - the scalar triple product ``det[u, v, w]``
    * - ``⋆ α``
      - ``Λ¹ → Λ¹`` in ``ℝ²``
      - rotation by 90°
+   * - ``⋆``
+     - ``Λ² → Λ²`` in ``ℝ⁴``
+     - the self-dual / anti-self-dual split (``⋆² = +1``)
    * - ``⋆ c``
      - ``Λ⁰ → Λⁿ``
      - the scalar ``c`` times the volume form
@@ -241,8 +292,17 @@ before, so the metric identifications hold up to that scale (for instance
    * - ``ι_v ω``
      - ``Λᵏ → Λ^{k-1}``
      - contract the form ``ω`` with the vector ``v``
+   * - ``δ = ⋆ d ⋆``
+     - ``k``-form field
+     - the codifferential — the formal adjoint of ``d``
+   * - ``d δ + δ d``
+     - form field
+     - the Hodge Laplacian ``Δ``
+   * - ``pullback(v, U)``
+     - related spaces
+     - project or embed a value into ``U``
 
-Two of these we can check outright. The divergence of a linear field ``F = A·x``
+Three of these we can check outright. The divergence of a linear field ``F = A·x``
 is the trace of ``A``, and ``⋆(u ∧ v)`` is parallel to the cross product:
 
 .. doctest::
@@ -254,10 +314,13 @@ is the trace of ``A``, and ``⋆(u ∧ v)`` is parallel to the cross product:
    >>> Amat = np.array([[1., -3, 2], [3, 2, -1], [-2, 1, 3]])
    >>> bool(np.isclose(float(run(div, A=Amat.T, x=np.array([0.5, -1., 2.]))), np.trace(Amat)))
    True
-   >>> u, v = G.var("u", W), G.var("v", W)
-   >>> uu, vv = np.array([1., 0., 1.]), np.array([0., 2., 1.])
+   >>> u, v, w = G.var("u", W), G.var("v", W), G.var("w", W)
+   >>> uu, vv, ww = np.array([1., 0., 1.]), np.array([0., 2., 1.]), np.array([1., 1., 0.])
    >>> s = run(hodge_star(wedge(u, v, 1, 1), 2), u=uu, v=vv).ravel()
    >>> bool(np.allclose(np.cross(s, np.cross(uu, vv)), 0.0, atol=1e-8))   # ⋆(u∧v) ∥ u×v
+   True
+   >>> tp = float(run(hodge_star(wedge(wedge(u, v, 1, 1), w, 2, 1), 3), u=uu, v=vv, w=ww))
+   >>> bool(np.isclose(tp, np.sqrt(6) * np.linalg.det(np.array([uu, vv, ww]))))   # ⋆(u∧v∧w) = √6·det[u,v,w]
    True
 
 None of these laws were written into the toolkit; each one is a fact about the
