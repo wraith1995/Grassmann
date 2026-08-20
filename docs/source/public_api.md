@@ -87,6 +87,7 @@ coordinate-free.
 
 | You want | grassmann |
 |---|---|
+| the standard (inner-product-orthonormal) basis of a space | `standard_basis(V)` |
 | pick or name a basis for a space | `basis` |
 | the image basis of a map (its literal pushforward columns) | `image_basis` |
 | an orthonormalized subspace basis | `projected_basis` |
@@ -144,4 +145,5 @@ Elementwise functions on scalar-valued vectors.
 | You want | grassmann |
 |---|---|
 | lower a term to a `polyarray` program | `compile(term)` |
+| lower a term in explicit frames | `compile_in(term, inputs=…, target=…)` |
 | compile and run to numbers | `run(term, values)` |

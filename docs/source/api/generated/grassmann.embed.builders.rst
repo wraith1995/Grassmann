@@ -65,6 +65,7 @@
       solve
       space
       spacefn
+      standard_basis
       sum
       sum_of_products
       svar
