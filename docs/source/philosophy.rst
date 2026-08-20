@@ -3,11 +3,11 @@ Philosophy
 
 Grassmann separates the mathematical object from the numerical recipe. You name
 abstract spaces and write the algebra you mean — an adjoint, a projection onto an
-image, a pseudo-inverse, a wedge — as typed terms, and the choice of coordinates
+image, a pseudo-inverse, a wedge production — as typed terms, and the choice of coordinates
 is deferred to the very end. A few principles run through the whole design.
 
-Coordinate-free until the last moment
--------------------------------------
+Coordinate-free 
+----------------
 
 A term never mentions a basis. ``dagger(f)`` denotes *the* adjoint of ``f``;
 which transpose-and-conjugate that becomes depends on the inner products of the
