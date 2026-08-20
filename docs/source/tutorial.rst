@@ -203,6 +203,63 @@ derivative, it is nilpotent — ``d ∘ d = 0`` — in every dimension:
    >>> bool(all(d_squared_zero(n) for n in (2, 3, 4)))
    True
 
+What these operators are, concretely
+------------------------------------
+
+In low dimensions these coordinate-free operators are exactly the familiar ones
+of vector calculus. The Hodge star carries the induced-metric normalization from
+before, so the metric identifications hold up to that scale (for instance
+``⋆(u ∧ v)`` points *along* ``u × v`` rather than being equal to it):
+
+.. list-table:: the coordinate-free operators as classical operations
+   :header-rows: 1
+
+   * - coordinate-free
+     - case
+     - classical meaning
+   * - ``d f``
+     - scalar field, any ``ℝⁿ``
+     - the gradient ``∇f``
+   * - ``⋆ d ⋆ ♭ F``
+     - vector field, ``ℝ³``
+     - the divergence ``∇ · F``
+   * - ``⋆ d ♭ F``
+     - vector field, ``ℝ³``
+     - the curl ``∇ × F``
+   * - ``⋆(u ∧ v)``
+     - ``Λ² → Λ¹`` in ``ℝ³``
+     - the cross product ``u × v``
+   * - ``⋆ α``
+     - ``Λ¹ → Λ¹`` in ``ℝ²``
+     - rotation by 90°
+   * - ``⋆ c``
+     - ``Λ⁰ → Λⁿ``
+     - the scalar ``c`` times the volume form
+   * - ``e₁ ∧ … ∧ eₙ``
+     - ``n`` vectors in ``ℝⁿ``
+     - their signed volume — a determinant
+   * - ``ι_v ω``
+     - ``Λᵏ → Λ^{k-1}``
+     - contract the form ``ω`` with the vector ``v``
+
+Two of these we can check outright. The divergence of a linear field ``F = A·x``
+is the trace of ``A``, and ``⋆(u ∧ v)`` is parallel to the cross product:
+
+.. doctest::
+
+   >>> W = R(3)
+   >>> x, A = G.var("x", W), G.var("A", W >> W)
+   >>> F = A(x)                                              # a linear vector field F = A·x
+   >>> div = hodge_star(exterior_derivative(hodge_star(G.flat(W)(F), 1), x, 2), 3)   # ⋆d⋆♭F
+   >>> Amat = np.array([[1., -3, 2], [3, 2, -1], [-2, 1, 3]])
+   >>> bool(np.isclose(float(run(div, A=Amat.T, x=np.array([0.5, -1., 2.]))), np.trace(Amat)))
+   True
+   >>> u, v = G.var("u", W), G.var("v", W)
+   >>> uu, vv = np.array([1., 0., 1.]), np.array([0., 2., 1.])
+   >>> s = run(hodge_star(wedge(u, v, 1, 1), 2), u=uu, v=vv).ravel()
+   >>> bool(np.allclose(np.cross(s, np.cross(uu, vv)), 0.0, atol=1e-8))   # ⋆(u∧v) ∥ u×v
+   True
+
 None of these laws were written into the toolkit; each one is a fact about the
 general construction that held because grassmann lowered the coordinate-free term
 to the right computation — for whichever ``n`` and ``k`` we asked.
