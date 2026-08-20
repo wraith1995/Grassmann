@@ -276,11 +276,10 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
                     and len(na.spaces) == len(nb.spaces)):
                 _unify_seq(na.spaces, nb.spaces, store, "⊗")
             elif na is not a or nb is not b:
-                # dropping the tensor-unit (Scalar) changed a side ⇒ re-dispatch. Guarded on ACTUAL
+                # Dropping the tensor-unit (Scalar) changed a side ⇒ re-dispatch. Guarded on ACTUAL
                 # progress: `_drop_scalar_factors` returns its argument UNCHANGED when there is no
-                # unit to drop, so re-dispatching unconditionally re-entered `unify` on the IDENTICAL
-                # pair and recursed until the stack blew (measured: still `RecursionError` at a
-                # 20000-frame limit, the same pair observed at depth 100 and 300).
+                # unit to drop, so re-dispatching unconditionally would re-enter `unify` on the
+                # IDENTICAL pair and recurse until the stack blows.
                 unify(na, nb, store)
             else:
                 # Two unit-free products of DIFFERENT arity. Mathematically these can still denote one
@@ -295,9 +294,9 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
                 # the two spellings realize as `(3,3,3)` and `(3,9)`; unifying them would let
                 # mismatched layouts meet silently. Splicing at construction (in `oprod`) is likewise
                 # not a drop-in — it flattens a map space's `Dual(dom) ⊗ cod` into its component axes,
-                # so `Alt_3 : V⊗³ ⊸ V⊗³` stops being the `(27,27)` MATRIX the SVD seam expects
-                # (measured). Resolving it needs the value-tensor / map-space distinction settled in
-                # the representation. Until then, FAIL LOUDLY rather than hang.
+                # so `Alt_3 : V⊗³ ⊸ V⊗³` stops being the `(27,27)` MATRIX the SVD seam expects.
+                # Resolving it needs the value-tensor / map-space distinction settled in
+                # the representation; absent that, this arm FAILS LOUDLY rather than hang.
                 #
                 # What this arm CAN do — at no cost on any success path, since both rows below
                 # raise — is say WHICH failure this is. Compare the two ⊗-LEAF sequences
@@ -352,7 +351,7 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
                 raise UnifyError(f"⊕ⁿ count mismatch: {a.count!r} ≢ {b.count!r}")
             unify(a.space, b.space, store)
             return
-        # ``⊕ⁿ s`` (OPlusRep) and the explicit ``⊕(s,…,s)`` (OPlus) are the SAME space (the new
+        # ``⊕ⁿ s`` (OPlusRep) and the explicit ``⊕(s,…,s)`` (OPlus) are the SAME space (the
         # ground ``ℝⁿ = ⊕ⁿ Scalar`` can appear either way); a static-count OPlusRep expands to
         # OPlus and unifies component-wise.
         case (OPlusRep(), OPlus()) | (OPlus(), OPlusRep()):

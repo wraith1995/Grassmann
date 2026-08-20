@@ -456,7 +456,7 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
     args = e.args
     sp = e.space
 
-    # an argument-less External is a CONSTANT (e.g. a basis/volume-form vector inside a Hodge
+    # An argument-less External is a CONSTANT (e.g. a basis/volume-form vector inside a Hodge
     # star) ⇒ its derivative is zero.
     if not args:
         return Zero(sp)
@@ -674,7 +674,7 @@ def _ffs_frame_value(kind: str, Jval: np.ndarray, rank: int | None = None) -> np
 # *connection* (a gauge): the realization frame ``Q`` of ``Img(J)`` is defined only up to ``O(k)``,
 # and the derivative depends on the choice.  The gauge is a property of the SPACE — keyed here by the
 # defining map's uid — read by ``diff`` to pick the frame ``(Q, dQ)``.  ``represent`` is untouched: it
-# realizes the subspace in its basis and cobs the value to any output basis, exactly as before.
+# realizes the subspace in its basis and cobs the value to any output basis.
 #
 # Gauge-awareness lives ENTIRELY in ``diff`` + this registry.  The ``immersion`` gauge
 # (``Q = J``, ``dQ = ∂J``) is the literal immersion frame.  ``polar``
@@ -815,7 +815,7 @@ def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
     key = (J.uid, kind)
     if key not in _QR_AUTO_VARS:
         if kind == "img" and is_injective(J):
-            # INJECTIVE Img: coords = dom(J), frame qr_pos(Jᵀ) (dim = dom); keep the prior path identical.
+            # INJECTIVE Img: coords = dom(J), frame qr_pos(Jᵀ) (dim = dom) — the byte-identical injective Img path.
             frame_space = synth_space(J)
         else:
             # NON-injective Img realizes in the SVD frame U[:,:rank] (dim = rank < dom), exactly like

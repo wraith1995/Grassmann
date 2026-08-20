@@ -87,8 +87,8 @@ class BasisError(Exception):
 # Valid `which` selectors for ProjectedBasis (the projection-built FFS).
 #
 # ``"image"`` is the **Q / orthonormal range** (the immersed side): the ``Q`` of ``QrOp``
-# when ``f`` is asserted injective (static rank ``=|dom|``, recovering the old ``IsoSpace``
-# path), else ``U[:, :δ_f]`` of ``SvdOp`` in general.  It is the
+# when ``f`` is asserted injective (static rank ``=|dom|``), else ``U[:, :δ_f]`` of
+# ``SvdOp`` in general.  It is the
 # **orthonormalized** counterpart of :class:`ImageBasis` (the raw map-application basis);
 # the two are related by ``QrOp.R`` / ``QrOp.Q`` (injective) or the SVD factors (general).
 PROJECTED_WHICH = ("image", "ker", "coimg", "coker")
@@ -378,7 +378,7 @@ class CompleteBasis:
 
     def __post_init__(self) -> None:
         # NB: ``sub_basis`` should be a genuine-subspace basis (not a bare short ``ListBasis``,
-        # which is now always full-ambient); not hard-rejected to keep the node flexible.
+        # which is always full-ambient); not hard-rejected to keep the node flexible.
         _require_basis(self.sub_basis, "CompleteBasis.sub_basis")
         _require_basis(self.complement, "CompleteBasis.complement")
         if not isinstance(self.reduce, Reduce):

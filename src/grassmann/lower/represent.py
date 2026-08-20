@@ -182,12 +182,11 @@ def _rational_lane() -> bool:
 #
 # Hence: the SYMBOLIC/CERTIFICATE consumer may opt in; the numeric default must not move.
 #
-# NOTE on the gate (the design note this implements proposed reusing the
-# `_REPRESENT_BUDGET` rational-lane distinction, and that is NOT usable): the affine-invariance
-# certificate does not build under `rational_lane()`.  `pointwise.sampling.pti` builds its
-# symbolic `W` through the ordinary `force_stmts` lane over a symbolic geometry;
+# NOTE on the gate — reusing the `_REPRESENT_BUDGET` rational-lane distinction is NOT usable:
+# the affine-invariance certificate does not build under `rational_lane()`.  `pointwise.sampling.pti`
+# builds its symbolic `W` through the ordinary `force_stmts` lane over a symbolic geometry;
 # `rational_lane()` has exactly one caller in the stack (`oracle.debug`, the sparsity mask).
-# Gating on `_REPRESENT_BUDGET` would therefore have left the certificate on `Q` and switched
+# Gating on `_REPRESENT_BUDGET` would therefore leave the certificate on `Q` and switch
 # oracle's mask lane instead — the opposite of the intent.  So the lane is its own EXPLICIT
 # opt-in, default OFF.
 _LITERAL_FFS_FRAMES: contextvars.ContextVar = contextvars.ContextVar(
@@ -293,7 +292,7 @@ def represent(
     # pre-REALIZE every free input var that carries a symbolic ``DimVar('n')``, so its
     # canonical runtime atom AND its input array both exist before any node needs an ℝⁿ shape (e.g.
     # a standalone metric in an η-reduced derivative sizes ``np.eye(n)`` off that input). Only
-    # DimVar-carrying vars are touched, so a fully-static term lowers byte-identically as before.
+    # DimVar-carrying vars are touched, so a fully-static term lowers byte-identically.
     for v in _free_term_vars(term):
         try:
             vs = _synth(v)
@@ -525,7 +524,7 @@ class _Ctx:
     lam_subprograms: dict[tuple, tuple[pa.Program, list[B.Basis], B.Basis]] = field(
         default_factory=dict
     )
-    # D2 — per-Program-build memo of FFS factorizations (the SvdOp/QrOp/GSvdOp seam).
+    # Per-Program-build memo of FFS factorizations (the SvdOp/QrOp/GSvdOp seam).
     # An FFS basis of a map ``f`` may be requested many times in one lowering (a Var's
     # dynamic-δ shape, the rank-consistency AssertOp, and every Project/Embed of that
     # FFS space all trigger ``_realize_ffs_for_space``).  Without memoization each request
@@ -721,7 +720,7 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
             return _rep_const(ctx, np.asarray(float(v)), S.Scalar(), B.scalar_basis(),
                               note="lit:const", target=target)
         case T.Zero(space):
-            # B1: an omitted (None) space must be recovered by inference first.
+            # An omitted (None) space must be recovered by inference first.
             return _rep_zeros(ctx, space if space is not None else _synth(e),
                               note="zero:zeros", target=target)
         case T.Identity(space):
@@ -767,7 +766,7 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
         case T.Sharp(space):
             return _rep_sharp(e, space, ctx, target)
         case T.Project(vector, space):
-            # B1: an omitted (None) target subspace is recovered by inference.
+            # An omitted (None) target subspace is recovered by inference.
             return _rep_project(e, vector, space if space is not None else _synth(e), ctx, target)
         case T.Embed(vector, space):
             return _rep_embed(e, vector, space, ctx, target)
@@ -1198,7 +1197,7 @@ def _rep_sum(
     free-label order with a transpose einsum before adding, so the sum is taken on
     matching basis indices.
     """
-    # B1: a Zero(None) summand has no space of its own — borrow it from a sibling that
+    # A Zero(None) summand has no space of its own — borrow it from a sibling that
     # does (the sum's common space), so the optional-space zero lowers in context.
     def _is_bare_zero(v: T.Term) -> bool:
         return isinstance(v, T.Zero) and v.space is None
@@ -1210,7 +1209,7 @@ def _rep_sum(
 
     # All summands share the sum's space, so building each in ``target`` lands the sum there
     # (each ``sum:cob`` below is then a no-op); under AUTO they keep their natural bases and the
-    # first summand's basis is the common one, exactly as before.
+    # first summand's basis is the common one.
     reps = [_rep(v, ctx, target) for v in vectors]
     common = reps[0].basis
     free = reps[0].free_labels
@@ -1396,7 +1395,7 @@ def _rep_eval_operands(
         if op_basis is not None:
             f_rep = _rep_metric(f, metric_kind, ctx, basis=op_basis)
             return f_rep, arg_reps
-        # default operand ⇒ identity-metric default: lower f exactly as before.
+        # default operand ⇒ identity-metric default: lower f directly (the f-first order).
         return _rep(f, ctx), arg_reps
     f_rep = _rep(f, ctx)
     arg_reps = [_rep(a, ctx) for a in args]
@@ -1453,7 +1452,7 @@ def _operand_metric_basis(arg_reps: list[Rep]) -> B.Basis | None:
     try:
         is_default = _basis_eq(b0, default_basis(arg_reps[0].space))
     except S.SpaceError:
-        is_default = not _is_immersed_metric_basis(b0)  # no static default ⇒ old immersed test
+        is_default = not _is_immersed_metric_basis(b0)  # no static default ⇒ fall back to the immersed test
     return None if is_default else b0
 
 
@@ -1839,14 +1838,14 @@ def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
             return S.Scalar()
         case B.DualBasis(inner):
             # `DualBasis(b)` is a basis of `Dual(space_of(b))` — LITERALLY, with no `Dual(Dual(·))`
-            # cancellation.  Using `_dual_toggle` here cancelled it, which made this function
-            # disagree with `_norm_space`, whose docstring explicitly REFUSES to collapse a double
-            # dual ("those are canonical isos, and cob makes no implicit conversions, even canonical
-            # ones").  The two are compared against each other in `_resolve_target`, so the
-            # disagreement silently REJECTED a structurally-matching target: a map basis
-            # `(~~Img ⊗ ~Img)` for a space `Dual(Dual(Img)) ⊗ Dual(Img)` resolved to `None`, the
-            # requested basis was dropped, and the node fell back to the orthonormal default —
-            # which keeps a `QrOp` alive on the Λᵏ lane instead of honoring the push-down.
+            # cancellation.  Toggling with `_dual_toggle` here would cancel it and disagree with
+            # `_norm_space`, which explicitly REFUSES to collapse a double dual (those are canonical
+            # isos, and cob makes no implicit conversions, even canonical ones).  The two are
+            # compared against each other in `_resolve_target`, so a disagreement silently REJECTS a
+            # structurally-matching target: a map basis `(~~Img ⊗ ~Img)` for a space
+            # `Dual(Dual(Img)) ⊗ Dual(Img)` would resolve to `None`, the requested basis would be
+            # dropped, and the node would fall back to the orthonormal default — keeping a `QrOp`
+            # alive on the Λᵏ lane instead of honoring the push-down.
             si = _space_of_basis(ctx, inner)
             if si is None:
                 return None
@@ -2652,7 +2651,7 @@ def _rep_eval(
     # basis-consistent (a non-orthonormal ``ImageBasis`` ⇒ the immersed Gram, not identity).
     # We therefore lower the args FIRST, read their basis, and lower the metric ``f`` in it.
     # Scoped strictly to a metric ``f`` with a non-orthonormal operand basis — every other
-    # ``Eval`` keeps the original f-first order and is byte-identical.
+    # ``Eval`` keeps the f-first order and is byte-identical.
     space = _synth(e)
     # (push-down) Steer f's slots so the Eval is born directly in ``want`` (no result cob):
     # surviving slots ← ``want``'s components, contracted slots ← dual(arg basis) (natural pairing).
@@ -2669,11 +2668,9 @@ def _rep_eval(
         # rather than letting it fall to `AUTO`.  Otherwise the arg's ACCIDENTAL basis becomes
         # AUTHORITATIVE: `_eval_operand_target` puts `dual_basis(arg_rep.basis)` at the contracted
         # slot, so an arg that floated to the orthonormal `ProjectedBasis(J)` drags `f` — and every
-        # node below it — into a frame the caller did NOT ask for.  Measured on a Λ¹-valued
-        # tetrahedral lane: the
-        # target says `ImageBasis(jacobian)` while the arg realized at `ProjectedBasis(jacobian)`,
+        # node below it — into a frame the caller did NOT ask for.  On a Λ¹-valued tetrahedral lane
+        # the target says `ImageBasis(jacobian)` while the arg realized at `ProjectedBasis(jacobian)`,
         # and the cob between two frames OF THE SAME MAP is the QR radical `R`.
-        #
         #
         # Safe by the same argument as `_binder_basis_from_body`: a target `_rep` cannot honour is
         # ignored, `_eval_operand_target` reads each arg's ACTUAL basis, and the pairing is
@@ -2947,7 +2944,7 @@ def _rep_compose(
     dim_of_label: dict[str, int] = {}
     # Free (basis-index) labels ride through verbatim to the output — both the map ``f``'s
     # own (rare) and each ``gₖ``'s (the case a *differentiated* g carries the seed axis),
-    # mirroring ``_rep_eval``. With no free labels this is byte-identical to before.
+    # mirroring ``_rep_eval``. With no free labels there is nothing extra to thread.
     f_free = f_rep.free_labels
     fshape = _shape_of(f_rep.array)
     for k, lab in enumerate(f_labels):       # f's space-axis dims (static + symbolic δ)
@@ -3350,8 +3347,8 @@ def _rep_solve(
     e: T.Solve, f: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     space = _synth(e)
-    # Arm-C operand steering: realize ``f`` in the slots whose dual-swap == ``want`` so the
-    # numeric inverse lands directly in ``want`` (no result cob).  ``None`` ⇒ existing bail.
+    # Operand steering: realize ``f`` in the slots whose dual-swap == ``want`` so the
+    # numeric inverse lands directly in ``want`` (no result cob).  ``None`` ⇒ bail.
     want = _resolve_target(ctx, space, target)
     f_target = _slot_swap_operand_target(want)
     f_rep = _rep(f, ctx, f_target) if f_target is not None else _rep(f, ctx)
@@ -3426,8 +3423,8 @@ def _rep_pinv(
                 return rep
             case _:
                 return _match_result(ctx, rep, target)
-    # PinvOp branch — arm-C operand steering: realize ``f`` in the slots whose dual-swap ==
-    # ``want`` so the numeric pinv lands directly in ``want``.  ``None`` ⇒ existing bail.
+    # PinvOp branch — operand steering: realize ``f`` in the slots whose dual-swap ==
+    # ``want`` so the numeric pinv lands directly in ``want``.  ``None`` ⇒ bail.
     # Steer only when a plain PinvOp lands honestly in ``want`` (ortho target, or a square map whose
     # pinv is the covariant inverse); a rectangular pinv at a non-ortho target falls through to the
     # default build + ``_match_result`` cob (correct for any ``want``) — else silent-wrong.
@@ -3546,8 +3543,8 @@ def _rep_solve_apply(
     #   ``XApply(f, v) ≡ Eval(X(f), (0,), (v,))`` — apply the inverse MAP via Eval (the canonical
     # contraction-view), i.e. ``Eval(Solve(f),(0,),(v,)) = solve(fᵀ, v)``.  This makes it
     # consistent with ``PinvApply`` and with how ``diff`` already differentiates it, and inherits
-    # Eval/Solve's honest per-axis basis handling (incl. threading a free LLam-seed axis — which the
-    # old bulk ``SolveOp = solve(f,v) = f⁻¹·v`` could not, the OPPOSITE cod-axis orientation).
+    # Eval/Solve's honest per-axis basis handling (incl. threading a free LLam-seed axis, which a bulk
+    # ``SolveOp = solve(f,v) = f⁻¹·v`` cannot — it has the OPPOSITE cod-axis orientation).
     return _rep(T.Eval(T.Solve(f), (0,), (v,)), ctx, target)
 
 
@@ -3626,7 +3623,7 @@ def _rep_pinv_apply(
                 return rep
             case _:
                 return _match_result(ctx, rep, target)
-    # PinvOp branch — arm-C operand steering: the result vector ``x = f⁺ v`` is honestly tagged in
+    # PinvOp branch — operand steering: the result vector ``x = f⁺ v`` is honestly tagged in
     # f's domain-slot primal.  Steer f's domain slot to ``DualBasis(want)`` (so primal == want) while
     # keeping its cod slot == v's basis (the einsum "ab,a->b" contracts fp's cod axis against v).
     want = _resolve_target(ctx, space, target)
@@ -3748,7 +3745,7 @@ def _rep_dagger(
     """
     f_rep = _rep(f, ctx)
     space = _synth(e)
-    # NOTE (arm-C, NOT taken): operand-steering ``f`` into the dual-swapped slots is UNSOUND.
+    # NOTE: operand-steering ``f`` into the dual-swapped slots is UNSOUND here.
     # ``_is_immersed_metric_basis`` treats an orthonormal ``list_basis`` as Gram=I (fast transpose),
     # but transpose is NOT basis-covariant (a non-orthonormal target has ``G·fᵀ·G⁻¹`` ≠ ``fᵀ``;
     # immersed-metric operands route through the metric formula instead).  Unlike Solve/Pinv
@@ -3851,7 +3848,7 @@ def _rep_inner(
     tagged with the per-slot basis so downstream bookkeeping stays consistent.
     """
     map_space = _synth(e)
-    # (#2) standalone metric (no Eval-site basis): build the Gram directly in a concrete target's
+    # Standalone metric (no Eval-site basis): build the Gram directly in a concrete target's
     # underlying basis instead of building in default and cob'ing.
     build_basis, steered = basis, False
     if basis is None:
@@ -3900,7 +3897,7 @@ def _rep_flat(
     """
     map_space = _synth(e)
     build_basis, steered = basis, False
-    if basis is None:  # (#2) build G_s directly in a concrete target's basis (see _rep_inner)
+    if basis is None:  # build G_s directly in a concrete target's basis (see _rep_inner)
         bt = _metric_target_basis(ctx, map_space, target, dual_slots=True)
         if bt is not None:
             build_basis, steered = bt, True
@@ -4022,7 +4019,7 @@ def _rep_project(
     # the orthonormal frame and being reconciled afterwards.  Without this the target dies here and
     # every node below defaults, which is what kept `eval-reconcile@0` — and the QR feeding it —
     # alive.  `_rep` ignores a target that is not a basis of the operand's space, so this is safe;
-    # AUTO otherwise, exactly as before.
+    # AUTO otherwise.
     v_target: B.TargetBasis | B.Basis = B.AUTO
     if isinstance(target, B.ProjectedBasis) and target.target is not None:
         v_target = target.target
@@ -4051,7 +4048,7 @@ def _rep_project(
         # requested `ProjectedBasis(alt, "image", ~Img⊗~Img, …)`) actually asks for, so the result
         # lands ON the target and `_match_result` becomes a no-op instead of a cob back through the
         # canonical frame.  Tagging it endpoint-free here would be the same dishonesty the `LLam`
-        # epilogue had: a basis the array is not in.
+        # epilogue guards against: a basis the array is not in.
         sub_basis = B.projected_basis(sub.f, "image", ep_basis, ep_basis)
         _assert_projection_exact(ctx, P, v_arr)
     else:
@@ -4083,14 +4080,13 @@ def _rep_project(
     # this branch cannot assume orthonormality.  `ProjectOp` is `Pᵀ·v`, which are coordinates
     # in `sub_basis` ONLY when `PᵀP = I`; the
     # general coordinate map is the matched dual `P⁺ = (PᵀP)⁻¹Pᵀ`.  So: exploit orthonormality where
-    # `_subspace_cols` can PROVE it (the historical single-Stmt path, unchanged and byte-identical —
-    # every frame this site sees today is metric-free QR/SVD, verified by census), else emit the
-    # general pinv.  `ProjectOp` is reused for the matvec-with-ravel by feeding it `(P⁺)ᵀ`: it
-    # computes `((P⁺)ᵀ)ᵀ·v = P⁺·v`, so no new op and no new lowering enters either render lane.
+    # `_subspace_cols` can PROVE it (the single-Stmt path — every frame this site sees is metric-free
+    # QR/SVD, verified by census), else emit the general pinv.  `ProjectOp` is reused for the
+    # matvec-with-ravel by feeding it `(P⁺)ᵀ`: it computes `((P⁺)ᵀ)ᵀ·v = P⁺·v`, so no new op and no
+    # new lowering enters either render lane.
     #
-    # NOT the cause of the σ face defect (still true): on that path every
-    # sub-basis is an endpoint-free `ProjectedBasis` with `PᵀP = I`, so `ortho` is True there and the
-    # emitted program is bit-for-bit what it was.
+    # On the σ face path every sub-basis is an endpoint-free `ProjectedBasis` with `PᵀP = I`, so
+    # `ortho` is True there and the general-pinv branch is never taken.
     if ortho:
         [out] = ctx.prog.emit_stmt(
             pa.ProjectOp(), [P, v_arr],
@@ -4145,8 +4141,9 @@ def _rep_embed(
     # Why it matters: the general path realizes the immersion via `_ffs_immersion_std` ->
     # `realize_basis_cols` -> `_realize_ffs_in_space`, which expresses the literal `ImageBasis(J)`
     # in the CANONICAL `ProjectedBasis` `U_d` — and building `U_d` for an injective image is a
-    # `QrOp`.  An identity embed was paying a QR (plus the `cob:std→to=C⁻¹` undoing it), putting the
-    # radical `R` on the dependency path of a DOF that is metric-free by construction.
+    # `QrOp`.  Without this fast path an identity embed would pay that QR (plus the `cob:std→to=C⁻¹`
+    # undoing it), putting the radical `R` on the dependency path of a DOF that is metric-free by
+    # construction.
     if (isinstance(big, S.OProd) and len(big.spaces) == 1
             and _norm_space(big.spaces[0]) == _norm_space(v_rep.space)
             and _shape_of_space(big) == _shape_of_space(v_rep.space)):
@@ -4174,11 +4171,11 @@ def _rep_embed(
     # is covariant under ANY (GL) change of frame per this function's own contract above, so there is
     # no exactness/complement obligation to discharge.
     #
-    # HOISTED (frame-probe): this test runs BEFORE the if/else below rather than overwriting
-    # `P`/`v_arr` after it.  Otherwise both branches' Stmts still enter the program even though
-    # their outputs are discarded — and for an endpoint-ful `ProjectedBasis` operand the `else`
-    # branch's `embed:operand-to-default` cob is exactly the canonical realization whose `Img(J)`
-    # endpoint IS the QR, so running the probe first avoids emitting that cob only to throw it away.
+    # This frame probe runs BEFORE the if/else below rather than overwriting `P`/`v_arr` after it:
+    # otherwise both branches' Stmts still enter the program even though their outputs are discarded —
+    # and for an endpoint-ful `ProjectedBasis` operand the `else` branch's `embed:operand-to-default`
+    # cob is exactly the canonical realization whose `Img(J)` endpoint IS the QR, so running the probe
+    # first avoids emitting that cob only to throw it away.
     amb_basis = default_basis(big)
     vb = v_rep.basis
     ep = (_endpoint_subspace_cols(ctx, v_rep.space, vb.target)
@@ -4292,7 +4289,7 @@ def _rep_tuple_embed(
     total = sum(_static_dim(s) for s in space.spaces)
     bi = _static_dim(space.spaces[i])
     map_space = _synth(e)
-    # (#3) clean structural match ⇒ the eye-block IS byte-identical in the per-block target bases
+    # A clean structural match ⇒ the eye-block IS byte-identical in the per-block target bases
     # (block_i ⊸ s: block = dual dom @ slot 0, ⊕ = primal cod @ slot 1), so tag `want` — no cob.
     steered = _tuple_block_basis_match(
         ctx, map_space, target, len(space.spaces), i, dom_is_oplus=False)
@@ -4325,7 +4322,7 @@ def _rep_tuple_project(
     total = sum(_static_dim(s) for s in space.spaces)
     bi = _static_dim(space.spaces[i])
     map_space = _synth(e)
-    # (#3) clean structural match ⇒ the eye-block IS byte-identical in the per-block target bases
+    # A clean structural match ⇒ the eye-block IS byte-identical in the per-block target bases
     # (s ⊸ block_i: ⊕ = dual dom @ slot 0, block = primal cod @ slot 1), so tag `want` — no cob.
     steered = _tuple_block_basis_match(
         ctx, map_space, target, len(space.spaces), i, dom_is_oplus=True)
@@ -4353,7 +4350,7 @@ def _rep_remetric(
 ) -> Rep:
     """``Remetric(v, g)`` — same coords, metric metadata swapped (+ SPD assert)."""
     space = _synth(e)  # WithInner(s, g)
-    # (B) a `WithInnerBasis(b, g)` target ⇒ realize the operand in the underlying `b` (the metric
+    # A `WithInnerBasis(b, g)` target ⇒ realize the operand in the underlying `b` (the metric
     # is pure metadata, coords unchanged) and re-home onto the metricized space — directly in `want`.
     want = _resolve_target(ctx, space, target)
     if isinstance(want, B.WithInnerBasis):
@@ -4450,41 +4447,34 @@ def _rep_lift(
     e: T.Lift | T.InvLift, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Lift``/``InvLift`` — fuse/unfuse the listed axes via reshape."""
-    # The reshape FUSES/UNFUSES axes, so the operand's per-axis bases cannot be re-wrapped as
-    # a single honest tensor basis of the reshaped layout (a fused axis would need a genuine
-    # Kronecker-product basis object).  Honest-tagging is intractable, so we take the roadmap's
-    # FALLBACK: cob the operand to its default basis first, making the ``default_basis`` result tag
-    # genuinely honest.  ALWAYS (incl. AUTO) — a default operand cob is a no-op (byte-identical), but a
-    # NON-default operand under AUTO (e.g. ``lift`` as a sub-term) must still be coerced, else the
-    # ``default_basis`` tag lies about a non-default-operand result (silent-wrong, `⟨lift(m),x⊗y⟩`).
-    # ...that fallback is now the SECOND choice, not the only one.  The claim above — "a fused axis
-    # would need a genuine Kronecker-product basis object" — is the same stale claim `_rep_kron`
-    # carried, and the object EXISTS: a fused axis is tagged by a nested `BasisProd`, which
-    # `realize_basis_cols` lowers through `_kron_cols` to a real `pa.KronOp`.  So build the honest
-    # tag from the operand's OWN basis (`_lift_result_basis`, the reshape analogue of
-    # `_kron_result_basis`) and only coerce to STD when it declines.
+    # The reshape FUSES/UNFUSES axes.  A fused axis is tagged by a nested `BasisProd`, which
+    # `realize_basis_cols` lowers through `_kron_cols` to a real `pa.KronOp` (the Kronecker product
+    # of the component frames), so the honest result tag IS constructible from the operand's OWN
+    # basis — `_lift_result_basis`, the reshape analogue of `_kron_result_basis`.  Build the tag that
+    # way, and only coerce the operand to STD when `_lift_result_basis` declines.
     #
-    # Why it matters: forcing STD is an INTERMEDIATE BASIS CHOICE
-    # For an `Img(J)` operand, STD is the
-    # orthonormal `ProjectedBasis`, realized by a `QrOp` — and the cob back to the literal
-    # `ImageBasis` the caller asked for is the QR radical `R`.  Measured: this was the LAST
-    # requester of a `QrOp` on a Λ¹-valued tetrahedral lane (the 3x2 face jacobians), upstream of both
-    # `_rep_eval`'s arg steering and `_rep_embed`'s immersion.
+    # Why it matters: forcing STD is an INTERMEDIATE BASIS CHOICE.  For an `Img(J)` operand, STD is
+    # the orthonormal `ProjectedBasis`, realized by a `QrOp` — and the cob back to the literal
+    # `ImageBasis` the caller asked for is the QR radical `R`.  This is the LAST requester of a `QrOp`
+    # on a Λ¹-valued tetrahedral lane (the 3x2 face jacobians), upstream of both `_rep_eval`'s arg
+    # steering and `_rep_embed`'s immersion.
     #
     # SAFETY mirrors `_rep_kron`: honesty is CHECKED, not assumed — `_lift_result_basis` returns
-    # `None` on any structure it cannot tag exactly, whereupon the historical coerce-to-STD path runs
-    # unchanged.  A lying tag would be a WRONG-VALUE bug (`_match_result` cobs from a basis the array
-    # is not in), so anything doubtful declines.
-    # (push-down) A CONCRETE target splits back to the operand's per-axis bases, so the operand is
-    # BORN in the requested frame and the result match below is a no-op.  Without it the operand
-    # realizes at AUTO (the orthonormal frame for an `Img`) and the caller cobs — the same round
-    # trip, merely relocated.  `None` ⇒ AUTO, exactly as before.
+    # `None` on any structure it cannot tag exactly, whereupon the coerce-to-STD fallback runs (a
+    # default operand cob is a no-op there; a NON-default operand under AUTO, e.g. `lift` as a
+    # sub-term, must still be coerced, else the `default_basis` tag lies — silent-wrong,
+    # `⟨lift(m),x⊗y⟩`).  A lying tag would be a WRONG-VALUE bug (`_match_result` cobs from a basis the
+    # array is not in), so anything doubtful declines.
+    # A CONCRETE target splits back to the operand's per-axis bases, so the operand is BORN in the
+    # requested frame and the result match below is a no-op; without it the operand realizes at AUTO
+    # (the orthonormal frame for an `Img`) and the caller cobs — the same round trip, merely
+    # relocated.  `None` ⇒ AUTO.
     _src_space = _synth(e.vector)
     _v_target = _lift_operand_target(target, e, _src_space)
     v_rep = _rep(e.vector, ctx, _v_target if _v_target is not None else B.AUTO)
     space = _synth(e)
     res_basis = _lift_result_basis(v_rep.basis, e, _src_space, space)
-    if res_basis is None:                      # untaggable — historical path, byte-identical
+    if res_basis is None:                      # untaggable — fall back to the STD-coerce path
         v_rep = _rep(e.vector, ctx, target=B.STD)
         res_basis = default_basis(space)
     out_shape = _shape_of_space(space)
@@ -4509,36 +4499,33 @@ def _rep_kron(
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
     """``Kron(f, g)`` — the (a0⊗a1)→(b0⊗b1) block tensor via einsum."""
-    # The Kron block FUSES the operands' slots (dom = a0⊗a1, cod = b0⊗b1).  This USED to force both
-    # operands to ``B.STD`` and tag the result ``default_basis(space)``, on the grounds that "a fused
-    # axis would need a genuine Kronecker-product basis object".  **That object exists**: a fused
-    # axis is tagged by a nested ``BasisProd``, which ``realize_basis_cols`` lowers through
-    # ``_kron_cols`` to a real ``pa.KronOp`` — and ``default_basis`` ALREADY emits exactly that shape
-    # for a Kron result space (axis 0 ``DualBasis(BasisProd((…,…)))``, axis 1 ``BasisProd((…,…))``).
-    # So the honest tag is constructible from the operands' OWN bases; see ``_kron_result_basis``.
+    # The Kron block FUSES the operands' slots (dom = a0⊗a1, cod = b0⊗b1).  A fused axis is tagged by
+    # a nested ``BasisProd``, which ``realize_basis_cols`` lowers through ``_kron_cols`` to a real
+    # ``pa.KronOp`` — and ``default_basis`` emits exactly that shape for a Kron result space (axis 0
+    # ``DualBasis(BasisProd((…,…)))``, axis 1 ``BasisProd((…,…))``).  So the honest tag is
+    # constructible from the operands' OWN bases; see ``_kron_result_basis``.
     #
-    # Why it matters: forcing STD is an INTERMEDIATE BASIS CHOICE
-    # For an ``Img(J)`` endpoint, STD is the
-    # orthonormal ``ProjectedBasis``, so the operands pay a ``QrOp`` round trip whose factor is a
-    # RADICAL — values stay right (the cobs are exact inverses) but the exact-fold lane can no longer
-    # certify the entry constant and degrades to probes.  Keeping the operands in the basis they
-    # naturally land in removes it.
+    # Why it matters: forcing both operands to STD is an INTERMEDIATE BASIS CHOICE.  For an ``Img(J)``
+    # endpoint, STD is the orthonormal ``ProjectedBasis``, so the operands pay a ``QrOp`` round trip
+    # whose factor is a RADICAL — values stay right (the cobs are exact inverses) but the exact-fold
+    # lane can no longer certify the entry constant and degrades to probes.  Keeping the operands in
+    # the basis they naturally land in removes it.
     #
     # SAFETY: honesty is not assumed, it is CHECKED.  ``_kron_result_basis`` returns ``None`` on any
-    # structure it cannot tag exactly, and the caller then falls back to the historical
-    # coerce-to-STD path — so an untaggable case degrades to today's behaviour, never to a lying tag
-    # (a lying tag is a WRONG-VALUE bug: ``_match_result`` cobs from a basis the array is not in).
-    # (push-down) When a CONCRETE target is asked for, split it back into per-operand bases and
-    # build each operand directly there — the inverse of `_kron_result_basis`.  Without this the
-    # operands realize at AUTO (`_natural_basis` ⇒ the ORTHONORMAL frame for an `Img`), the result is
-    # tagged from that, and the caller cobs — the round trip this whole arc is about.  Falls back to
-    # AUTO on any structure that does not split, and the honesty check below still gates the tag.
+    # structure it cannot tag exactly, and the caller then falls back to the coerce-to-STD path — an
+    # untaggable case degrades to a plain STD build, never to a lying tag (a lying tag is a
+    # WRONG-VALUE bug: ``_match_result`` cobs from a basis the array is not in).
+    # When a CONCRETE target is asked for, split it back into per-operand bases and build each operand
+    # directly there — the inverse of `_kron_result_basis`.  Without this the operands realize at AUTO
+    # (`_natural_basis` ⇒ the ORTHONORMAL frame for an `Img`), the result is tagged from that, and the
+    # caller cobs — the same round trip.  Falls back to AUTO on any structure that does not split, and
+    # the honesty check below still gates the tag.
     f_t, g_t = _kron_operand_targets(target, _synth(f), _synth(g))
     f_rep = _rep(f, ctx, f_t)
     g_rep = _rep(g, ctx, g_t)
     space = _synth(e)
     res_basis = _kron_result_basis(f_rep.basis, g_rep.basis, space)
-    if res_basis is None:                      # untaggable — historical path, byte-identical
+    if res_basis is None:                      # untaggable — fall back to the STD-coerce path
         f_rep = _rep(f, ctx, target=B.STD)
         g_rep = _rep(g, ctx, target=B.STD)
         res_basis = default_basis(space)
@@ -4921,7 +4908,7 @@ def _rep_llam_eye(
     # free labels (the returned Rep has ``free_labels=""``), so the counter is restored on
     # exit and only *concurrently open* scopes hold labels.  This keeps the live free-label
     # set tiny even for a deep nested wedge, so labels never run off the valid
-    # einsum-symbol alphabet (the degree-≥3 wedge fix).
+    # einsum-symbol alphabet.
     saved_next = ctx._free_label_next
     bound: list[int] = []
     for v in vars_:
@@ -4948,8 +4935,8 @@ def _rep_llam_eye(
     # ``default_basis(space)`` when the body landed in its DEFAULT basis (the common case: a body over
     # default/leaf operands).  A non-default body basis (e.g. a pinned operand) makes the tensor's
     # coords live in an untracked basis, so the default tag would be silent-wrong under a downstream
-    # or STD/MATCH cob — fail loudly instead of miscomputing.  (Full fix: track free-label-axis bases;
-    # a residual domain-only case with a default cod can still slip — see the audit log.)
+    # or STD/MATCH cob — fail loudly instead of miscomputing.  (A residual domain-only case with a
+    # default cod can still slip through.)
     try:
         body_default: B.Basis | None = default_basis(body_rep.space)
     except S.SpaceError:
@@ -5093,21 +5080,20 @@ def _rep_llam_vmap(
             ]
     #    BOTTOM-UP fallback, where the caller asked for nothing (`AUTO`): a binder with no pin and no
     #    requested basis would fall to `_natural_basis` — the ORTHONORMAL choice — even when its own
-    #    CONSUMER in the body already declares which basis it expects.  Ask the body first
-    # option A): a pinned map applied to this
-    #    binder pins the slot it is applied at, and the binder's honest basis is that slot's natural
-    #    PAIRING PARTNER.  Purely an AUTO-refinement — it never overrides a pin or a requested
-    #    target, and `None` (no use site, ambiguous use sites, unpinned consumer) keeps `AUTO`.
+    #    CONSUMER in the body already declares which basis it expects.  Ask the body first: a pinned
+    #    map applied to this binder pins the slot it is applied at, and the binder's honest basis is
+    #    that slot's natural PAIRING PARTNER.  Purely an AUTO-refinement — it never overrides a pin or
+    #    a requested target, and `None` (no use site, ambiguous use sites, unpinned consumer) keeps
+    #    `AUTO`.
     #
-    # ⚠ MEASURED: this does NOT yet pay off, and is a small REGRESSION on the k ≥ 2
-    #    Λᵏ lane (78 → 90 statements on one such lane; k = 1 unchanged, since there the requested
-    #    target already supplies the binder basis and this never fires).  Diffing the statement
-    #    notes says why: the better binder basis propagates up CORRECTLY and is then thrown away by
-    #    `_rep_project` / `_rep_embed`, which must coerce their operand to `default_basis` because
-    #    `_subspace_cols` hands them `P` in std ambient coords — so it buys one extra `ffs-basis:*`
-    # cob block per axis and keeps nothing. KEPT DELIBERATELY: the choice is
-    #    right, the blocker is downstream, and this is the half that will pay off the moment the
-    #    realization seam can deliver a frame in a DECLARED basis (NOTE #5).  Re-measure then.
+    #    This refinement does NOT yet pay off, and is a small REGRESSION on the k ≥ 2 Λᵏ lane
+    #    (78 → 90 statements on one such lane; k = 1 unchanged, since there the requested target
+    #    already supplies the binder basis and this never fires).  The better binder basis propagates
+    #    up CORRECTLY and is then thrown away by `_rep_project` / `_rep_embed`, which must coerce their
+    #    operand to `default_basis` because `_subspace_cols` hands them `P` in std ambient coords — so
+    #    it buys one extra `ffs-basis:*` cob block per axis and keeps nothing.  KEPT DELIBERATELY: the
+    #    choice is right and the blocker is downstream — it will pay off once the realization seam can
+    #    deliver a frame in a DECLARED basis.
     for i, v in enumerate(vars_):
         if binder_targets[i] is B.AUTO and v.uid not in ctx.basis_env:
             inferred = _binder_basis_from_body(body, v, ctx)
@@ -5119,10 +5105,10 @@ def _rep_llam_vmap(
     for v in free_vars:
         _rep_var(v, sub_ctx)
     body_rep = _rep(body, sub_ctx)
-    # (The former domain-only guard — ``⟨a,x⟩`` with a pinned covector — is no longer needed: each
-    # per-slice body lowers with the bound var bound to a concrete rank-1 ``eⱼ``, and ``eval``'s
-    # ``_reconcile_pairing`` now reconciles a pinned rank-1 operand against it (``_slot_basis_at``
-    # treats a rank-1 operand as its own slot), so the body is honest even with a domain-only pin.)
+    # No domain-only guard is needed here (``⟨a,x⟩`` with a pinned covector): each per-slice body
+    # lowers with the bound var bound to a concrete rank-1 ``eⱼ``, and ``eval``'s
+    # ``_reconcile_pairing`` reconciles a pinned rank-1 operand against it (``_slot_basis_at`` treats
+    # a rank-1 operand as its own slot), so the body is honest even with a domain-only pin.
     sub.add_output("result", body_rep.array)
 
     # 3. Parent: realize the free vars (this materializes any frame/basis inputs in the parent under
@@ -5137,10 +5123,9 @@ def _rep_llam_vmap(
     # cobs materialize inside the sub-Program; they must exist in the parent too so the vmap call
     # can feed them (and so the parent's own output cob reuses them, no duplicate inputs).
     #
-    # This walked ``ctx.basis_env`` alone while a pin was the ONLY way a var could land in a
-    # non-default basis.  A binder now also takes its basis from the requested ``target`` (above), so
-    # the pins are no longer the full set — walk the bases actually CHOSEN.  Missing one is not
-    # silent: the sub-input lookup below raises ``LLam vmap body needs sub-input …``.
+    # A binder takes its basis from the requested ``target`` (above) as well as from a ``basis_env``
+    # pin, so walking ``ctx.basis_env`` alone would miss some — walk the bases actually CHOSEN.
+    # Missing one is not silent: the sub-input lookup below raises ``LLam vmap body needs sub-input …``.
     chosen_bases = [*binding_bases, *(ctx.basis_env.get(v.uid) for v in free_vars)]
     for b in chosen_bases:
         if b is None:
@@ -5224,17 +5209,14 @@ def _rep_llam_vmap(
         shared_arrays.append(parent_arr)
     n_shared = len(shared_arrays)
 
-    # Physical layout mirrors the historical ``eye`` einsum (``ab,ai->bi``): body codomain axes
-    # FIRST, then one var (basis-index) axis per bound var.  This is the TRANSPOSE of the space's
-    # ``(dom…, cod…)`` factor order — but it is exactly what the eye path emits, so the value is
-    # byte-identical for a default body (and the honest tag below describes THIS physical order).
-    # The body ARRAY is the layout authority (G2): a nested-map body value can be
-    # laid out FUSED — an inner ``X⊸R`` produced by this same lowering is stored ``(d,)``
-    # (its scalar cod contributes no axis), while ``_shape_of_space(X⊸R)`` says ``(d, 1)``
-    # — so the space-derived count over-states the vmap's ``out_axes`` and the stack dies.
-    # The per-slice body carries no batch axis, so its actual shape IS the codomain shape
-    # (δ axes and all — this also subsumes the old dynamic-FFS fallback). Byte-identical
-    # whenever the space and array shapes agree, i.e. every non-nested body.
+    # Physical layout matches the ``eye`` einsum (``ab,ai->bi``): body codomain axes FIRST, then one
+    # var (basis-index) axis per bound var.  This is the TRANSPOSE of the space's ``(dom…, cod…)``
+    # factor order (the honest tag below describes THIS physical order).
+    # The body ARRAY is the layout authority: a nested-map body value can be laid out FUSED — an inner
+    # ``X⊸R`` produced by this same lowering is stored ``(d,)`` (its scalar cod contributes no axis),
+    # while ``_shape_of_space(X⊸R)`` says ``(d, 1)`` — so the space-derived count over-states the
+    # vmap's ``out_axes`` and the stack dies.  The per-slice body carries no batch axis, so its actual
+    # shape IS the codomain shape (δ axes and all, covering a dynamic-FFS body too).
     cod_shape = _shape_of(body_rep.array)
     n_cod_axes = len(cod_shape)          # ARRAY axes of the body (0 for a scalar body)
     fn = _nested_vmap(sub, n_vars, n_shared, n_cod_axes)
@@ -5258,12 +5240,12 @@ def _rep_llam_vmap(
     # ``dual`` per domain var, then the body's codomain as ONE factor (``s_e`` is a single space
     # factor — possibly itself a ⊗ — so it must not be flattened, else a consumer cob sees a
     # different factor structure).  For a default body this is exactly ``default_basis(space)``.
-    # ⚠ The ``default_basis(space)`` shortcut describes the DOMAIN axes too, so it is honest only
-    # when the BINDERS are also default — not just the body.  That was automatic while a binder's
-    # basis was always the AUTO/``_natural_basis`` choice; now that it can be steered to the caller's
-    # requested basis, a default body with a steered binder would be tagged as fully-default and the
-    # epilogue's ``dual(binding)`` domain factor silently dropped (``_match_result`` then cobs from a
-    # basis the array is not in — wrong values, caught by ``test_concrete_target_honesty[llam_map]``).
+    # ⚠ The ``default_basis(space)`` shortcut describes the DOMAIN axes too, so it is honest only when
+    # the BINDERS are also default — not just the body.  A binder can be STEERED to the caller's
+    # requested basis, so a default body with a steered binder must NOT be tagged fully-default: that
+    # would silently drop the epilogue's ``dual(binding)`` domain factor (``_match_result`` then cobs
+    # from a basis the array is not in — wrong values, caught by
+    # ``test_concrete_target_honesty[llam_map]``).
     try:
         body_is_default = _basis_eq(body_rep.basis, default_basis(body_rep.space))
         binders_are_default = all(
@@ -5288,12 +5270,11 @@ def _rep_llam_vmap(
             return _match_result(ctx, rep, target)
 
 
-# Free (basis-index) einsum labels live in a pool disjoint from the lowercase space labels
-# in practice: lowercase ``i``–``z`` (the historical choice, kept so existing spec strings are
-# byte-identical) then uppercase ``A``–``Z`` as overflow headroom — all valid numpy-einsum
+# Free (basis-index) einsum labels live in a pool disjoint from the lowercase space labels:
+# lowercase ``i``–``z`` then uppercase ``A``–``Z`` as overflow headroom — all valid numpy-einsum
 # symbols.  Scope recycling (see :func:`_rep_llam`) keeps the LIVE count tiny (a deep nested
 # wedge needs only a handful at once), so a free label never overflows into an invalid
-# character (e.g. ``'{'`` — the old degree-≥3 wedge bug from a non-recycled counter).
+# character (e.g. ``'{'``, which a non-recycled counter would reach on a degree-≥3 wedge).
 _FREE_LABEL_POOL = (
     [chr(ord("i") + i) for i in range(ord("z") - ord("i") + 1)]
     + [chr(ord("A") + i) for i in range(26)]
@@ -5405,7 +5386,7 @@ def _result_basis_from_factors(
 
 
 # ---------------------------------------------------------------------------
-# Honest operand-derived result bases (the 2.3 "bail-out via honest tag" floor).
+# Honest operand-derived result bases (bail-out via an honest tag).
 #
 # Several movement/operator/binder helpers reshuffle / re-wrap their operand's coordinates
 # WITHOUT changing the basis each axis lives in.  Their result must therefore be tagged with
@@ -5569,12 +5550,8 @@ def _eval_operand_target(
     for arg_rep in arg_reps:
         if arg_rep.free_labels:
             return None
-        # A MULTI-AXIS arg is not backed off unconditionally: that would be too strict, since
-        # an arg over k > 1 space axes carries a `BasisProd` of exactly k
-        # factors, and `dual_basis` of THAT honestly names the fused slot — the same
-        # nested-`BasisProd`-as-fused-axis tagging `_kron_result_basis` uses, which
-        # `realize_basis_cols` lowers through `_kron_cols` to a genuine Kronecker product.
-        # Allow it only when the basis really does split one factor per axis.
+        # A MULTI-AXIS arg is allowed (not backed off): its basis is a `BasisProd` of one honest
+        # factor per axis, so accept it only when the factor count matches the axis count.
         n_axes = len(_shape_of(arg_rep.array)) - len(arg_rep.free_labels)
         if n_axes > 1:
             parts = _basis_factors(arg_rep.basis, n_axes)
@@ -5735,7 +5712,8 @@ def _project_exact_by_naturality(vector: T.Term, sub: S.Space) -> bool:
     # project and the residual is zero for ANY frame.  This needs no naturality square: it is the
     # definition of ``Img``.  It is also the shape the `Λᵏ` trace actually arrives in — `alt`
     # is `Scale(½, Lift(LLam(…)))`, NOT a literal `Kron`, so the diagonal-transport recognizer below
-    # never fired for it and every r >= 2 lane fell back to the canonical ambient (a `QrOp`).
+    # does not fire for it, and without this branch every r >= 2 lane falls back to the canonical
+    # ambient (a `QrOp`).
     # Requires the Eval to contract ALL of ``f``'s domain: a PARTIAL application is still a map, not
     # an element of ``Img(f)``.  Alpha-comparison (spaces ignored) matches the rest of this
     # function, and the run-time ``in_span`` assert remains the net.
@@ -5831,12 +5809,12 @@ def _endpoint_subspace_cols(
         return None          # not an endomorphism — one basis cannot honestly serve both endpoints
     # Do NOT route through `_realize_image_covariant` for this: it eagerly realizes the endpoint
     # frames `S`/`T` to form `A₀ = T⁻¹·F·S`, and realizing an `~Img[J]` endpoint canonically IS the
-    # QR — so asking it for `Q₀` pays exactly the cost this function exists to avoid (measured: the
-    # `QrOp` that stayed live on the Λ² lane was requested from right here).
+    # QR — so asking it for `Q₀` pays exactly the cost this function exists to avoid (the
+    # `QrOp` that stays live on the Λ² lane is requested from right here).
     #
     # The sandwich is unnecessary whenever `f` is NATURAL, and naturality is precisely what makes
     # `F` itself feed-invariant: `T⁻¹·F·S` is the constant reference matrix because `F` already IS
-    # that constant (measured for `alt₂`: entries {−½, 0, ½} in BOTH the canonical and the
+    # that constant (for `alt₂`, entries {−½, 0, ½} in BOTH the canonical and the
     # transported realization).  So certify `F` directly with the same oracle
     # (`try_constant_ffs` — evaluate the dependency cone at several feeds) and take its range basis.
     # `try_constant_ffs` returning `None` (not feed-invariant ⇒ not natural ⇒ the endpoint frame is
@@ -5979,9 +5957,9 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     k = _shape_of(imm)[1]
     # BASIS HONESTY (the second `Uᵀ`-as-inverse site): `U_dᵀ·imm` are the immersion's
     # coordinates in `U_d` only when `U_dᵀU_d = I`.  The general map is the matched dual
-    # `pinv(U_d)·imm`.  Exploit orthonormality where the realization PROVES it (the historical
-    # single-einsum path — every frame this site sees today is the metric-free QR/SVD one, so
-    # this is byte-identical), else emit the pinv.
+    # `pinv(U_d)·imm`.  Exploit orthonormality where the realization PROVES it (the single-einsum
+    # path — every frame this site sees is the metric-free QR/SVD one, so this is byte-identical),
+    # else emit the pinv.
     if ffs_cols_orthonormal(u_d_real):
         [out] = ctx.prog.emit_stmt(
             pa.EinsumStmtOp("nr,nk->rk"), [u_d, imm],
@@ -6282,7 +6260,7 @@ def _realize_list_basis(
         # ``RREF`` with NO determinable ambient (abstract vectors): keep the frame's
         # linearly-independent columns — a genuine basis of the frame's SPAN.  Full rank ⇒ all
         # columns unchanged; rank-deficient ⇒ a ``(rows, rank)`` matrix whose column axis is a
-        # runtime ``DimAtom`` (``rank`` is numeric).  (Audit Fix 2.)
+        # runtime ``DimAtom`` (``rank`` is numeric).
         cols = _rref_select_cols(ctx, cols)
     return cols
 
@@ -7213,7 +7191,8 @@ def _combine_atom_dims(
     # as `OProd((Scalar(), Img(alt∘J)))`, so `prod([1 (the ⊗-unit Scalar), rank:f (the Λᵏ Img rank)])
     # == rank:f`. Return it directly — no shape-read is needed, and this admits a STMT-sourced
     # (FFS-realized) rank atom, which the input-shape path below cannot read (a bare Λ¹ = `Img(J)`
-    # already flows such an atom through as a single-space dim; the Λ²/Λ³ product hit this raise).
+    # already flows such an atom through as a single-space dim; the Λ²/Λ³ product would otherwise
+    # hit the raise below).
     if static == (0 if op == "sum" else 1) and len(atoms) == 1:
         return atoms[0]
     refs: list[pa.SymArray] = []
@@ -7246,7 +7225,7 @@ def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
     except RepresentError:
         pass
     match space:
-        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():   # runtime-rank FFS δ (as before)
+        case S.Img() | S.Ker() | S.CoImg() | S.CoKer():   # runtime-rank FFS δ
             real = _realize_ffs_for_space(ctx, space)
             return _shape_of(real.cols)[1]
         case S.Dual(inner):
@@ -7291,10 +7270,8 @@ def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
             # NOT a fundamental-subspace space. An `OProd` in particular is a genuine ⊗-product, not an
             # FFS: it has no single SVD/QR factorization. Its orthonormal metric is instead built
             # factor-wise as the Kron of the factor metrics in `_dyn_identity` (`G(A⊗B)=G(A)⊗G(B)`), so a
-            # transported scalar-weighted top-form `OProd((Scalar, Img(alt∘J)))` never reaches here — the
-            # former "strip the Scalar and realize the lone FFS" hack (which also bailed on multi-FFS
-            # products) is gone. An `OProd` arriving here now is a real mis-modeling, not something to
-            # un-tensor.
+            # transported scalar-weighted top-form `OProd((Scalar, Img(alt∘J)))` never reaches here. An
+            # `OProd` arriving here is a real mis-modeling, not something to un-tensor into a lone FFS.
             raise NotImplementedError(
                 f"_realize_ffs_for_space: {type(space).__name__} is not a fundamental-subspace space "
                 "(only Img/Ker/CoImg/CoKer)")
@@ -7360,15 +7337,14 @@ def _realize_ffs_by_which(
         return real
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
-    # HONESTY: the same seam fix the sibling `_realize_image_basis` already applies. `_rep(f)` is realized at
+    # HONESTY: the same seam coercion the sibling `_realize_image_basis` applies. `_rep(f)` is realized at
     # `AUTO`, so pinning `f`'s own operands to a non-default basis lands the realized frame in THOSE
     # coordinates while it is still tagged `default_basis(Img f)` — two routes, two frames, one tag, no
-    # cob between. `Project(v, Img(J))` was silent-wrong under a pinned `J` for exactly this reason.
+    # cob between. `Project(v, Img(J))` is silent-wrong under a pinned `J` for exactly this reason.
     #
-    # Scope, measured: this is the METRIC-FREE / single-endpoint path. An `img` request carrying BOTH
+    # Scope: this is the METRIC-FREE / single-endpoint path. An `img` request carrying BOTH
     # endpoints routes above to `_realize_image_covariant`, which already coerces — so this does NOT
-    # change the σ face case (verified: bit-identical before and after). It closes the recorded bug
-    # where it was actually open.
+    # change the σ face case (bit-identical there).
     f_rep = _coerce_rep_basis(ctx, f_rep, note="ffs-by-which:f-to-default")
     [f_cd] = ctx.prog.emit_stmt(
         pa.TransposeOp(), [f_rep.array],
@@ -7438,23 +7414,22 @@ def _realize_image_covariant(
     f_rep = _coerce_rep_basis(ctx, f_rep, note="ffs-cov:f-to-default")
     # ── FAST FACTORIZATION: when `F` is already feed-invariant, skip the endpoint sandwich ──
     # `A₀ = T⁻¹·F·S` exists to read `f` in the endpoint coordinates, and for a NATURAL `f` that IS
-    # `F` — measured for `alt₂`: the realized matrix is the SAME constant ({−½, 0, ½}) in the
-    # canonical and the transported realization, which is what naturality asserts.  So when
-    # `try_constant_ffs` certifies `F` feed-invariant, factor `F` directly and skip building `S`,
-    # `InvOp(T)`, the sandwich einsum and the factorization of `A₀`.  `None` (not feed-invariant ⇒
-    # not natural) falls through to the general sandwich below, unchanged.
+    # `F` (for `alt₂` the realized matrix is the SAME constant {−½, 0, ½} in the canonical and the
+    # transported realization, which is what naturality asserts).  So when `try_constant_ffs`
+    # certifies `F` feed-invariant, factor `F` directly and skip building `S`, `InvOp(T)`, the
+    # sandwich einsum and the factorization of `A₀`.  `None` (not feed-invariant ⇒ not natural)
+    # falls through to the general sandwich below, unchanged.
     #
-    # ⚠ WHAT THIS MAY NOT SKIP — the transport `T` (P(T)=I regression). This
-    # short-circuit originally returned `cols = Q₀`, reasoning that "the matrix is identical in both
-    # bases, and that equality IS the naturality condition".  The premise is right and the conclusion
-    # does not follow: `A₀ = F` makes `Q₀` the same FRAME EXPRESSED IN `target` COORDINATES, but this
-    # function's output contract is STANDARD AMBIENT coordinates, and the docstring above is explicit
-    # that `cols = T·Q₀` — the TRANSPORTED frame — is precisely the affine-equivariance that P(T)=I
-    # needs (the non-transported per-cell frame "broke every traced k ≥ 2 lane").  Dropping `T` left
-    # a frame that is CONSTANT and wrong: it certified 100% under `partial_eval_numeric` (which
-    # checks constancy, never correctness), kept polyarray/grassmann/pointwise/chartLib green, and
-    # broke `P(T)=I` for every r ≥ 2 lane.  r = 1 survived because it has no
-    # proper-face weights, so `T` is trivial there.  Guarded now by
+    # ⚠ WHAT THIS MUST NOT SKIP — the transport `T` (the P(T)=I hazard).  Returning `cols = Q₀`
+    # directly is TEMPTING ("the matrix is identical in both bases, and that equality IS the
+    # naturality condition") but WRONG: `A₀ = F` makes `Q₀` the same FRAME EXPRESSED IN `target`
+    # COORDINATES, while this function's output contract is STANDARD AMBIENT coordinates, and the
+    # docstring above is explicit that `cols = T·Q₀` — the TRANSPORTED frame — is precisely the
+    # affine-equivariance that P(T)=I needs (the non-transported per-cell frame breaks every traced
+    # k ≥ 2 lane).  Dropping `T` leaves a frame that is CONSTANT and wrong: it certifies 100% under
+    # `partial_eval_numeric` (which checks constancy, never correctness), keeps
+    # polyarray/grassmann/pointwise/chartLib green, and breaks `P(T)=I` for every r ≥ 2 lane.  r = 1
+    # is immune because it has no proper-face weights, so `T` is trivial there.  Guarded by
     # `oracle/tests/test_pt_identity_rapid.py`.
     [f_cd_fast] = ctx.prog.emit_stmt(
         pa.TransposeOp(), [f_rep.array],
@@ -7789,9 +7764,9 @@ class _OpaqueOp:  # audit: ok LOWER-PYAB-HOLE,LOWER-NUMPY-HOLE — foreign escap
 # ===========================================================================
 # Change of basis — the pure, static-matrix fast path.
 #
-# Moved here from the former ``cob.py`` so all change-of-basis lives in one module: this
-# layer realizes the bases whose columns are known WITHOUT lowering a term (Scalar / Dual /
-# Prod / Sum / Rep / WithInner / Complete) and composes ``cob = R_to⁻¹ · R_from``.  The FFS
+# All change-of-basis lives in one module: this layer realizes the bases whose columns are
+# known WITHOUT lowering a term (Scalar / Dual / Prod / Sum / Rep / WithInner / Complete) and
+# composes ``cob = R_to⁻¹ · R_from``.  The FFS
 # bases (ImageBasis / ProjectedBasis) and the term ListBasis are NOT realized here — they need
 # the runtime SVD/QR/GSVD seam or ``_rep`` of a term; ``realize_basis`` raises ``CobError`` for
 # them and the seam-aware TOTAL cob :func:`_basis_cob_matrix` (above) catches that, mirrors

@@ -88,7 +88,7 @@ class Expr:
     def __init__(self, node: object, tower: str | None = None, note: object = None) -> None:
         object.__setattr__(self, "node", node)
         object.__setattr__(self, "tower", tower if tower is not None else _classify(node))
-        # OPTIONAL, non-invasive metadata (F1): a dict of side annotations (e.g. the base
+        # OPTIONAL, non-invasive metadata: a dict of side annotations (e.g. the base
         # space ``V`` of an exterior power, recorded so the stdlib need not re-derive it).
         # Deliberately EXCLUDED from ``__eq__``/``__hash__`` below — a note never changes a
         # term's identity, so annotating is observationally transparent.
@@ -107,7 +107,7 @@ class Expr:
     def __hash__(self) -> int:
         return hash(self.node)
 
-    # -- optional annotation facility (F1) ----------------------------------
+    # -- optional annotation facility ----------------------------------
 
     def with_note(self, **kw: object) -> Expr:
         """Return a handle over the SAME node carrying the given side annotations.
@@ -130,7 +130,7 @@ class Expr:
     # Operators.
     # ===================================================================
 
-    # ~x : Dual (spaces & bases only; never maps/vectors — 27 Q7).
+    # ~x : Dual (spaces & bases only; never maps/vectors).
     def __invert__(self) -> Expr:
         if self.tower == SPACE:
             return wrap(_s.dual(self.node))
@@ -149,10 +149,10 @@ class Expr:
             # A SCALAR-valued Term operand makes `*` scalar MULTIPLICATION (`Scale`, which takes a
             # scalar-valued Term), NOT a genuine ⊗. The ⊗-unit convention gives a
             # `Scalar` factor its own array axis, so `OProdV((q: Scalar, u))` lives in `R ⊗ W` —
-            # one axis MORE than `W` — and `q()*u() + w()` would be a space mismatch that the old
-            # accidental 0-axis lowering silently absorbed. The unit iso `R ⊗ W ≅ W` is applied
-            # HERE, at the creation site (the consumer that makes a scalar factor deals with it);
-            # a genuine `R ⊗ W` tensor is still available explicitly via `G.tensor`/`oprod_v`.
+            # one axis MORE than `W` — and `q()*u() + w()` would be a space mismatch. The unit
+            # iso `R ⊗ W ≅ W` is applied HERE, at the creation site (the consumer that makes a
+            # scalar factor deals with it); a genuine `R ⊗ W` tensor is still available
+            # explicitly via `G.tensor`/`oprod_v`.
             from grassmann.infer.synth import synth_space
             if isinstance(synth_space(self.node), _s.Scalar):
                 return wrap(_t.scale(self.node, o.node))
@@ -214,12 +214,12 @@ class Expr:
             return wrap(_t.compose(self.node, (0,), o.node))
         raise EmbedError("`@` (Compose) needs two map (Term) operands")
 
-    # a >> b : linear-map space ~a * b, auto right-re-associating (27 Q1).
+    # a >> b : linear-map space ~a * b, auto right-re-associating.
     def __rshift__(self, other: object) -> Expr:
         o = _expr(other)
         if self.tower != SPACE or o.tower != SPACE:
             raise EmbedError("`>>` (linear-map space) needs two space operands")
-        # Q1: V >> W >> R parses left as (V >> W) >> R; rebuild right-nested so that
+        # V >> W >> R parses left as (V >> W) >> R; rebuild right-nested so that
         #     V >> W >> R  ==  V >> (W >> R).  When self is an `~a * b` map space, peel
         #     off its domain `a` and re-key the curry onto a >> (b >> other).
         dom_chain = _peel_map_space(self.node)
@@ -276,9 +276,9 @@ class Expr:
     @property
     def flat(self) -> Expr:
         """Give the musical ♭ map of this SPACE."""
-        # v.flat — Flat reads the metric of v's space; surface form takes the term's
-        # own space via Flat(space). We expose Flat keyed on the wrapped space when the
-        # handle is a space, else build Flat over the term's declared space if known.
+        # Flat reads the metric of a space; the surface `.flat` takes that space
+        # directly. Keyed on the wrapped node when the handle is a space; a term
+        # handle is refused (use G.flat(space)).
         if self.tower == SPACE:
             return wrap(_t.flat(self.node))
         raise EmbedError("`.flat` is the musical ♭ map of a SPACE; use G.flat(space)")

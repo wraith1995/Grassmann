@@ -132,7 +132,7 @@ def alt(V: Expr, k: int) -> Expr:
 # constructed ``Λᵏ(V)`` — e.g. the spaces of two distinct ``wedge`` results, or two k-form fields —
 # are only ALPHA-equivalent, not identical. FFS unification compares the defining map by structural
 # identity, so ``inner``/``dot`` of two such values (a k-form mass/moment DOF ``⟨αᵢ,αⱼ⟩``)
-# raised ``UnifyError: FFS map mismatch``. Memoizing on ``(V-space, k, rank)`` makes ``Λᵏ(V)`` one
+# would raise ``UnifyError: FFS map mismatch``. Memoizing on ``(V-space, k, rank)`` makes ``Λᵏ(V)`` one
 # canonical space — so the SAME ``V`` and ``k`` always yield the identical ``Img`` node and unify.
 _EXTPOW_CACHE: dict[object, Expr] = {}
 
@@ -168,14 +168,14 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
         # operand looks like a map space `~a ⊗ b` it peels the domain and curries. For a FORM base
         # (`V = Dual(...)`, every k-form) `Vk = V*⊗…⊗V*` has a `Dual` FIRST FACTOR, so
         # `_peel_map_space` mistakes the Λᵏ AMBIENT for a curried map and curries it — and
-        # `Vk >> Vk` never builds `Dual(Vk) ⊗ Vk` at all. The projector's space then came out
-        # RIGHT-NESTED while `tensor_power` builds the ambient FLAT, so one space had two spellings
-        # (`V*⊗V*⊗V*` vs `V*⊗(V*⊗V*)`) and `unify` had no rewrite that made progress between them.
-        # That blocked every Λ³ lane; k = 2 escaped only because both spellings land at arity 2.
+        # `Vk >> Vk` never builds `Dual(Vk) ⊗ Vk` at all. The projector's space then comes out
+        # RIGHT-NESTED while `tensor_power` builds the ambient FLAT, so one space has two spellings
+        # (`V*⊗V*⊗V*` vs `V*⊗(V*⊗V*)`) and `unify` has no rewrite that makes progress between them.
+        # That blocks every Λ³ lane; k = 2 escapes only because both spellings land at arity 2.
         # Spelling it directly also keeps `Alt_k` the 2-axis `(n^k, n^k)` MATRIX the SVD/FFS seam
         # expects — which is why the alternative (splicing nested products inside `oprod`) is NOT a
         # fix: it flattens `Dual(dom) ⊗ cod` into its component axes and the factorization seam then
-        # receives a rank-6 array instead of a matrix (measured).
+        # receives a rank-6 array instead of a matrix.
         projector = G.var(f"Alt_{k}", G.tensor(G.dual(Vk), Vk), props=G.rank(rank))
         result = G.img(projector)
     # Record the base space V as an OPTIONAL side note so derived ops (``wedge``) can
@@ -317,8 +317,8 @@ def hodge_star(omega: Expr, k: int) -> Expr:
     # metric lower `♭` on Λᵏ can consume it (`♭` is typed on `Lk = Img(alt(V,1))`, and a
     # bare value does not unify with it). `alt`-project it; idempotent on an already wrapped
     # Λ¹, so k=1 wrapped operands are unchanged. Mirrors how `wedge`/`interior` coerce their
-    # bare Λ¹ operands (there via the tensor-power embed) — hodge_star was the one Λ¹ door
-    # that rejected a plain covector.
+    # bare Λ¹ operands (there via the tensor-power embed) — hodge_star is the one Λ¹ door
+    # that would otherwise reject a plain covector.
     omega_k = G.project(omega, Lk) if k == 1 else omega
     # the wedge-into-volume pairing M : Λⁿ⁻ᵏ → (Λᵏ)*  (curried so pinv sees Λⁿ⁻ᵏ ⊸ Dual(Λᵏ)).
     pairing = G.llam(Lnk, lambda g: G.llam(

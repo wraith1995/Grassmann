@@ -1760,7 +1760,7 @@ def rule_order_otimes(node: Term) -> Term | None:
             if sigma == list(range(len(facs))):
                 return None  # already canonical
             if any((_top_arity(f) or 2) != 1 for f in facs):
-                return None  # multi-axis factor — Permute-on-blocks not yet handled
+                return None  # multi-axis factor — Permute-on-blocks not handled here
             sorted_facs = tuple(facs[i] for i in sigma)
             inv = [0] * len(sigma)  # perm = σ⁻¹ : Permute(OProdV(sorted), inv) reconstructs the original
             for position, i in enumerate(sigma):

@@ -307,7 +307,7 @@ class FfsRealization:
     # orthogonal complement, which differs between the two ambient bases.  Consumers must therefore
     # guard on exactness (measured: for the Λᵏ trace the residual is identically zero because a
     # diagonal pullback of an antisymmetric tensor stays antisymmetric for ANY ι; for a general
-    # operand it is 100%). See
+    # operand it is 100%).
     endpoint_cols: pa.SymArray | None = None
     endpoint_basis: object | None = None      # the `B.Basis` `endpoint_cols` is expressed in
 
