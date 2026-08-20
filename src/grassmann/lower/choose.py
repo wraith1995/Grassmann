@@ -102,7 +102,7 @@ def score_basis(
     # ── Fold-preservation: the RATIONAL literal image frame of an un-pinned ``Img`` leaf, when
     #   no metric/orthonormality demand forces the orthonormal frame.  Symmetric with the +10
     #   above (exactly one of the two operator bases earns it), so the rational ``ImageBasis``
-    #   now WINS (50 vs 40) where the orthonormal ``ProjectedBasis`` used to.
+    #   wins the tie (50 vs 40) over the orthonormal ``ProjectedBasis``.
     elif is_op_basis and isinstance(candidate, B.ImageBasis) and fold_alt and not demands:
         score += 10
 

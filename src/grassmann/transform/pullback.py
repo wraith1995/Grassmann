@@ -594,8 +594,7 @@ def _summand_index(component: Space, whole: Space) -> int | None:
     return None
 
 
-# Canonical FFS probes — the hand-rolled copies formerly here now live in
-# grassmann.infer.subspace.
+# Canonical FFS probes live in grassmann.infer.subspace.
 from grassmann.infer.subspace import ffs_superspace as _ffs_superspace
 from grassmann.infer.subspace import is_ffs as _is_ffs
 

@@ -1741,7 +1741,7 @@ def _coerce_rep_to_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> 
 # CHANGE OF BASIS — mirrors the docs "Conversion matrix".
 #
 # A cob relates two bases of the SAME space — there are NO implicit conversions, not even
-# canonical ones (ℝ≅ℝ* must be explicit; see docs/design-problems.md).  Pieces + the seam:
+# canonical ones (ℝ≅ℝ* must be explicit).  Pieces + the seam:
 #
 #   space guard        _space_of_basis / _same_space   the precondition (leads — see below)
 #   total cob (HUB)    _basis_cob_matrix()             guard, then dispatch to _basis_cob_rec
@@ -1845,8 +1845,8 @@ def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
             # ones").  The two are compared against each other in `_resolve_target`, so the
             # disagreement silently REJECTED a structurally-matching target: a map basis
             # `(~~Img ⊗ ~Img)` for a space `Dual(Dual(Img)) ⊗ Dual(Img)` resolved to `None`, the
-            # requested basis was dropped, and the node fell back to the orthonormal default — which
-            # is what kept a `QrOp` alive on the Λᵏ lane long after the push-down was correct.
+            # requested basis was dropped, and the node fell back to the orthonormal default —
+            # which keeps a `QrOp` alive on the Λᵏ lane instead of honoring the push-down.
             si = _space_of_basis(ctx, inner)
             if si is None:
                 return None
@@ -2469,7 +2469,7 @@ def _is_standard_orthonormal(b: B.Basis) -> bool:
             return True
         case B.OrthonormalBasis(inner):
             # standard-orthonormal ONLY when NO metric is carried (peel Dual/Primal to find it);
-            # a carried metric ⇒ g-orthonormal (or G⁻¹-orthonormal under a dual) (audit Fix 5).
+            # a carried metric ⇒ g-orthonormal (or G⁻¹-orthonormal under a dual).
             g, _parity = _peel_orthonormal_metric(inner)
             return g is None                                        # plain QR ⇒ QᵀQ = I
         case B.ListBasis(_v, _backup, reduce):
@@ -2509,7 +2509,7 @@ def _orthonormal_metric(ctx: _Ctx, b: B.Basis, n_amb: object) -> pa.SymArray | N
     match b:
         case B.OrthonormalBasis(inner):
             # peel Dual/Primal to the carried metric; ODD parity ⇒ the dual metric G⁻¹ is the
-            # effective inner product (Orth(Dual(WithInner(b,g)))), EVEN ⇒ G (audit Fix 5).
+            # effective inner product (Orth(Dual(WithInner(b,g)))), EVEN ⇒ G.
             g, parity = _peel_orthonormal_metric(inner)
             if g is None:
                 return None
@@ -2921,7 +2921,7 @@ def _rep_compose(
     steered = False
     want = _resolve_target(ctx, space, target)
     # The gate is `_compose_operand_targets`' own (it returns None on any structure it cannot steer
-    # cleanly).  It used to ALSO require `isinstance(_synth(f), S.OProd)` here — stricter than the
+    # cleanly).  An `isinstance(_synth(f), S.OProd)` guard here would be stricter than the
     # callee needs, since that works off `_factors`/`_basis_factors`, both of which handle a
     # single-factor space.  The excluded case is the most common form-valued shape there is: a COVECTOR
     # composed with an inclusion (`u ∘ ι` with `u : Dual(Img(J_cell))`), which is a `Dual`, not an
@@ -3499,7 +3499,7 @@ def _rep_corestrict(
     f_rep = _coerce_rep_basis(ctx, _rep(f, ctx), note="corestrict:f-to-default")
     img_basis, cols, ortho = _subspace_cols(ctx, img, note="corestrict:image-frame")
     if not ortho:
-        # THIRD instance of the `Pᵀ`-as-inverse pattern (`docs/basis-honesty-handoff.md`): the
+        # The `Pᵀ`-as-inverse pattern again: the
         # einsum below reads `f`'s columns in the image frame as `fᵀ·P`, i.e. `(Pᵀ·f)ᵀ`, which
         # are coordinates in `img_basis` only for an ORTHONORMAL `P`.  Not rewritten here (out
         # of the frame-realization arc's scope) — but a non-orthonormal image frame must BAIL
@@ -4079,9 +4079,9 @@ def _rep_project(
             )
     # projected dim = #columns of the sub-basis (may be a runtime δ_f DimAtom).
     out_dim = _shape_of(P)[1]
-    # BASIS HONESTY (`docs/basis-honesty-handoff.md`; the branch its note left unwritten,
-    # written now that a second — non-orthonormal — realization of the FFS image frame
-    # exists).  `ProjectOp` is `Pᵀ·v`, which are coordinates in `sub_basis` ONLY when `PᵀP = I`; the
+    # BASIS HONESTY: a second, non-orthonormal realization of the FFS image frame exists, so
+    # this branch cannot assume orthonormality.  `ProjectOp` is `Pᵀ·v`, which are coordinates
+    # in `sub_basis` ONLY when `PᵀP = I`; the
     # general coordinate map is the matched dual `P⁺ = (PᵀP)⁻¹Pᵀ`.  So: exploit orthonormality where
     # `_subspace_cols` can PROVE it (the historical single-Stmt path, unchanged and byte-identical —
     # every frame this site sees today is metric-free QR/SVD, verified by census), else emit the
@@ -4174,12 +4174,11 @@ def _rep_embed(
     # is covariant under ANY (GL) change of frame per this function's own contract above, so there is
     # no exactness/complement obligation to discharge.
     #
-    # HOISTED (frame-probe): this test used to sit AFTER the if/else below and merely OVERWRITE
-    # `P`/`v_arr`.  Both branches' outputs are then discarded — but their Stmts are already in the
-    # program, and for an endpoint-ful `ProjectedBasis` operand the `else` branch's
-    # `embed:operand-to-default` cob is exactly the canonical realization whose `Img(J)` endpoint IS
-    # the QR.  Measured on a Λ²-valued tetrahedral lane: 99/99 `else` entries had `vb.target is not None` and
-    # 108/108 `_endpoint_subspace_cols` calls hit, i.e. EVERY such cob was emitted and thrown away.
+    # HOISTED (frame-probe): this test runs BEFORE the if/else below rather than overwriting
+    # `P`/`v_arr` after it.  Otherwise both branches' Stmts still enter the program even though
+    # their outputs are discarded — and for an endpoint-ful `ProjectedBasis` operand the `else`
+    # branch's `embed:operand-to-default` cob is exactly the canonical realization whose `Img(J)`
+    # endpoint IS the QR, so running the probe first avoids emitting that cob only to throw it away.
     amb_basis = default_basis(big)
     vb = v_rep.basis
     ep = (_endpoint_subspace_cols(ctx, v_rep.space, vb.target)
@@ -5560,9 +5559,9 @@ def _eval_operand_target(
         return None
     # BACK OFF if any arg carries free labels — those break the natural pairing.
     #
-    # A MULTI-AXIS arg used to back off too ("a fused slot would fire — steering only the clean
-    # common shape").  That is now too strict: an arg presented over k > 1 space axes carries a
-    # `BasisProd` of exactly k factors, and `dual_basis` of THAT honestly describes the fused slot —
+    # A MULTI-AXIS arg is handled here rather than backed off: backing it off would be too
+    # strict, since an arg presented over k > 1 space axes carries a `BasisProd` of exactly k
+    # factors, and `dual_basis` of THAT honestly describes the fused slot —
     # the same nested-`BasisProd`-as-fused-axis tagging `_kron_result_basis` uses, which
     # `realize_basis_cols` lowers through `_kron_cols` to a genuine Kronecker product.  So allow it
     # when the basis really does split into one factor per axis, and keep backing off otherwise (a
@@ -5570,8 +5569,8 @@ def _eval_operand_target(
     for arg_rep in arg_reps:
         if arg_rep.free_labels:
             return None
-        # A MULTI-AXIS arg used to back off unconditionally ("a fused slot would fire").
-        # Too strict: an arg over k > 1 space axes carries a `BasisProd` of exactly k
+        # A MULTI-AXIS arg is not backed off unconditionally: that would be too strict, since
+        # an arg over k > 1 space axes carries a `BasisProd` of exactly k
         # factors, and `dual_basis` of THAT honestly names the fused slot — the same
         # nested-`BasisProd`-as-fused-axis tagging `_kron_result_basis` uses, which
         # `realize_basis_cols` lowers through `_kron_cols` to a genuine Kronecker product.
@@ -6003,7 +6002,7 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
 
 
 # ---------------------------------------------------------------------------
-# Seam-aware (Dim-aware) structured-basis combinators (audit Fix 1).
+# Seam-aware (Dim-aware) structured-basis combinators.
 #
 # The pure ``_block_diag``/``_kron``/``_block_repeat`` (below) do raw Python int shape
 # arithmetic, so they ``TypeError`` once a component dim is a runtime ``DimAtom`` (an FFS
@@ -6395,7 +6394,7 @@ def _realize_complete_basis(
     )
     if reduce is B.Reduce.NONE and isinstance(k, int) and isinstance(n_rows, int) and k != n_rows:
         # `NONE` does not reduce, so an over/under-complete `[sub|comp]` is a rectangular
-        # non-basis that never round-trips.  Use RREF (general completion) instead (audit D).
+        # non-basis that never round-trips.  Use RREF (general completion) instead.
         raise RepresentError(
             f"CompleteBasis(reduce=NONE): sub+complement span {k} columns but the ambient is "
             f"{n_rows}-dimensional; NONE assumes a disjoint pair spanning exactly the ambient. "
@@ -6983,8 +6982,8 @@ def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
             return False  # genuinely orthonormal / abstract ⇒ identity fast path
         case B.BasisSum(bs) | B.BasisProd(bs):
             # Gram of a composite = block-diag / Kron of factor Grams ⇒ non-orthonormal iff
-            # any factor is (probe-verified fix: `Prod(ImageBasis, std)` previously
-            # kept the identity fast path — silently wrong Gram on e.g. Dagger's transpose path).
+            # any factor is.  A `Prod(ImageBasis, std)` is non-orthonormal, so the identity
+            # fast path would give a silently wrong Gram (e.g. on Dagger's transpose path).
             return any(_is_immersed_metric_basis(x) for x in bs)
         case B.BasisRep(_, inner):
             return _is_immersed_metric_basis(inner)
@@ -7361,8 +7360,7 @@ def _realize_ffs_by_which(
         return real
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
-    # HONESTY: the same `` seam fix the sibling `_realize_image_basis` already applies, and
-    # `docs/basis-honesty-handoff.md` records as this seam's outstanding bug. `_rep(f)` is realized at
+    # HONESTY: the same seam fix the sibling `_realize_image_basis` already applies. `_rep(f)` is realized at
     # `AUTO`, so pinning `f`'s own operands to a non-default basis lands the realized frame in THOSE
     # coordinates while it is still tagged `default_basis(Img f)` — two routes, two frames, one tag, no
     # cob between. `Project(v, Img(J))` was silent-wrong under a pinned `J` for exactly this reason.
