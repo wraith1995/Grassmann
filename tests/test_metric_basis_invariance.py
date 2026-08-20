@@ -1,17 +1,15 @@
 """Basis-invariance of the inner product across orthonormal and non-orthonormal FFS bases.
 
-Regression for the metric-basis bug: Grassmann's ``dot`` used the identity metric for any
-non-``WithInner`` space *regardless of the active basis*, so the same geometric vector
-``t = J·s`` gave different inner products depending on whether it was expressed in the
-orthonormal ``ProjectedBasis`` (Q of the QR) or the literal non-orthonormal ``ImageBasis``
-(the ``f(eᵢ)`` columns).  The inner product must be basis-invariant:
+The inner product must be basis-invariant: the same geometric vector ``t = J·s`` gives the
+same inner product whether it is expressed in the orthonormal ``ProjectedBasis`` (Q of the
+QR) or the literal non-orthonormal ``ImageBasis`` (the ``f(eᵢ)`` columns).
 
     ⟨t, t⟩ = sᵀ(JᵀJ)s    (coordinate-free)
 
-The fix builds the metric in the operands' *active* basis (`lower/represent.py`):
+The metric is built in the operands' *active* basis (`lower/represent.py`):
 ``ProjectedBasis``/``Q`` (orthonormal) ⇒ identity metric (the min-sym fast path), while the
 non-orthonormal ``ImageBasis`` ⇒ the immersed Gram ``G = colsᵀ·G_cod·cols = JᵀJ`` (and its
-dual carries ``(JᵀJ)⁻¹``), routed through the FFS realization seam (`73 Topic 2`, `50 §A`).
+dual carries ``(JᵀJ)⁻¹``), routed through the FFS realization seam.
 """
 
 from __future__ import annotations
@@ -116,7 +114,7 @@ def test_inner_product_is_basis_invariant(Jmath: np.ndarray, dom: int, cod: int)
 
 @pytest.mark.parametrize(("Jmath", "dom", "cod"), CASES)
 def test_image_basis_gram_is_JtJ(Jmath: np.ndarray, dom: int, cod: int) -> None:
-    """The ``ImageBasis``-pinned ``dot`` kernel equals the immersed Gram ``JᵀJ`` (`73 T2`)."""
+    """The ``ImageBasis``-pinned ``dot`` kernel equals the immersed Gram ``JᵀJ``."""
     gram = _tangent_gram(Jmath, dom, cod)
     assert gram == pytest.approx(Jmath.T @ Jmath)
 

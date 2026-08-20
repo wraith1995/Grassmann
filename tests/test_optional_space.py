@@ -1,4 +1,4 @@
-"""TASK B1 — optional space annotations on ``Zero`` / ``Project``, unified later.
+"""Optional space annotations on ``Zero`` / ``Project``, unified later.
 
 The explicit space annotation is OPTIONAL (``None``) on :class:`~grassmann.core.term.Zero`
 and :class:`~grassmann.core.term.Project`; inference recovers it via first-order space

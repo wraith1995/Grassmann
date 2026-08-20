@@ -237,8 +237,8 @@ class TestKindEnforcement:
 
 
 class TestPrimitiveNameEnforcement:
-    """Tier-3 primitive name/id fields — a raw array as a ``name``/``uid`` would also make the
-    node unhashable, so they are guarded too (closing the last residual of the audit)."""
+    """Primitive name/id fields — a raw array as a ``name``/``uid`` would also make the
+    node unhashable, so they are guarded too."""
 
     def test_svar_name_must_be_str(self):
         with pytest.raises(SpaceError):

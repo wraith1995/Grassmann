@@ -1,29 +1,26 @@
-"""G3 — the headline acceptance gate: wedge basis-invariance (`41 §7b`, `50 A4`).
+"""Wedge basis-invariance.
 
 The flagship lowering test. The wedge ``a ∧ b`` is **coordinate-free**, so its realization
 is basis-independent: lower it in two different bases of ``Λ^{k+l}`` and prove they agree.
 
-* **Image basis.** ``wedge(a, b)`` lowers with its result in the ``§1`` default of
+* **Image basis.** ``wedge(a, b)`` lowers with its result in the default of
   ``Λ^{k+l} = Img(alt(V, k+l))`` — which IS ``ImageBasis(Alt)`` (the SVD basis of the
   antisymmetrizer). The result ``coords_image`` is a coordinate vector of length
   ``rank(Alt) = C(n, k+l)``.
 * **Orthonormal standard basis.** ``embed(wedge(a, b), V⊗^{k+l})`` lowers the *same*
-  element back into the ambient ``V⊗^{k+l}`` in its orthonormal standard basis (the `§1`
+  element back into the ambient ``V⊗^{k+l}`` in its orthonormal standard basis (the
   default of a tensor space). The result ``coords_std`` is the antisymmetric tensor.
 
 The two are connected by the change of basis ``P = ImageBasis(Alt)`` (its columns are the
-``Λ^{k+l}`` basis vectors in ambient coords, realized via the SVD seam, `41 §1`/`§2`):
-``coords_std == P @ coords_image``. Asserting this is the `§7b` invariance statement — it
+``Λ^{k+l}`` basis vectors in ambient coords, realized via the SVD seam):
+``coords_std == P @ coords_image``. Asserting this is the invariance statement — it
 exercises (a) ``cob``/basis-choice are *sound* (same element both ways), (b)
 ``ImageBasis`` realization via the FFS SVD seam, and (c) the derived stdlib ``wedge``
 (embed → tensor → reassociate → antisymmetrize → project → scale).
 
-**Improvement over the old impl (`41 §7b`):** FEMOracle hard-coded numeric results for
-both bases; here we *compute* both through the lowering and demonstrate invariance.
-
 The operands are supplied as ``project(ambient, Λᵏ)`` of ambient ``V⊗ᵏ`` inputs: an
 element of ``Λᵏ`` realized from an ambient one (the runtime ``δ`` axis of ``Λᵏ`` is then
-sourced from a Stmt's SVD rank, `42 §B`, not a — impossible — dynamic Program input).
+sourced from a Stmt's SVD rank, not a — impossible — dynamic Program input).
 """
 
 from __future__ import annotations
@@ -47,7 +44,7 @@ def _input_names(prog: pa.Program) -> list[str]:
 def _image_basis_matrix(V: G.Expr, m: int) -> np.ndarray:
     """Realize ``P = ImageBasis(alt(V, m))`` — the ``Λᵐ`` basis vectors in ambient coords.
 
-    This is the `41 §2` change-of-basis ``ImageBasis(Alt) → ambient standard`` (the SVD
+    This is the change-of-basis ``ImageBasis(Alt) → ambient standard`` (the SVD
     factor columns), realized on its own so the test can connect the two lowerings.
     """
     prog = pa.Program("image_basis", budget=pa.SymbolicBudget.force_stmts())
@@ -58,7 +55,7 @@ def _image_basis_matrix(V: G.Expr, m: int) -> np.ndarray:
 
 
 def _wedge_operands(V: G.Expr, k: int, l: int):  # noqa: E741 - l matches the spec
-    """``a : Λᵏ``, ``b : Λˡ`` as projections of ambient ``V⊗`` input vars (`26 §6`)."""
+    """``a : Λᵏ``, ``b : Λˡ`` as projections of ambient ``V⊗`` input vars."""
     a_amb = G.var("a_amb", tensor_power(V, k))
     b_amb = G.var("b_amb", tensor_power(V, l))
     a = G.project(a_amb, exterior_power(V, k))
@@ -67,11 +64,11 @@ def _wedge_operands(V: G.Expr, k: int, l: int):  # noqa: E741 - l matches the sp
 
 
 def _wedge_operands_bare(V: G.Expr, k: int, l: int):  # noqa: E741
-    """``a : Λᵏ``, ``b : Λˡ`` as **bare FFS-typed input vars** (Stage C, `42 §C`).
+    """``a : Λᵏ``, ``b : Λˡ`` as **bare FFS-typed input vars**.
 
     No ``project(ambient, Λᵏ)`` workaround: the operands live directly in ``Λᵏ``/``Λˡ`` and
     lower to dynamic bulk Program inputs whose runtime δ axis is read from the supplied
-    array's shape (with the C4 rank-consistency / sibling AssertOps emitted by represent).
+    array's shape (with the rank-consistency / sibling AssertOps emitted by represent).
     """
     a = G.var("a", exterior_power(V, k))
     b = G.var("b", exterior_power(V, l))
@@ -81,13 +78,13 @@ def _wedge_operands_bare(V: G.Expr, k: int, l: int):  # noqa: E741
 def _lower_two_bases(V: G.Expr, k: int, l: int):  # noqa: E741
     """Lower ``wedge(a, b)`` twice: in ``ImageBasis(Λ^{k+l})`` and the ambient standard."""
     a, b = _wedge_operands(V, k, l)
-    w = wedge(a, b, k, l)  # result in Λ^{k+l} (the §1 default = ImageBasis(Alt))
+    w = wedge(a, b, k, l)  # result in Λ^{k+l} (the default = ImageBasis(Alt))
     w_std = G.embed(w, tensor_power(V, k + l))  # same element, ambient V⊗^{k+l} std basis
     return represent(w.node), represent(w_std.node)
 
 
 def _lower_two_bases_bare(V: G.Expr, k: int, l: int):  # noqa: E741
-    """As :func:`_lower_two_bases` but with **bare FFS-typed input** operands (`42 §C`)."""
+    """As :func:`_lower_two_bases` but with **bare FFS-typed input** operands."""
     a, b = _wedge_operands_bare(V, k, l)
     w = wedge(a, b, k, l)
     w_std = G.embed(w, tensor_power(V, k + l))
@@ -95,18 +92,18 @@ def _lower_two_bases_bare(V: G.Expr, k: int, l: int):  # noqa: E741
 
 
 # ===========================================================================
-# G3 — wedge basis-invariance: ImageBasis vs orthonormal standard agree.
+# wedge basis-invariance: ImageBasis vs orthonormal standard agree.
 # ===========================================================================
 
 
 @pytest.mark.parametrize(("n", "k", "l"), [(3, 1, 1), (4, 1, 1), (4, 2, 1)])
 def test_wedge_basis_invariance(n: int, k: int, l: int) -> None:  # noqa: E741
-    """`§7b`: ``coords_std == P · coords_image`` — the two bases represent one element."""
+    """``coords_std == P · coords_image`` — the two bases represent one element."""
     V = G.space("V", n)
     prog_image, prog_std = _lower_two_bases(V, k, l)
     P = _image_basis_matrix(V, k + l)  # the connecting cob (ImageBasis → standard)
 
-    # the Λ^{k+l} coordinate axis has the expected dimension C(n, k+l) (`26 F4`).
+    # the Λ^{k+l} coordinate axis has the expected dimension C(n, k+l).
     rank = math.comb(n, k + l)
     assert P.shape == (n ** (k + l), rank)
 
@@ -121,21 +118,21 @@ def test_wedge_basis_invariance(n: int, k: int, l: int) -> None:  # noqa: E741
     assert coords_image.shape == (rank,)  # the image (SVD) basis of Λ^{k+l}
     assert coords_std.shape == (n ** (k + l),)  # the ambient standard basis
 
-    # THE §7b invariance assertion: the two coordinate vectors are the SAME element,
+    # THE invariance assertion: the two coordinate vectors are the SAME element,
     # connected by the change of basis P = ImageBasis(Alt).
     np.testing.assert_allclose(P @ coords_image, coords_std, atol=1e-9)
 
-    # P's columns are orthonormal (the SVD/QR image basis is orthonormal, `41 §1`).
+    # P's columns are orthonormal (the SVD/QR image basis is orthonormal).
     np.testing.assert_allclose(P.T @ P, np.eye(rank), atol=1e-9)
 
 
 @pytest.mark.parametrize(("n", "k", "l"), [(3, 1, 1), (4, 1, 1), (4, 2, 1)])
 def test_wedge_basis_invariance_bare_ffs_inputs(n: int, k: int, l: int) -> None:  # noqa: E741
-    """`§7b` + Stage C: the same invariance with **bare FFS-typed input** operands.
+    """The same invariance with **bare FFS-typed input** operands.
 
     ``a : Λᵏ``, ``b : Λˡ`` are bare FFS inputs (no ``project(ambient, Λᵏ)`` workaround);
     they lower to dynamic bulk Program inputs (their δ read from the supplied array's shape)
-    with the C4 rank-consistency / sibling AssertOps.  The basis-invariance assertion still
+    with the rank-consistency / sibling AssertOps.  The basis-invariance assertion still
     holds: ``coords_std == P · coords_image``.
     """
     V = G.space("V", n)
@@ -166,7 +163,7 @@ def test_wedge_basis_invariance_bare_ffs_inputs(n: int, k: int, l: int) -> None:
     assert coords_image.shape == (rank,)
     assert coords_std.shape == (n ** (k + l),)
 
-    # THE §7b invariance assertion still holds with bare FFS inputs.
+    # THE invariance assertion still holds with bare FFS inputs.
     np.testing.assert_allclose(P @ coords_image, coords_std, atol=1e-9)
     np.testing.assert_allclose(P.T @ P, np.eye(rank), atol=1e-9)
 
@@ -180,10 +177,10 @@ def test_wedge_basis_invariance_bare_ffs_inputs(n: int, k: int, l: int) -> None:
 
 def test_bare_ffs_input_is_static_rank() -> None:
     """A bare FFS-typed input whose frame operator FOLDS to a build-time constant lowers to a
-    STATIC-rank Program input with a STATIC-DIM AssertOp (`42 §C`, Option B).
+    STATIC-rank Program input with a STATIC-DIM AssertOp.
 
     ``Λ¹(ℝ⁴)`` is a constant-rank subspace (its alt operator is the 4×4 identity), so its
-    input is a plain static ``(4,)`` array — NOT a dynamic bulk input — and the C4
+    input is a plain static ``(4,)`` array — NOT a dynamic bulk input — and the
     rank-consistency assert is now the STATIC-dim ``assert:ffs-input-static-rank-consistency``
     (the runtime-bound input's subspace axis must equal the folded static rank).
     """
@@ -202,7 +199,7 @@ def test_bare_ffs_input_is_static_rank() -> None:
 
 
 def test_bare_ffs_sibling_mismatch_trips_assert() -> None:
-    """Two Λᵏ siblings fed mismatched δ trips a runtime assert (`42 §C4`).
+    """Two Λᵏ siblings fed mismatched δ trips a runtime assert.
 
     ``Λ¹(ℝ⁴)`` folds to a static-rank input; the sibling-agreement AssertOp is preserved on
     the static path, and the static-dim rank-consistency assert additionally guards each
@@ -254,7 +251,7 @@ def test_wedge_is_antisymmetric() -> None:
 
 
 def test_wedge_provenance_distinguishes_the_two_bases() -> None:
-    """`§6b`: the emitted ``Stmt`` ``note``s record which basis choice produced the code.
+    """The emitted ``Stmt`` ``note``s record which basis choice produced the code.
 
     The image-basis lowering ends in the ``ImageBasis(Alt)`` coordinates (the wedge's
     ``project:drop-complement`` onto ``Λ^{k+l}``); the standard-basis lowering takes the
@@ -275,7 +272,7 @@ def test_wedge_provenance_distinguishes_the_two_bases() -> None:
     notes_image = [s.note for s in prog_image.statements]
     notes_std = [s.note for s in prog_std.statements]
 
-    # every Stmt carries a non-empty algebra-centric note (`41 §6b`).
+    # every Stmt carries a non-empty algebra-centric note.
     assert all(notes_image) and all(notes_std)
 
     # the constant ImageBasis(Alt) SVD folds away in both lanes (uniform fold_numeric), so no

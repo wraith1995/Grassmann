@@ -1,9 +1,9 @@
-"""Scalar-lowering regressions (matrix findings G1–G3).
+"""Scalar-lowering regressions.
 
 The R ≅ R¹ empty-product law: a Scalar-space value is stored 0-d, but contraction and
 change-of-basis seams consume the coordinate vector ``[x]`` in the standard basis {1}.
-Two seams were missing the law (G1/G3), and the LLam vmap counted codomain axes off the
-SPACE instead of the body ARRAY (G2 — a nested map's inner scalar cod is FUSED away).
+Two seams were missing the law, and the LLam vmap counted codomain axes off the
+SPACE instead of the body ARRAY (a nested map's inner scalar cod is FUSED away).
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _run(prog, feeds: dict) -> np.ndarray:
 
 
 def test_scalar_dot_compiles_and_runs():
-    # G1: dot of two SCALARS — the humblest inner product — through represent's Eval.
+    # dot of two SCALARS — the humblest inner product — through represent's Eval.
     u = G.var("u", G.R)
     v = G.var("v", G.R)
     prog = G.compile(G.dot(u, v))
@@ -28,7 +28,7 @@ def test_scalar_dot_compiles_and_runs():
 
 
 def test_scalar_product_plus_scalar_dot():
-    # G3's grassmann half: a SUM whose operands carry different (1-dim) scalar bases —
+    # a SUM whose operands carry different (1-dim) scalar bases —
     # the sum-cob seam must apply the 1×1 cob through the R¹ coordinate vector.
     u = G.var("u", G.R)
     v = G.var("v", G.R)
@@ -38,7 +38,7 @@ def test_scalar_product_plus_scalar_dot():
 
 
 def test_transpose_map_types_dual_and_is_metric_free():
-    """ F1: the covector-factor transport is the metric-free TRANSPOSE
+    """The covector-factor transport is the metric-free TRANSPOSE
     ``λω. ω∘f : Dual(B) ⊸ Dual(A)`` (LLam + Compose — defined in the calculus),
     NOT ``dagger`` (the metric adjoint, typed PRIMAL ``B ⊸ A`` — pairing a covector
     against it was the Dual(Img J) ~ Img J unify refusal). Applied to a covector it

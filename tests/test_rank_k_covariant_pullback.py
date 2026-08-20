@@ -72,8 +72,8 @@ def _tower(k: int, leaf: S.Space) -> S.Space:
     """``Dual(leaf) ⊗ … ⊗ Dual(leaf) ⊗ ℝ`` — the space a ``k``-th derivative of a scalar field
     lands in.
 
-    FLAT, one axis per differentiation, exactly as ``transform.diff._tower_space`` builds it
-    (`§flat-tower`); ``test_tower_matches_what_diff_builds`` pins the two together.  The
+    FLAT, one axis per differentiation, exactly as ``transform.diff._tower_space`` builds it;
+    ``test_tower_matches_what_diff_builds`` pins the two together.  The
     alternative spelling, right-nested ``Dual ⊗ (Dual ⊗ (… ⊗ ℝ))`` as ``linear_map_space``
     curries, realizes as the ``(d, dᵏ⁻¹)`` MATRIX rather than ``k+1`` separate axes, and from
     ``k = 3`` up cannot meet the flat ``tensor_power`` product it is contracted against —

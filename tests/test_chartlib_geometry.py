@@ -8,9 +8,8 @@ the top-degree wedge ``e¹ ∧ … ∧ eᵈ`` of the frame, built from the stdli
 exterior algebra (``wedge`` / ``exterior_power``) and lowered through
 ``represent`` to a ``polyarray.Program``.  We then assert the two agree.
 
-This replicates the spirit of the old FEMOracle ``test_forms.py`` on the
-modern stack: Grassmann's exterior algebra validated against an independent
-geometric oracle, with NO hard-coded numbers — both sides are computed.
+Grassmann's exterior algebra is validated against an independent geometric
+oracle, with NO hard-coded numbers — both sides are computed.
 
 The headline identity
 ---------------------
@@ -28,7 +27,7 @@ the d tangent vectors are fed as the ``d`` rank-1 operands of the wedge.  The
 wedge thus computes ``t₁ ∧ … ∧ t_d`` with the frame's chartlib Jacobian
 columns as its numeric basis — exactly the volume form of that tangent space.
 
-Degree ≥ 3 is now native: the stdlib ``wedge`` consumes the *result* of another
+Degree ≥ 3 is native: the stdlib ``wedge`` consumes the *result* of another
 ``wedge`` directly — the d=3 top form is the genuine nested wedge
 ``wedge(wedge(t₁,t₂), t₃)``, with Grassmann's ``alt`` antisymmetrizer doing all
 the work at both levels and no numerically-staged inner Λ².

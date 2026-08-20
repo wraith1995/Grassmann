@@ -1,4 +1,4 @@
-"""IW5 — the Grassmann stdlib (derived exterior-algebra + LA ops).
+"""The Grassmann stdlib (derived exterior-algebra + LA ops).
 
 Builds ``alt(V, k)``, ``exterior_power(V, k)`` and ``wedge(a, b, k, l)`` from
 ``grassmann.stdlib`` and asserts:
@@ -10,8 +10,8 @@ Builds ``alt(V, k)``, ``exterior_power(V, k)`` and ``wedge(a, b, k, l)`` from
    (``Alt : V⊗ᵏ >> V⊗ᵏ``; ``wedge : Λᵏ × Λˡ → Λ^{k+l}``; the FFS dim is the symbolic
    ``C(n,k)`` when asserted, or the runtime atom ``δ`` otherwise).
 
-Type-level only: actually *lowering* the wedge and checking basis-invariance is gate G3
-(`50 §A4`), a separate follow-on, not exercised here.
+Type-level only: actually *lowering* the wedge and checking basis-invariance is not
+exercised here.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def _alpha(node, env=None):
 
 
 # ===========================================================================
-# alt(V, k) — the antisymmetrizer: a multi-var LLam + Lift + Scale (26 §2, F2).
+# alt(V, k) — the antisymmetrizer: a multi-var LLam + Lift + Scale.
 # ===========================================================================
 
 
@@ -114,7 +114,7 @@ def test_alt_signs_are_antisymmetric():
 
 
 # ===========================================================================
-# exterior_power(V, k) = Img(alt) — Λᵏ; dim is δ or asserted C(n,k) (26 §2/F3).
+# exterior_power(V, k) = Img(alt) — Λᵏ; dim is δ or asserted C(n,k).
 # ===========================================================================
 
 
@@ -127,7 +127,7 @@ def test_exterior_power_is_img():
 
 
 def test_exterior_power_runtime_dim_default():
-    # No asserted rank ⇒ |Λᵏ| = rank(Alt) is the runtime SVD atom δ_Alt (26 F3).
+    # No asserted rank ⇒ |Λᵏ| = rank(Alt) is the runtime SVD atom δ_Alt.
     V = G.space("V", S.DimVar("n"))
     Lk = exterior_power(V, 2)
     d = I.dim_of(Lk.node)
@@ -138,7 +138,7 @@ def test_exterior_power_runtime_dim_default():
 
 
 def test_exterior_power_asserted_symbolic_rank():
-    # Assert |Λ²(Vₙ)| = C(n,2): a static (symbolic) dim, NOT a runtime atom (26 §2/F4).
+    # Assert |Λ²(Vₙ)| = C(n,2): a static (symbolic) dim, NOT a runtime atom.
     V = G.space("V", S.DimVar("n"))
     cnk = S.DimVar("C_n_2")
     Lk = exterior_power(V, 2, rank=cnk)
@@ -157,7 +157,7 @@ def test_exterior_power_asserted_concrete_rank():
 
 
 # ===========================================================================
-# wedge(a, b, k, l) : Λᵏ × Λˡ → Λ^{k+l}  (derived; 26 §2, F5).
+# wedge(a, b, k, l) : Λᵏ × Λˡ → Λ^{k+l}  (derived).
 # ===========================================================================
 
 
@@ -193,7 +193,7 @@ def test_wedge_type_is_exterior_power_kplusl():
 
 
 def test_wedge_dim_runtime_by_default():
-    # |Λ^{k+l}| is the runtime atom δ unless asserted (26 F3).
+    # |Λ^{k+l}| is the runtime atom δ unless asserted.
     V = G.space("V", S.DimVar("n"))
     a, b = _make_operands(V, 2, 1)
     sp = I.synth_space(wedge(a, b, 2, 1).node)
@@ -201,7 +201,7 @@ def test_wedge_dim_runtime_by_default():
 
 
 def test_wedge_intermediate_steps_type():
-    # Each step's space is inferred (26 §2): embed ⇒ V⊗ᵏ; antisym ⇒ V⊗^{k+l}.
+    # Each step's space is inferred: embed ⇒ V⊗ᵏ; antisym ⇒ V⊗^{k+l}.
     V = G.space("V", S.DimVar("n"))
     k, l = 2, 1  # noqa: E741
     a, _ = _make_operands(V, k, l)

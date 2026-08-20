@@ -1,4 +1,4 @@
-"""IW5 tests: the basic nonlinear scalar stdlib ops (the old ``BaseNonLinear``).
+"""The basic nonlinear scalar stdlib ops.
 
 Each op (``sqrt``/``absval``/``sign``/``div``/``reciprocal``) builds a core
 :class:`~grassmann.core.term.External` over ``Scalar`` operands, lowers through

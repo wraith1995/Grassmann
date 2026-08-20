@@ -64,7 +64,7 @@ def _fingerprint(prog) -> tuple:
 
 def test_default_path_still_factorizes_frame() -> None:
     """Baseline: with NO supplied_frames the injective image frame is realized by the
-    QrOp seam and ``f`` is a program input (the historical behavior)."""
+    QrOp seam and ``f`` is a program input."""
     term, f, _W = _build()
     prog = represent(term)
     assert any(isinstance(s.fn, pa.QrOp) for s in prog.statements)
@@ -101,8 +101,8 @@ def test_supplied_frame_becomes_input_and_skips_factorization() -> None:
 
 def test_unused_kwarg_is_byte_identical() -> None:
     """Regression guard: ``supplied_frames`` defaulting to ``None`` (or ``{}``, or an
-    UNRELATED key) leaves the program structurally identical to the historical lowering —
-    the new code is a strict no-op when the ``(which, id(f))`` is not present."""
+    UNRELATED key) leaves the program structurally identical to the baseline lowering —
+    a strict no-op when the ``(which, id(f))`` is not present."""
     # Build ONE term (stable Var uids) and lower it four ways; only the kwarg differs.
     term, _f, _W = _build()
     base = _fingerprint(represent(term))
@@ -118,7 +118,7 @@ def test_unused_kwarg_is_byte_identical() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Seam gaps surfaced by the POINTWISE producer (P2): one input per supplied
+# Seam gaps surfaced by the POINTWISE producer: one input per supplied
 # frame per Program, and a frame realized only inside a vmap body.
 # ---------------------------------------------------------------------------
 
@@ -166,7 +166,7 @@ def test_metric_realization_is_not_stood_in_for_by_a_supplied_frame() -> None:
 def test_frame_realized_inside_a_vmap_body_is_declared_on_the_parent() -> None:
     """A supplied frame reached ONLY through a body-internal realization (the `LLam` vmap sub-
     Program) is declared on the PARENT too, and the parent's array is passed down as the shared
-    operand — the by-name channel free vars use (`41 §7`). Without it the lowering raised
+    operand — the by-name channel free vars use. Without it the lowering raises
     "LLam vmap body needs sub-input 'frame_…', but the parent has no matching input"."""
     V, W = C.base("V", 2), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W), props=P.inj)

@@ -1,16 +1,14 @@
-"""E1 — exterior-**algebra** property tests.
+"""Exterior-**algebra** property tests.
 
 Property-based numeric checks of the derived ``stdlib.wedge`` / ``exterior_power`` against
-clean numpy oracles, lowered through ``represent`` + ``Program.run`` exactly like the G3
-gate.  These fill the gaps the plan flags: antisymmetry was tested for *one* ``(n,k,l)`` on
-*one* seed; bilinearity / scaling / associativity / graded-commutativity / dimension /
-Cauchy–Binet / top-power=det / ``Λᵏ=0`` (k>n) had **no** numeric coverage at all.
+clean numpy oracles, lowered through ``represent`` + ``Program.run``.  They cover
+antisymmetry across ``(n,k,l)`` and seeds, bilinearity / scaling / associativity /
+graded-commutativity / dimension / Cauchy–Binet / top-power=det / ``Λᵏ=0`` (k>n).
 
 Scope: exterior **algebra** + the Gram/determinant bridge.  NOT exterior calculus (forms,
-``d``) — out of scope per the user.
+``d``) — out of scope.
 
-Implements (plan ids in headers): P1, P2/P3, P13, P10/G-B (Cauchy–Binet), P4, P9, P12, P6,
-P5, P7, P8.  Each loops over a grid of dims and rng seeds where the plan recommends it.
+Each check loops over a grid of dims and rng seeds.
 """
 
 from __future__ import annotations
@@ -39,8 +37,8 @@ SEEDS = (0, 42)
 def _image_basis_wedge_program(V: G.Expr, k: int, l: int):  # noqa: E741
     """``wedge(a, b, k, l)`` lowered in the default ``ImageBasis(Λ^{k+l})`` basis.
 
-    Operands are ``project(ambient V⊗, Λ)`` of ``V⊗ᵏ`` / ``V⊗ˡ`` input vars (`26 §6`), as
-    G3 does.  Returns ``(prog, name_a, name_b)``.
+    Operands are ``project(ambient V⊗, Λ)`` of ``V⊗ᵏ`` / ``V⊗ˡ`` input vars.  Returns
+    ``(prog, name_a, name_b)``.
     """
     a = G.project(G.var("a_amb", tensor_power(V, k)), exterior_power(V, k))
     b = G.project(G.var("b_amb", tensor_power(V, l)), exterior_power(V, l))
@@ -52,7 +50,7 @@ def _image_basis_wedge_program(V: G.Expr, k: int, l: int):  # noqa: E741
 
 
 # ===========================================================================
-# P1 — antisymmetry across (n,k,l) and many seeds (generalizes the one G3 test).
+# antisymmetry across (n,k,l) and many seeds.
 # ===========================================================================
 
 
@@ -80,7 +78,7 @@ def test_wedge_antisymmetry_grid(n: int, k: int, l: int, seed: int) -> None:  # 
 
 
 # ===========================================================================
-# P2 / P3 — bilinearity and per-slot scaling (one lowered program, linear combos).
+# bilinearity and per-slot scaling (one lowered program, linear combos).
 # ===========================================================================
 
 
@@ -112,7 +110,7 @@ def test_wedge_bilinearity_each_slot(seed: int) -> None:
 
 @pytest.mark.parametrize("seed", SEEDS)
 def test_wedge_scaling_per_slot(seed: int) -> None:
-    """``(αa)∧b = α(a∧b) = a∧(αb)`` — the cheap per-slot scaling guard (P3)."""
+    """``(αa)∧b = α(a∧b) = a∧(αb)`` — the cheap per-slot scaling guard."""
     n = 4
     V = G.space("V", n)
     prog, na, nb = _image_basis_wedge_program(V, 1, 1)
@@ -126,14 +124,14 @@ def test_wedge_scaling_per_slot(seed: int) -> None:
 
 
 # ===========================================================================
-# P13 — embed/project round-trip: project(embed(x, V⊗ᵏ), Λᵏ) == x for x:Λᵏ.
+# embed/project round-trip: project(embed(x, V⊗ᵏ), Λᵏ) == x for x:Λᵏ.
 # ===========================================================================
 
 
 @pytest.mark.parametrize(("n", "k"), [(3, 1), (4, 1), (4, 2)])
 @pytest.mark.parametrize("seed", (0, 7))
 def test_embed_project_roundtrip_on_exterior_power(n: int, k: int, seed: int) -> None:
-    """The ``Λᵏ ⊑ V⊗ᵏ`` embed used inside ``wedge`` is an isometric inclusion (`26 §6`)."""
+    """The ``Λᵏ ⊑ V⊗ᵏ`` embed used inside ``wedge`` is an isometric inclusion."""
     V = G.space("V", n)
     x = G.var("x", exterior_power(V, k))
     rt = G.project(G.embed(x, tensor_power(V, k)), exterior_power(V, k))
@@ -148,7 +146,7 @@ def test_embed_project_roundtrip_on_exterior_power(n: int, k: int, seed: int) ->
 
 
 # ===========================================================================
-# P10 / G-B — wedge component = minor; |v₁∧…∧v_m|² = det(Gram) (Cauchy–Binet).
+# wedge component = minor; |v₁∧…∧v_m|² = det(Gram) (Cauchy–Binet).
 # ===========================================================================
 
 
@@ -186,7 +184,7 @@ def test_cauchy_binet_gram_determinant(n: int, m: int, seed: int) -> None:
 
 
 # ===========================================================================
-# P6 — wedge with a linearly-dependent vector = 0 (general m).
+# wedge with a linearly-dependent vector = 0 (general m).
 # ===========================================================================
 
 
@@ -210,7 +208,7 @@ def test_wedge_dependent_vector_is_zero(n: int, m: int, seed: int) -> None:
 
 
 # ===========================================================================
-# P4 — associativity (a∧b)∧c == a∧(b∧c) (nested-wedge operand path).
+# associativity (a∧b)∧c == a∧(b∧c) (nested-wedge operand path).
 # ===========================================================================
 
 
@@ -246,7 +244,7 @@ def test_wedge_associativity(n: int, seed: int) -> None:
 
 
 # ===========================================================================
-# P9 — top exterior power is the determinant (dim Λⁿ = 1).
+# top exterior power is the determinant (dim Λⁿ = 1).
 # ===========================================================================
 
 
@@ -264,7 +262,7 @@ def test_top_power_component_is_determinant(n: int, seed: int) -> None:
 
 
 # ===========================================================================
-# P12 — full Sₘ sign law: permuting operands multiplies by sgn(σ).
+# full Sₘ sign law: permuting operands multiplies by sgn(σ).
 # ===========================================================================
 
 
@@ -294,7 +292,7 @@ def test_full_symmetric_group_sign_law(n: int, m: int) -> None:
 
 
 # ===========================================================================
-# P5 — graded commutativity for general k,l: a∧b == (−1)^{kl} (b∧a).
+# graded commutativity for general k,l: a∧b == (−1)^{kl} (b∧a).
 # ===========================================================================
 
 
@@ -336,7 +334,7 @@ def test_graded_commutativity_general_kl(n: int, k: int, l: int, seed: int) -> N
 
 
 # ===========================================================================
-# P7 — numeric dim Λᵏ = C(n,k) via the SVD seam (was only type-level).
+# numeric dim Λᵏ = C(n,k) via the SVD seam.
 # ===========================================================================
 
 
@@ -351,7 +349,7 @@ def test_dim_exterior_power_is_binomial(n: int) -> None:
 
 
 # ===========================================================================
-# P8 — Λᵏ = 0 for k > n (rank-0 / empty-basis SVD-seam probe).
+# Λᵏ = 0 for k > n (rank-0 / empty-basis SVD-seam probe).
 # ===========================================================================
 
 
@@ -359,8 +357,8 @@ def test_dim_exterior_power_is_binomial(n: int) -> None:
 def test_exterior_power_vanishes_above_dimension(n: int, k: int) -> None:
     """``Λᵏ(Vₙ) = 0`` for k>n: ``ImageBasis`` has 0 columns (C(n,k)=0).
 
-    Probes the rank-0 / empty-basis seam the plan flags (P8): the SVD seam must produce a
-    well-formed ``(nᵏ, 0)`` basis matrix without error.
+    Probes the rank-0 / empty-basis seam: the SVD seam must produce a well-formed
+    ``(nᵏ, 0)`` basis matrix without error.
     """
     assert math.comb(n, k) == 0
     V = G.space("V", n)

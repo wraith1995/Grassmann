@@ -1,4 +1,4 @@
-"""Finite-difference AD sweep over the INPUT space ``X`` (Goal 3).
+"""Finite-difference AD sweep over the INPUT space ``X``.
 
 ``diff(e, x, deps)`` returns the total derivative as a map ``X ⊸ space(e)``.  Where
 ``tests/test_diff_sweep.py`` fixes ``X`` (a vector ``V₃``) and varies the *body*, this sweep
@@ -17,7 +17,7 @@ hand-derived formula):
 * **full Jacobian map** — lower the WHOLE map ``represent(J)`` (which seeds ``h`` with the
   identity basis to read off every column at once), reshape to ``(|X|, |space(e)|)`` and compare
   to the column-by-column central-FD Jacobian.  This is the canonical map output and the path that
-  exercises the ``LLam``-binder lowering for a multi-axis / scalar input space (the Goal-3 fix).
+  exercises the ``LLam``-binder lowering for a multi-axis / scalar input space.
 
 Both run under **both** ``GRASSMANN_LLAM_INDEX`` modes (vmap/eye).  A loud ``DiffError`` /
 ``RepresentError`` is ACCEPTABLE (e.g. the eye-mode bulk-op / Hadamard seam); only a *silent*

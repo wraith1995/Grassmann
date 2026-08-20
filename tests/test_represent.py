@@ -1,17 +1,17 @@
-"""IW4 tests: the per-node ``representDown`` lowering (`41 §3`).
+"""Tests for the per-node lowering.
 
-These are the seeds of acceptance gates G1/G2 (`41 §7`):
+These exercise:
 
 * a small matrix program (``Eval``/``Compose``/dot over concrete ``Base`` spaces) lowered
   → ``Program.run`` → matches hand-computed numpy;
-* the **pullback** (`41 §7`): the body of ``λT.λb.λx,y. b(Tx,Ty)`` becomes the deferred
+* the **pullback**: the body of ``λT.λb.λx,y. b(Tx,Ty)`` becomes the deferred
   contraction ``EinsumStmt("ab,ai,bj->ij", B, T, T)`` = ``TᵀBT``, verified vs ``T.T@B@T``;
 * a ``Pinv``/``Solve`` program lowering to ``PinvOp``/``InvOp`` with the right
   ``AssertOp``, matching ``numpy.linalg.lstsq``/``solve``;
 * provenance: emitted ``Stmt``s carry non-empty algebra-centric ``note``s.
 
-**Storage convention (resolved, see report).** A map space ``~s0*s1`` mirrors its space
-factors onto array axes ``(|s0|, |s1|) = (|dom|, |cod|)`` (`41 §0`). ``Eval`` contracts
+**Storage convention.** A map space ``~s0*s1`` mirrors its space
+factors onto array axes ``(|s0|, |s1|) = (|dom|, |cod|)``. ``Eval`` contracts
 the leading ``Dual`` (input) axis, so a stored map matrix is the transpose of the usual
 ``(cod, dom)`` matrix; results below are computed against that convention.
 """
@@ -31,7 +31,7 @@ from grassmann.lower.provenance import PROV_KINDS
 
 
 def _llam_eye_mode() -> bool:
-    """True when the LLam lowering is the default fused-``eye`` einsum (not ``vmap``, `41 §7`)."""
+    """True when the LLam lowering is the default fused-``eye`` einsum (not ``vmap``)."""
     return os.environ.get("GRASSMANN_LLAM_INDEX", "vmap") != "vmap"
 
 
@@ -48,7 +48,7 @@ def _einsum_specs(prog: pa.Program) -> list[str]:
 
 
 # ===========================================================================
-# G1 — a small matrix program over concrete Base spaces vs hand numpy.
+# A small matrix program over concrete Base spaces vs hand numpy.
 # ===========================================================================
 
 
@@ -94,7 +94,7 @@ def test_inner_default_metric_is_identity() -> None:
     V = C.base("V", 3)
     prog = represent(C.inner(V))
     res = prog.run({})["result"]
-    # orthonormal default ⇒ G_s = I (the major min-sym win, `41 §1`).
+    # orthonormal default ⇒ G_s = I.
     np.testing.assert_allclose(res, np.eye(3))
 
 
@@ -110,7 +110,7 @@ def test_sum_and_scale_matches_numpy() -> None:
 
 
 # ===========================================================================
-# G2 — the pullback: body ⇒ deferred EinsumStmt("ab,ai,bj->ij") = TᵀBT.
+# The pullback: body ⇒ deferred EinsumStmt("ab,ai,bj->ij") = TᵀBT.
 # ===========================================================================
 
 
@@ -126,7 +126,7 @@ def test_pullback_body_is_deferred_tbt_contraction() -> None:
 
     prog = represent(pullback_form)
 
-    # The body contraction is the single deferred TᵀBT einsum (`41 §7`) — an EYE-mode IR shape.
+    # The body contraction is the single deferred TᵀBT einsum — an EYE-mode IR shape.
     # Under the Path-B ``GRASSMANN_LLAM_INDEX=vmap`` lowering the body is a sub-Program + vmap call
     # (no fused free-axis einsum), so this structural check applies only to the default eye mode.
     if _llam_eye_mode():
@@ -148,13 +148,13 @@ def test_pullback_only_T_and_b_are_inputs() -> None:
     xv, yv = C.var("x", V), C.var("y", V)
     body = C.eval_(bv, (0, 1), C.eval_(Tv, (0,), xv), C.eval_(Tv, (0,), yv))
     prog = represent(C.llam(xv, yv, body=body))
-    # the linear binder vars x,y do NOT leak as program inputs (`41 §3` LLam→matrix).
+    # the linear binder vars x,y do NOT leak as program inputs (LLam→matrix).
     names = {i.name for i in prog.inputs}
     assert names == {_var_key(Tv), _var_key(bv)}
 
 
 # ===========================================================================
-# G2 — Pinv / Solve programs vs numpy, with the right AssertOp.
+# Pinv / Solve programs vs numpy, with the right AssertOp.
 # ===========================================================================
 
 
@@ -206,7 +206,7 @@ def test_solve_emits_invop_and_full_rank_assert() -> None:
     f = C.var("f", C.linear_map_space(V, V), props=P.bij)
     prog = represent(C.solve(f))
     assert any(isinstance(s.fn, pa.InvOp) for s in prog.statements)
-    # the bij D-scope check (`41 §4`).
+    # the bij D-scope check.
     assert any(
         isinstance(s.fn, pa.AssertOp) and s.fn.kind == "square_full_rank"
         for s in prog.statements
@@ -221,7 +221,7 @@ def test_application_convention_invariant() -> None:
     # The application convention: every bundled apply equals applying the
     # corresponding MAP via Eval (the canonical contraction-view):
     #     XApply(f, v) ≡ Eval(X(f), (0,), v).
-    # SolveApply was the lone violator (solve(f,v)=f⁻¹v); now it conforms like PinvApply.
+    # SolveApply conforms like PinvApply.
     V = C.base("V", 3)
     rng = np.random.default_rng(1)
     A = rng.standard_normal((3, 3))
@@ -241,7 +241,7 @@ def test_application_convention_invariant() -> None:
 
 def test_solve_apply_is_eval_of_solve() -> None:
     # Convention: SolveApply(f,v) lowers as Eval(Solve(f),(0,),v) — apply the inverse
-    # MAP in Eval's contraction-view, = solve(fᵀ, v).  (No longer a bare SolveOp = solve(f,v).)
+    # MAP in Eval's contraction-view, = solve(fᵀ, v).
     V = C.base("V", 3)
     f = C.var("f", C.linear_map_space(V, V), props=P.bij)
     b = C.var("b", V)
@@ -267,7 +267,7 @@ def test_project_onto_injective_image_uses_qr_seam() -> None:
     imgf = C.img(f, source=V, target=W)
     w = C.var("w", W)
     prog = represent(C.project(w, imgf))
-    # the injective image basis is realized by QrOp (recovers IsoSpace, `41 §1`).
+    # the injective image basis is realized by QrOp (recovers IsoSpace).
     assert any(isinstance(s.fn, pa.QrOp) for s in prog.statements)
     assert any(s.note.startswith("ffs-basis:ImageBasis") for s in prog.statements)
 
@@ -300,7 +300,7 @@ def test_eval_dim_mismatch_raises_at_lowering() -> None:
 
 
 # ===========================================================================
-# Provenance — every emitted Stmt carries an algebra-centric note (`41 §6b`).
+# Provenance — every emitted Stmt carries an algebra-centric note.
 # ===========================================================================
 
 
@@ -312,7 +312,7 @@ def test_provenance_notes_are_algebra_centric() -> None:
     notes = _notes(prog)
     # every Stmt has a non-empty note.
     assert all(n for n in notes)
-    # and the eval contraction note uses the algebra vocabulary (`41 §6b`).
+    # and the eval contraction note uses the algebra vocabulary.
     assert any(n.startswith("eval:contract") for n in notes)
 
 
@@ -335,7 +335,7 @@ def test_provenance_pullback_notes() -> None:
 
 
 # ===========================================================================
-# (1) NEval → sub-Program / CallOp packaging (`41 §3` "Lam → sub-Program").
+# (1) NEval → sub-Program / CallOp packaging ("Lam → sub-Program").
 # ===========================================================================
 
 
@@ -348,7 +348,7 @@ def _eval_lam(V: C.Space, W: C.Space) -> tuple[C.Term, C.Var, C.Var]:
 
 
 def test_neval_lowers_via_subprogram_and_runs() -> None:
-    # An NEval of a Lam now lowers via the §3 Lam→sub-Program path (a Stmt whose fn is the
+    # An NEval of a Lam lowers via the Lam→sub-Program path (a Stmt whose fn is the
     # body's own sub-Program), and runs to the right numbers.
     V, W = C.base("V", 2), C.base("W", 3)
     lam, f, _x = _eval_lam(V, W)
@@ -405,7 +405,7 @@ def test_reused_dependent_function_shares_one_subprogram() -> None:
 
 
 # ===========================================================================
-# (2) Structured Provenance — every emitted Stmt carries node+basis+why (`41 §6b`).
+# (2) Structured Provenance — every emitted Stmt carries node+basis+why.
 # ===========================================================================
 
 
@@ -419,7 +419,7 @@ def test_stmts_carry_structured_provenance() -> None:
     provs = [s.provenance for s in prog.statements]
     assert all(p is not None for p in provs)
     assert all(isinstance(p, pa.Provenance) for p in provs)
-    # the algebra-centric kind vocabulary (`41 §6b`), NOT the FEM sampler vocabulary.
+    # the algebra-centric kind vocabulary, NOT the FEM sampler vocabulary.
     assert all(p.kind in PROV_KINDS for p in provs)
     # the eval contraction's provenance records the node kind + the contraction reason.
     eval_provs = [p for p in provs if p.kind == "eval"]
@@ -430,7 +430,7 @@ def test_stmts_carry_structured_provenance() -> None:
 
 
 def test_structured_provenance_records_basis_choice() -> None:
-    # An FFS realization Stmt's provenance records the basis CHOICE (+ why), the `41 §6b`
+    # An FFS realization Stmt's provenance records the basis CHOICE (+ why), the
     # auditable "which coordinate choice produced this code".
     V, W = C.base("V", 2), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W), props=P.inj)
@@ -445,7 +445,7 @@ def test_structured_provenance_records_basis_choice() -> None:
 
 
 def test_provenance_survives_post_pass_partial_eval() -> None:
-    # Structured provenance must survive the `41 §5` partial_eval post-pass (which copies
+    # Structured provenance must survive the partial_eval post-pass (which copies
     # the program); a regression here would silently drop traceability.
     V = C.base("V", 3)
     f = C.var("f", C.linear_map_space(V, V), props=P.bij)
@@ -455,7 +455,7 @@ def test_provenance_survives_post_pass_partial_eval() -> None:
 
 
 # ===========================================================================
-# (3) Static-axis per-contraction runtime AssertOp (`41 §4`, belt-and-suspenders).
+# (3) Static-axis per-contraction runtime AssertOp (belt-and-suspenders).
 # ===========================================================================
 
 
@@ -464,7 +464,7 @@ def _axis_len_op():  # noqa: ANN202 - test helper
 
 
 def test_static_contraction_emits_runtime_rank_eq_assert() -> None:
-    # A purely-STATIC Eval contraction now also emits a runtime rank_eq AssertOp (`41 §4`),
+    # A purely-STATIC Eval contraction also emits a runtime rank_eq AssertOp,
     # not only the lowering-time static check.
     V, W = C.base("V", 2), C.base("W", 3)
     f = C.var("f", C.linear_map_space(V, W))
@@ -509,13 +509,13 @@ def test_runtime_contraction_assert_trips_through_run() -> None:
 
 
 # ===========================================================================
-# ListBasis — explicit list-of-Term-vectors basis (`73 Topic 2`, B5)
+# ListBasis — explicit list-of-Term-vectors basis
 # ===========================================================================
 
 
 def test_list_basis_stacks_lowered_vectors_as_columns() -> None:
     """``ListBasis(v0, v1)`` of ℝ³ lowers to a FULL ℝ³ basis whose LEADING columns are
-    ⟦v0⟧, ⟦v1⟧ — a short frame is completed to the ambient (`73 T2`)."""
+    ⟦v0⟧, ⟦v1⟧ — a short frame is completed to the ambient."""
     from grassmann.lower.represent import _Ctx, realize_basis_cols
 
     V = C.base("V", 3)
@@ -527,7 +527,7 @@ def test_list_basis_stacks_lowered_vectors_as_columns() -> None:
     prog.add_output("B", realize_basis_cols(ctx, lb))
     res = prog.run({_var_key(x): np.array([1.0, 2.0, 3.0]),
                     _var_key(y): np.array([4.0, 5.0, 6.0])})["B"]
-    # A short ℝ³ ListBasis now realizes to a full 3×3 ambient basis (the 2 explicit
+    # A short ℝ³ ListBasis realizes to a full 3×3 ambient basis (the 2 explicit
     # vectors plus a standard completion).
     assert res.shape == (3, 3)
     np.testing.assert_allclose(res[:, 0], np.array([1.0, 2.0, 3.0]))
@@ -571,8 +571,8 @@ def test_list_basis_inconsistent_dim_raises() -> None:
 
 def test_image_basis_node_realizes_literal_map_application() -> None:
     """The LITERAL ``f(eᵢ)`` columns are the ambient immersion ``_ffs_immersion(ImageBasis)``;
-    ``realize_basis_cols`` now realizes the FFS basis **in-space** (the square ``R`` of
-    ``J = U_d·R``) (`73 T2`, `51 §FFS-δ`)."""
+    ``realize_basis_cols`` realizes the FFS basis **in-space** (the square ``R`` of
+    ``J = U_d·R``)."""
     from grassmann.lower.represent import _Ctx, _ffs_immersion, realize_basis_cols
 
     V, W = C.base("V", 2), C.base("W", 3)

@@ -1,11 +1,11 @@
 """``frame_cols_program(f, which)`` — the PRODUCER half of "frame becomes a kernel
-argument" (Phase 1b; additive).
+argument".
 
 Given a frame map ``f`` (e.g. the Jacobian ``Img(J)``), this builds a standalone
 :class:`polyarray.Program` whose inputs are ``f``'s own raw inputs and whose single output
 ``Q`` is the orthonormal frame columns — EXACTLY the ``FfsRealization.cols`` that
 :func:`_realize_ffs_by_which` produces inside a full :func:`represent`.  Pointwise (a later
-phase) runs it once per cell to obtain the numeric ``Q`` and feeds it to the Phase-1a
+phase) runs it once per cell to obtain the numeric ``Q`` and feeds it to the
 ``supplied_frames`` short-circuit (see ``test_supplied_frames.py``).
 
 The correctness anchor: the ``Q`` this frame-prep program computes must equal what the main

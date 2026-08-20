@@ -116,7 +116,7 @@ def test_auto_unchanged_by_the_decomposition_arms():
 
 
 # ---------------------------------------------------------------------------
-# Operator push-down (roadmap #1): Trace steers f so the surviving slots land in the target.
+# Operator push-down: Trace steers f so the surviving slots land in the target.
 # ---------------------------------------------------------------------------
 
 
@@ -140,7 +140,7 @@ def test_trace_pushes_target_into_surviving_slot():
 
 
 # ---------------------------------------------------------------------------
-# Metric-in-target (roadmap #2): Inner/Flat build the Gram directly in a concrete target basis.
+# Metric-in-target: Inner/Flat build the Gram directly in a concrete target basis.
 # ---------------------------------------------------------------------------
 
 
@@ -254,7 +254,7 @@ def test_arm_c_auto_byte_identical():
 
 
 # ---------------------------------------------------------------------------
-# Structured movement (roadmap #3): TupleEmbed/TupleProject emit their CONSTANT eye-block
+# Structured movement: TupleEmbed/TupleProject emit their CONSTANT eye-block
 # directly in a structure-matching per-block target — the matrix is byte-identical there
 # (verified: an ⊕ basis block-diagonal in [c₀…] with the lone block slot == cᵢ keeps the
 # off-block selected columns zero), so it lands in `want` with no conversion cob.

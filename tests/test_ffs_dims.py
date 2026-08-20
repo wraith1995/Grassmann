@@ -1,5 +1,5 @@
 """Static dimensions for the four fundamental subspaces (FFS) when the defining map's props
-pin the rank (`20 §5`). Regression for the fix in `lower/_dims.py`: FFS spaces previously raised
+pin the rank. Regression for the fix in `lower/_dims.py`: FFS spaces previously raised
 `DynamicDim` unconditionally, even when inj/surj/bij/rank made the dimension static — which blocked
 e.g. modelling a tangent space as `Image(J)` for an injective Jacobian `J`.
 

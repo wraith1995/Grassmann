@@ -910,7 +910,7 @@ def test_inverse_compose_needs_property() -> None:
 
 
 # ===========================================================================
-# Phase 3 — application fold + applied-form inverse cancellation.
+# Application fold + applied-form inverse cancellation.
 # ===========================================================================
 
 

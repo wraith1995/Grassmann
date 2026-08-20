@@ -1,4 +1,4 @@
-"""Asserted facts aiding unification / inference (A3).
+"""Asserted facts aiding unification / inference.
 
 ``Assert(v, s)`` and the asserted map properties (``inj``/``surj``/``bij``/``rank``)
 carried by a map's ``Var`` feed information into inference:
@@ -74,7 +74,7 @@ def test_bij_iso_forces_dim_equality_solve_ok():
 
 
 def test_bij_between_unequal_dims_rejected_in_solve():
-    """``Solve`` of a ``bij`` map asserted ``V ⊸ W`` with ``n ≢ m`` is rejected (A3)."""
+    """``Solve`` of a ``bij`` map asserted ``V ⊸ W`` with ``n ≢ m`` is rejected."""
     f = G.var("f", G.linear_map_space(V, W), props=G.bij)
     with pytest.raises(AssertFactError):
         synth_space(G.solve(f))
@@ -153,7 +153,7 @@ def test_inj_and_surj_facts():
 
 
 def test_no_props_no_facts():
-    """An unannotated map (F3 runtime-rank path) contributes no static dim facts."""
+    """An unannotated map (runtime-rank path) contributes no static dim facts."""
     f = G.var("f", G.linear_map_space(V, W))  # no props
     assert assert_property_dims(f, *map_domain_codomain(f)) == []
     assert map_facts_for_unify(f) == []

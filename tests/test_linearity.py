@@ -1,4 +1,4 @@
-"""Resource-based linearity checking for ``LLam`` (C1+C2).
+"""Resource-based linearity checking for ``LLam``.
 
 The inference layer enforces a real **usage / resource** discipline on the linear binder
 ``LLam``: each linear-bound variable must be consumed *exactly once* along every
@@ -7,9 +7,9 @@ evaluation path. These tests cover:
 - the exactly-once discipline (under-use, over-use rejected);
 - the **additive** ``Sum`` rule (each summand must consume the same resources — so
   ``Σ_σ`` of permutations is fine, but mismatched branches are not);
-- the **C2** requirement that ``x ↦ x ⊕ 0`` (a ``Zero`` summand) is a single ordinary use
+- the requirement that ``x ↦ x ⊕ 0`` (a ``Zero`` summand) is a single ordinary use
   of ``x`` and typechecks as linear-identity-like;
-- that already-valid programs (the §26 antisymmetrizer / pullback) still pass.
+- that already-valid programs (the antisymmetrizer / pullback) still pass.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ R = G.scalar()
 
 
 # ---------------------------------------------------------------------------
-# C2 — x ↦ x ⊕ 0 is a single use (Zero consumes nothing).
+# x ↦ x ⊕ 0 is a single use (Zero consumes nothing).
 # ---------------------------------------------------------------------------
 
 
@@ -114,7 +114,7 @@ def test_sum_branch_disagreement_rejected():
 
 
 # ---------------------------------------------------------------------------
-# The §26 worked examples still pass (no regression; precision, not rejection).
+# The worked examples still pass (no regression; precision, not rejection).
 # ---------------------------------------------------------------------------
 
 
@@ -148,7 +148,7 @@ def test_antisymmetrizer_multivar_sum_of_perms_ok():
 
 
 def test_pullback_inner_llam_ok():
-    """The §26.1 inner ``LLam([x,y]. b(T x, T y))`` passes the resource check."""
+    """The inner ``LLam([x,y]. b(T x, T y))`` passes the resource check."""
     formW = G.oprod(G.dual(W), G.dual(W), R)
     T = G.var("T", G.linear_map_space(V, W))
     b = G.var("b", formW)

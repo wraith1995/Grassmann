@@ -1,10 +1,10 @@
-"""Top-level ``import grassmann as G`` pipeline (`27 §2`).
+"""Top-level ``import grassmann as G`` pipeline.
 
 Proves the single-import end-to-end works: build a small program purely through the
 ``G.*`` surface, then ``G.compile`` / ``G.run`` (embed → infer → represent → run) and
 match a numpy reference.
 
-Storage convention (`41 §0`, see ``tests/test_represent.py``): a map space ``V >> W``
+Storage convention (see ``tests/test_represent.py``): a map space ``V >> W``
 mirrors its factors onto axes ``(|V|, |W|)`` and ``Eval`` contracts the leading (dual)
 axis, so a stored map matrix is the transpose of the usual ``(cod, dom)`` matrix.
 """
@@ -22,7 +22,7 @@ def _key(v: G.Expr) -> str:
 
 
 def test_single_import_surface() -> None:
-    """The intended top-level surface is all reachable off one import (`27 §2`)."""
+    """The intended top-level surface is all reachable off one import."""
     for name in ("space", "var", "llam", "osum", "tensor", "dual", "inner", "dot",
                  "pinv", "compile", "run", "core", "infer", "lower", "stdlib",
                  "wedge", "alt", "sqrt", "div"):

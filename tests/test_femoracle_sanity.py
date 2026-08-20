@@ -1,32 +1,23 @@
-"""Ported FEMOracle ``representDown`` sanity tests (`50 §OQ6`).
+"""Represent-down lowering sanity checks.
 
-Cross-checks that the new Grassmann lowering reproduces the *known numeric results* the
-old FEMOracle algebra tests pinned. Each test below is a PORT (rebuilt in the new API and
-lowered via :func:`grassmann.lower.represent.represent` + ``Program.run``) of a specific
-case in ``~/projects/fem/ElementForge2/tests/baseTest/test_rep.py``; the old API is
-incompatible, so these reproduce the *scenarios + expected numbers*, not the code.
+Cross-checks that the Grassmann lowering reproduces known numeric results, each rebuilt in
+the API and lowered via :func:`grassmann.lower.represent.represent` + ``Program.run``:
 
-Ports (old test → here):
-
-* ``test_identityRepSimple``  → :func:`test_identity_lowers_to_eye`
+* :func:`test_identity_lowers_to_eye`
       identity over an ``~s ⊗ s`` map space lowers to ``np.eye`` (the major min-sym win).
-* ``test_basisKern``          → :func:`test_antisymmetrizer_image_basis_rank_and_orthonormal`
+* :func:`test_antisymmetrizer_image_basis_rank_and_orthonormal`
       (+ XFAIL :func:`test_antisymmetrizer_kernel_basis_rank_and_orthonormal`) — the FFS
-      basis of an antisymmetrizer: rank + orthonormality (the old eigh/svd check).
-* ``test_repliftForAssoci``   → :func:`test_lift_reshape_shape_and_values`
+      basis of an antisymmetrizer: rank + orthonormality (an eigh/svd check).
+* :func:`test_lift_reshape_shape_and_values`
       ``Lift`` is an index reshape — the asserted output shape and reshape value-preservation.
-* ``test_repPullBack``        → :func:`test_pullback_is_tt_b_t`
-      the pullback ``λT.λb.λx,y. b(Tx,Ty)`` lowers (``representDown``) to ``TᵀBT`` and (as
-      the old test did with ``reshape(16)``) the flattened matrix matches the reference.
+* :func:`test_pullback_is_tt_b_t`
+      the pullback ``λT.λb.λx,y. b(Tx,Ty)`` lowers to ``TᵀBT`` and the flattened matrix
+      matches the reference.
 
-Skipped (per the brief: symbolic/geometry-heavy): ``test_repSymPullBack``,
-``testProjectEmbedSpacesRep``, ``test_inner``, ``test_identityTrace``, ``test_scaleInvert``,
-``test_scaleCompose``.
-
-Storage convention (`tests/test_represent.py`): a map space ``~s0 ⊗ s1`` mirrors its
-factors onto array axes ``(|s0|, |s1|) = (|dom|, |cod|)``; ``Eval`` contracts the leading
-(dual/input) axis, so a stored map matrix is the transpose of the usual ``(cod, dom)``
-matrix and the pullback result is ``Tm @ Bm @ Tm.T`` in these coords.
+Storage convention: a map space ``~s0 ⊗ s1`` mirrors its factors onto array axes
+``(|s0|, |s1|) = (|dom|, |cod|)``; ``Eval`` contracts the leading (dual/input) axis, so a
+stored map matrix is the transpose of the usual ``(cod, dom)`` matrix and the pullback
+result is ``Tm @ Bm @ Tm.T`` in these coords.
 """
 
 from __future__ import annotations
@@ -47,15 +38,15 @@ def _var_key(v: C.Var) -> str:
 
 
 # ===========================================================================
-# Port of test_identityRepSimple — identity lowers to np.eye.
+# Identity lowers to np.eye.
 # ===========================================================================
 
 
 def test_identity_lowers_to_eye() -> None:
     """``Identity(s)`` over ``~s ⊗ s`` lowers to ``np.eye(|s|)`` for assorted ``s``.
 
-    Mirrors the old ``test_identityRepSimple`` space list (a base ``R2`` standing in for
-    ``SpaceOPlus([R, R])``, its dual, and the ⊗ map/bilinear spaces).
+    Covers a base ``R2`` (standing in for ``SpaceOPlus([R, R])``), its dual, and the ⊗
+    map/bilinear spaces.
     """
     r2 = C.base("R2", 2)
     r2d = C.dual(r2)
@@ -76,16 +67,15 @@ def test_identity_lowers_to_eye() -> None:
 
 
 # ===========================================================================
-# Port of test_basisKern — the FFS basis of an antisymmetrizer (rank + orthonormality).
+# The FFS basis of an antisymmetrizer (rank + orthonormality).
 # ===========================================================================
 #
-# The old test built the antisymmetrizer on bilinear forms (`f(x,y) − f(y,x)`) and asserted
-# its KERNEL basis (the symmetric forms, a rank-3 ProjectedBasis of the dim-4 space) via an
-# svd/eigh comparison. We rebuild the antisymmetrizer with the new stdlib ``alt(V, 2)``
-# (the same multi-var LLam + Lift construction) and check its FFS bases through the SVD
-# seam.  For n = 2: V⊗² has dim 4, the antisymmetric image has rank 1, the symmetric kernel
-# has rank 3.  The old eigh/svd check ⇒ here: the expected rank + orthonormality of the
-# realized FFS basis.
+# The antisymmetrizer on bilinear forms (`f(x,y) − f(y,x)`) has a KERNEL basis (the
+# symmetric forms, a rank-3 ProjectedBasis of the dim-4 space) checked via an svd/eigh
+# comparison. We build the antisymmetrizer with the stdlib ``alt(V, 2)`` (a multi-var
+# LLam + Lift construction) and check its FFS bases through the SVD seam.  For n = 2:
+# V⊗² has dim 4, the antisymmetric image has rank 1, the symmetric kernel has rank 3.
+# The eigh/svd check gives the expected rank + orthonormality of the realized FFS basis.
 
 
 def _realize_ffs(space: C.Space, feed: dict[str, np.ndarray]):
@@ -101,12 +91,11 @@ def _realize_ffs(space: C.Space, feed: dict[str, np.ndarray]):
 def test_antisymmetrizer_image_basis_rank_and_orthonormal() -> None:
     """``Img(alt(V, 2))`` — rank 1 (antisymmetric part), orthonormal columns (n = 2).
 
-    The positive half of the ``test_basisKern`` port.  ``alt(V, 2)`` is a build-time-CONSTANT
-    operator, so its FFS basis now FOLDS to a constant (the structural constant-fold on the
-    general realization path): ``op == "const"``, a STATIC rank (``real.rank is None`` — no
-    deferred SVD, no runtime ``rank`` output).  The numerical content is unchanged — the same
-    rank-1 antisymmetric line with orthonormal columns.  ``alt(V, 2)`` is fully concrete ⇒ no
-    program inputs.
+    ``alt(V, 2)`` is a build-time-CONSTANT operator, so its FFS basis FOLDS to a constant
+    (the structural constant-fold on the general realization path): ``op == "const"``, a
+    STATIC rank (``real.rank is None`` — no deferred SVD, no runtime ``rank`` output).  The
+    numerical content is the rank-1 antisymmetric line with orthonormal columns.
+    ``alt(V, 2)`` is fully concrete ⇒ no program inputs.
     """
     import grassmann.embed as G
 
@@ -122,7 +111,7 @@ def test_antisymmetrizer_image_basis_rank_and_orthonormal() -> None:
 
 
 def test_antisymmetrizer_kernel_basis_rank_and_orthonormal() -> None:
-    """``Ker(alt(V, 2))`` — the rank-3 symmetric forms (the old ``test_basisKern`` target)."""
+    """``Ker(alt(V, 2))`` — the rank-3 symmetric forms."""
     import grassmann.embed as G
 
     V = G.space("V", 2)
@@ -134,15 +123,13 @@ def test_antisymmetrizer_kernel_basis_rank_and_orthonormal() -> None:
 
 
 # ===========================================================================
-# Port of test_repliftForAssoci — Lift is an index reshape (shape + values).
+# Lift is an index reshape (shape + values).
 # ===========================================================================
 #
-# The old test built a 3-arg map into a nested ⊗, then ``Lift([0,1], 0)`` it and asserted
-# the representation shape (4, 2, 8) plus that ``einsum("ijk,ij->k", rep, v)`` reproduced
-# the un-reshaped value (i.e. Lift is a pure reshape, value-preserving).  We port the
-# *reshape semantics* directly: a value of ``V⊗V⊗V`` (dims 2,2,2) with axes (0,1) fused has
-# the asserted shape (4, 2) and reshape-recovers the original tensor (the load-bearing
-# claim — Lift carries no numeric content, only an index regrouping).
+# ``Lift`` regroups indices without numeric content: a value of ``V⊗V⊗V`` (dims 2,2,2)
+# with axes (0,1) fused has the asserted shape (4, 2) and reshape-recovers the original
+# tensor (the load-bearing claim — Lift carries no numeric content, only an index
+# regrouping).
 
 
 def test_lift_reshape_shape_and_values() -> None:
@@ -164,18 +151,16 @@ def test_lift_reshape_shape_and_values() -> None:
 
 
 # ===========================================================================
-# Port of test_repPullBack — the pullback lowers to TᵀBT.
+# The pullback lowers to TᵀBT.
 # ===========================================================================
 #
-# The old test represented ``pullback = λT.λb.λx,y. b(Tx, Ty)`` against a symbolic 2×2 ``T``
-# (entries c11..c22) and pinned the 4×4 result = (Tᵀ⊗Tᵀ) reshaped, asserting via
-# ``reshape(16)``.  The new lowering collapses heavy symbolic cells to runtime atoms, so we
-# port it *numerically*: with concrete ``T``, ``B`` the pullback form on V is ``TᵀBT`` (the
-# ``Tm @ Bm @ Tm.T`` of the storage convention), checked flattened as the old test did.
+# ``pullback = λT.λb.λx,y. b(Tx, Ty)`` checked numerically: with concrete ``T``, ``B`` the
+# pullback form on V is ``TᵀBT`` (the ``Tm @ Bm @ Tm.T`` of the storage convention),
+# checked flattened.
 
 
 def test_pullback_is_tt_b_t() -> None:
-    """``λT.λb.λx,y. b(Tx,Ty)`` → ``representDown`` → ``TᵀBT`` (flattened, as the old test)."""
+    """``λT.λb.λx,y. b(Tx,Ty)`` → ``TᵀBT`` (flattened)."""
     V, W = C.base("V", 2), C.base("W", 2)  # both dim 2 (old: R2 → R2)
     Tv = C.var("T", C.linear_map_space(V, W))         # T : V ⊸ W
     bv = C.var("b", C.oprod(C.dual(W), C.dual(W)))    # b : bilinear form on W
@@ -184,9 +169,9 @@ def test_pullback_is_tt_b_t() -> None:
     pullback = C.llam(xv, yv, body=body)              # the n×n form matrix on V
 
     prog = represent(pullback)
-    # the body is the single deferred TᵀBT contraction (`41 §7`) — an EYE-mode IR shape only.
+    # the body is the single deferred TᵀBT contraction — an EYE-mode IR shape only.
     # Under ``GRASSMANN_LLAM_INDEX=vmap`` the body is a sub-Program + vmap call (no fused einsum);
-    # the NUMERIC result below is unchanged, so guard this structural check on the eye mode.
+    # the NUMERIC result below is the same, so guard this structural check on the eye mode.
     if os.environ.get("GRASSMANN_LLAM_INDEX", "vmap") != "vmap":
         specs = [s.fn.spec for s in prog.statements if isinstance(s.fn, pa.EinsumStmtOp)]
         assert "ab,ai,bj->ij" in specs
@@ -197,5 +182,5 @@ def test_pullback_is_tt_b_t() -> None:
     rep = prog.run({_var_key(Tv): tm, _var_key(bv): bm})["result"]
     assert rep.shape == (2, 2)
     expected = tm @ bm @ tm.T  # TᵀBT in the (|V|,|W|) storage convention
-    # the old test compared via reshape(16); here reshape(4) (the dim-2 analogue).
+    # compared flattened via reshape(4).
     np.testing.assert_allclose(rep.reshape(4), expected.reshape(4))

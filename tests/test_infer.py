@@ -1,8 +1,8 @@
-"""IW3 inference engine tests.
+"""Inference engine tests.
 
-Builds the §26 terms with ``grassmann.core`` constructors and asserts inference yields the
-expected Space/Type. Covers the G0 acceptance gate (a deliberate space-mismatch is
-rejected), unification recovering an implicit ``?α`` plus the explicit ``f[α]`` override,
+Builds the terms with ``grassmann.core`` constructors and asserts inference yields the
+expected Space/Type. Covers the deliberate space-mismatch rejection,
+unification recovering an implicit ``?α`` plus the explicit ``f[α]`` override,
 and the runtime-rank ``δ_f`` path for an unannotated map.
 """
 
@@ -39,7 +39,7 @@ R = G.scalar()
 
 
 # ===========================================================================
-# §26.1 — Pullback of a bilinear form (llam/lam split + Eval contraction).
+# Pullback of a bilinear form (llam/lam split + Eval contraction).
 # ===========================================================================
 
 
@@ -86,7 +86,7 @@ def test_pullback_checks_against_expected_type():
 
 
 # ===========================================================================
-# §26.2/§26.3 — Exterior / symmetric algebra: FFS dims via Img of a projector.
+# Exterior / symmetric algebra: FFS dims via Img of a projector.
 # ===========================================================================
 
 
@@ -102,7 +102,7 @@ def test_symmetric_algebra_asserted_rank():
 
 
 def test_exterior_algebra_dims_static():
-    """Λᵏ(V) = Img(Alt); with an asserted rank C(n,k) the dims are static (`26 §2`)."""
+    """Λᵏ(V) = Img(Alt); with an asserted rank C(n,k) the dims are static."""
     Vk = G.oprod(V, V)
     cnk = DimVar("Cnk")  # C(n,k)
     Alt = G.var("Alt", G.linear_map_space(Vk, Vk), props=G.rank(cnk))
@@ -116,7 +116,7 @@ def test_exterior_algebra_dims_static():
 
 
 # ===========================================================================
-# F3 seam — runtime rank atom δ_f for an UNANNOTATED constructed map (`25 §1`/§7).
+# Runtime rank atom δ_f for an UNANNOTATED constructed map.
 # ===========================================================================
 
 
@@ -143,12 +143,12 @@ def test_runtime_atom_distinct_per_map():
 
 
 # ===========================================================================
-# G0 — a deliberate space-mismatch must be REJECTED.
+# A deliberate space-mismatch must be REJECTED.
 # ===========================================================================
 
 
 def test_space_mismatch_rejected():
-    """Applying T : V⊸W to a W-vector mismatches the V input slot ⇒ rejected (G0)."""
+    """Applying T : V⊸W to a W-vector mismatches the V input slot ⇒ rejected."""
     T = G.var("T", G.linear_map_space(V, W))
     w = G.var("w", W)  # wrong space (should be V)
     bad = G.eval_(T, (0,), w)
@@ -170,7 +170,7 @@ def test_check_against_wrong_space_rejected():
 
 
 # ===========================================================================
-# §5 — implicit ?α recovery by unification + explicit f[α] override.
+# Implicit ?α recovery by unification + explicit f[α] override.
 # ===========================================================================
 
 
@@ -209,7 +209,7 @@ def test_implicit_recovery_in_eval_slot():
 
 
 # ===========================================================================
-# Unification unit checks (`25 §2`).
+# Unification unit checks.
 # ===========================================================================
 
 
@@ -249,7 +249,7 @@ def test_occurs_check():
 
 
 # ===========================================================================
-# Other §3 rules (smoke).
+# Other rules (smoke).
 # ===========================================================================
 
 
@@ -326,7 +326,7 @@ def test_tuple_embed_project():
 
 
 # ===========================================================================
-# §6 — subspace ⊑.
+# Subspace ⊑.
 # ===========================================================================
 
 

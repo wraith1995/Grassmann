@@ -1,10 +1,10 @@
-"""Shared test infrastructure for the exterior-algebra / geometry property suite (E1).
+"""Shared test infrastructure for the exterior-algebra / geometry property suite.
 
-The single reusable primitive the exterior-testing plan calls
-for: :func:`wedge_all` — the general ``m``-fold wedge of ``Λ¹`` vectors lowered into the
+The single reusable primitive:
+:func:`wedge_all` — the general ``m``-fold wedge of ``Λ¹`` vectors lowered into the
 **ambient** ``V⊗ᵐ`` standard basis (the fully antisymmetric tensor).  It generalizes the
 d≤3-capped ``_volume_form_via_grassmann`` of ``tests/test_chartlib_geometry.py`` to any
-``m`` and lifts the cap, and backs most of the Tier-2/Tier-3 property tests.
+``m`` and lifts the cap, and backs most of the property tests.
 
 It also exposes :func:`image_basis_matrix` (the ``ImageBasis(Λᵏ)`` SVD-seam realization,
 factored out of ``tests/test_g3_wedge_invariance.py`` so the dimension / round-trip /
@@ -32,7 +32,7 @@ from grassmann.stdlib import exterior_power, tensor_power, wedge
 def image_basis_matrix(V: G.Expr, k: int) -> np.ndarray:
     """``P = ImageBasis(alt(V, k))`` — the ``Λᵏ`` basis vectors in ambient coords.
 
-    The `41 §2` change-of-basis ``ImageBasis(Alt) → ambient standard`` realized via the
+    The change-of-basis ``ImageBasis(Alt) → ambient standard`` realized via the
     FFS SVD seam (``_realize_ffs_for_space``), exactly as ``test_g3_wedge_invariance``'s
     ``_image_basis_matrix`` does.  ``P`` is ``(nᵏ, C(n,k))`` with orthonormal columns
     (``C(n,k) == 0`` columns when ``k > n``).
@@ -45,7 +45,7 @@ def image_basis_matrix(V: G.Expr, k: int) -> np.ndarray:
 
 
 def _lambda1_operand(V: G.Expr, name: str) -> G.Expr:
-    """A ``Λ¹(V)`` operand built as ``project(ambient V⊗¹ var, Λ¹)`` (`26 §6`)."""
+    """A ``Λ¹(V)`` operand built as ``project(ambient V⊗¹ var, Λ¹)``."""
     amb = G.var(f"{name}_amb", tensor_power(V, 1))
     return G.project(amb, exterior_power(V, 1))
 

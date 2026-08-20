@@ -11,7 +11,7 @@ cannot meet.
 The refusal is CORRECT: ⊗ associativity makes the two one *space* but not one *layout*, and
 unifying them would let mismatched layouts meet silently.  So the arm CLASSIFIES rather than
 resolves — both rows raise; the success set of ``unify`` is untouched.  On the producer side,
-``transform.diff``'s derivative tower is flat (``_tower_space``, `§flat-tower`), so the
+``transform.diff``'s derivative tower is flat (``_tower_space``), so the
 association row is unreachable from it —
 ``test_the_derivative_tower_is_flat_and_never_reaches_the_association_row``.  A genuine map space
 (``Alt₃``, an opaque Jacobian) is a two-factor ``linear_map_space`` MATRIX, so the row itself
@@ -55,7 +55,7 @@ def _nested(k: int, leaf: S.Space) -> S.Space:
 
 
 # ===========================================================================
-# Phase 1 — `tensor_leaves` itself.
+# `tensor_leaves` itself.
 # ===========================================================================
 
 
@@ -78,13 +78,13 @@ def test_tensor_leaves_treats_dual_as_a_leaf_not_a_distribution_point() -> None:
 def test_tensor_leaves_keeps_the_tensor_unit() -> None:
     """The ⊗-unit occupies no array axis but it DOES occupy a factor position, and
     ``_basis_prod_leaves`` keeps its ``ScalarBasis`` tail.  Dropping it here would put the two
-    readers out of step, which is the drift Phase 4 exists to catch."""
+    readers out of step, which is the drift the leaf-reader tripwire exists to catch."""
     sp = S.oprod(S.dual(V3), S.oprod(S.dual(V3), S.Scalar()))
     assert S.tensor_leaves(sp) == [S.dual(V3), S.dual(V3), S.Scalar()]
 
 
 # ===========================================================================
-# Phase 2 — the two failure rows.
+# The two failure rows.
 # ===========================================================================
 
 
@@ -163,7 +163,7 @@ def test_success_set_is_untouched() -> None:
 
 
 # ===========================================================================
-# Phase 4 — the two leaf readers are a matched pair.
+# The two leaf readers are a matched pair.
 # ===========================================================================
 
 
@@ -233,7 +233,7 @@ def test_the_derivative_tower_is_flat_and_never_reaches_the_association_row() ->
     (``tensor_power``, ``Kron``'s spliced endpoints) and lands exactly on the
     ``AssociationMismatch`` row above — an error with no repair, because ⊗ associativity makes the
     two one space but ``_shape_of_space`` makes them two LAYOUTS.  ``transform.diff._tower_space``
-    builds the tower FLAT, so both sides agree by construction (`§flat-tower`).
+    builds the tower FLAT, so both sides agree by construction.
 
     Assert it on the ARTIFACT the producer mints, not on a hand-written space: what matters is that
     nothing in the stack spells a tower nested."""

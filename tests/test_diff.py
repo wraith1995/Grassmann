@@ -170,7 +170,7 @@ def _sig(u):
         (L.sinh, np.cosh),
         (L.tanh, lambda u: 1.0 / np.cosh(u) ** 2),
         (L.square, lambda u: 2.0 * u),
-        # batch 2 (xv below has |components| < 1, in-domain for asin/acos)
+        # xv below has |components| < 1, in-domain for asin/acos
         (L.atan, lambda u: 1.0 / (1.0 + u**2)),
         (L.asin, lambda u: 1.0 / np.sqrt(1.0 - u**2)),
         (L.acos, lambda u: -1.0 / np.sqrt(1.0 - u**2)),
@@ -181,7 +181,7 @@ def _sig(u):
 @_vmap_only
 def test_elementwise_vector_derivative_vs_fd(op, fprime) -> None:
     """diff of an elementwise op over a VECTOR is the Jacobian ``diag(f'(u))`` — via the
-    Hadamard pointwise op (goal 02). Checked vs the closed diagonal and central FD."""
+    Hadamard pointwise op. Checked vs the closed diagonal and central FD."""
     V = S.base("V", 3)
     x = T.var("x", V)
     e = op(G.wrap(x)).node
@@ -195,7 +195,7 @@ def test_elementwise_vector_derivative_vs_fd(op, fprime) -> None:
 
 @pytest.mark.parametrize("op", [L.atan, L.asin, L.acos, L.sigmoid, L.softplus])
 def test_batch2_scalar_derivative_vs_fd(op) -> None:
-    """Batch-2 scalar derivatives (built with the unit-constant ``_ones``) vs central FD.
+    """Scalar derivatives (built with the unit-constant ``_ones``) vs central FD.
     Operand ⟨x,x⟩ is small (≈0.13) so asin/acos stay in domain."""
     V = S.base("V", 2)
     x = T.var("x", V)
@@ -224,8 +224,8 @@ def test_hadamard_bilinear_derivative_vs_fd() -> None:
 
 # NOTE: second-order AD through these ops (differentiating an already-differentiated
 # LLam map) trips a higher-order `represent` limitation (Scalar≅ℝ¹ cob / a free-var
-# 'b' KeyError), independent of the derivative arms — that is goal-03 (arbitrary/higher-
-# order AD) territory, not op registration. The first-order chain rule above covers all
+# 'b' KeyError), independent of the derivative arms — that is arbitrary/higher-
+# order AD territory, not op registration. The first-order chain rule above covers all
 # nine ops; each arm composes from primitives, so it is higher-order-safe by construction
 # once the engine supports it.
 
@@ -283,7 +283,7 @@ def test_diff_through_marked_map_applied() -> None:
 
 def test_inverse_through_map_is_rejected() -> None:
     # The APPLIED inverse SolveApply(A, b) with A marked still routes the seed through the bulk op
-    # ⇒ rejected.  (The BARE form Eval(Solve(A), b) is now supported — see below.)
+    # ⇒ rejected.  (The BARE form Eval(Solve(A), b) IS supported — see below.)
     V = S.base("V", 2)
     x = T.var("x", V)
     A = T.var("A", S.oprod(S.dual(V), V), props=G.bij)
@@ -360,7 +360,7 @@ def test_sqrt_spd_map_derivative() -> None:
 
 
 def test_polar_gauge_engages_and_is_correct() -> None:
-    # P0 gauge mechanism: the subspace gauge is read by `diff` only (`represent` untouched).
+    # The gauge mechanism: the subspace gauge is read by `diff` only (`represent` untouched).
     # (1) the default `qr` gauge ⇒ realization has no Sqrt (the opaque QR frame is a fed var);
     #     registering `polar` for J ⇒ the realization IS Sqrt-bearing (Q = J·G^{-1/2}).
     # (2) the polar realization formula dQ·(Q⁺·embed v) is FD-correct — checked through the explicit
@@ -533,7 +533,7 @@ def test_qr_gauge_opaque_matches_projectedbasis_fd() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Gauge × realized-basis FD matrix (task 3).  The AD gauge frame ``Q`` must match the value frame
+# Gauge × realized-basis FD matrix.  The AD gauge frame ``Q`` must match the value frame
 # `represent` lowers the moving subspace in: ``(immersion, ImageBasis)`` and the DEFAULT
 # ``(qr, ProjectedBasis)``.  Each consistent pair must FD-match; the MISMATCHED pair must NOT.
 # Both embed and project through a moving ``Img(J)`` are covered, in both LLam modes (suite-level).
@@ -706,7 +706,7 @@ def test_mismatched_gauge_is_off_by_the_qr_connection() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Second-order FD (task 4): ∂²(embed/project) via diff(diff(·)) vs a central SECOND difference.
+# Second-order FD: ∂²(embed/project) via diff(diff(·)) vs a central SECOND difference.
 # The immersion gauge is closed-form ⇒ correct at all orders.  The opaque qr gauge's 2nd order needs
 # ∂²Q/∂x² (a further opaque variable) — the single (Q, ∂Q/∂x) pair cannot supply it, so the opaque
 # 2nd order is a documented SKIP (see test_qr_gauge_second_order_needs_d2Q below).
@@ -850,10 +850,10 @@ def _qr_world(rng, Rt_dim, Re_dim, order):
 
 
 def test_qr_gauge_second_order_embed_fd() -> None:
-    # Arbitrary-order QR AD (`§qr-tower`): diff(diff(embed)) through a MOVING Img(J), value realized
+    # Arbitrary-order QR AD: diff(diff(embed)) through a MOVING Img(J), value realized
     # in the DEFAULT ProjectedBasis (gauge qr), with the whole Q-tower fed via qr_gauge_feed — must
-    # FD-match a central SECOND difference.  The single (Q,∂Q/∂x) pair USED to drop ∂²Q (old SKIP);
-    # the self-differentiating tower now supplies it.
+    # FD-match a central SECOND difference.  The second order needs ∂²Q, which the
+    # self-differentiating tower supplies (the single (Q,∂Q/∂x) pair cannot).
     from grassmann.lower.represent import represent
     from grassmann.transform.diff import (
         clear_subspace_gauges,
@@ -1320,7 +1320,7 @@ def test_metric_pairing_is_parallel() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Frame / chart-Jacobian connection (task 3): ∇ from a moving frame J(x), the FEM case.
+# Frame / chart-Jacobian connection: ∇ from a moving frame J(x), the FEM case.
 # The induced (pullback) metric is g = JᵀJ; the connection Γ(h) = J⁺·(∂J·h) needs no rank-3
 # metric gradient.  Cross-checked against the trusted marked-(g, Dg) metric connection.
 # ---------------------------------------------------------------------------
@@ -1467,13 +1467,13 @@ def test_higher_order_is_rejected() -> None:
 
 def test_project_through_moving_img_differentiates() -> None:
     # project IS di⁺.  Differentiating project(z, Img(f)) w.r.t. the chart f (which defines the
-    # space) now COMPUTES the realization derivative ∂(f⁺)·z (the un-gated pseudoinverse derivative)
-    # instead of silently dropping it / bailing — no longer a Zero or a raise.
+    # space) COMPUTES the realization derivative ∂(f⁺)·z (the un-gated pseudoinverse derivative) —
+    # a genuine Jacobian map, not a Zero or a raise.
     W, V = S.base("W", 2), S.base("V", 4)
     f = T.var("f", S.oprod(S.dual(W), V), props=G.inj)
     z = T.var("z", V)
     J = diff(T.Project(z, S.img(f)), f)  # d/df of the projection w.r.t. its defining map
-    assert not isinstance(J, T.Zero)  # the ∂f contribution is no longer silently dropped
+    assert not isinstance(J, T.Zero)  # the ∂f contribution is present, not silently dropped
     assert isinstance(J, T.LLam)      # a genuine Jacobian map
 
 
@@ -1552,7 +1552,7 @@ def test_embed_through_moving_img_differentiates() -> None:
 def test_inner_with_xdep_metric_raises_else_zero() -> None:
     # Inner/Flat/Sharp of a WithInner space whose metric depends on x has a NONZERO operator
     # derivative (d⟨a,b⟩_g = aᵀ(∂g)b); the covariant path only intercepts Remetric, so a bare
-    # Inner here was a SILENT Zero — now a loud DiffError (audit bug B).  A CONSTANT metric is
+    # Inner here must be a loud DiffError, not a SILENT Zero.  A CONSTANT metric is
     # genuinely x-independent ⇒ the zero map (no raise).
     V = S.base("V", 4)
     GS = S.oprod(S.dual(V), S.dual(V))
@@ -1582,7 +1582,8 @@ def test_surface_diff_reachable() -> None:
 # SVD V[:,:δ]), ``Ker(J)`` (null space, complement V[:,δ:]) and ``CoKer(J)`` (left null, complement
 # U[:,δ:]).  ``embed``/``project`` through a moving one realize in the SAME (DEFAULT) frame
 # ``represent`` lowers, with the opaque self-differentiating frame tower fed via ``ffs_gauge_feed``.
-# Each must FD-match (these used to UnifyError for CoImg/Ker and silently use the Img frame for CoKer).
+# Each must FD-match: CoImg/Ker unify to their own coordinates and CoKer uses its own (left-null)
+# frame, not the Img frame.
 # Pick generic J with well-separated singular values so the SVD frame is stable across the FD steps.
 # ---------------------------------------------------------------------------
 
@@ -1994,10 +1995,10 @@ def test_ffs_gauge_third_order_embed_fd(kind) -> None:
 # Non-injective ``Img(J)`` gauge × realized-basis FD (ffs-frame, the rank-deficient Img case).
 # For an INJECTIVE J the range frame is qr_pos(Jᵀ) (dim = dom); for a NON-injective J (``props=rank(r)``,
 # r < dom) ``represent`` realizes ``Img(J)`` in the SVD LEFT-singular frame ``U[:,:r]`` (dim = r), NOT
-# qr_pos.  Before this fix ``diff`` lowered the QR/dom-dim gauge against the SVD/rank-dim value — a
-# SILENTLY WRONG derivative.  Now the non-inj Img routes through the same subspace-coord SVD path as
-# CoImg/Ker/CoKer, with the slice width PINNED at the declared rank so the Taylor-reconstructed frame
-# does not drift off the rank-r manifold (the §ffs-frame-drift subtlety).  Both embed and project
+# qr_pos.  So the non-inj Img must route through the same subspace-coord SVD path as
+# CoImg/Ker/CoKer (matching the QR/dom-dim gauge to the SVD/rank-dim value would be SILENTLY WRONG),
+# with the slice width PINNED at the declared rank so the Taylor-reconstructed frame
+# does not drift off the rank-r manifold.  Both embed and project
 # FD-match to machine precision (residuals ~1e-11 at eps=1e-6).
 #
 # Build an EXACTLY-rank-r moving subspace ``Img(J(x))`` via ``Jm(x) = M(x)·N(x)`` (M cod×r, N r×dom,
@@ -2030,7 +2031,7 @@ def _noninj_img_world(rng):
     DJv = np.stack([(Md[a] @ N0 + M0 @ Nd[a]).T for a in range(Rtd)], axis=0)  # (a, k, n)
     # M,N LINEAR in x ⇒ J = M·N is degree-2 ⇒ the tower is FINITE & EXACT: D²J is the symmetric
     # product-rule second derivative ∂²(MN)[a,b] = Md[a]·Nd[b] + Md[b]·Nd[a] (M''=N''=0), and D³J≡0.
-    # So the feed's Taylor reconstruction is EXACTLY rank-r at every step (no §ffs-frame-drift).
+    # So the feed's Taylor reconstruction is EXACTLY rank-r at every step (no frame drift).
     D2Jv = np.stack(
         [np.stack([(Md[a] @ Nd[b] + Md[b] @ Nd[a]).T for b in range(Rtd)], axis=0) for a in range(Rtd)],
         axis=0,

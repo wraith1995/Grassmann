@@ -1,10 +1,10 @@
-"""Coordinate-free (basis) invariance of the represent lowering rules — the `43 §2c` audit.
+"""Coordinate-free (basis) invariance of the represent lowering rules.
 
-`43 §2b` fixed the *metric* (``Inner``/``Flat``/``Sharp`` via ``_metric_matrix``): an
-``ImageBasis`` operand now carries the immersed Gram ``JᵀJ`` rather than the identity.  The
-`43 §2c` audit asks the broader question — does *every* represent rule stay correct when its
-operands/results sit in a non-orthonormal FFS basis (``ImageBasis``), not just the
-orthonormal default ``choose`` almost always picks?
+The *metric* (``Inner``/``Flat``/``Sharp`` via ``_metric_matrix``) carries, for an
+``ImageBasis`` operand, the immersed Gram ``JᵀJ`` rather than the identity.  The broader
+question here — does *every* represent rule stay correct when its operands/results sit in a
+non-orthonormal FFS basis (``ImageBasis``), not just the orthonormal default ``choose``
+almost always picks?
 
 Method (the "same value, two bases, must agree" invariant from
 ``test_metric_basis_invariance.py``): realise a geometric quantity over ``Img(J)`` in both
@@ -12,18 +12,17 @@ the orthonormal ``ProjectedBasis`` (Q of the QR, coords ``R·s``) and the non-or
 ``ImageBasis`` (literal ``f(eᵢ)`` columns, coords ``s``) and assert the lowering agrees with
 the coordinate-free truth.
 
-Findings locked down here:
+What is checked here:
 
-* ``_rep_dagger`` was the remaining metric bug (`43 §2c` suspect #1): it emitted a *plain
-  transpose* regardless of basis, but the adjoint is ``f† = G_cod·fᵀ·G_dom⁻¹``.  In an
-  ``ImageBasis`` endpoint (Gram ``JᵀJ`` ≠ I) the plain transpose violated the defining
-  adjoint identity ``⟨f† a, b⟩ = ⟨a, f b⟩``.  Now metric-aware (orthonormal fast path kept
-  byte-identical).  ``test_dagger_*``.
-* ``_rep_flat`` / ``_rep_sharp`` (suspect #2): confirmed already correct after `43 §2b` —
-  the pairing ``⟨flat(v), v⟩`` and the round trip ``sharp(flat(v)) = v`` are basis-invariant.
-* ``_rep_compose`` / ``Eval`` natural pairing (suspect #3): confirmed correct — a domain⊗
-  codomain contraction needs no metric, so it is basis-agnostic when the two contracted
-  slots share a coordinate convention (which ``choose`` and consistent pinning guarantee).
+* ``_rep_dagger`` (the metric adjoint): the adjoint is ``f† = G_cod·fᵀ·G_dom⁻¹``, not a
+  plain transpose.  In an ``ImageBasis`` endpoint (Gram ``JᵀJ`` ≠ I) a plain transpose
+  violates the defining adjoint identity ``⟨f† a, b⟩ = ⟨a, f b⟩``; the metric-aware form
+  satisfies it (orthonormal fast path kept byte-identical).  ``test_dagger_*``.
+* ``_rep_flat`` / ``_rep_sharp``: the pairing ``⟨flat(v), v⟩`` and the round trip
+  ``sharp(flat(v)) = v`` are basis-invariant.
+* ``_rep_compose`` / ``Eval`` natural pairing: a domain⊗codomain contraction needs no
+  metric, so it is basis-agnostic when the two contracted slots share a coordinate
+  convention (which ``choose`` and consistent pinning guarantee).
 """
 
 from __future__ import annotations
@@ -73,7 +72,7 @@ def _bases(J: G.Expr):
 
 
 # ---------------------------------------------------------------------------
-# Dagger — the `43 §2c` suspect #1 (metric adjoint, was a plain transpose).
+# Dagger — the metric adjoint.
 # ---------------------------------------------------------------------------
 
 # (dom_is_img, cod_is_img): which endpoints of M are the immersed tangent space Img(J).
@@ -93,9 +92,8 @@ def test_dagger_adjoint_identity(
 ) -> None:
     """``⟨M† a, b⟩_dom == ⟨a, M b⟩_cod`` must hold in EVERY basis (the defining adjoint).
 
-    A plain transpose (the old ``_rep_dagger``) satisfies this only for orthonormal
-    endpoints; an ``ImageBasis`` endpoint (Gram ``JᵀJ`` ≠ I) breaks it unless the adjoint
-    materialises the metric.
+    A plain transpose satisfies this only for orthonormal endpoints; an ``ImageBasis``
+    endpoint (Gram ``JᵀJ`` ≠ I) breaks it unless the adjoint materialises the metric.
     """
     _Rt, _Re, J = _setup(dom, cod)
     img = G.img(J)
@@ -137,7 +135,7 @@ def test_dagger_adjoint_identity(
 
 
 def test_dagger_orthonormal_is_plain_transpose() -> None:
-    """The orthonormal fast path stays a byte-for-byte plain transpose (`43 §2c`)."""
+    """The orthonormal fast path stays a byte-for-byte plain transpose."""
     V = G.space("V", 3)
     W = G.space("W", 4)
     f = G.var("f", V >> W)
@@ -165,7 +163,7 @@ def test_dagger_self_map_matches_numpy_adjoint(Jmath: np.ndarray, dom: int, cod:
     rng = np.random.default_rng(3)
     Mv = rng.standard_normal((dom, dom))  # stored (|img|,|img|)
     gram = Jmath.T @ Jmath
-    # f† stored = G_cod · fᵀ · G_dom⁻¹  (`43 §2c`).
+    # f† stored = G_cod · fᵀ · G_dom⁻¹.
     expect = gram @ Mv.T @ np.linalg.inv(gram)
     # Recover the stored adjoint column-by-column: M†(e_i) = expectᵀ[:, i]  (apply convention).
     cols = []
@@ -181,7 +179,7 @@ def test_dagger_self_map_matches_numpy_adjoint(Jmath: np.ndarray, dom: int, cod:
 
 
 # ---------------------------------------------------------------------------
-# Flat / Sharp — the `43 §2c` suspect #2 (confirmed already correct after `43 §2b`).
+# Flat / Sharp.
 # ---------------------------------------------------------------------------
 
 
@@ -239,7 +237,7 @@ def test_sharp_flat_roundtrip_is_basis_invariant(
 
 
 # ---------------------------------------------------------------------------
-# Compose / Eval natural pairing — the `43 §2c` suspect #3 (confirmed correct).
+# Compose / Eval natural pairing.
 # ---------------------------------------------------------------------------
 
 
@@ -325,11 +323,11 @@ def test_compose_output_invariant_across_bases() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The mismatched-pinning gap — auto-reconciled (`43 §2c`).
+# The mismatched-pinning gap — auto-reconciled.
 #
 # `choose` and consistent `basis_env` never split the two contracted slots of a contraction
-# across an immersed and an orthonormal basis.  An inconsistent MANUAL pin used to silently
-# miscompute (the raw index contraction omits the change-of-basis); represent now changes the
+# across an immersed and an orthonormal basis.  An inconsistent MANUAL pin would silently
+# miscompute (the raw index contraction omits the change-of-basis); represent changes the
 # mismatched operand into the slot-consistent basis (through the FFS realization seam) so the
 # result is correct regardless of how the slots were pinned.
 # ---------------------------------------------------------------------------
@@ -342,8 +340,7 @@ def test_dot_mismatched_operand_pinning_reconciles(
     """``dot`` with operands in *different* bases is reconciled, not miscomputed.
 
     Feed the SAME geometric vector ``v = J·s`` as ``a`` (``ImageBasis`` coords ``s``) and ``b``
-    (``ProjectedBasis`` coords ``R·s``); the inner product must be ``sᵀ(JᵀJ)s``.  (Before the
-    fix this silently returned the raw ``aᵀb``.)
+    (``ProjectedBasis`` coords ``R·s``); the inner product must be ``sᵀ(JᵀJ)s``.
     """
     _Rt, _Re, J = _setup(dom, cod)
     img = G.img(J)
@@ -442,7 +439,7 @@ def test_consistent_pinning_still_works() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Movement (`embed`) with a non-default operand basis (`43 §2c` audit).
+# Movement (`embed`) with a non-default operand basis.
 # ---------------------------------------------------------------------------
 
 
@@ -455,8 +452,7 @@ def test_embed_uses_operand_basis(
 
     ``embed`` pads ``v ∈ Img(J)`` into the ambient via ``P·⟦v⟧``.  ``P`` must be the operand's
     *active* basis columns: ``ImageBasis`` ⇒ the literal ``J`` columns (coords ``s``),
-    ``ProjectedBasis`` ⇒ ``Q`` (coords ``R·s``).  (Before the fix the ``ImageBasis`` pin used
-    ``Q`` with ``ImageBasis`` coords — a wrong ambient vector.)
+    ``ProjectedBasis`` ⇒ ``Q`` (coords ``R·s``).
     """
     from grassmann.embed.builders import embed
 
@@ -478,7 +474,7 @@ def test_embed_uses_operand_basis(
 
 
 # ---------------------------------------------------------------------------
-# Dynamic-rank FFS: dynamic → dynamic is always allowed (`42 §C`, `43 §2c`).
+# Dynamic-rank FFS: dynamic → dynamic is always allowed.
 #
 # A generic (no-props) map has a runtime rank δ_f; an inner product over its image/kernel
 # vectors must lower (the orthonormal metric is a δ×δ identity sized at run time).

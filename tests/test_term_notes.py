@@ -1,4 +1,4 @@
-"""TASK F1 — optional notes/annotations on terms.
+"""Optional notes/annotations on terms.
 
 A surface :class:`~grassmann.embed.ops.Expr` can carry OPTIONAL side annotations via
 ``with_note``/``get_note`` that NEVER affect equality or hashing. :func:`stdlib.exterior_power`

@@ -1,10 +1,9 @@
-"""IW2 acceptance tests — the Python embedding (eDSL).
+"""Acceptance tests for the Python embedding (eDSL).
 
-Renders the worked-example constructions in the FINALIZED surface syntax
-(`27`) and asserts they desugar to the SAME core nodes the IW1 tests build (compared
-against the `grassmann.core` constructors). Also exercises operator precedence
-consequences, ``>>`` right-re-association, ``f[α]`` type application, and
-``v.remetric(g)``.
+Renders the worked-example constructions in the surface syntax and asserts they
+desugar to the SAME core nodes built directly against the `grassmann.core`
+constructors. Also exercises operator precedence consequences, ``>>``
+right-re-association, ``f[α]`` type application, and ``v.remetric(g)``.
 
 Because core ``Var`` carries a fresh ``uid`` in its identity, structural comparison
 uses :func:`norm`, which canonicalizes all ``Var.uid``/``SVar``/binder names by first
@@ -75,7 +74,7 @@ def norm(node, env=None):
 
 
 # ===========================================================================
-# Worked example 1: pullback of a bilinear form (26 §1) in surface syntax.
+# Worked example 1: pullback of a bilinear form in surface syntax.
 # ===========================================================================
 
 
@@ -95,12 +94,11 @@ def build_pullback_surface():
 
 
 def build_pullback_core():
-    """The IW1 reference construction (cf. tests/test_core_ir.py build_pullback).
+    """The reference construction (cf. tests/test_core_ir.py build_pullback).
 
     NOTE: the surface ``formW = W >> (W >> R)`` desugars to the *curried* binary form
-    ``~W * (~W * R)`` per the locked `27 §1` semantics of ``>>`` (strictly ``~a * b``),
-    NOT the flat ternary ``~W * ~W * R`` the IW1 core test happens to build. We mirror
-    the curried surface form here (see the report's ambiguity note A1).
+    ``~W * (~W * R)`` per the semantics of ``>>`` (strictly ``~a * b``), NOT the flat
+    ternary ``~W * ~W * R``. We mirror the curried surface form here.
     """
     V = S.base("V", S.DimVar("n"))
     W = S.base("W", S.DimVar("m"))
@@ -158,7 +156,7 @@ def test_pullback_inner_evals():
 
 
 # ===========================================================================
-# Worked example 2: the antisymmetrizer (26 §2) in surface syntax.
+# Worked example 2: the antisymmetrizer in surface syntax.
 # ===========================================================================
 
 
@@ -235,7 +233,7 @@ def test_antisymmetrizer_image():
 
 
 def test_dual_times_equals_map_space():
-    # ~a * b == a >> b   (27 §1: `~` binds tighter than `*`; map-space identity).
+    # ~a * b == a >> b   (`~` binds tighter than `*`; map-space identity).
     V = G.space("V", 3)
     W = G.space("W", 4)
     assert (~V * W) == (V >> W)
@@ -252,7 +250,7 @@ def test_tensor_binds_tighter_than_osum():
 
 
 def test_rshift_right_reassociates():
-    # V >> W >> R parses left in Python as (V >> W) >> R, but Q1 re-associates to
+    # V >> W >> R parses left in Python as (V >> W) >> R, but re-associates to
     # V >> (W >> R).
     V = G.space("V", 2)
     W = G.space("W", 3)

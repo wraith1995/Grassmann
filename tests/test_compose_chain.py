@@ -1,7 +1,7 @@
-"""TASK B3 — series-composition ``chain`` smart constructor.
+"""Series-composition ``chain`` smart constructor.
 
-``chain(*fs)`` is sugar over nested single-arg :class:`Compose`, mimicking FEMOracle's
-nested ``Compose(outer, (0,), [inner])`` (``pullback.py:778``). No new core node.
+``chain(*fs)`` is sugar over nested single-arg :class:`Compose`
+(``Compose(outer, (0,), [inner])``). No new core node.
 """
 
 from __future__ import annotations

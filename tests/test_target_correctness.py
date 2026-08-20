@@ -3,7 +3,7 @@ operand lives in a non-default basis.
 
 The bug being guarded: ~11 ``_rep_X`` helpers tagged their result ``default_basis(space)``
 while the coordinates actually lived in the OPERAND's basis.  Inert under ``AUTO`` (the
-lowering never cob'd), but ``target=STD``/concrete activates the (now-emitted) cob FROM the
+lowering never cob'd), but ``target=STD``/concrete activates the cob FROM the
 (dishonest) tag → wrong numbers whenever an operand is in a non-default basis.
 
 The check is **independent of the implementation**: for each affected helper we build a term
@@ -378,8 +378,8 @@ def _endo_map_want():
 # but a non-orthonormal list basis has Gram ≠ I, where the adjoint is ``G·fᵀ·G⁻¹`` ≠ ``fᵀ``
 # (``transpose(map_coords(M)) ≠ map_coords(Mᵀ)``).  Unlike Solve/Pinv (inversion IS
 # basis-covariant), transpose is not.  (A non-orthonormal ``list_basis`` is immersed-metric, so it
-# routes through the metric formula — honest tag.  The fast path now ALSO tags the honest operand
-# basis for an orthonormal-but-NON-STANDARD operand, fixing a former silent-wrong STD cob; see
+# routes through the metric formula — honest tag.  The fast path ALSO tags the honest operand
+# basis for an orthonormal-but-NON-STANDARD operand, avoiding a silent-wrong STD cob; see
 # ``test_dagger_orthonormal_nonstandard_operand_std``.)
 
 
@@ -459,7 +459,7 @@ def test_concrete_basis_round_trip():
 
 
 # ---------------------------------------------------------------------------
-# Operator concrete-target PUSH-DOWN (roadmap-#1): _rep_eval / _rep_compose steer their
+# Operator concrete-target PUSH-DOWN: _rep_eval / _rep_compose steer their
 # operand bases so the result is born directly in ``want`` (no result cob).  The two-route check
 # proves correctness; AUTO must stay byte-identical (stmt count); a steered case with default/leaf
 # operands must emit NO ``cob:target`` note (the steer realized natively).
@@ -548,16 +548,16 @@ def test_dagger_orthonormal_nonstandard_operand_std():
     # Mf expressed in the orthonormal-non-standard map basis, via the lowering's own cob
     mf_q = _run(represent(f, basis_env=std_env, target=opb), {**frame, _vk(f): Mf})
     got = _run(represent(C.dagger(f), basis_env={f.uid: opb}, target=B.STD), {**frame, _vk(f): mf_q})
-    assert np.allclose(got, ref)  # was WRONG before the fast-path tag fix (returned the Q-basis adjoint)
+    assert np.allclose(got, ref)  # correct only with the fast-path tag (else returns the Q-basis adjoint)
 
 
 def test_llam_nondefault_body_basis_fails_loudly():
     """_rep_llam basis honesty across both modes.  A default-operand body is correct (AUTO==STD==Mfᵀ).
     A COD-non-default body (``f·x`` with ``f`` pinned) RAISES under ``eye`` (the one-einsum lowering
     can't tag the free-axis Gram) but is CORRECT under the ``vmap`` default (per-basis-vector, honest).
-    A DOMAIN-only body (``⟨a,x⟩`` with a pinned covector) is now CORRECT in BOTH modes — eval's
+    A DOMAIN-only body (``⟨a,x⟩`` with a pinned covector) is CORRECT in BOTH modes — eval's
     ``_reconcile_pairing`` reconciles the pinned rank-1 operand against the bound var (the
-    ``_slot_basis_at`` rank-1 fix); it was formerly silent-wrong, then guarded by a raise."""
+    ``_slot_basis_at`` rank-1 fix)."""
     import os
 
     from grassmann.lower.represent import RepresentError
@@ -597,7 +597,7 @@ def test_llam_nondefault_body_basis_fails_loudly():
     lbd = B.list_basis(*d)
     dfr = {f"d{i}_{d[i].uid}": Am[:, i] for i in range(3)}
     lin = C.llam(x, body=C.eval_(a, (0,), x))  # LLam([x]. ⟨a,x⟩) = the covector a
-    # Domain-only case — now HONEST in BOTH modes (was silent-wrong, then a guard-raise): eval's
+    # Domain-only case — HONEST in BOTH modes: eval's
     # `_reconcile_pairing` reconciles the pinned rank-1 covector `a` against the bound var (the
     # `_slot_basis_at` rank-1 fix), so ⟨a, eⱼ⟩ is the honest pairing.  Two-route: `a` pinned to lbd
     # fed its lbd-coords, target=STD == `a` in the std dual basis (the value it represents).
@@ -677,7 +677,7 @@ def test_pinv_apply_gsvd_nondefault_operand_two_route():
 
 
 # ---------------------------------------------------------------------------
-# LLam Path-B (`GRASSMANN_LLAM_INDEX=vmap`) — a NON-DEFAULT llam body, correct (`41 §7`).
+# LLam Path-B (`GRASSMANN_LLAM_INDEX=vmap`) — a NON-DEFAULT llam body, correct.
 #
 # The default ``eye`` lowering binds each linear var to a materialized identity on an untyped FREE
 # axis and lowers the body once; for a non-default/non-orthonormal body this entangles a Gram onto
@@ -743,14 +743,14 @@ def test_embed_subspace_list_basis_no_crash():
     alb = _run(represent(a, basis_env={a.uid: default_basis(imgJ)}, target=lb),
                {_vk(a): ad, _vk(Jm): Jfeed, **qfeed})
     got = _run(represent(emb, basis_env={a.uid: lb}), {_vk(a): alb, _vk(Jm): Jfeed, **qfeed})
-    assert ref.shape == (3,) and np.allclose(got, ref)  # was a ValueError reshape crash
+    assert ref.shape == (3,) and np.allclose(got, ref)  # else a ValueError reshape crash
 
 
 def test_eval_pinned_covector_against_default_vector():
     """The root fix for the domain-only LLam hazard: `eval(a,(0,),v)` (= ⟨a,v⟩) with a RANK-1
     covector `a` pinned to a non-default basis and `v` in default must reconcile (a rank-1 operand is
-    its own slot in `_slot_basis_at`, so `_reconcile_pairing` fires) — it formerly contracted
-    basis-blind (`4.0` instead of the true `5.0`)."""
+    its own slot in `_slot_basis_at`, so `_reconcile_pairing` fires) — a basis-blind contraction
+    would give `4.0` instead of the true `5.0`."""
     V = C.base("V", 3)
     a = C.var("a", C.dual(V))
     v = C.var("v", V)

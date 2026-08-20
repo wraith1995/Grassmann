@@ -1,9 +1,8 @@
-"""Phase-5 algorithm corpus — standalone A1 (FFS/FSV) + A5 (GSVD metric-pinv).
+"""Algorithm corpus — standalone A1 (FFS/FSV) + A5 (GSVD metric-pinv).
 
-The two acceptance tests (OQ1/OQ6) still owed a
-*standalone* gate:
+Two standalone gates:
 
-* **A1 — Four fundamental subspaces via FSV** (`50 §A1`). For a concrete numeric map
+* **A1 — Four fundamental subspaces via FSV**. For a concrete numeric map
   ``f : V ⊸ W`` of known rank ``r``, realize the four FFS bases (``Img``/``Ker``/
   ``CoKer``/``CoImg``) through the ``lower`` substrate (the SVD/QR seam,
   :func:`grassmann.lower.represent._realize_ffs_for_space` over
@@ -13,14 +12,14 @@ The two acceptance tests (OQ1/OQ6) still owed a
   both an *asserted-rank / injective* ``f`` (static rank via ``QrOp``) and an *unannotated*
   ``f`` (runtime δ via ``SvdOp``).
 
-* **A5 — GSVD pseudo-inverse in a non-identity metric** (`50 §A5`). A least-squares solve
+* **A5 — GSVD pseudo-inverse in a non-identity metric**. A least-squares solve
   ``min_x ‖f x − v‖`` in non-identity SPD metrics on domain/codomain, lowered through
   :class:`polyarray.GSvdOp` (``f† = U S⁻¹ Vᵀ`` in the metrics), matching a numpy reference
   (whiten with Cholesky, ``np.linalg.pinv``/``lstsq``, de-whiten); and confirm it reduces
   to plain ``np.linalg.pinv`` when both metrics are the identity.
 
 The FFS realization is exercised exactly the way the substrate runs it (the same
-``_realize_ffs_for_space`` the wedge gate G3 uses), so the asserts pin the substrate's
+``_realize_ffs_for_space`` the wedge gate uses), so the asserts pin the substrate's
 numeric contract, not a re-implementation.
 """
 
@@ -48,7 +47,7 @@ def _realize_ffs(space: C.Space, feed: dict[str, np.ndarray]):
     """Realize one FFS basis through the substrate; return ``(run_outputs, FfsRealization)``.
 
     Mirrors :func:`grassmann.lower.represent.represent`'s own program construction (the
-    same path the wedge gate G3 uses) so the asserts pin the substrate's contract.
+    same path the wedge gate uses) so the asserts pin the substrate's contract.
     """
     prog = pa.Program("a1-ffs", budget=pa.SymbolicBudget.force_stmts())
     ctx = _Ctx(prog=prog, basis_env={}, inputs={})
@@ -64,7 +63,7 @@ def _orthonormal(cols: np.ndarray) -> bool:
 
 
 def test_a1_image_basis_unannotated_runtime_rank() -> None:
-    """``Img(f)`` for an *unannotated* ``f`` — runtime δ via ``SvdOp`` (`50 §A1`).
+    """``Img(f)`` for an *unannotated* ``f`` — runtime δ via ``SvdOp``.
 
     ``|Img| = r`` (the numerical rank), columns orthonormal, and they span ``range f``
     (the residual of ``f``'s columns in the complement is ≈ 0).
@@ -88,9 +87,9 @@ def test_a1_image_basis_unannotated_runtime_rank() -> None:
 
 
 def test_a1_image_basis_injective_static_rank_via_qr() -> None:
-    """``Img(f)`` for an *injective* ``f`` — static ``rank = |V|`` via ``QrOp`` (`50 §A1`).
+    """``Img(f)`` for an *injective* ``f`` — static ``rank = |V|`` via ``QrOp``.
 
-    Recovers the dropped ``IsoSpace``: an injective map's range basis is the ``Q`` of a QR.
+    An injective map's range basis is the ``Q`` of a QR.
     """
     V, W = C.base("V", 2), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W), props=P.inj)
@@ -109,7 +108,7 @@ def test_a1_image_basis_injective_static_rank_via_qr() -> None:
 
 
 def test_a1_coimage_basis_dims_and_orthonormal() -> None:
-    """``CoImg(f)`` — ``|CoImg| = r`` in the domain ``V`` (first-δ block, `50 §A1`)."""
+    """``CoImg(f)`` — ``|CoImg| = r`` in the domain ``V`` (first-δ block)."""
     V, W = C.base("V", 5), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W))
     A_cd = np.zeros((4, 5))
@@ -157,7 +156,7 @@ def test_a1_cokernel_basis_dims_and_orthonormal() -> None:
 # A5 — GSVD pseudo-inverse / least-squares in a non-identity metric.
 #
 # The metric pinv is lowered END-TO-END through ``represent(C.pinv(f_metric))`` /
-# ``represent(C.pinv_apply(...))`` (the `_rep_pinv` GSvdOp route, `50 §A5`), not by
+# ``represent(C.pinv_apply(...))`` (the `_rep_pinv` GSvdOp route), not by
 # hand-assembling on ``GSvdOp`` — so the asserts pin the substrate's own metric path.
 # Storage convention: a map stored ``(|dom|,|cod|)`` is the transpose of the math
 # ``(cod,dom)`` matrix; the lowered pinv map is stored ``(|cod|,|dom|)`` likewise.
@@ -173,7 +172,7 @@ def _spd(n: int, seed: int) -> np.ndarray:
 def _metric_pinv_reference(
     a: np.ndarray, m_v: np.ndarray, m_w: np.ndarray,
 ) -> np.ndarray:
-    """Numpy reference metric pinv ``f† : W ⊸ V`` in math ``(|V|,|W|)`` orientation (`50 §A5`).
+    """Numpy reference metric pinv ``f† : W ⊸ V`` in math ``(|V|,|W|)`` orientation.
 
     Whiten with Cholesky, plain ``pinv``, de-whiten.
     """
@@ -209,7 +208,7 @@ def test_a5_gsvd_metric_least_squares_matches_reference() -> None:
 
 
 def test_a5_gsvd_metric_pinv_apply_matches_reference() -> None:
-    """A5: ``represent(C.pinv_apply(f_metric, v))`` solves the metric least-squares (`50 §A5`)."""
+    """A5: ``represent(C.pinv_apply(f_metric, v))`` solves the metric least-squares."""
     n_v, n_w = 4, 3
     m_v, m_w = _spd(n_v, 3), _spd(n_w, 4)
     V0, W0 = C.base("V", n_v), C.base("W", n_w)
@@ -233,7 +232,7 @@ def test_a5_gsvd_metric_pinv_apply_matches_reference() -> None:
 
 
 def test_a5_gsvd_reduces_to_plain_pinv_at_identity_metric() -> None:
-    """A5: at identity metrics, the metric pinv coincides with ``np.linalg.pinv`` (`50 §A5`)."""
+    """A5: at identity metrics, the metric pinv coincides with ``np.linalg.pinv``."""
     n_v, n_w = 4, 3
     V0, W0 = C.base("V", n_v), C.base("W", n_w)
     gV = C.var("gV", C.oprod(C.dual(V0), C.dual(V0)))
@@ -255,7 +254,7 @@ def test_a5_gsvd_reduces_to_plain_pinv_at_identity_metric() -> None:
 
 
 def test_a5_plain_pinv_uses_no_gsvd() -> None:
-    """A non-metric map's pinv collapses to a plain ``PinvOp`` (no ``GSvdOp``) (`50 §A5`)."""
+    """A non-metric map's pinv collapses to a plain ``PinvOp`` (no ``GSvdOp``)."""
     V, W = C.base("V", 4), C.base("W", 3)
     f = C.var("f", C.linear_map_space(V, W))
     prog = represent(C.pinv(f))

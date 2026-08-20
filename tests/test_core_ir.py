@@ -1,4 +1,4 @@
-"""IW1 acceptance tests for the Grassmann core IR.
+"""Acceptance tests for the Grassmann core IR.
 
 Constructs the core-IR forms of the worked-example terms (pullback of a
 bilinear form; the k-linear antisymmetrizer as a multi-var LLam + Lift), asserts the
@@ -30,7 +30,7 @@ from grassmann.core import (
 )
 
 # ---------------------------------------------------------------------------
-# Worked example 1: pullback of a bilinear form (26 §1).
+# Worked example 1: pullback of a bilinear form.
 #
 #   V, W spaces;  T : V ⊸ W  (a value, bound non-linearly);  b : formW (linear).
 #   pullback = Lam(T : V>>W. LLam(b:formW. LLam([x:V,y:V]. b(T x, T y))))
@@ -101,7 +101,7 @@ def test_pullback_repr_roundtrip():
 
 
 # ---------------------------------------------------------------------------
-# Worked example 2: exterior-algebra antisymmetrizer (26 §2):
+# Worked example 2: exterior-algebra antisymmetrizer:
 #   a MULTI-VAR LINEAR lambda that permutes its variables, then Lift the k slots
 #   into one tensor input ⇒ a (V⊗ᵏ) ⊸ (V⊗ᵏ) projection, scaled by 1/k!.
 # ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ def test_antisymmetrizer_repr_roundtrip():
 
 
 # ---------------------------------------------------------------------------
-# Symmetric algebra (26 §3): same shape, via an asserted-rank projector var.
+# Symmetric algebra: same shape, via an asserted-rank projector var.
 # ---------------------------------------------------------------------------
 
 
@@ -248,7 +248,7 @@ def test_llam_needs_a_var():
 
 def test_llam_linear_var_in_dependence_position_raises():
     # A linear var used as an explicit SPACE arg of an NEval is a dependence position;
-    # the result would depend on it, violating linearity (20 §1/§2).
+    # the result would depend on it, violating linearity.
     V = S.base("V", 3)
     x = T.var("x", V)
     g = T.var("g", S.linear_map_space(V, V))
@@ -298,11 +298,11 @@ def test_projected_basis_bad_which_raises():
     V = S.base("V", 3)
     f = T.var("f", S.linear_map_space(V, V))
     with pytest.raises(B.BasisError):
-        B.projected_basis(f, "range")  # not in PROJECTED_WHICH ("image" IS valid now)
+        B.projected_basis(f, "range")  # not in PROJECTED_WHICH ("image" IS valid)
 
 
 def test_projected_basis_image_which_is_valid():
-    """``which="image"`` is the Q/orthonormal range basis (`73 Topic 2`)."""
+    """``which="image"`` is the Q/orthonormal range basis."""
     V = S.base("V", 3)
     f = T.var("f", S.linear_map_space(V, V))
     pb = B.projected_basis(f, "image")

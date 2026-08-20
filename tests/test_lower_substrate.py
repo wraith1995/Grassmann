@@ -1,7 +1,6 @@
-"""IW4-substrate tests: ``space_basis`` / ``cob`` / ``choose`` (`41 §1`/`§1b`/`§2`).
+"""Substrate tests: ``space_basis`` / ``cob`` / ``choose``.
 
-The first integration of the Grassmann side with the shipped polyarray additions
-(`42`): ``cob``/FFS realization emit real ``SvdOp``/``QrOp``/``GSvdOp``/``DimAtom`` Stmts
+``cob``/FFS realization emit real ``SvdOp``/``QrOp``/``GSvdOp``/``DimAtom`` Stmts
 and run through ``polyarray.Program.run`` on small numeric examples.
 """
 
@@ -77,7 +76,7 @@ def _block_diag(*ms: np.ndarray) -> np.ndarray:
 
 
 # ===========================================================================
-# space_basis — default + candidates per Space node (`41 §1`)
+# space_basis — default + candidates per Space node
 # ===========================================================================
 
 
@@ -132,8 +131,8 @@ def test_default_basis_img_is_orthonormal_range() -> None:
     V, W = C.base("V", 3), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W))
     db, cands = space_basis(C.img(f, source=V, target=W))
-    # The natural basis of Img(f) is now the ORTHONORMAL range (Q/SVD-U) —
-    # ProjectedBasis(f, "image") — not the literal map-application ImageBasis (`73 T2`).
+    # The natural basis of Img(f) is the ORTHONORMAL range (Q/SVD-U) —
+    # ProjectedBasis(f, "image") — not the literal map-application ImageBasis.
     assert isinstance(db, C.ProjectedBasis) and db.which == "image"
     # the literal map-application ImageBasis(f) is offered as a candidate alternative.
     assert any(isinstance(c, C.ImageBasis) for c in cands)
@@ -158,11 +157,11 @@ def test_default_basis_svar_is_bvar() -> None:
 
 
 # ===========================================================================
-# cob — change of basis, run through polyarray.Program.run (`41 §2`)
+# cob — change of basis, run through polyarray.Program.run
 # ===========================================================================
 
 
-# Explicit bases of ℝⁿ are now ``ListBasis`` (the term basis); cob through them runs at the
+# Explicit bases of ℝⁿ are ``ListBasis`` (the term basis); cob through them runs at the
 # represent level (their vectors are Terms realized via `_rep`).  ``A``/``Bm`` are the basis
 # columns in standard coords; ``cob(A→B) = pinv(C_B)·C_A = Bm⁻¹·A`` for square invertible bases.
 _A = np.array([[1.0, 1.0], [0.0, 2.0]])
@@ -228,7 +227,7 @@ def test_cob_roundtrip_is_inverse() -> None:
 
 
 def test_listbasis_with_backup_completes_to_ambient() -> None:
-    # A short ℝ² term frame (e0) completed from a backup (e1): the new idiom — a `ListBasis` is
+    # A short ℝ² term frame (e0) completed from a backup (e1): a `ListBasis` is
     # always a full basis of its ambient, so a short frame is completed from its backup.
     # cob to standard = [e0|e1] = I.
     sub, fs = _listb("sub", np.array([[1.0], [0.0]]))
@@ -238,7 +237,7 @@ def test_listbasis_with_backup_completes_to_ambient() -> None:
 
 
 # ===========================================================================
-# FFS realization — injective ⇒ QrOp, metric ⇒ GSvdOp, generic ⇒ SvdOp (`41 §1`)
+# FFS realization — injective ⇒ QrOp, metric ⇒ GSvdOp, generic ⇒ SvdOp
 # ===========================================================================
 
 
@@ -359,12 +358,12 @@ def test_ffs_two_ranks_two_shapes() -> None:
 
 
 # ===========================================================================
-# which="image" — the Q/orthonormal range owns the SVD/QR realization (`73 Topic 2`)
+# which="image" — the Q/orthonormal range owns the SVD/QR realization
 # ===========================================================================
 
 
 def test_image_which_is_alias_of_img() -> None:
-    """``ProjectedBasis``' ``which="image"`` realizes identically to the legacy ``"img"``."""
+    """``ProjectedBasis``' ``which="image"`` realizes identically to the ``"img"`` alias."""
     rng = np.random.default_rng(7)
     fn = rng.standard_normal((4, 2))  # cod=4, dom=2, injective
     prog_a = pa.Program("a")
@@ -415,7 +414,7 @@ def test_image_basis_literal_map_application_columns() -> None:
 
 
 def test_image_basis_to_projected_image_cob_edge() -> None:
-    """The ``ImageBasis ↔ ProjectedBasis(image)`` change of basis is realizable (`73 T2`).
+    """The ``ImageBasis ↔ ProjectedBasis(image)`` change of basis is realizable.
 
     For an injective ``f`` the literal columns ``R_img = f(eᵢ)`` and the orthonormal range
     ``Q`` are related by ``Q = R_img · M`` for a square ``M`` (here the QR ``R⁻¹``); the
@@ -438,7 +437,7 @@ def test_image_basis_to_projected_image_cob_edge() -> None:
 
 
 # ===========================================================================
-# choose — symbolic-aware basis choice heuristic (`41 §1b`)
+# choose — symbolic-aware basis choice heuristic
 # ===========================================================================
 
 
@@ -449,18 +448,18 @@ def test_choose_absorbs_operator_structure() -> None:
     _, cands = space_basis(sp)
     chosen = choose(sp, cands, term=f)
     # the operator's own image (SVD/Q) basis wins — coordinates become numeric there.
-    # That is now ProjectedBasis(f, "image") (the orthonormal range), `73 Topic 2`.
+    # That is ProjectedBasis(f, "image") (the orthonormal range).
     assert isinstance(chosen, C.ProjectedBasis) and chosen.which == "image"
     assert chosen.f is f
 
 
 def test_choose_prefers_rational_image_frame_under_propagated_lane() -> None:
-    """F1 — the fold-preserving scorer, gated on the propagated rational-frame lane.
+    """The fold-preserving scorer, gated on the propagated rational-frame lane.
 
     At an un-pinned INJECTIVE ``Img(f)`` leaf: OFF (default) the orthonormalizing
-    ``ProjectedBasis`` (QR/SVD) wins — byte-identical to history; ON (the ``literal_ffs_frames``
-    lane the exact/certificate consumer propagates) the RATIONAL literal ``ImageBasis`` wins, so
-    the algebraic-irrational QR ``R`` never enters and polyarray's exact lane survives.  A
+    ``ProjectedBasis`` (QR/SVD) wins; ON (the ``literal_ffs_frames`` lane the
+    exact/certificate consumer propagates) the RATIONAL literal ``ImageBasis`` wins, so the
+    algebraic-irrational QR ``R`` never enters and polyarray's exact lane survives.  A
     NON-injective image (rank-deficient literal columns) keeps the orthonormal default on BOTH
     lanes (nothing rational to prefer).
     """
@@ -485,8 +484,8 @@ def test_choose_prefers_rational_image_frame_under_propagated_lane() -> None:
 
 
 def test_propagated_literal_frames_drops_the_qr_radical() -> None:
-    """F2 — the artifact: an injective-image lowering emits the QR radical by DEFAULT and NONE
-    of it under the propagated rational lane, with the SAME physical result (`assert-on-the-artifact`).
+    """The artifact: an injective-image lowering emits the QR radical by DEFAULT and NONE
+    of it under the propagated rational lane, with the SAME physical result.
 
     ``project(v, Img(J))`` on a live injective ``J`` realizes ``Img(J)``'s frame.  Default =
     ``QrOp`` (the fold-blocking radical); ``represent(literal_frames=True)`` = zero ``QrOp`` (the

@@ -1,4 +1,4 @@
-"""`ProjectedBasis`/`ImageBasis` source & target threaded through cob (Stage B).
+"""`ProjectedBasis`/`ImageBasis` source & target threaded through cob.
 
 `source`/`target` (bases of `f`'s domain/codomain) make the realized FFS basis orthonormal
 w.r.t. those bases' inner products: each is turned into the GSVD metric `G = (B·Bᵀ)⁻¹`, with
