@@ -700,6 +700,20 @@ def complete(sub: object, comp: object) -> Expr:
     return wrap(_b.complete_basis(_node(sub), _node(comp)))
 
 
+def standard_basis(s: object) -> Expr:
+    """Build the standard (inner-product-orthonormal) basis of the space ``s``.
+
+    The standard basis makes the space's inner product the identity in coordinates,
+    so ``Inner`` / ``Dagger`` / pseudo-inverse become numeric. The returned frame
+    records the space it coordinatizes, so :func:`grassmann.compile_in` can check
+    that a frame supplied for a variable is a basis of that variable's space.
+    """
+    from grassmann.lower.space_basis import default_basis
+
+    sp = _space(s)
+    return wrap(default_basis(sp)).with_note(space=sp)
+
+
 def frame(s: object, fn: Callable[[Expr], object]) -> Expr:
     """Build a value-binding basis (a frame), ``G.frame(s, lambda x: <basis>)``.
 

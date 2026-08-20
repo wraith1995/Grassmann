@@ -99,6 +99,7 @@ from .embed import (
     solve,
     space,
     spacefn,
+    standard_basis,
     sum,
     sum_of_products,
     surj,
@@ -176,6 +177,55 @@ def run(term: object, inputs: dict[str, object] | None = None) -> dict[str, obje
     return compile(term).run(inputs or {})
 
 
+def compile_in(
+    term: object,
+    inputs: dict[object, object] | None = None,
+    target: object | None = None,
+) -> pa.Program:
+    """Compile ``term`` with explicit frames for its variables and its result.
+
+    ``inputs`` maps each variable handle (from :func:`var`) to a frame — from
+    :func:`standard_basis` or another basis builder — and ``target`` is the frame
+    the result is produced in (``None`` chooses one automatically). Unlike
+    :func:`compile`, which picks every basis itself, this pins the coordinates the
+    term is computed in, then routes into :func:`grassmann.lower.represent.represent`.
+
+    A frame supplied for a variable must be a basis of that variable's space; a
+    frame built for the wrong space raises
+    :class:`~grassmann.core.basis.BasisError`. Two different bases of the *same*
+    space are allowed — the compiler inserts a change-of-basis to reconcile them.
+    """
+    from .core import basis as _cb
+    from .infer import synth_space
+
+    node = term.node if isinstance(term, Expr) else term
+    basis_env: dict[int, object] = {}
+    for var_handle, frame_handle in (inputs or {}).items():
+        var_node = var_handle.node if isinstance(var_handle, Expr) else var_handle
+        frame_node = frame_handle.node if isinstance(frame_handle, Expr) else frame_handle
+        noted = frame_handle.get_note("space") if isinstance(frame_handle, Expr) else None
+        if noted is not None:
+            var_space = synth_space(var_node)
+            if noted != var_space:
+                raise _cb.BasisError(
+                    f"frame for {getattr(var_node, 'name', var_node)!r} is a basis of "
+                    f"{unparse(noted)}, but that variable lives in {unparse(var_space)}"
+                )
+        basis_env[var_node.uid] = frame_node
+    tgt: object = _cb.TargetBasis.AUTO
+    if target is not None:
+        tgt = target.node if isinstance(target, Expr) else target
+        noted_t = target.get_note("space") if isinstance(target, Expr) else None
+        if noted_t is not None:
+            result_space = synth_space(node)
+            if noted_t != result_space:
+                raise _cb.BasisError(
+                    f"target frame is a basis of {unparse(noted_t)}, but the result "
+                    f"lives in {unparse(result_space)}"
+                )
+    return represent(node, basis_env=basis_env, target=tgt)
+
+
 __all__ = [
     # subpackages
     "core",
@@ -184,6 +234,7 @@ __all__ = [
     "stdlib",
     # pipeline entry points
     "compile",
+    "compile_in",
     "run",
     # embed core handle / errors
     "Expr",
@@ -263,6 +314,7 @@ __all__ = [
     "typefn",
     # bases & frames
     "scalar_basis",
+    "standard_basis",
     "basis",
     "image_basis",
     "projected_basis",
