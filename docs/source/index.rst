@@ -75,11 +75,10 @@ A simple example shows how changes of basis are appropriately inserted:
    :maxdepth: 2
    :caption: Narrative
 
-   use_case
-   philosophy
    features
+   tutorial
+   philosophy
    grammar
-   examples
 
 .. toctree::
    :maxdepth: 2
