@@ -183,7 +183,7 @@ def _check_subspace_obligations(ctx: Ctx) -> None:
         if not is_subspace(resolved, parent):
             raise InferError(
                 f"project: inferred target {resolved!r} is not a subspace of "
-                f"{parent!r} (25 §6)"
+                f"{parent!r}"
             )
 
 
@@ -277,7 +277,7 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
         case Lam():
             return _synth_lam(e, ctx)
         case Frame():
-            raise InferError("synth: Frame (basis binder) typing is out of IW3 scope")
+            raise InferError("synth: Frame (basis binder) typing is not yet supported")
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -325,7 +325,7 @@ def _synth_external(e: External, ctx: Ctx) -> Space:
                     f"External {getattr(e.data, 'name', e.data)!r} requires standard "
                     f"coordinates (basis_req=STANDARD), but operand {a!r} has a "
                     f"basis-polymorphic space {sp!r} that cannot be standardized; "
-                    f"annotate/realize its space first (71 §2.4)"
+                    f"annotate/realize its space first"
                 )
     else:
         # Still type-check operands (synthesizable) even when no basis constraint applies.
@@ -587,7 +587,7 @@ def _synth_solve(e: Solve, ctx: Ctx) -> Space:
     from .assertions import check_assert_property_consistency
 
     if not is_bijective(e.f):
-        raise InferError("Solve requires the map to be asserted `bij` (25 §3/§7)")
+        raise InferError("Solve requires the map to be asserted `bij`")
     dom, cod = _map_dom_cod_resolved(e.f, ctx)
     # `bij` guarantees |dom| ≡ |cod|; reject an asserted-bij map between unequal-dim
     # spaces up front (asserted facts inform/validate the inverse's space).
@@ -622,7 +622,7 @@ def _synth_corestrict(e: Corestrict, ctx: Ctx) -> Space:
             "Corestrict requires the map to be asserted `inj` (props=inj): the corestriction "
             "f~ : dom(f) ⊸ Img(f) is the first-isomorphism-theorem isomorphism only when "
             "ker f = 0.  For a general map the induced iso is CoImg(f) ⊸ Img(f), which this "
-            f"node deliberately does NOT cover.  Got {e.f!r} (25 §3/§7)"
+            f"node deliberately does NOT cover.  Got {e.f!r}"
         )
     dom, _cod = _map_dom_cod_resolved(e.f, ctx)
     return linear_map_space(dom, Img(e.f))
@@ -673,7 +673,7 @@ def _synth_project(e: Project, ctx: Ctx) -> Space:
         ctx.subspace_obligations.append((target, s, e.vector))
         return target
     if not is_subspace(e.space, s):
-        raise InferError(f"project: {e.space!r} is not a subspace of {s!r} (25 §6)")
+        raise InferError(f"project: {e.space!r} is not a subspace of {s!r}")
     return e.space
 
 
@@ -682,7 +682,7 @@ def _synth_embed(e: Embed, ctx: Ctx) -> Space:
 
     s = ctx.store.resolve(_synth_value(e.vector, ctx))
     if not is_subspace(s, e.space):
-        raise InferError(f"embed: {s!r} is not a subspace of {e.space!r} (25 §6)")
+        raise InferError(f"embed: {s!r} is not a subspace of {e.space!r}")
     return e.space
 
 

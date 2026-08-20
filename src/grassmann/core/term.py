@@ -981,8 +981,7 @@ def _check_llam_linearity(vars: tuple[Var, ...], body: Term) -> None:
                         raise TermError(
                             f"LLam: linear variable {node.name!r} appears in a "
                             f"dependence position (space/nat arg or binder domain); "
-                            f"the result space would depend on it, violating linearity "
-                            f"(20 §1/§2)"
+                            f"the result space would depend on it, violating linearity"
                         )
             case Lam():
                 # Binder-domain annotations (SpaceSort spaces) are dependence positions.

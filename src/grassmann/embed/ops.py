@@ -136,7 +136,7 @@ class Expr:
             return wrap(_s.dual(self.node))
         if self.tower == BASIS:
             return wrap(_b.dual_basis(self.node))
-        raise EmbedError("`~` (Dual) applies only to spaces and bases (27 Q7)")
+        raise EmbedError("`~` (Dual) applies only to spaces and bases")
 
     # a * b : ⊗ OProd (space / vector / basis), level-poly. A Python NUMBER scalar-SCALES a vector.
     def __mul__(self, other: object) -> Expr:

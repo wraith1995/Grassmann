@@ -106,8 +106,7 @@ def _add_merge(branches: list[Usage], names: dict[int, str]) -> Usage:
                     f"linear variable {nm!r} is used a different number of times "
                     f"across the branches of a Sum "
                     f"({first.counts.get(uid, 0)} vs {other.counts.get(uid, 0)}); "
-                    f"each additive branch must consume the same linear resources "
-                    f"(20 §1/§2)"
+                    f"each additive branch must consume the same linear resources"
                 )
     return first
 
@@ -170,12 +169,12 @@ def check_llam_resources(node: LLam) -> None:
         if n == 0:
             raise LinearityError(
                 f"linear variable {v.name!r} is never used; a linear map must consume "
-                f"each linear argument exactly once (20 §1/§2)"
+                f"each linear argument exactly once"
             )
         if n > 1:
             raise LinearityError(
                 f"linear variable {v.name!r} is used {n} times; a linear map must "
-                f"consume each linear argument exactly once (20 §1/§2)"
+                f"consume each linear argument exactly once"
             )
 
 

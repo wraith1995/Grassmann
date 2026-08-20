@@ -92,7 +92,7 @@ class Arrow:
         if isinstance(self.domain, Arrow):
             raise KindError(
                 "higher-order arrow kinds (function-taking-function domains) are "
-                f"deferred per 20 §9; got domain {self.domain!r}"
+                f"not supported; got domain {self.domain!r}"
             )
         if not is_kind(self.domain):
             raise KindError(f"arrow domain must be a Kind, got {self.domain!r}")
