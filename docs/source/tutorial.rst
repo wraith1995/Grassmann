@@ -19,7 +19,7 @@ Setup
    >>> import numpy as np
    >>> from math import comb
    >>> import grassmann as G
-   >>> from grassmann.stdlib.exterior import wedge, hodge_star, exterior_derivative
+   >>> from grassmann.stdlib.exterior import wedge, hodge_star, interior, exterior_derivative
 
 Three helpers: the space ``ℝⁿ``, the inner product of a space as a two-argument
 map, and a runner that compiles a term and feeds each variable by name.
@@ -60,6 +60,49 @@ lands in ``Λ²``, which has dimension ``C(n, 2)`` —
    ...     return out.size
    >>> [wedge_dim(3), wedge_dim(4)]                        # = C(3,2), C(4,2)
    [3, 6]
+
+Those dimensions ``C(n, k)`` are just Pascal's triangle. Up to ``n = 4``:
+
+.. list-table:: ``dim Λᵏ(ℝⁿ) = C(n, k)``
+   :header-rows: 1
+   :stub-columns: 1
+
+   * - ``n``
+     - ``Λ⁰``
+     - ``Λ¹``
+     - ``Λ²``
+     - ``Λ³``
+     - ``Λ⁴``
+   * - 1
+     - 1
+     - 1
+     - –
+     - –
+     - –
+   * - 2
+     - 1
+     - 2
+     - 1
+     - –
+     - –
+   * - 3
+     - 1
+     - 3
+     - 3
+     - 1
+     - –
+   * - 4
+     - 1
+     - 4
+     - 6
+     - 4
+     - 1
+
+The operations move around this table in fixed ways: the **wedge** adds degrees
+(``Λᵏ × Λˡ → Λ^{k+l}``), the **interior product** lowers a form by one
+(``Λᵏ → Λ^{k-1}``), the **Hodge star** reflects a column to its mirror
+(``Λᵏ → Λⁿ⁻ᵏ``, equal dimension), and the **exterior derivative** raises a form
+field by one (``Ωᵏ → Ωᵏ⁺¹``).
 
 The wedge product
 -----------------
@@ -114,6 +157,30 @@ generally and check the identity across ``(n, k)``:
    ...     rhs = run(pair(Lk, al, be), al=av, be=bv)
    ...     return np.allclose(lhs, rhs, atol=1e-7)
    >>> bool(all(hodge_characterizes(n, k) for n, k in [(2, 1), (3, 1), (3, 2)]))
+   True
+
+The interior product
+--------------------
+
+The **interior product** ``ι_v`` contracts a form with a vector, lowering the
+degree by one: ``ι_v : Λᵏ(V*) → Λ^{k-1}(V*)``. Forms live over the dual ``V*``, so
+a 1-form is a covector; grassmann builds ``ι_v`` by embedding the form into
+``(V*)⊗ᵏ``, applying ``v`` to the first slot, and projecting back onto
+``Λ^{k-1}``. On a 1-form it is exactly the pairing ``ι_v ω = ω(v)``; on higher
+forms it is an antiderivation, and on a wedge of 1-forms that reads
+``ι_v(a ∧ b) = ⟨a, v⟩ b − ⟨b, v⟩ a`` — which holds across dimensions:
+
+.. doctest::
+
+   >>> def contracts_by_leibniz(n):
+   ...     W, Ws = R(n), G.dual(R(n))                 # 1-forms live in V* = Dual(V)
+   ...     a, b = G.var("a", Ws), G.var("b", Ws)
+   ...     v = G.var("v", W)                          # a vector to contract with
+   ...     av, bv, vv = (rng.standard_normal(n) for _ in range(3))
+   ...     lhs = run(interior(wedge(a, b, 1, 1), v, 2), a=av, b=bv, v=vv)
+   ...     rhs = (av @ vv) * bv - (bv @ vv) * av      # ⟨a,v⟩ b − ⟨b,v⟩ a
+   ...     return np.allclose(lhs.ravel(), rhs, atol=1e-8)
+   >>> bool(all(contracts_by_leibniz(n) for n in (3, 4)))
    True
 
 The exterior derivative
