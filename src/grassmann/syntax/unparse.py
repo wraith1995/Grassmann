@@ -1,7 +1,6 @@
-"""``unparse``.
+"""``unparse`` — render a core node as round-trippable Unicode mathematical text.
 
-Render a core node (term / space / basis, plus dim / kind / type / props) as round-trippable Unicode
-mathematical text.
+The node may be a term / space / basis (plus dim / kind / type / props).
 
 The output is ``<preamble> ⊢ <body>`` when the node has free variables (each free term
 ``Var`` bound to its space, each free ``SVar`` / ``BVar`` / ``DimVar`` to its sort), or
@@ -602,8 +601,27 @@ def _emit_body(node: object) -> str:
 def unparse(x: object) -> str:
     """Render ``x`` as round-trippable Unicode text.
 
-    ``x`` is a core term/space/basis/dim/type/kind, or an embed ``Expr``.  The output
-    carries a typed-variable preamble declaring any free variables.
+    The inverse of :func:`grassmann.syntax.parse`. Free variables are collected and
+    emitted as a typed-variable preamble ahead of a ``⊢`` turnstile; a closed node
+    renders as its body alone. Parenthesization follows the precedence table in
+    :mod:`grassmann.syntax.glyphs`, so the parser re-derives the same tree.
+
+    Parameters
+    ----------
+    x :
+        A core node — a :class:`~grassmann.core.term.Term`, a
+        :class:`~grassmann.core.space.Space`, a :class:`~grassmann.core.basis.Basis`, a
+        ``Dim``, a ``Type``, or a ``Kind`` — or an embed ``Expr`` wrapping one.
+
+    Returns
+    -------
+    str
+        The Unicode surface text, with a typed preamble when ``x`` has free variables.
+
+    Raises
+    ------
+    UnparseError
+        When a node cannot be rendered to surface text.
     """
     node = _unwrap(x)
     acc = _Free()

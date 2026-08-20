@@ -1,11 +1,11 @@
-"""``space_basis`` — default (inner-product-orthonormal) basis + candidates (`41 §1`).
+"""``space_basis`` — default (inner-product-orthonormal) basis + candidates.
 
 ``space_basis(space) -> (default_basis, candidates)``.
 
-The **default** is the paper's *standard basis*: orthonormal w.r.t. the space's inner
+The **default** is the *standard basis*: orthonormal w.r.t. the space's inner
 product, so the metric is the identity in coordinates (``Inner``/``Dagger``/pinv become
-numeric — the major min-sym win, `41 §1`/`§1b`). It mirrors the Space tower onto the
-Basis tower per the `41 §1` table:
+numeric — the major symbolic-minimizing win). It mirrors the Space tower onto the
+Basis tower per this table:
 
 ```
 Scalar      ⇒ ScalarBasis                ⊕(sᵢ) ⇒ BasisSum(default sᵢ)
@@ -16,10 +16,10 @@ Img f       ⇒ ProjectedBasis(f, "image") Ker/CoImg/CoKer f ⇒ ProjectedBasis(
 SVar α      ⇒ BVar(β)                    (basis supplied at instantiation)
 ```
 
-The **candidates** feed the symbolic-aware choice in :mod:`grassmann.lower.choose`
-(`41 §1b`): the operator's SVD/structure-aligned basis, the FFS ``src``/``tgt`` bases,
-and the g-orthonormal basis. Realizing an FFS basis is the SVD/QR seam (`41 §1`,
-`50 §A1`): :class:`SvdOp` (+ runtime rank ``δ_f`` as a :class:`~polyarray.DimAtom`) for
+The **candidates** feed the symbolic-aware choice in :mod:`grassmann.lower.choose`:
+the operator's SVD/structure-aligned basis, the FFS ``src``/``tgt`` bases,
+and the g-orthonormal basis. Realizing an FFS basis is the SVD/QR seam:
+:class:`SvdOp` (+ runtime rank ``δ_f`` as a :class:`~polyarray.DimAtom`) for
 the generic case, :class:`QrOp` for the injective / ``IsoSpace`` case, :class:`GSvdOp`
 for the metric (``WithInner``) case — realized by :func:`realize_ffs_basis`.
 """
@@ -75,7 +75,7 @@ def default_basis(space: S.Space) -> B.Basis:
             # The natural basis of the range is the ORTHONORMAL (Q/SVD-U) range basis —
             # ``ProjectedBasis(f, "image")`` (the immersed side).  ``ImageBasis(f)`` is the
             # separate LITERAL map-application basis (raw ``f(eᵢ)`` columns), offered only
-            # as a candidate (`73 Topic 2`).
+            # as a candidate.
             return B.projected_basis(f, "image", _maybe(src), _maybe(tgt))
         case S.Ker(f, src, tgt):
             return B.projected_basis(f, "ker", _maybe(src), _maybe(tgt))
@@ -132,7 +132,7 @@ def map_space(
     *,
     map_choice: Callable[[T.Term], T.Term | None] | None = None,
 ) -> S.Space:
-    """Structure-mirroring SPACE functor — the `Space -> Space` sibling of :func:`map_basis`.
+    """Structure-mirroring SPACE functor — the ``Space -> Space`` sibling of :func:`map_basis`.
 
     ``choice(space) -> Space | None`` is consulted at EVERY node first (``None`` = no override
     there); un-overridden structural wrappers (``Dual``/``OPlus``/``OProd``/``OPlusRep``/
@@ -183,7 +183,7 @@ def map_space(
 
 
 def _map_f(f: T.Term, map_choice: Callable[[T.Term], T.Term | None] | None) -> T.Term:
-    """Give an FFS node's defining map under the optional `map_choice`; unchanged when it declines."""
+    """Give an FFS node's defining map under the optional ``map_choice``; unchanged when it declines."""
     if map_choice is None:
         return f
     out = map_choice(f)
@@ -195,13 +195,14 @@ def _map_opt(
     choice: Callable[[S.Space], S.Space | None],
     map_choice: Callable[[T.Term], T.Term | None] | None = None,
 ) -> S.Space | None:
-    """Run `map_space` on an FFS node's optional ENDPOINT space.
+    """Run :func:`map_space` on an FFS node's optional ENDPOINT space.
 
     An FFS node is not a leaf of the walk: a buried immersion reaches the tower only through the
-    `source`/`target` of the map that defines it. `Λᵏ(Img J) = Img(alt)` keeps its `Img(J)` in `alt`'s
-    endpoints, so treating `Img` as a leaf made a σ readout on a FACE (a 2-form moment) find nothing to
-    substitute — `tgt == src`, no transport, and every `O_σ` came back `I`. `_immersed_basis`/
-    `_immersed_endpoints` already recurse this way on the BASIS side; this is the Space-side match.
+    ``source``/``target`` of the map that defines it. ``Λᵏ(Img J) = Img(alt)`` keeps its ``Img(J)``
+    in ``alt``'s endpoints, so treating ``Img`` as a leaf made a σ readout on a FACE (a 2-form
+    moment) find nothing to substitute — ``tgt == src``, no transport, and every ``O_σ`` came back
+    ``I``. ``_immersed_basis``/``_immersed_endpoints`` already recurse this way on the BASIS side;
+    this is the Space-side match.
     """
     return None if s is None else map_space(s, choice, map_choice=map_choice)
 
@@ -211,12 +212,12 @@ def _maybe(s: S.Space | None) -> B.Basis | None:
 
 
 # ---------------------------------------------------------------------------
-# Candidate bases (fed to §1b choice).
+# Candidate bases (fed to the basis choice).
 # ---------------------------------------------------------------------------
 
 
 def candidate_bases(space: S.Space) -> tuple[B.Basis, ...]:
-    """Alternative bases to score against the term in `41 §1b`.
+    """Alternative bases to score against the term.
 
     Always includes the default; adds the operator's SVD/structure-aligned basis, the
     FFS ``src``/``tgt`` bases, and (for a metric space) both the g-orthonormal default
@@ -232,7 +233,7 @@ def candidate_bases(space: S.Space) -> tuple[B.Basis, ...]:
         case S.Img(f, src, tgt):
             # default (out[0]) is the orthonormal range ProjectedBasis(f,"image"); the
             # literal map-application ImageBasis(f) and the codomain's standard basis are
-            # alternatives the §1b heuristic can score against the term (`73 Topic 2`).
+            # alternatives the heuristic can score against the term.
             _add(out, B.image_basis(f))
             if tgt is not None:
                 _add(out, default_basis(tgt))
@@ -253,16 +254,16 @@ def _add(acc: list[B.Basis], b: B.Basis) -> None:
 
 
 def space_basis(space: S.Space) -> tuple[B.Basis, tuple[B.Basis, ...]]:
-    """Return ``(default_basis, candidates)`` for ``space`` (`41 §1`).
+    """Return ``(default_basis, candidates)`` for ``space``.
 
     ``default_basis`` is the inner-product-orthonormal standard basis; ``candidates``
-    are the alternatives (including the default) that the `41 §1b` heuristic scores.
+    are the alternatives (including the default) that the choice heuristic scores.
     """
     return default_basis(space), candidate_bases(space)
 
 
 # ---------------------------------------------------------------------------
-# FFS basis realization — the SVD / QR / GSVD seam (`41 §1`, `50 §A1`/`§A5`).
+# FFS basis realization — the SVD / QR / GSVD seam.
 # ---------------------------------------------------------------------------
 
 
@@ -287,7 +288,7 @@ class FfsRealization:
     coordinate map INTO the frame must branch on it (``Pᵀ`` only when orthonormal)."""
     # The upper-triangular ``R`` of the injective QR (``J = Q·R``), captured so a change of
     # basis between the literal ``ImageBasis`` and the orthonormal ``ProjectedBasis`` of the
-    # SAME map is ``R`` directly — no realize-both-and-pseudo-invert (`Stage B`).  ``None``
+    # SAME map is ``R`` directly — no realize-both-and-pseudo-invert.  ``None``
     # for the SVD/GSVD seams.
     r: pa.SymArray | None = None
     # The SAME subspace frame expressed in the DECLARED ENDPOINT basis instead of the ambient
@@ -324,9 +325,9 @@ def ffs_cols_orthonormal(real: FfsRealization) -> bool:
     """Whether ``real.cols`` is provably STANDARD-orthonormal (``PᵀP = I``).
 
     Conservative in the SAFE direction: ``False`` only costs a consumer the general
-    ``pinv``/Gram solve, it is never wrong; ``True`` on a non-orthonormal frame is the
-    documented silent-wrongness class (`docs/basis-honesty-handoff.md`), so this is a
-    positive whitelist of the ops that provably orthonormalize.
+    ``pinv``/Gram solve, it is never wrong; ``True`` on a non-orthonormal frame would be
+    silently wrong, so this is a positive whitelist of the operations that provably
+    orthonormalize.
     """
     return real.op in _STD_ORTHONORMAL_FFS_OPS
 
@@ -350,20 +351,20 @@ def realize_ffs_basis(
     dim_atom: pa.DimAtom | None = None,
     literal_frame: bool = False,
 ) -> FfsRealization:
-    """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``) (`41 §1`).
+    """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``).
 
     ``"image"`` (the :class:`~grassmann.core.basis.ProjectedBasis` spelling) is accepted as
     an alias of ``"img"`` — both name the **orthonormal range** (Q/SVD-U) basis.
 
     Emits the SVD/QR/GSVD ``Stmt``(s) into ``program`` and returns an
-    :class:`FfsRealization`. Selection per `41 §1`/`50 §A1`:
+    :class:`FfsRealization`. Selection:
 
     * **injective + image** ⇒ :class:`QrOp` — ``Q`` is the orthonormal range basis with a
       *static* ``rank = dom_dim`` (recovers the dropped ``IsoSpace``);
     * **metric present** ⇒ :class:`GSvdOp` (orthonormal in the metrics);
     * otherwise ⇒ :class:`SvdOp`, with the runtime rank ``δ_f`` sizing a dynamic axis.
 
-    ``dim_atom`` (`51 §FFS-δ`) — a caller-supplied **canonical subspace-dimension** atom
+    ``dim_atom`` — a caller-supplied **canonical subspace-dimension** atom
     for the dynamic column axis.  The FFS dimension is metric-independent (the rank, or its
     complement for ker/coker), so a single atom is shared across the metric-free SVD and the
     metric GSVD of one ``(f, which)`` and across every FFS-typed Var of that space.  ``None``
@@ -469,7 +470,7 @@ def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
     A function of the SUBSPACE (and the ambient index order) alone, not of the factorization that produced
     ``q``.
 
-    Why this exists (`73 Topic 2`). ``U[:,:r]`` is only determined up to a
+    Why this exists. ``U[:,:r]`` is only determined up to a
     rotation *inside* each degenerate singular subspace, so it is a **discontinuous** function of
     the operator: the Λᵏ antisymmetrizer's nonzero singular values are degenerate (measured
     ``σ = 1, 1, 1, 0…`` for the 3-dim ``Λ²`` case) and the operator we factor is invariant only
@@ -612,7 +613,7 @@ def realize_image_application(
     """Realize :class:`~grassmann.core.basis.ImageBasis` — the LITERAL map-application.
 
     Columns are ``f`` applied to the source basis (``f(eᵢ)``), i.e. the ``(cod, dom)``
-    operator matrix itself — **not** orthonormalized (the R/fwd side, `73 Topic 2`).  No
+    operator matrix itself — **not** orthonormalized (the R/fwd side).  No
     QR/SVD is emitted; the columns ARE ``f_matrix`` (passed in ``(cod, dom)`` orientation).
     The column axis is the static source dimension ``dom_dim`` (the ``f(eᵢ)`` per source
     basis vector); ``rank``/``rank_dim`` are ``None`` (no SVD δ).
@@ -806,7 +807,7 @@ def _realize_via_gsvd(
     )
     gsvd_idx = len(program.statements) - 1
     # img/coimg: canonical subspace atom IS δ (shared with the metric-free SVD); ker/coker:
-    # the subspace atom is the complement (see `51 §FFS-δ`).
+    # the subspace atom is the complement.
     if which in ("img", "coimg") and dim_atom is not None:
         delta = dim_atom
     else:
@@ -835,7 +836,7 @@ def _take_ffs_block(
     rank: pa.SymArray, delta: pa.DimAtom, cod_dim: int, dom_dim: int, label: str,
     *, comp_atom: pa.DimAtom | None = None,
 ) -> pa.SymArray:
-    """Slice the rank-δ FFS block from the full SVD factors (`41 §1`).
+    """Slice the rank-δ FFS block from the full SVD factors.
 
     img  = first δ cols of U;   coker = last cod-δ cols of U;
     coimg= first δ cols of V;   ker   = last dom-δ cols of V   (V = Vhᵀ).
@@ -873,6 +874,7 @@ def _take_ffs_block(
 
 
 def factor_rows(factor: pa.SymArray, ambient: int) -> int:
+    """Give the ambient row count of an FFS factor's column block (its embedding dimension)."""
     return ambient
 
 

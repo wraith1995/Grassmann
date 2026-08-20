@@ -1,7 +1,8 @@
-"""Asserted facts that aid first-order unification / inference (A3).
+"""Asserted facts that aid first-order unification / inference.
 
-The core ``Assert(v, s)`` node, and the **asserted map properties** carried by a map's
-``Var`` (``inj``/``surj``/``bij``/``rank``), are *trusted* facts. Beyond pinning a space
+The core :class:`~grassmann.core.term.Assert` node ``Assert(v, s)``, and the **asserted map
+properties** carried by a map's :class:`~grassmann.core.term.Var`
+(``inj``/``surj``/``bij``/``rank``), are *trusted* facts. Beyond pinning a space
 by unification, those facts carry **dimension** information that the (dim-aware, but
 dim-never-unifying) inference can exploit:
 
@@ -17,12 +18,13 @@ This module turns those facts into:
 1. :func:`assert_property_dims` — given a map term and its decoded ``(dom, cod)``, the
    list of dimension equalities the asserted properties *guarantee*. Sound: it only reads
    user-asserted props (never invents).
-2. :func:`check_assert` — the inference rule for ``Assert(v, s)``: unify the synthesized
-   space with ``s`` (recovering implicit metavars — this is the unification *aid*), then
-   verify every property-implied dimension equality holds for the now-resolved space,
-   rejecting an assertion that contradicts an asserted property.
+2. :func:`check_assert_property_consistency` — the consistency check the ``Assert`` /
+   inverse rules in :mod:`grassmann.infer.synth` apply. After the synthesized space is
+   unified with the asserted ``s`` (recovering implicit metavars — this is the unification
+   *aid*), it verifies that every property-implied dimension equality holds for the
+   now-resolved space, rejecting an assertion that contradicts an asserted property.
 
-Because dimensions are *compared, never unified* (`25 §F5`), the contribution of an
+Because dimensions are *compared, never unified*, the contribution of an
 assertion to unification is two-fold: (a) the ordinary structural unification of
 ``Assert``'s space solves implicit space metavars; (b) the property-implied dim equalities
 are *checked* against the resolved space, so an asserted-``bij`` map whose asserted
@@ -54,7 +56,7 @@ def assert_property_dims(f: object, dom: Space, cod: Space) -> list[DimFact]:
 
     ``f`` is a map term with decoded ``dom``/``cod``. Returns the dim facts that the
     asserted ``inj``/``surj``/``bij``/``rank`` impose. Returns ``[]`` when ``f`` carries
-    no usable assertion (the F3 runtime-rank case — nothing static to add).
+    no usable assertion (the runtime-rank case — nothing static to add).
     """
     props = map_props(f)
     if props is None:
@@ -128,7 +130,7 @@ def check_assert_property_consistency(f: object, dom: Space, cod: Space) -> None
 
 
 class AssertFactError(InferError):
-    """Raised when an asserted property contradicts the resolved space (A3).
+    """Raised when an asserted property contradicts the resolved space.
 
     A subclass of :class:`grassmann.infer.synth.InferError` so it is caught by the same
     generic inference-failure handling as the other rules.

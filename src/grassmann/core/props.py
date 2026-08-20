@@ -1,15 +1,16 @@
-"""Asserted map properties — replaces ``IsoSpace``.
+"""Asserted properties of a map variable: injectivity, surjectivity, rank.
 
-A linear-map var may carry **user-asserted, trusted** properties:
+A linear-map variable may carry properties the user asserts and the language
+trusts: the booleans ``inj``, ``surj``, and ``bij``, and a rank, which may be
+symbolic and may be given directly as ``dim_ker`` or ``dim_img``. Properties live
+on variables only.
 
-- the booleans ``inj`` / ``surj`` / ``bij`` (v1), and/or
-- a (possibly symbolic) ``rank`` — or directly ``dim_ker`` / ``dim_img``.
-
-These are recorded on ``Var`` (properties live ON VARS ONLY in v1). They (a) set
-``rank(f)`` for the FFS dimension rules and (b) license ``Solve`` (``bij``) / sharpen
-``Pinv`` (``inj``/``surj``). If a rank is left unspecified it becomes a runtime atom
-``δ_f`` at lowering — **no static rank-inference** in v1 (F3). Property *inference*
-(``inj∘inj``, ``embed ⇒ inj``, …) is deferred.
+They do two things. They fix ``rank(f)``, which the dimension rules for the four
+fundamental subspaces need, and they license or sharpen operations: ``bij``
+licenses :class:`~grassmann.core.term.Solve`, and ``inj`` or ``surj`` sharpen
+:class:`~grassmann.core.term.Pinv`. A rank left unspecified becomes a runtime
+atom resolved at lowering rather than inferred statically; inference of
+properties across compositions is not done here.
 """
 
 from __future__ import annotations

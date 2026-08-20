@@ -1,9 +1,10 @@
-"""IW5 — small linear-algebra conveniences (derived ops, NOT core IR).
+"""Small linear-algebra conveniences: derived ops built on the embed surface, not core IR.
 
-Thin wrappers over the :mod:`grassmann.embed` surface for the most common derived LA
-idioms. Like :mod:`grassmann.stdlib.exterior`, nothing here is a core
-node — each function composes existing core ops (``Inner``/``Eval``, ``Pinv``,
-``Compose``). Real-valued.
+Thin wrappers over the :mod:`grassmann.embed` surface for the most common derived
+linear-algebra idioms. Like :mod:`grassmann.stdlib.exterior`, nothing here is a core
+node — each function composes existing core ops (:class:`~grassmann.core.term.Inner` /
+:class:`~grassmann.core.term.Eval`, :class:`~grassmann.core.term.Pinv`,
+:class:`~grassmann.core.term.Compose`). Real-valued.
 """
 
 from __future__ import annotations
@@ -15,13 +16,21 @@ __all__ = ["dot", "norm_sq", "orthogonal_projection", "least_squares"]
 
 
 def dot(x: Expr, y: Expr, space: Expr | None = None) -> Expr:
-    """``⟨x, y⟩`` — the inner product, a ``Scalar``.
+    """Take the inner product ``⟨x, y⟩`` of two vectors, contracting to a ``Scalar``.
 
-    ``Inner(s)`` is the metric bilinear form on ``s`` — an element of ``s* ⊗ s*`` with
-    two covariant slots — so it is applied to the two vectors directly
-    (``Eval(Inner(s), [0,1], x, y)``), fully contracting to a ``Scalar``. The metric
-    space ``s`` defaults to ``x``'s declared space; pass ``space`` explicitly when
-    ``x``'s space cannot be read off the node (e.g. a derived term, not a ``Var``).
+    :class:`~grassmann.core.term.Inner` on ``s`` is the metric bilinear form — an element
+    of ``s* ⊗ s*`` with two covariant slots — so it is applied to the two vectors directly
+    (an :class:`~grassmann.core.term.Eval` at slots ``[0, 1]``), fully contracting to a
+    ``Scalar``.
+
+    Parameters
+    ----------
+    x, y
+        The two operands; both must live in the metric space ``s``.
+    space
+        The metric space ``s``. Defaults to ``x``'s declared space; pass it explicitly
+        when ``x``'s space cannot be read off the node (e.g. a derived term, not a
+        :class:`~grassmann.core.term.Var`).
     """
     s = space if space is not None else _space_of(x)
     return G.inner(s)(x, y)
@@ -35,8 +44,9 @@ def norm_sq(x: Expr, space: Expr | None = None) -> Expr:
 def orthogonal_projection(f: Expr) -> Expr:
     """Build the orthogonal projector ``P_{img f} = f ∘ f† : W ⊸ W`` onto ``img f``.
 
-    ``f†`` is the Moore–Penrose pseudo-inverse; ``f ∘ f†`` is the orthogonal projection
-    onto the image of ``f`` (idempotent, self-adjoint in the metric).
+    ``f†`` is the Moore–Penrose pseudo-inverse (:func:`grassmann.embed.pinv`); ``f ∘ f†``
+    is the orthogonal projection onto the image :func:`grassmann.embed.img` of ``f``
+    (idempotent, self-adjoint in the metric).
     """
     return f @ f.pinv
 

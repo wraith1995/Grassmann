@@ -1,4 +1,4 @@
-"""Auto pullback — transport a value between spaces (`§40`/`§41 §7`).
+"""Auto pullback: transport a value into a target space by static structural relation.
 
 ``pullback(v, T)`` rewrites a value term ``v : S`` into a new term living in the
 target space ``T``, inserting projections/embeddings and recursing structurally:
@@ -12,8 +12,7 @@ target space ``T``, inserting projections/embeddings and recursing structurally:
 - FFS (``Ker``/``Img``/…)          → via the ambient: ``proj ∘ conv ∘ embed``
 - otherwise                        → a dim-equal pass-through, else :class:`PullbackError`.
 
-Adapted from FEMOracle ``base/pullback.py::toFromMap`` to the n-ary, positions-based
-contraction view. A key lowering constraint shapes the construction: only the *primitive*
+A key lowering constraint shapes the construction: only the *primitive*
 map nodes (``TupleProject``/``TupleEmbed``/``Identity``/``Kron``/``Compose``/``Sum``) lower
 in the canonical ``(dom, cod)`` layout that ``Eval``/``Compose`` read — an ``LLam``-built
 map lowers transposed (its inputs ride as trailing axes). So the transport is assembled
@@ -230,7 +229,7 @@ def transport_map(
             # A covector-factor map (a `⊗`/`Λᵏ` factor) is the metric-free TRANSPOSE of the
             # reversed primal map f = td⊸sd:  f* : Dual(sd) ⊸ Dual(td),  (f*ω)(x) = ω(f x).
             # NOT `dagger` — the metric adjoint types PRIMAL (`B⊸A`), so `Eval(dagger(f), ω)`
-            # pairs a covector against a primal slot (the F1 UnifyError), and a
+            # pairs a covector against a primal slot (a UnifyError), and a
             # metric may not enter a metric-free trace at all. The transpose is DEFINED in
             # the calculus: λω. ω∘f — an `LLam`/`Compose`, no new node; `Eval(LLam,·)`
             # β-reduces to the same `Compose` the value-level Dual branch above builds.
@@ -285,13 +284,13 @@ def endomorphism_map(space: Space, *, primitives: SelfPrimitives) -> Term:
       carries the PULLBACK ``ω ↦ ω ∘ f``;
     - ``⊗``     → the ``Kron`` of the factor self-maps;
     - ``⊕``     → block-diagonal (embedₖ ∘ mₖ ∘ projectₖ, summed);
-    - ``Img(f)``→ conjugation through the ambient (``project ∘ endo(ambient) ∘ embed`` via the
+    - ``Img(f)`` → conjugation through the ambient (``project ∘ endo(ambient) ∘ embed`` via the
       corestriction maps ``Img`` itself determines — :func:`_ffs_immersion`). Sound exactly
       when the ambient action maps the image into itself, which holds for the functorial
       actions this serves (an antisymmetrizer commutes with ``f⊗ᵏ``, so ``Λᵏ`` images are
       invariant); a caller whose ambient action does NOT preserve the image must supply the
       ``Img`` leaf directly.
-    - ``Scalar``→ ``Identity``; ``WithInner`` strips (represent consults no metric here).
+    - ``Scalar`` → ``Identity``; ``WithInner`` strips (represent consults no metric here).
 
     A ``Ker``/``CoKer``/``CoImg``/``App`` node with no supplied primitive raises
     :class:`PullbackError` — no structural rule determines an induced self-map there.
@@ -399,7 +398,7 @@ def _ffs_immersion(S: Space, T: Space) -> Term | None:
     nothing from outside. `primitives` (like `supplied_frames`) is a caller-supplied ESCAPE HATCH and
     an OPTIMIZATION; correctness must never depend on one. A consumer supplying this leaf by hand was
     re-deriving what `Img` already knows, and had to wrap it in an `LLam` whose free map then failed
-    to realize in a vmap sub-body (`41 §7`).
+    to realize in a vmap sub-body.
 
     Returns `None` when neither side is an `Img` with a usable ambient, or when the defining map is
     not asserted `inj` (`Corestrict`'s scope) — leaving the existing `primitives`/`PullbackError`

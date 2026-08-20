@@ -1,33 +1,35 @@
-"""Basis tower — first-class, mirrors Space / Type / the Function layer.
+"""The Basis sum type: how a space is coordinatized.
 
-```
-Basis  b ::=
-  -- mirror Space (§5)
-  | ScalarBasis                     -- the basis of ℝ (the only ground)
-  | BVar(β)                          basis variable (the basis of an SVar α)
-  | DualBasis(b) | PrimalBasis(b)
-  | BasisSum(b…) | BasisProd(b…)     -- ⊕ / ⊗  (n-ary)
-  | BasisRep(n, b)                   -- ⊕ⁿ
-  | ProjectedBasis(f, which, source?, target?)  -- subspace basis (Image/Ker/CoImg/CoKer)
-  | ImageBasis(f, source?, target?)   -- literal map-application basis (f applied to source)
-  | ListBasis(vectors…, backup?, reduce?)  -- explicit Term vectors (RREF/orthonormalize+complete)
-  | WithInnerBasis(b, g)             -- b carrying the metric g (raw; orthonormalize explicitly)
-  | OrthonormalBasis(b)              -- explicit orthonormalization of b (dual of remetric)
-  | CompleteBasis(subBasis, complement, reduce?)  -- complete a subspace basis to its ambient
-  -- mirror Type (§4) AND the Space/Type-Function layer
-  | BLam(b:σ̂. bodyBasis)            value → Frame; basis → basis-function; nat → builder
-  | BApp(f, positions, args…)        apply (mirrors App/Eval)
-```
+A :class:`Basis` records the coordinates chosen for a space. The family mirrors
+:class:`~grassmann.core.space.Space` node for node, so every space has a basis
+built the same way the space is::
 
-``BLam``/``BApp`` mirror ``Lam``/``App`` across the whole tower. A ``BLam`` over a
-**value** is the **Frame** (the paper's frame; basis varies with a runtime value) — note
-:class:`grassmann.core.term.Frame` is the dedicated Term-level frame node; here ``BLam``
-with a ``SpaceSort`` domain is the basis-tower spelling. A ``BLam`` over a **basis** is a
-**basis function** (mirror of a Space/Type Function); over a **nat**, a nat-parametric
-builder.
+    ScalarBasis                the basis of ℝ, the only ground
+    BVar(β)                    a basis variable (the basis of a space variable)
+    DualBasis(b) PrimalBasis(b)   the dual and primal of a basis
+    BasisSum(b…) BasisProd(b…)    the ⊕ and ⊗ of bases (n-ary)
+    BasisRep(n, b)             the basis of ⊕ⁿ s
+    ProjectedBasis(f, which)   an orthonormal basis of one of f's four subspaces
+    ImageBasis(f)              the literal pushforward columns f(sᵢ) of Img(f)
+    ListBasis(vectors…)        an explicit list of vectors, optionally reduced
+    WithInnerBasis(b, g)       b carrying a metric g, kept raw
+    OrthonormalBasis(b)        the explicit orthonormalization of b
+    CompleteBasis(sub, …)      a subspace basis completed to its ambient space
+    BLam(b:σ̂. body)            a basis abstracted over a value, basis, or nat
+    BApp(f, positions, args…)  the basis produced by applying a basis function
 
-No stored ``coeffs`` (that was impl change-of-basis caching; recompute at lowering).
-``which`` for :class:`ProjectedBasis` is one of the FFS selectors below.
+Two bases coordinatize an image differently and deliberately.
+:class:`ImageBasis` takes the literal pushforward columns ``f(s₁), …, f(sₙ)`` —
+the frame chartlib transports along ``f`` — and does not orthonormalize them.
+:class:`ProjectedBasis` gives the orthonormalized basis of a chosen subspace
+instead; orthonormalization is always explicit here, never implicit.
+
+``BLam`` and ``BApp`` mirror the term-level ``Lam`` and ``App`` across the whole
+tower. A ``BLam`` over a value is a frame — a basis that varies with a runtime
+value; the dedicated term node is :class:`~grassmann.core.term.Frame`, and this
+is its basis-tower spelling. A ``BLam`` over a basis is a basis function, and
+over a nat a nat-parametric builder. A basis stores no coefficients; a change of
+basis is recomputed at lowering rather than cached.
 """
 
 from __future__ import annotations
@@ -102,7 +104,7 @@ class ScalarBasis:
 
 @dataclass(frozen=True)
 class BVar:
-    """A basis variable ``β`` — the basis of an ``SVar α`` (rides on a ``Lam``)."""
+    """A basis variable — the basis of a space variable ``SVar α``, riding on a ``Lam``."""
 
     name: str
 
@@ -116,7 +118,7 @@ class BVar:
 
 @dataclass(frozen=True)
 class DualBasis:
-    """``DualBasis(b)`` — the dual basis."""
+    """The dual basis of a basis."""
 
     basis: Basis
 
@@ -129,7 +131,7 @@ class DualBasis:
 
 @dataclass(frozen=True)
 class PrimalBasis:
-    """``PrimalBasis(b)`` — the primal basis of a dual basis."""
+    """The primal basis underlying a dual basis."""
 
     basis: Basis
 
@@ -142,7 +144,7 @@ class PrimalBasis:
 
 @dataclass(frozen=True)
 class BasisSum:
-    """``BasisSum(b…)`` — n-ary ⊕ basis."""
+    """The direct-sum basis of finitely many bases (the basis of an ``n``-ary ``⊕``)."""
 
     bases: tuple[Basis, ...]
 
@@ -156,7 +158,7 @@ class BasisSum:
 
 @dataclass(frozen=True)
 class BasisProd:
-    """``BasisProd(b…)`` — n-ary ⊗ basis."""
+    """The tensor-product basis of finitely many bases (the basis of an ``n``-ary ``⊗``)."""
 
     bases: tuple[Basis, ...]
 
@@ -172,7 +174,10 @@ class BasisProd:
 
 @dataclass(frozen=True)
 class BasisRep:
-    """``BasisRep(n, b)`` — ⊕ⁿ basis (mirrors ``OPlusRep``)."""
+    """The basis of an ``n``-fold direct sum ``⊕ⁿ s``.
+
+    Mirrors the ``OPlusRep`` space at the basis level.
+    """
 
     count: Dim
     basis: Basis
@@ -187,9 +192,10 @@ class BasisRep:
 
 @dataclass(frozen=True)
 class ProjectedBasis:
-    """``ProjectedBasis(f, which, source?, target?)`` — subspace basis by projection.
+    """The orthonormalized basis of one of ``f``'s four fundamental subspaces, built by projection.
 
-    For ``Image`` / ``Ker`` / ``CoImg`` / ``CoKer`` (``which`` ∈ :data:`PROJECTED_WHICH`).
+    The subspace is chosen by ``which`` — ``Image`` / ``Ker`` / ``CoImg`` / ``CoKer``
+    (``which`` ∈ :data:`PROJECTED_WHICH`).
     ``source`` / ``target`` are the bases of ``f``'s domain / codomain (default the
     standard basis, represented as ``None`` here).
 
@@ -229,7 +235,7 @@ class ProjectedBasis:
 
 @dataclass(frozen=True)
 class ImageBasis:
-    """``ImageBasis(f, source?, target?)`` — the **literal map-application** basis of ``f``'s range.
+    """The literal map-application basis of ``f``'s range — the raw, non-orthonormalized pushforward frame.
 
     Its columns are ``f`` applied to the **source** basis of ``f``'s domain — ``f(sᵢ)``,
     the R/fwd side — **not** orthonormalized, read in the codomain ``target`` basis.  ``source``
@@ -264,7 +270,7 @@ class ImageBasis:
 
 @dataclass(frozen=True)
 class ListBasis:
-    """``ListBasis(vectors…, backup?, reduce?)`` — a basis as an EXPLICIT LIST OF TERM VECTORS.
+    """A basis given as an explicit list of term vectors, always a full basis of its ambient.
 
     A ``ListBasis`` is **ALWAYS a full basis of its ambient** (the vectors' space).  Each entry
     is a :class:`~grassmann.core.term.Term` vector (all of the same space); the listed vectors
@@ -309,7 +315,7 @@ class ListBasis:
 
 @dataclass(frozen=True)
 class WithInnerBasis:
-    """``WithInnerBasis(b, g)`` — the basis ``b`` of the metricized space ``WithInner(V, g)``.
+    """The basis ``b`` living in the metricized space ``WithInner(V, g)``, carrying the metric raw.
 
     Carries the metric ``g`` as metadata; it is **not** assumed ``g``-orthonormal — it is just
     ``b`` living in the metricized space.  To get the ``g``-orthonormal basis, wrap it in
@@ -330,7 +336,7 @@ class WithInnerBasis:
 
 @dataclass(frozen=True)
 class OrthonormalBasis:
-    """``OrthonormalBasis(b)`` — the orthonormalization of basis ``b``.
+    """The explicit orthonormalization of a basis.
 
     An **explicit** basis node (the dual of ``remetric``): orthonormalizes ``b`` w.r.t. its
     metric when ``b`` is a :class:`WithInnerBasis` (g-orthonormal), else w.r.t. the standard
@@ -348,9 +354,9 @@ class OrthonormalBasis:
 
 @dataclass(frozen=True)
 class CompleteBasis:
-    """``CompleteBasis(subBasis, complement, reduce?)``.
+    """The completion of a subspace basis to a full basis of its ambient space.
 
-    Complete a basis of an EXPLICIT subspace to its ambient, by filling the missing directions from
+    Completes a basis of an EXPLICIT subspace to its ambient, by filling the missing directions from
     ``complement``.
 
     ``complement`` is a :class:`Basis` (e.g. the ambient standard basis) — the source of the
@@ -385,7 +391,7 @@ class CompleteBasis:
 
 @dataclass(frozen=True)
 class BLam:
-    """``BLam(b:σ̂. bodyBasis)`` — basis-level binder; machinery to BUILD a basis.
+    """The basis-level binder: the machinery that builds a basis, abstracted over a value, basis, or nat.
 
     Domain ``σ`` (a :class:`~grassmann.core.kinds.Kind`) decides the instance:
     a value (``SpaceSort``) ⇒ a **Frame**; a basis ⇒ a **basis function**; a nat ⇒ a
@@ -422,7 +428,10 @@ class BLam:
 
 @dataclass(frozen=True)
 class BApp:
-    """``BApp(f, positions, args…)`` — apply a ``BLam`` (mirrors ``App``/``Eval``)."""
+    """The basis produced by applying a basis function (a ``BLam``) to arguments.
+
+    Mirrors ``App``/``Eval`` at the basis level.
+    """
 
     f: Basis
     positions: tuple[int, ...]

@@ -1,11 +1,12 @@
-"""Grassmann inference / elaboration engine (IW3).
+"""The inference engine: bidirectional type synthesis and checking.
 
-Bidirectional type synthesis + checking over the core IR, with first-order unification on
-SPACE terms only, symbolic dimension reasoning (static OR the runtime SVD atom ``δ_f``),
-the subspace relation ``⊑``, and asserted map-property / FFS-dimension propagation.
-
-Operates over the IW1 core
-(``grassmann.core``); does not modify it.
+This engine types a term. It works bidirectionally — synthesizing a type where
+one can be read off, checking against an expected type elsewhere — with
+first-order unification over space terms, symbolic reasoning about dimensions
+(static, or the runtime rank atom ``δ_f`` when a rank is unknown), the subspace
+relation ``⊑``, and propagation of asserted map properties and the four
+fundamental subspace dimensions. It reads the core IR
+(:mod:`grassmann.core`) and does not modify it.
 
 Public entry points
 -------------------
@@ -13,8 +14,8 @@ Public entry points
 - :func:`check` — ``Γ ⊢ e ⇐ s`` (check against an expected Space/Type).
 - :func:`unify` — first-order unification on space terms (mutates a :class:`MetaStore`).
 - :func:`dim_of` / :func:`dim_eq` / :func:`rank_of` — symbolic dimensions + ``δ_f``.
-- :func:`is_subspace` — the ``⊑`` relation (`25 §6`).
-- :func:`ffs_dims` — FFS dimensions from asserted props / runtime rank (`25 §7`).
+- :func:`is_subspace` — the ``⊑`` relation.
+- :func:`ffs_dims` — FFS dimensions from asserted props / runtime rank.
 """
 
 from __future__ import annotations
@@ -66,7 +67,7 @@ __all__ = [
     "SynthResult",
     "InferError",
     "map_domain_codomain",
-    # FFS / map-space probes (canonical — audit #18)
+    # FFS / map-space probes (canonical)
     "is_ffs",
     "ffs_defining_map",
     "ffs_kind",
@@ -102,7 +103,7 @@ __all__ = [
     "Usage",
     "check_linearity",
     "check_llam_resources",
-    # asserted-fact unification aids (A3)
+    # asserted-fact unification aids
     "DimFact",
     "AssertFactError",
     "assert_property_dims",

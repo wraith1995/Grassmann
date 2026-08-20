@@ -7,7 +7,7 @@ coordinate-free linear map ``X ⊸ space(e)`` (the Jacobian, space ``Dual(X) ⊗
 **Method — directional derivative + seed.** We compute the *directional derivative*
 ``De[h]`` — a **value** in ``space(e)`` that is linear in a fresh seed direction
 ``h : X`` — by forward-mode rules (product / chain / quotient), then wrap it in
-``LLam((h,). De[h])``. The ``LLam``→coordinate-tensor lowering seeds ``h`` with the
+``LLam((h,). De[h])``. The ``LLam`` → coordinate-tensor lowering seeds ``h`` with the
 identity basis and reads off the whole Jacobian. Working with *values* (not Jacobian
 maps) throughout keeps every intermediate in the ordinary value algebra — no map is ever
 re-applied, so the construction is layout-safe.
@@ -252,7 +252,39 @@ def clear_deriv_inputs() -> None:
 
 
 def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
-    """Total covariant derivative ``d e / d x : X ⊸ space(e)`` (the public entry point)."""
+    """Total covariant derivative ``d e / d x : X ⊸ space(e)`` (the public entry point).
+
+    Differentiates the closed term ``e`` with respect to the single value variable ``x``
+    by symbolic forward-mode (directional derivative plus seed), returning the Jacobian as
+    a coordinate-free linear map. See the module docstring for the method, the marked-
+    dependence protocol, and the covariant (metric-connection) correction.
+
+    Parameters
+    ----------
+    e : :class:`~grassmann.core.term.Term`
+        The term to differentiate. Must be closed — no free space variables — and first
+        order (``x`` must not flow into a space position; see
+        :func:`_guard_closed_and_first_order`).
+    x : :class:`~grassmann.core.term.Var`
+        The value variable to differentiate along; its space ``X`` is the Jacobian's domain.
+    deps : dict[int, :class:`~grassmann.core.term.Term` | None], optional
+        Marks the other x-dependent value variables by ``var.uid``. The value is the supplied
+        derivative map ``∂val/∂x : X ⊸ space(val)``, or ``None`` to allocate a fresh symbolic
+        derivative-map input (surfaced by :func:`enumerate_derivative_inputs`). A variable
+        that is neither ``x`` nor a key here is treated as x-independent.
+
+    Returns
+    -------
+    :class:`~grassmann.core.term.Term`
+        The total derivative as a linear map ``X ⊸ space(e)`` — an ``LLam`` over the seed
+        direction, or the ``Zero`` map when ``e`` is x-independent.
+
+    Raises
+    ------
+    DiffError
+        If ``e`` is not a closed first-order term, or a higher-order construct (``Lam``-as-
+        function, ``Frame``, or a path where ``x`` enters a space position) is encountered.
+    """
     if not is_term(e):
         raise DiffError(f"diff: expected a Term, got {e!r}")
     if not isinstance(x, Var):
@@ -383,6 +415,12 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
 
 
 def _dd_var(e: Var, ctx: _DCtx) -> Term:
+    """Directional derivative of a variable — the base case of forward-mode ``diff``.
+
+    ``dx = h`` (the seed direction); a marked dependent var contributes ``(∂e/∂x)·h``; a
+    self-differentiating QR-frame tower element yields its successor applied to the seed; any
+    other variable is x-independent, with derivative ``Zero``.
+    """
     if e.uid == ctx.x.uid:
         return ctx.h  # d x = h (the seed direction)
     if e.uid in ctx.deps:
@@ -1032,6 +1070,7 @@ def _dd_project(z: Term, sub: Space, e: Term, ctx: _DCtx) -> Term:
 
 
 def _dd_kron(e: Kron, ctx: _DCtx) -> Term:
+    """``d(f ⊗ g) = df ⊗ g + f ⊗ dg`` — the Leibniz rule for the ``Kron`` map tensor."""
     df, dg = _dd(e.f, ctx), _dd(e.g, ctx)
     parts: list[Term] = []
     if not isinstance(df, Zero):
@@ -1110,7 +1149,7 @@ def _dd_solve(e: Solve, ctx: _DCtx) -> Term:
     """``d(f⁻¹) = −f⁻¹ (df) f⁻¹`` — the bare inverse-map derivative (``f`` square).
 
     Built term→term from ``Solve``/``Compose``: the seed in ``df`` flows through the einsum
-    ``Compose``s, NEVER the bulk ``SolveOp`` (which only ever sees the seed-free ``f``), so it
+    ``Compose`` nodes, NEVER the bulk ``SolveOp`` (which only ever sees the seed-free ``f``), so it
     threads in both llam modes — unlike the *applied* ``Solve(f)·v`` where the seed enters the
     bulk op directly.
     """
@@ -1126,7 +1165,7 @@ def _dd_pinv(e: Pinv, ctx: _DCtx) -> Term:
 
     ``d(f⁺) = −f⁺ (df) f⁺ + (fᵀf)⁻¹ (df)ᵀ (I − f f⁺)``. The rank term vanishes for a square map
     (``f f⁺ = I``), so the same formula is exact for square *and* injective (full-column-rank)
-    ``f``. Pure ``Pinv``/``Dagger``/``Compose`` — the seed threads through the einsum ``Compose``s
+    ``f``. Pure ``Pinv``/``Dagger``/``Compose`` — the seed threads through the einsum ``Compose`` nodes
     (the bulk ``PinvOp`` only sees the seed-free ``f``).  This is what makes ``project`` through a
     moving ``Img(J)`` differentiate term→term (``project ≡ Eval(Pinv(J), ·)``).
     """
@@ -1232,7 +1271,7 @@ def _dd_inverse_apply(
     if not isinstance(df, Zero):
         raise DiffError(
             f"diff: differentiating {type(e).__name__} w.r.t. the inverted map is not "
-            f"supported in v1 (the seed would flow through the bulk inverse op); only the "
+            f"supported (the seed would flow through the bulk inverse op); only the "
             f"applied vector may depend on x here"
         )
     return _sum(parts, e, ctx)

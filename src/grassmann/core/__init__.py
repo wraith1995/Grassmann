@@ -1,9 +1,23 @@
-"""Grassmann core IR (IW1): the typed Kind / Space / Type / Term / Basis towers.
+"""The typed core IR: the closed families of nodes every term is built from.
 
-Nodes are frozen dataclasses;
-the module-level smart constructors enforce arity and structural kind well-formedness
-(full type CHECKING — dims/properties/contraction matching — is IW3). Re-exports the
-public constructors of every sub-module.
+Grassmann's core is a tower of typed node families, each a small closed set of
+frozen dataclasses::
+
+    Kind    the sort of a space, nat, type, or arrow (the classifier of a node)
+    Space   an abstract vector space: a variable, a dual, a direct sum ⊕ or
+            tensor product ⊗, one of the four fundamental subspaces of a map,
+            or a space with an inner product attached
+    Type    a space used as a type, or a Π (function) type
+    Term    a map: application, composition, the adjoint, Solve/Pinv, the
+            musical isomorphisms, projections, the trace, and the two lambdas
+    Basis   how a space is coordinatized at the lowering boundary
+
+The module-level smart constructors build these nodes and enforce structural
+well-formedness — that every child has the right kind and every node the right
+arity. Full type checking, which matches dimensions, map properties, and
+contracted slots, is the job of :mod:`grassmann.infer`. Because each family is
+closed, dispatch over it is exhaustive. This package re-exports the public
+constructors of every submodule.
 """
 
 from __future__ import annotations

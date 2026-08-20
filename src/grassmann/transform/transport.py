@@ -1,4 +1,4 @@
-"""Transport along a map — pushforward, the map-driven dual of :mod:`pullback`.
+"""Transport along a map — pushforward, the map-driven dual of :mod:`~grassmann.transform.pullback`.
 
 ``pullback(v, target)`` (see :mod:`grassmann.transform.pullback`) transports a value
 into a *target space* using only **static structural / subspace** relations — it never

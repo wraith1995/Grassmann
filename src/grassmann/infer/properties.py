@@ -1,13 +1,17 @@
-"""Asserted map-property propagation + FFS dimensions (`25 §7`).
+"""Asserted map-property propagation and the four fundamental-subspace dimensions.
 
-Map ``props`` (on a ``Var``) are **asserted/trusted** in v1: booleans
+A map's :class:`~grassmann.core.props.MapProps` (carried on a
+:class:`~grassmann.core.term.Var`) are **asserted/trusted** facts: booleans
 ``inj``/``surj``/``bij`` plus an optional (possibly symbolic) ``rank``/``dim_ker``/
-``dim_img``. They (a) set ``rank(f)`` for the FFS dimension rules (`25 §1`) and (b)
-license ``Solve`` (``bij``) / sharpen ``Pinv`` (``inj``/``surj``).
+``dim_img``. They (a) set ``rank(f)`` for the fundamental-subspace dimension rules and (b)
+license :class:`~grassmann.core.term.Solve` (``bij``) and sharpen
+:class:`~grassmann.core.term.Pinv` (``inj``/``surj``).
 
 This module exposes the property-to-FFS-dimension flow: given a map ``f`` it computes the
-dimensions of ``Ker f`` / ``Img f`` / ``CoKer f`` / ``CoImg f`` from its asserted rank
-(or the runtime atom ``δ_f`` when rank is unspecified — F3).
+dimensions of its kernel, image, cokernel, and coimage
+(:class:`~grassmann.core.space.Ker` / :class:`~grassmann.core.space.Img` /
+:class:`~grassmann.core.space.CoKer` / :class:`~grassmann.core.space.CoImg`) from the asserted rank, or from the
+runtime rank atom ``δ_f`` when the rank is unspecified.
 """
 
 from __future__ import annotations
@@ -24,7 +28,12 @@ from .dims import dim_diff, dim_of, rank_of
 
 
 def map_props(f: object) -> MapProps | None:
-    """Give the asserted properties of a map term, if any (props live on ``Var``)."""
+    """Give a map term's asserted properties, if any.
+
+    Asserted properties (:class:`~grassmann.core.props.MapProps`) live on a
+    :class:`~grassmann.core.term.Var`; returns ``None`` for any other term or for a
+    ``Var`` carrying no (non-empty) assertion.
+    """
     if isinstance(f, Var):
         p = f.props
         if p is not None and not p.is_empty():
@@ -38,8 +47,8 @@ def is_bijective(f: object) -> bool:
     if p is not None and p.bij:
         return True
     # The inverse / metric-adjoint of a bijection is itself a bijection — so a re-inverted
-    # bijection (e.g. ``Solve(Solve(X))``, which the ``d det``/``d logdet`` rules build when
-    # differentiating a determinant of an inverse) type-checks without a fresh ``bij`` assertion.
+    # bijection (e.g. ``Solve(Solve(X))``, which the derivative rules for a determinant of an
+    # inverse build) type-checks without a fresh ``bij`` assertion.
     if isinstance(f, (Solve, Pinv, Dagger)):  # audit: ok EX-ISINSTANCE-LADDER — safe direction: refusal-to-license bijectivity [approved 2026-07-03]
         return is_bijective(f.f)
     return False
@@ -69,9 +78,9 @@ class FFSDims:
 
 
 def ffs_dims(f: object, dom: Space, cod: Space) -> FFSDims:
-    """Compute the four FFS dims for a map ``f : dom ⊸ cod`` (`25 §1`).
+    """Compute the four FFS dims for a map ``f : dom ⊸ cod``.
 
-    ``rank`` is asserted (static) or the runtime atom ``δ_f`` (F3). Then
+    ``rank`` is asserted (static) or the runtime atom ``δ_f``. Then
     ``|Img|=|CoImg|=rank``, ``|Ker|=|dom|−rank``, ``|CoKer|=|cod|−rank``.
     """
     r = rank_of(f)
@@ -85,7 +94,7 @@ def ffs_dims(f: object, dom: Space, cod: Space) -> FFSDims:
 
 
 def ffs_dim(node: Ker | Img | _CoKer | CoImg, dom: Space, cod: Space) -> Dim:
-    """Dimension of a specific FFS space node (dispatch helper)."""
+    """Give the dimension of one FFS space node (``Img``/``CoImg``/``Ker``/``CoKer``)."""
     dims = ffs_dims(node.f, dom, cod)
     match node:
         case Img():

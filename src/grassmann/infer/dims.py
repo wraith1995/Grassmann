@@ -1,4 +1,4 @@
-"""Symbolic dimension reasoning (`25 §1`).
+"""Symbolic dimension reasoning.
 
 A ``Dim`` (from :mod:`grassmann.core.space`) is a Nat-expression over
 
@@ -11,7 +11,7 @@ otherwise a runtime atom ``δ_f``), and decides dim equality ``d ≡ d'`` by nor
 to a canonical polynomial over the opaque generators (``DimVar``/``DimOf``/``DimAtomRef``
 treated as atoms; ``δ_f ≡ δ_g`` iff ``f ≈ g`` structurally).
 
-Dims are **compared, never unified** (`25 §F5`).
+Dims are **compared, never unified**.
 """
 
 from __future__ import annotations
@@ -56,15 +56,17 @@ class DimError(Exception):
 
 
 # ===========================================================================
-# |s| — the dimension of a space (`25 §1`).
+# |s| — the dimension of a space.
 # ===========================================================================
 
 
 def dim_of(s: Space) -> Dim:
-    """Compute ``|s|`` as a symbolic :class:`Dim` (`25 §1`).
+    """Compute ``|s|``, the dimension of a space, as a symbolic ``Dim`` (see :mod:`grassmann.core.space`).
 
-    FFS dims (``Ker``/``Img``/``CoKer``/``CoImg``) require knowing the source/target
-    spaces and the map's rank; rank is resolved via :func:`rank_of`.
+    Fundamental-subspace dims (:class:`~grassmann.core.space.Ker` /
+    :class:`~grassmann.core.space.Img` / :class:`~grassmann.core.space.CoKer` /
+    :class:`~grassmann.core.space.CoImg`) require knowing the source/target spaces and the
+    map's rank; the rank is resolved via :func:`rank_of`.
     """
     match s:
         case Scalar():
@@ -120,12 +122,12 @@ def _ffs_target(node: Ker | Img | CoKer | CoImg) -> Space:
 
 
 # ===========================================================================
-# rank(f) — asserted (static) OR a runtime atom δ_f (`25 §1`/§7).
+# rank(f) — asserted (static) OR a runtime atom δ_f.
 # ===========================================================================
 
 
 def rank_of(f: object) -> Dim:
-    """Resolve ``rank(f)`` per `25 §1`/§7.
+    """Resolve ``rank(f)`` to a static rank when asserted, else a runtime atom.
 
     - asserted props on ``f`` (a ``Var``): ``bij``/``inj``/``surj``/explicit ``rank``;
     - otherwise a runtime rank atom ``δ_f`` (:class:`DimAtomRef` keyed by ``f``).
@@ -167,12 +169,12 @@ def _map_dom_cod(f: object) -> tuple[Space, Space]:
 
 
 # ===========================================================================
-# Dim arithmetic + normalized equality (`25 §1`: d ≡ d').
+# Dim arithmetic + normalized equality (d ≡ d').
 # ===========================================================================
 
 
 def dim_diff(a: Dim, b: Dim) -> Dim:
-    """Symbolic ``a − b``.
+    """Compute the symbolic difference ``a − b``.
 
     Represented internally via the normalized polynomial; if the result has only
     non-negative integer monomials it stays as a sum, otherwise it carries negative

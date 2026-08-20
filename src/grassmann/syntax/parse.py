@@ -1,7 +1,7 @@
 """``parse`` — the inverse of :func:`grassmann.syntax.unparse`.
 
 A hand-rolled lexer + Pratt (precedence-climbing) parser builds a small generic AST; a
-**sort-directed resolver** then interprets it into IW1 core nodes (terms / spaces / bases /
+**sort-directed resolver** then interprets it into core nodes (terms / spaces / bases /
 dims / kinds / types) against an environment built from the typed-variable preamble.
 
 The grammar is the one emitted by the unparser — see :mod:`grassmann.syntax.glyphs` for the
@@ -212,35 +212,43 @@ class LamN:
 
 
 class _Parser:
+    """Pratt parser over Unicode-surface tokens, producing the generic AST."""
+
     def __init__(self, toks: list[Tok], src: str) -> None:
         self.toks = toks
         self.src = src
         self.k = 0
 
     def peek(self) -> Tok:
+        """Return the current token without consuming it."""
         return self.toks[self.k]
 
     def peek2(self) -> Tok:
+        """Return the token one past the current one (or the last token at the end)."""
         return self.toks[self.k + 1] if self.k + 1 < len(self.toks) else self.toks[-1]
 
     def next(self) -> Tok:
+        """Consume and return the current token, advancing the cursor."""
         t = self.toks[self.k]
         self.k += 1
         return t
 
     def expect_op(self, op: str) -> Tok:
+        """Consume the current token, requiring it to be the operator ``op``."""
         t = self.peek()
         if t.kind != "OP" or t.text != op:
             raise ParseError(f"expected {op!r}", t.pos, self.src)
         return self.next()
 
     def at_op(self, op: str) -> bool:
+        """Report whether the current token is the operator ``op``."""
         t = self.peek()
         return t.kind == "OP" and t.text == op
 
     # -- expression (precedence climbing) -------------------------------------
 
     def expr(self, min_bp: int = 0) -> object:
+        """Parse an expression by precedence climbing, binding no looser than ``min_bp``."""
         left = self.atom()
         while True:
             t = self.peek()
@@ -261,6 +269,7 @@ class _Parser:
         return left
 
     def atom(self) -> object:
+        """Parse an atom: a literal, name, binder, bracketed form, or parenthesized expression."""
         t = self.peek()
         if t.kind == "NUM":
             self.next()
@@ -304,6 +313,7 @@ class _Parser:
         raise ParseError("expected an expression", t.pos, self.src)
 
     def list_lit(self) -> ListN:
+        """Parse a bracketed list literal ``[a, b, …]``."""
         t = self.expect_op("[")
         items: list = []
         if not self.at_op("]"):
@@ -315,6 +325,7 @@ class _Parser:
         return ListN(items, t.pos)
 
     def application(self, fn: object, opener: str) -> App:
+        """Parse a call ``fn(args)`` or index ``fn[args]`` onto an already-parsed ``fn``."""
         closer = ")" if opener == "(" else "]"
         t = self.expect_op(opener)
         args: list = []
@@ -337,6 +348,7 @@ class _Parser:
             args.append(self.expr(0))
 
     def binder(self, glyph: str) -> LamN:
+        """Parse a binder form — λ / Λ / Π / frame / basisfn — with its binder list and body."""
         t = self.next()  # glyph token (λ / Λ / Π / frame-name)
         binders: list = []
         binders.append(self._binder_decl())
@@ -373,16 +385,21 @@ def parse_ast(src: str) -> object:
 
 @dataclass
 class _Env:
+    """A lexical environment mapping names to resolved ``(tag, value)`` bindings, with a parent scope."""
+
     m: dict = field(default_factory=dict)
     parent: object = None
 
     def child(self) -> _Env:
+        """Return a fresh child environment nested under this one."""
         return _Env(parent=self)
 
     def put(self, name: str, val: tuple) -> None:
+        """Bind ``name`` to the resolved value ``val`` in this environment."""
         self.m[name] = val
 
     def get(self, name: str) -> tuple | None:
+        """Look up ``name`` in this environment and its parents, returning ``None`` if unbound."""
         e = self
         while e is not None:
             if name in e.m:
@@ -399,15 +416,19 @@ _REDUCE = {r.value: r for r in B.Reduce}
 
 
 class _Resolver:
+    """Interprets the generic AST into core nodes against a typed environment."""
+
     def __init__(self, src: str) -> None:
         self.src = src
 
     def err(self, msg: str, node: object) -> ParseError:
+        """Build a :class:`ParseError` for ``msg`` at ``node``'s source location."""
         return ParseError(msg, getattr(node, "pos", None), self.src)
 
     # -- dims ----------------------------------------------------------------
 
     def dim(self, node: object, env: _Env) -> S.Dim:
+        """Resolve an AST node to a symbolic dimension (``Dim``)."""
         match node:
             case Num(text=tx):
                 if "." in tx:
@@ -445,11 +466,13 @@ class _Resolver:
         return [self.dim(node, env)]
 
     def int_(self, node: object) -> int:
+        """Resolve an AST node to a plain integer literal."""
         if isinstance(node, Num) and "." not in node.text:
             return int(node.text)
         raise self.err("expected an integer", node)
 
     def ints(self, node: object) -> tuple[int, ...]:
+        """Resolve a ``[..]`` list node to a tuple of integers."""
         if not isinstance(node, ListN):
             raise self.err("expected a [..] list of integers", node)
         return tuple(self.int_(x) for x in node.items)
@@ -457,6 +480,7 @@ class _Resolver:
     # -- kinds ---------------------------------------------------------------
 
     def kind(self, node: object, env: _Env) -> K.Kind:
+        """Resolve an AST node to a kind — ``Space``/``Nat``/``Type``, an arrow of kinds, or a space sort."""
         if isinstance(node, Name) and node.text in ("Space", "Nat", "Type"):
             return {"Space": K.SPACE, "Nat": K.NAT, "Type": K.STAR}[node.text]
         if isinstance(node, Bin) and node.op == G.ARROW:
@@ -467,6 +491,7 @@ class _Resolver:
     # -- spaces --------------------------------------------------------------
 
     def space(self, node: object, env: _Env) -> S.Space:
+        """Resolve an AST node to a core ``Space`` node."""
         match node:
             case Name(text=G.SCALAR):
                 return S.Scalar()
@@ -512,6 +537,7 @@ class _Resolver:
     # -- bases ---------------------------------------------------------------
 
     def basis(self, node: object, env: _Env) -> B.Basis:
+        """Resolve an AST node to a core ``Basis`` node."""
         match node:
             case Name(text=G.SCALAR_BASIS):
                 return B.ScalarBasis()
@@ -595,6 +621,7 @@ class _Resolver:
     # -- terms ---------------------------------------------------------------
 
     def term(self, node: object, env: _Env) -> T.Term:
+        """Resolve an AST node to a core ``Term`` (vector, map, or scalar) node."""
         match node:
             case Num(text=tx):
                 return T.Lit(float(tx))
@@ -809,6 +836,7 @@ class _Resolver:
     # -- types ---------------------------------------------------------------
 
     def type_(self, node: object, env: _Env) -> TY.Type:
+        """Resolve an AST node to a core ``Type`` node."""
         match node:
             case BracketN(glyph=G.TYPE_L, inner=s):
                 return TY.SpaceAsType(self.space(s, env))
@@ -831,6 +859,7 @@ class _Resolver:
     # -- application args (term | space | dim, and basis for BApp) -----------
 
     def arg(self, node: object, env: _Env) -> T.Term | S.Space | S.Dim:
+        """Resolve an application argument to a term, space, or dim (the first that parses)."""
         if isinstance(node, Num):
             return S.DimLit(int(node.text)) if "." not in node.text else T.Lit(float(node.text))
         if isinstance(node, Name):
@@ -847,6 +876,7 @@ class _Resolver:
         raise self.err("could not resolve application argument", node)
 
     def barg(self, node: object, env: _Env) -> T.Term | S.Space | S.Dim | B.Basis:
+        """Resolve a ``BApp`` argument to a basis, or else to a term, space, or dim."""
         try:
             return self.basis(node, env)
         except ParseError:
@@ -940,9 +970,30 @@ def _parse_props(p: _Parser, src: str, env: _Env) -> P.MapProps:
 def parse(src: str, sort: str | None = None) -> object:
     """Parse Unicode surface text into a core node (term / space / basis / dim / type).
 
-    ``sort`` may pin the expected sort (``"term"``/``"space"``/``"basis"``/``"dim"``/
-    ``"type"``); by default the resolver auto-detects. Raises :class:`ParseError` with a
-    source location on malformed input.
+    The inverse of :func:`grassmann.syntax.unparse`. A leading typed-variable preamble
+    (everything before ``⊢``) binds the free variables; the body after the turnstile is
+    then resolved against it.
+
+    Parameters
+    ----------
+    src :
+        The Unicode surface string, optionally prefixed by a ``⊢`` preamble.
+    sort :
+        Pins the expected sort — one of ``"term"``, ``"space"``, ``"basis"``, ``"dim"``,
+        ``"type"``. When ``None`` the resolver tries each in turn and keeps the first that
+        resolves.
+
+    Returns
+    -------
+    object
+        The resolved core node — a :class:`~grassmann.core.term.Term`, a
+        :class:`~grassmann.core.space.Space`, a :class:`~grassmann.core.basis.Basis`, a
+        symbolic ``Dim``, or a ``Type`` node.
+
+    Raises
+    ------
+    ParseError
+        On malformed input, carrying the offending source location.
     """
     toks = tokenize(src)
     pre_toks, body_toks = _split_preamble(toks)

@@ -1,13 +1,14 @@
-"""Subspace relation ``⊑`` (`25 §6`) — for project / embed.
+"""Subspace relation ``⊑`` — the relation :class:`~grassmann.core.term.Project` and :class:`~grassmann.core.term.Embed` rest on.
 
-```
-s ⊑ ⊕(…, s, …)          (a summand)
-Ker f ⊑ dom f   Img f ⊑ cod f   CoImg f ⊑ dom f   CoKer f ⊑ cod f
-reflexive + transitive
-```
+::
 
-Coordinate realization happens at lowering (``CompleteBasis``); here we only decide the
-relation structurally (with dim-equality for the reflexive/leaf case).
+    s ⊑ ⊕(…, s, …)          (a summand)
+    Ker f ⊑ dom f   Img f ⊑ cod f   CoImg f ⊑ dom f   CoKer f ⊑ cod f
+    reflexive + transitive
+
+Coordinate realization happens at lowering (:class:`~grassmann.core.basis.CompleteBasis`);
+here we only decide the relation structurally (with dim-equality for the reflexive/leaf
+case).
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ def _eq(a: Space, b: Space) -> bool:
 
 
 def is_subspace(sub: Space, amb: Space) -> bool:
-    """Decide ``sub ⊑ amb`` (`25 §6`), reflexive + transitive."""
+    """Decide the subspace relation ``sub ⊑ amb`` (reflexive and transitive)."""
     if _eq(sub, amb):
         return True
 
@@ -118,17 +119,14 @@ def _ffs_cod(node: Img | CoKer) -> Space | None:
 
 
 # ---------------------------------------------------------------------------
-# Canonical FFS / map-space probes (—).
-# These replace the per-module hand-rolled copies (pullback._is_ffs/_ffs_superspace,
-# diff._subspace_defining_map/_ffs_kind/_map_dom_cod, choose._operator_of,
-# embed.ops._split_map_space, _dims' peel, represent's membership gates).
+# Canonical FFS / map-space probes.
 # ---------------------------------------------------------------------------
 
 FfsKind = Literal["img", "ker", "coimg", "coker"]
 
 
 def is_ffs(s: Space) -> TypeGuard[Img | Ker | CoImg | CoKer]:
-    """Whether ``s`` is one of the four fundamental subspaces of a map."""
+    """Report whether ``s`` is one of the four fundamental subspaces of a map."""
     return isinstance(s, (Img, Ker, CoImg, CoKer))  # audit: ok EX-ISINSTANCE-LADDER — THE canonical FFS membership predicate (definitional 4-member subset) [approved 2026-07-03]
 
 
@@ -179,7 +177,7 @@ def ffs_superspace(s: Space) -> Space | None:
 
 
 def split_map_space(s: Space) -> tuple[Space, Space] | None:
-    """Strict one-step peel of the linear-map encoding.
+    """Peel the linear-map encoding one step, purely syntactically.
 
     ``OProd(Dual(dom), cod)`` → ``(dom, cod)``, else ``None``. (The general multi-factor decoder is
     :func:`grassmann.infer.synth._decode_map_space` via :func:`map_domain_codomain`; this is the syntactic

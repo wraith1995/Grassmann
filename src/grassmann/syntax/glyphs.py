@@ -1,8 +1,9 @@
 """Single source of truth for the Unicode surface syntax — glyphs + precedence.
 
 The parser (:mod:`grassmann.syntax.parse`) and unparser (:mod:`grassmann.syntax.unparse`)
-both read this table so the two stay in lock-step. A goal-04 LaTeX printer can consume the
-SAME operator/precedence model (it only needs to swap the glyph strings for LaTeX macros).
+both read this table so the two stay in lock-step. The LaTeX printer
+(:mod:`grassmann.printer.latex`) consumes the same operator/precedence model — it only
+swaps the glyph strings for LaTeX macros.
 
 Design (the operator allocation):
 

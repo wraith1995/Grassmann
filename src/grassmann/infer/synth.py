@@ -1,9 +1,9 @@
-"""Bidirectional type synthesis ``Γ ⊢ e ⇒ s`` (`25 §3`).
+"""Bidirectional type synthesis ``Γ ⊢ e ⇒ s``.
 
 Synthesizes the Space (for vectors / linear maps) or Type (for ``Lam`` over a Term, i.e.
 a ``Π``; or an arrow Kind for Space/Type Functions) of a core ``Term``. Application
 (``Eval``/``NEval``), composition, trace, inverses, movement and the binders are typed
-per the contraction-view rules of `25 §3`.
+per the contraction-view rules.
 
 The companion :mod:`grassmann.infer.check` runs the ``⇐`` direction. Unification of
 implicit space metavars and dimension equality live in :mod:`grassmann.infer.unify` /
@@ -93,7 +93,7 @@ SynthResult = Space | Type | Kind
 
 @dataclass
 class Ctx:
-    """Inference context ``Γ`` (`25 §0`): metavar store + type-var scope.
+    """Inference context ``Γ``: metavar store + type-var scope.
 
     ``space_vars`` records in-scope rigid space vars introduced by ``Lam`` over
     ``space`` (used only for completeness; the core already carries them as ``SVar``).
@@ -101,14 +101,37 @@ class Ctx:
 
     store: MetaStore = field(default_factory=MetaStore)
     space_vars: set[str] = field(default_factory=set)
-    # B1 — deferred ``s ⊑ parent`` obligations for ``Project(v, None)`` whose target
+    # Deferred ``s ⊑ parent`` obligations for ``Project(v, None)`` whose target
     # subspace metavar must be resolved (by the ⇐ check direction) before the subspace
     # relation can be validated. Each entry is (target_meta, parent_space, vector).
     subspace_obligations: list[tuple[Space, Space, Term]] = field(default_factory=list)
 
 
 def synth(term: Term, ctx: Ctx | None = None) -> SynthResult:
-    """Synthesize the Space/Type/Kind of ``term`` (`25 §3`)."""
+    """Synthesize the classifier of ``term`` — the *synthesize* direction ``Γ ⊢ e ⇒ s``.
+
+    Reads a type off the term: a Space for a value or linear map, a Type (a ``Π``) for a
+    :class:`~grassmann.core.term.Lam` over a term, or an arrow Kind for a Space/Type
+    function. The companion :func:`~grassmann.infer.check.check` runs the ``⇐`` direction.
+
+    Parameters
+    ----------
+    term
+        The core term to type.
+    ctx
+        Inference context; a fresh one is created at the top level, where any deferred
+        subspace obligations are also discharged.
+
+    Returns
+    -------
+    SynthResult
+        The synthesized Space, Type, or Kind.
+
+    Raises
+    ------
+    InferError
+        If ``term`` is not a term or cannot be typed.
+    """
     top = ctx is None
     if ctx is None:
         ctx = Ctx()
@@ -121,7 +144,11 @@ def synth(term: Term, ctx: Ctx | None = None) -> SynthResult:
 
 
 def synth_space(term: Term, ctx: Ctx | None = None) -> Space:
-    """Synthesize and require a Space result (resolved against the metastore)."""
+    """Synthesize ``term`` and require the result to be a Space.
+
+    Like :func:`synth`, but rejects a term that classifies as a Type or Kind, and returns
+    the Space fully resolved against the metastore. Raises :class:`InferError` otherwise.
+    """
     top = ctx is None
     if ctx is None:
         ctx = Ctx()
@@ -134,7 +161,7 @@ def synth_space(term: Term, ctx: Ctx | None = None) -> Space:
 
 
 def _check_subspace_obligations(ctx: Ctx) -> None:
-    """Validate any deferred ``Project(v, None)`` target obligations (B1).
+    """Validate any deferred ``Project(v, None)`` target obligations.
 
     Once the surrounding context has run, each deferred target metavar should be solved
     (by the ⇐ check direction). A solved target must be a subspace of its parent; an
@@ -174,7 +201,7 @@ def _synth(e: Term, ctx: Ctx) -> SynthResult:
         case External():
             return _synth_external(e, ctx)
         case Zero():
-            # B1: an omitted space is a fresh metavar, solved by the surrounding context
+            # An omitted space is a fresh metavar, solved by the surrounding context
             # (a Sum sibling, a check/Assert against an expected space, …).
             return e.space if e.space is not None else fresh_meta("zero")
         case Identity():
@@ -281,10 +308,10 @@ def _external_requires_standard(data: object) -> bool:
 
 
 def _synth_external(e: External, ctx: Ctx) -> Space:
-    """``External(s, data, args…)`` — a foreign elementwise op (`41 §3`).
+    """``External(s, data, args…)`` — a foreign elementwise op.
 
     The result space is ``e.space`` (the source of truth, unchanged). On top of that we
-    **surface the kernel's basis contract** (`71 §2.4`): a ``STANDARD`` op's operands must
+    **surface the kernel's basis contract**: a ``STANDARD`` op's operands must
     be standardizable to ``default_basis`` before the componentwise kernel runs, so an
     operand whose space is a still-unresolved, basis-polymorphic metavar/``SVar`` (no known
     realization ⇒ no standard basis) is rejected here — precisely the case that would
@@ -328,7 +355,7 @@ def _as_factors(s: Space) -> tuple[Space, ...]:
 
 
 def _synth_eval(e: Eval, ctx: Ctx) -> Space:
-    """``Eval(f, pos, args)`` — linear application (`25 §3`).
+    """``Eval(f, pos, args)`` — linear application.
 
     ``f ⇒ ⊗(t…)``; for each j, ``t_{pos[j]} ~ Dual(s_j)`` with ``args[j] ⇐ s_j``
     (``s_j`` may be a fresh ``?α`` recovered from the arg); result = remaining factors.
@@ -357,7 +384,7 @@ def _synth_eval(e: Eval, ctx: Ctx) -> Space:
 
 
 def _synth_neval(e: NEval, ctx: Ctx) -> Space:
-    """``NEval(f, pos, args)`` — non-linear application of a ``Lam`` (`25 §3`).
+    """``NEval(f, pos, args)`` — non-linear application of a ``Lam``.
 
     ``f ⇒ Π(b:σ).τ`` (curried per slot). A value arg is checked against σ; an implicit
     space param (σ=space) gets a fresh ``?α`` recovered from the arg/result; an explicit
@@ -369,7 +396,7 @@ def _synth_neval(e: NEval, ctx: Ctx) -> Space:
     slot = 0
     # Walk the Π chain by absolute slot index. A SPACE slot not explicitly supplied is
     # an IMPLICIT space param: instantiate a fresh ?α (recovered by unification as later
-    # value args / the expected type flow in, `25 §5`).
+    # value args / the expected type flow in).
     while isinstance(result, Pi):
         if slot in supplied:
             result = _apply_pi(result, supplied[slot], ctx)
@@ -401,7 +428,7 @@ def _apply_pi(fty: Pi, arg: object, ctx: Ctx) -> object:
             sp: Space = arg if is_space(arg) else fresh_meta(fty.binder)  # type: ignore[assignment]
             return _subst_codomain(fty, sp, ctx)
         case Sort() if dom == NAT:
-            # Nat param: must be explicit (nats are not unified, `25 §2`).
+            # Nat param: must be explicit (nats are not unified).
             from grassmann.core.space import is_dim
 
             if not is_dim(arg):
@@ -462,7 +489,7 @@ def _synth_compose(e: Compose, ctx: Ctx) -> Space:
 
 
 def _synth_trace(e: Trace, ctx: Ctx) -> Space:
-    """``Trace(f, i, j)`` — contract primal index i with dual index j (`25 §3`)."""
+    """``Trace(f, i, j)`` — contract primal index i with dual index j."""
     fs = ctx.store.resolve(_synth_value(e.f, ctx))
     factors = list(_as_factors(fs))
     n = len(factors)
@@ -552,7 +579,7 @@ def _decode_map_space(s: Space) -> tuple[Space, Space]:
 
 
 # ===========================================================================
-# Inverses & adjoint (`25 §3`).
+# Inverses & adjoint.
 # ===========================================================================
 
 
@@ -563,7 +590,7 @@ def _synth_solve(e: Solve, ctx: Ctx) -> Space:
         raise InferError("Solve requires the map to be asserted `bij` (25 §3/§7)")
     dom, cod = _map_dom_cod_resolved(e.f, ctx)
     # `bij` guarantees |dom| ≡ |cod|; reject an asserted-bij map between unequal-dim
-    # spaces up front (A3: asserted facts inform/validate the inverse's space).
+    # spaces up front (asserted facts inform/validate the inverse's space).
     check_assert_property_consistency(e.f, dom, cod)
     return linear_map_space(cod, dom)
 
@@ -576,7 +603,7 @@ def _synth_pinv(e: Pinv, ctx: Ctx) -> Space:
 
 
 def _synth_corestrict(e: Corestrict, ctx: Ctx) -> Space:
-    """``Corestrict(f) ⇒ dom(f) ⊸ Img(f)`` — the first-isomorphism-theorem iso (`25 §3`).
+    """``Corestrict(f) ⇒ dom(f) ⊸ Img(f)`` — the first-isomorphism-theorem iso.
 
     **Injective-only.**  ``f~`` is an isomorphism exactly when ``ker f = 0``; without that
     it is only well defined out of ``CoImg(f)``, a different (and out-of-scope) domain.  So a
@@ -585,7 +612,7 @@ def _synth_corestrict(e: Corestrict, ctx: Ctx) -> Space:
     and that identification is simply false for a non-injective ``f``.
 
     The codomain is the *bare* ``Img(f)`` (endpoints left unset): that is the space
-    ``G.img(f)`` builds, and FFS unification keys on the defining map alone (`25 §2`), so an
+    ``G.img(f)`` builds, and FFS unification keys on the defining map alone, so an
     ``Img(f, source=…, target=…)`` written by a caller still unifies with it.
     """
     from grassmann.core.space import Img
@@ -629,7 +656,7 @@ def _synth_dagger(e: Dagger, ctx: Ctx) -> Space:
 
 
 # ===========================================================================
-# Movement / coercion / reshape (`25 §3`).
+# Movement / coercion / reshape.
 # ===========================================================================
 
 
@@ -638,7 +665,7 @@ def _synth_project(e: Project, ctx: Ctx) -> Space:
 
     s = ctx.store.resolve(_synth_value(e.vector, ctx))
     if e.space is None:
-        # B1: target subspace omitted. A subspace is not unique, so we cannot solve the
+        # Target subspace omitted. A subspace is not unique, so we cannot solve the
         # target by unification in the ⇒ direction; return a fresh metavar (to be solved
         # by the ⇐ check direction) and DEFER the ``target ⊑ s`` obligation, validated
         # once the metavar is resolved (see ``_check_subspace_obligations``).
@@ -663,14 +690,14 @@ def _synth_assert(e: Assert, ctx: Ctx) -> Space:
     """``Assert(v, s)``.
 
     Unify ``v``'s space with ``s`` (recovering implicit metavars), then let any **asserted map properties** of
-    ``v`` *aid* inference (A3).
+    ``v`` *aid* inference.
 
     Structural unification of ``s`` solves the implicit space metavars in ``v``'s space
     (the basic unification aid). On top of that, if ``v`` is a property-bearing map
     (``inj``/``surj``/``bij``/``rank``), the property-implied dimension equalities are
     checked against the now-resolved space: an assertion contradicting a property (e.g. a
     ``bij`` map asserted between spaces of unequal dimension) is rejected here rather than
-    silently accepted (`25 §7`).
+    silently accepted.
     """
     from .assertions import check_assert_property_consistency
     from .properties import map_props
@@ -775,7 +802,7 @@ def _synth_lift(e: Lift | InvLift, ctx: Ctx) -> Space:
         # InvLift: fuse the listed factors primally, *reassociating* — a fused factor
         # that is itself an ⊗ (a nested ``OProd``, e.g. ``V⊗ᵏ``) flattens into the
         # block, so ``InvLift((V⊗ᵏ)⊗(V⊗ˡ), [0,1])`` reassociates to the flat
-        # ``V⊗^{k+l}`` rather than keeping the nesting (`26 §2`, the explicit wedge
+        # ``V⊗^{k+l}`` rather than keeping the nesting (the explicit wedge
         # reassociation: the core never silently flattens nested ⊗).
         flat: list[Space] = []
         for f in fused_factors:
@@ -828,14 +855,14 @@ def _synth_tuple_permute(e: TuplePermute, ctx: Ctx) -> Space:
 
 
 # ===========================================================================
-# Binders (`25 §3`).
+# Binders.
 # ===========================================================================
 
 
 def _synth_llam(e: LLam, ctx: Ctx) -> Space:
-    """``LLam([xᵢ:sᵢ]. e) ⇒ ⊗(Dual sᵢ) * s_e`` (the linear-map space, `25 §3`).
+    """``LLam([xᵢ:sᵢ]. e) ⇒ ⊗(Dual sᵢ) * s_e`` (the linear-map space).
 
-    Beyond the space, enforce the **resource / usage** discipline (C1+C2): each linear
+    Beyond the space, enforce the **resource / usage** discipline: each linear
     var must be consumed exactly once along every path of the body. ``x ↦ x ⊕ 0`` counts
     as a single use of ``x`` (the ``Zero`` summand consumes nothing) — see
     :mod:`grassmann.infer.linearity`.

@@ -1,4 +1,4 @@
-"""Resource / usage accounting for the linear binder ``LLam`` (`20 §1`/`§2`, C1+C2).
+"""Resource / usage accounting for the linear binder :class:`~grassmann.core.term.LLam`.
 
 The core (:mod:`grassmann.core.term`) ships a *structural* well-formedness guard for
 ``LLam``: it walks the body and (a) rejects a linear var appearing in a dependence
@@ -27,11 +27,11 @@ A term tree has two flavors of node for resource purposes:
   usage maps to agree (rather than summing them).
 
 ``Zero`` is the unit that **consumes nothing**: ``Usage()`` (empty). This is what makes
-the C2 requirement ``x ↦ x ⊕ 0`` typecheck — ``OPlus(x, 0)`` is multiplicative, so its
+the requirement ``x ↦ x ⊕ 0`` typecheck — ``OPlus(x, 0)`` is multiplicative, so its
 usage is ``usage(x) + usage(0) = {x:1} + {} = {x:1}``: a single ordinary use of ``x``,
 not a misuse or double use.
 
-Nested binders (``LLam``/``Lam``) bind their *own* fresh vars (distinct ``uid``s), so a
+Nested binders (``LLam``/``Lam``) bind their *own* fresh vars (each a distinct ``uid``), so a
 nested binder simply contributes the usage of *its body* w.r.t. the outer linear vars —
 the value it denotes captures the outer var, which is one consumption. We therefore treat
 binder bodies multiplicatively (a binder has a single body child).
@@ -114,7 +114,7 @@ def _add_merge(branches: list[Usage], names: dict[int, str]) -> Usage:
 
 def _usage(node: object, tracked: set[int], names: dict[int, str]) -> Usage:
     """Compute the resource usage of ``node`` w.r.t. the ``tracked`` linear var uids."""
-    # A Zero vector consumes nothing — the unit of the resource calculus (C2).
+    # A Zero vector consumes nothing — the unit of the resource calculus.
     if isinstance(node, Zero):
         return Usage.empty()
 
@@ -157,7 +157,7 @@ def _term_children(node: object) -> list[object]:
 
 
 def check_llam_resources(node: LLam) -> None:
-    """Enforce the exactly-once linear discipline for a single ``LLam`` (C1+C2).
+    """Enforce the exactly-once linear discipline for a single ``LLam``.
 
     Each variable bound by ``node`` must be consumed **exactly once** along every path of
     the body. Raises :class:`LinearityError` on under- or over-use.

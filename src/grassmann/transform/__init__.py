@@ -1,8 +1,8 @@
-"""Term→Term transformation passes (a new pass category).
+"""Term-to-term transformation passes.
 
-Unlike :mod:`grassmann.infer` (which *types* a term) and :mod:`grassmann.lower`
-(which lowers a term to :mod:`polyarray`), these passes rewrite a core
-:class:`~grassmann.core.term.Term` into a new core ``Term``:
+Where :mod:`grassmann.infer` types a term and :mod:`grassmann.lower` lowers it to
+:mod:`polyarray`, these passes rewrite a core
+:class:`~grassmann.core.term.Term` into a new core term:
 
 - :func:`pullback` — auto-transport a value into a target space, inserting
   projections/embeddings (and recursing structurally through ⊗/⊕/Dual).

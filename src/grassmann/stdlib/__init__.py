@@ -1,20 +1,20 @@
-"""IW5 — the Grassmann stdlib (derived operations on top of the embedding).
+"""The standard library: derived operations built on the embedding.
 
-A thin library of *derived* coordinate-free LA operations built **entirely** on the
-``grassmann.embed`` (``G.*``) surface — explicitly **not** core IR. Exterior algebra is an
-expressiveness test for the core (`50 §0`), so ``wedge`` / ``alt`` live here as composed
-functions, never as primitive nodes.
+These are coordinate-free linear-algebra operations built entirely on the
+``G.*`` embedding surface, not as core IR nodes. Exterior algebra in particular
+is a test of the core's expressiveness: ``wedge`` and ``alt`` are composed
+functions here, never primitive nodes.
 
 Public surface
 --------------
-- :func:`alt` — the ``k``-linear antisymmetrizer ``Alt : V⊗ᵏ ⊸ V⊗ᵏ`` (`26 §2`, F2).
-- :func:`exterior_power` — ``Λᵏ(V) = Img(alt(V, k))`` (`26 §2`).
-- :func:`wedge` — the derived ``∧ : Λᵏ × Λˡ → Λ^{k+l}`` (`26 §2`, F5).
-- :func:`tensor_power` — ``V⊗ᵏ`` (helper).
+- :func:`alt` — the ``k``-linear antisymmetrizer ``Alt : V⊗ᵏ ⊸ V⊗ᵏ``.
+- :func:`exterior_power` — the ``k``-th exterior power ``Λᵏ(V) = Img(alt(V, k))``.
+- :func:`wedge` — the derived wedge product ``∧ : Λᵏ × Λˡ → Λ^{k+l}``.
+- :func:`tensor_power` — the ``k``-th tensor power ``V⊗ᵏ``.
 - linear-algebra conveniences: :func:`dot`, :func:`norm_sq`,
   :func:`orthogonal_projection`, :func:`least_squares`.
-- basic nonlinear scalar ops (the old ``BaseNonLinear``): :func:`sqrt`, :func:`absval`,
-  :func:`sign`, :func:`div`, :func:`reciprocal`.
+- scalar nonlinearities: :func:`sqrt`, :func:`absval`, :func:`sign`,
+  :func:`div`, :func:`reciprocal`.
 """
 
 from __future__ import annotations

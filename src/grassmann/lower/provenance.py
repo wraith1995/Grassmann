@@ -1,6 +1,6 @@
-"""Structured lowering provenance (`41 §6b`, `60 §1`) — the algebra-centric vocabulary.
+"""Structured lowering provenance — the algebra-centric vocabulary.
 
-`41 §6b` is a HARD requirement: every emitted polyarray ``Stmt`` must carry provenance
+Provenance is a HARD requirement: every emitted polyarray ``Stmt`` must carry provenance
 recording *what produced it* — the **core-IR node kind**, the **basis choice**, and **why**
 that choice was made — so the generated ``Program`` is fully traceable ("which coordinate
 choice produced this code?").
@@ -26,8 +26,8 @@ import polyarray as pa
 __all__ = ["LowerProv", "PROV_KINDS"]
 
 
-# The algebra-centric provenance vocabulary (`41 §6b`) — the core-IR node *families* a
-# Stmt can be attributed to.  NOT the FEM sampler vocabulary (`WS1 §4.1`).
+# The algebra-centric provenance vocabulary — the core-IR node *families* a
+# Stmt can be attributed to.  NOT the FEM sampler vocabulary.
 PROV_KINDS: frozenset[str] = frozenset(
     {
         "value",      # Lit / Zero / Identity / Var input / const
@@ -53,7 +53,7 @@ PROV_KINDS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class LowerProv:
-    """A structured lowering-provenance record (`41 §6b`).
+    """A structured lowering-provenance record.
 
     Captures the three mandated facts per emitted ``Stmt``:
 
@@ -94,7 +94,7 @@ class LowerProv:
         """Build the polyarray :class:`~polyarray.Provenance` to attach to a ``Stmt``.
 
         ``kind`` carries the algebra vocabulary; ``origin`` the core-IR node kind; ``label``
-        the basis choice + why (the auditable "which coordinate choice produced this?").
+        the basis choice and why (a traceable "which coordinate choice produced this?").
         """
         label = self.node
         if self.basis:

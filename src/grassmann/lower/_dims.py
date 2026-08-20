@@ -1,4 +1,4 @@
-"""Static-dimension resolution for spaces and bases (`41 §0`).
+"""Static-dimension resolution for spaces and bases.
 
 A small helper shared by :mod:`space_basis` and :mod:`cob`: turn a structural
 :class:`~grassmann.core.space.Space` (or :class:`~grassmann.core.basis.Basis`) into a
@@ -7,8 +7,8 @@ size is a runtime rank ``δ_f`` (a :class:`~grassmann.core.space.DimAtomRef`) or
 symbolic. The substrate emits polyarray :class:`~polyarray.DimAtom`-sized (dynamic) axes
 in those cases, so callers catch :class:`DynamicDim` and route to the bulk/dynamic lane.
 
-This is *structural* dimension arithmetic only (the IW3 dim machinery does the real
-inference); it suffices for the substrate's static numeric tests and for sizing the
+This is *structural* dimension arithmetic only (the full dim-inference machinery does the
+real inference); it suffices for the substrate's static numeric tests and for sizing the
 ``OutSpec``s of the FFS realizations.
 """
 
@@ -44,7 +44,7 @@ def dim_of(space: S.Space) -> int:
             return dim_of(s)
         case S.Img() | S.CoImg() | S.Ker() | S.CoKer():
             # FFS dims are runtime ranks UNLESS the defining map's asserted props
-            # (inj/surj/bij, rank/dim_img/dim_ker) pin a static rank (`20 §5`); when they
+            # (inj/surj/bij, rank/dim_img/dim_ker) pin a static rank; when they
             # don't, the substrate sizes these with a polyarray DimAtom (dynamic axis).
             return _ffs_dim(space)
         case S.SVar() | S.App():
@@ -136,7 +136,7 @@ def _dim_int(d: S.Dim) -> int:
         case S.DimOf(s):
             return dim_of(s)
         case S.DimNeg(term):
-            # ``-d`` (appears inside a DimSum for the FFS subtraction laws, `20 §5`).
+            # ``-d`` (appears inside a DimSum for the FFS subtraction laws).
             return -_dim_int(term)
         case S.DimVar() | S.DimAtomRef():
             raise DynamicDim(f"dim {d!r} is symbolic / runtime")

@@ -1,16 +1,17 @@
-"""Parameterizations & their geometry — Phase C of the matrixcalculus-style tool.
+"""Parameterizations and their geometry for the matrix-calculus surface notation.
 
 A **parameterization** φ: ℝᵏ → ℝⁿ (an immersion) traces a k-manifold in ℝⁿ. Its differential
-``J = dφ : param ⊸ ambient`` is an injective map, and we model the **tangent space as the
-image space** ``Img(J)`` (the FFS), with the orthogonal complement ``CoKer(J)`` the **normal**
-space, and their duals the **cotangent** / **conormal** spaces. Differentiating a value that
-lives on the tangent space — under the *immersion gauge* — yields the **covariant** (Levi-
-Civita) derivative ``∇v = Γ·v`` with ``Γ(h) = J⁺·(∂J·h)``, the chart Christoffel connection.
+``J = dφ : param ⊸ ambient`` is an injective map, so the **tangent space** is modeled as the
+image space ``Img(J)``, the orthogonal complement ``CoKer(J)`` as the **normal** space, and
+their duals as the **cotangent** and **conormal** spaces. Differentiating a value that lives
+on the tangent space — under the *immersion gauge* — yields the **covariant** (Levi-Civita)
+derivative ``∇v = Γ·v`` with ``Γ(h) = J⁺·(∂J·h)``, the chart Christoffel connection. The
+differentiation itself is :func:`grassmann.transform.diff.diff`; this module only supplies the
+geometry (spaces, gauge, and numeric feed) around it.
 
 The numeric immersion is supplied at run time: ``J`` is fed the Jacobian ``dφ|_p`` and ``DJ``
-the Hessian ``d²φ|_p`` at the point. This mirrors the engine's
-``test_diff_analytic.py::test_covariant_derivative_via_christoffel`` (the analytic ground
-truth: sphere / Monge patches), wrapped as a clean surface.
+the Hessian ``d²φ|_p`` at the point. The covariant derivative then matches the analytic ground
+truth (sphere and Monge patches), wrapped as a clean surface.
 """
 
 from __future__ import annotations

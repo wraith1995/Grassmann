@@ -1,6 +1,9 @@
-"""Bidirectional checking ``Γ ⊢ e ⇐ s``.
+"""Bidirectional checking ``Γ ⊢ e ⇐ s`` — the *check* direction of inference.
 
-Default rule: synthesize ``e ⇒ s'`` then unify ``s' ~ s``. Propagation rules:
+Where :func:`~grassmann.infer.synth.synth` reads a type off a term (synthesize, ``⇒``),
+this checks a term against an expected classifier (``⇐``). The default rule synthesizes
+``e ⇒ s'`` and then unifies ``s' ~ s`` (:func:`~grassmann.infer.unify.unify`). Propagation
+rules:
 
 - a ``Lam`` checked against ``Π(b:σ).τ`` pushes ``σ`` in and checks ``body ⇐ τ``;
 - an application checked against an expected ``s`` synthesizes and unifies the result
@@ -94,7 +97,7 @@ def check_against(term: object, expected: Space | Type, ctx: Ctx) -> None:
 
 
 def _check_lam_against_pi(term: Lam, expected: Pi, ctx: Ctx) -> None:
-    # v1: the binders' domains must structurally agree with the Π's; then check body.
+    # The binders' domains must structurally agree with the Π's; then check body.
     # We synthesize the Lam and unify against the full Π (handles the common nested case
     # for these examples). A deeper push-in is unnecessary while codomains are
     # value-independent.

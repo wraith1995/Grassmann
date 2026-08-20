@@ -1,14 +1,18 @@
-"""IW2 — the Grassmann Python embedding (eDSL).
+"""The Python embedding: the builder and operator surface one writes against.
 
-Public surface (`25 §F4`, `27 §2`). Use either::
+This is the eDSL. One names spaces and maps with the builder functions and
+combines them with operator sugar on the :class:`~grassmann.embed.ops.Expr`
+handles they return::
 
     import grassmann.embed as G
     V = G.space("V", 3)
 
-or the operator sugar on the returned :class:`~grassmann.embed.ops.Expr` handles
-(``&``=⊕, ``*``=⊗, ``@``=Compose, ``+``=Sum, ``~``=Dual, ``>>``=map space,
-``()``=apply, ``f[α]``=type application). Every operator desugars eagerly to the IW1
-core smart constructors (`grassmann.core`); no inference happens at this layer (IW3).
+The operators are ``&`` for the direct sum ⊕, ``*`` for the tensor product ⊗,
+``@`` for composition, ``+`` for a sum of terms, ``~`` for the dual, ``>>`` for a
+map space, ``()`` to apply a map, and ``f[α]`` for type application. Every
+operator desugars eagerly to the core smart constructors in
+:mod:`grassmann.core`; no type checking happens at this layer — that is the job
+of :mod:`grassmann.infer`, run later when a term is compiled.
 """
 
 from __future__ import annotations

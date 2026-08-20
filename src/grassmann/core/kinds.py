@@ -1,18 +1,22 @@
-"""Kind tower + arrow kinds.
+"""The Kind tower: the sorts that classify nodes, and the arrow kinds.
 
-```
-Sort  σ ::= space | nat | *  |  s        -- binder domains: kind of spaces / nats /
-                                         --   types, OR a space `s` (binding a value)
-Kind  κ ::= σ                            -- base kind
-          | σ -> κ                       -- ARROW KIND (arity) — Space/Type Functions
-```
+A :class:`Kind` classifies a node the way a type classifies a value. A base kind
+is a sort — the kind of spaces, of nats, of types, or a space ``s`` itself when
+the binder ranges over the values of ``s``. An arrow kind ``σ -> κ`` records the
+arity of a function::
 
-Term functions are classified by Pi-types (kind ``*``, see :mod:`grassmann.core.types`);
-Space/Type/Nat *functions* (which produce spaces/types/nats) are classified by **arrow
-kinds**. Simple (non-dependent) arrows suffice: a function's *result* kind is fixed
-(``space``/``nat``/``*``) even though the produced space/type value depends on the
-argument, so no dependent kinds are needed. Arrow *domains* may be a space ``s``
-(value-indexed).
+    Sort  σ ::= space | nat | * | s        the kind of spaces, nats, types,
+                                           or a space s (binding a value)
+    Kind  κ ::= σ                          a base kind
+              | σ -> κ                      an arrow kind, for a space/type/nat function
+
+Term functions are classified by Π-types, whose kind is ``*`` (see
+:mod:`grassmann.core.types`). The functions that produce spaces, types, or nats
+are classified by arrow kinds instead. Non-dependent arrows suffice: a function's
+result kind is fixed at ``space``, ``nat``, or ``*`` even though the space or
+type value it produces depends on the argument, so no dependent kinds are needed.
+An arrow's domain may itself be a space ``s``, which is what makes a function
+indexed by a value.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Sort:
-    """Base sort / kind. One of the four singletons below, or a value-domain sort.
+    """A base sort, which is also a base kind.
 
     The three classifier sorts are nullary singletons (use :data:`SPACE`,
     :data:`NAT`, :data:`STAR`). A binder may also range over the values of a
@@ -56,7 +60,7 @@ class SpaceSort:
     ``space`` is a :class:`~grassmann.core.space.Space`; the annotation is kept as ``object`` to
     avoid an import cycle (space.py does not import kinds), but it is **enforced** at construction
     via a lazy ``is_space`` check — so a raw array / non-Space cannot slip into a ``Lam``/``BLam``
-    binder domain (which would make the binder unhashable, the type-enforcement audit's bug class).
+    binder domain, where it would make the binder unhashable.
     """
 
     space: object
@@ -137,17 +141,17 @@ def space_value_sort(space: object) -> SpaceSort:
 
 # Convenience named arrow kinds (documentation aliases).
 def space_to_space() -> Arrow:
-    """``space -> space`` (e.g. ``λα. α⊗α``)."""
+    """The arrow kind of a function from a space to a space, such as ``α ↦ α ⊗ α``."""
     return Arrow(SPACE, SPACE)
 
 
 def nat_to_space() -> Arrow:
-    """``nat -> space`` (e.g. ``λn. ⊕ⁿ ℝ``)."""
+    """The arrow kind of a function from a nat to a space, such as ``n ↦ ⊕ⁿ ℝ``."""
     return Arrow(NAT, SPACE)
 
 
 def space_to_star() -> Arrow:
-    """``space -> *`` (e.g. ``λα. (α→α)``)."""
+    """The arrow kind of a function from a space to a type, such as ``α ↦ (α → α)``."""
     return Arrow(SPACE, STAR)
 
 

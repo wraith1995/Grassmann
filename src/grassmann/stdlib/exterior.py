@@ -1,9 +1,12 @@
-"""IW5 — the exterior-algebra stdlib (derived ops, NOT core IR).
+"""The exterior-algebra stdlib: derived exterior/symmetric constructions, not core IR.
 
-A thin library on top of the :mod:`grassmann.embed` surface implementing the
-the standard exterior/symmetric algebra constructions. Nothing here is a core node: ``alt`` /
-``exterior_power`` / ``wedge`` are *derived* functions composing the existing core ops
-(``LLam`` + ``Lift`` antisymmetrization, ``Img``, ``Embed``/``Project``, ``Scale``).
+A thin library on top of the :mod:`grassmann.embed` surface implementing the standard
+exterior/symmetric algebra constructions. Nothing here is a core node: :func:`alt` /
+:func:`exterior_power` / :func:`wedge` are *derived* functions composing the existing core
+ops (:class:`~grassmann.core.term.LLam` + :class:`~grassmann.core.term.Lift`
+antisymmetrization, :class:`~grassmann.core.space.Img`,
+:class:`~grassmann.core.term.Embed` / :class:`~grassmann.core.term.Project`,
+:class:`~grassmann.core.term.Scale`).
 
 Spec:
 
@@ -69,7 +72,7 @@ def tensor_power(V: Expr, k: int) -> Expr:
 
 
 # ===========================================================================
-# The antisymmetrizer Alt (26 §2, F2).
+# The antisymmetrizer Alt.
 # ===========================================================================
 
 
@@ -90,9 +93,22 @@ def _alt_body(vs: tuple[Expr, ...], indices: tuple[int, ...]) -> Expr:
 def alt(V: Expr, k: int) -> Expr:
     """Build the ``k``-linear antisymmetrizer ``Alt : V⊗ᵏ ⊸ V⊗ᵏ``.
 
-    Built concretely as the multi-var linear lambda permuting its ``k`` variables, then
-    ``Lift`` (uncurry) fusing the ``k`` argument slots into one ``V⊗ᵏ`` input, then
-    ``Scale(1/k!)``. Synthesizes to the linear-map space ``V⊗ᵏ >> V⊗ᵏ``.
+    Built concretely as the multi-var linear lambda permuting its ``k`` variables, then a
+    :class:`~grassmann.core.term.Lift` (uncurry) fusing the ``k`` argument slots into one
+    ``V⊗ᵏ`` input, then :class:`~grassmann.core.term.Scale` by ``1/k!``. Synthesizes to the
+    linear-map space ``V⊗ᵏ >> V⊗ᵏ``.
+
+    Parameters
+    ----------
+    V
+        The ambient vector space (an embed :class:`~grassmann.embed.ops.Expr`).
+    k
+        The tensor rank; must be ``>= 1``.
+
+    Returns
+    -------
+    Expr
+        The antisymmetrizer as a value of space ``V⊗ᵏ >> V⊗ᵏ``.
     """
     if k < 1:
         raise ValueError(f"alt: k must be >= 1, got {k}")
@@ -107,11 +123,11 @@ def alt(V: Expr, k: int) -> Expr:
 
 
 # ===========================================================================
-# The exterior power Λᵏ(V) = Img(Alt) (26 §2).
+# The exterior power Λᵏ(V) = Img(Alt).
 # ===========================================================================
 
 
-# CANONICAL exterior-power spaces (`§canon-extpow`). Each call to :func:`exterior_power` would
+# CANONICAL exterior-power spaces. Each call to :func:`exterior_power` would
 # otherwise build a FRESH ``alt`` ``LLam`` (fresh binder uids) / rank-``Var``, so two independently
 # constructed ``Λᵏ(V)`` — e.g. the spaces of two distinct ``wedge`` results, or two k-form fields —
 # are only ALPHA-equivalent, not identical. FFS unification compares the defining map by structural
@@ -122,16 +138,17 @@ _EXTPOW_CACHE: dict[object, Expr] = {}
 
 
 def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
-    """Build the ``k``-th exterior power ``Λᵏ(V) = Img(alt(V, k))``.
+    """Build the ``k``-th exterior power ``Λᵏ(V) = Img(alt(V, k))`` as a first-class space.
 
+    The image (see :class:`~grassmann.core.space.Img`) of the antisymmetrizer :func:`alt`.
     ``|Λᵏ(V)| = rank(Alt)``: by default (``rank is None``) the runtime SVD atom
     ``δ_Alt``; if a (possibly symbolic) ``rank`` is supplied, the projector is
     instead an explicitly rank-asserted ``Var`` of space ``V⊗ᵏ >> V⊗ᵏ`` so the dimension
     resolves *statically* to the asserted ``C(n,k)`` (since ``infer.rank_of`` reads
     ``props`` only off a ``Var``).
 
-    The result is CANONICAL: the same ``(V, k, rank)`` returns the identical space node (memoized,
-    `§canon-extpow`), so ``inner``/``dot`` of two independently built ``Λᵏ(V)`` values unifies.
+    The result is CANONICAL: the same ``(V, k, rank)`` returns the identical space node
+    (memoized), so ``inner``/``dot`` of two independently built ``Λᵏ(V)`` values unifies.
     """
     Vspace = V.node if isinstance(V, Expr) else V
     try:
@@ -161,7 +178,7 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
         # receives a rank-6 array instead of a matrix (measured).
         projector = G.var(f"Alt_{k}", G.tensor(G.dual(Vk), Vk), props=G.rank(rank))
         result = G.img(projector)
-    # F1: record the base space V as an OPTIONAL side note so derived ops (``wedge``) can
+    # Record the base space V as an OPTIONAL side note so derived ops (``wedge``) can
     # read it directly instead of structurally re-deriving it from the Img/Alt term. The
     # note never affects the term's identity (see ``Expr.with_note``).
     result = result.with_note(base_space=V, exterior_k=k)
@@ -171,7 +188,7 @@ def exterior_power(V: Expr, k: int, rank: object | None = None) -> Expr:
 
 
 # ===========================================================================
-# The wedge product (derived; 26 §2, F5).
+# The wedge product (derived).
 # ===========================================================================
 
 
@@ -206,7 +223,7 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
     target = exterior_power(V, k + l)  # Λ^{k+l}(V)
     projected = G.project(antisym, target)  # onto Λ^{k+l}
     result = G.scale(math.comb(k + l, k), projected)
-    # F1: carry the base space forward as an OPTIONAL note so a *nested* wedge (whose next
+    # Carry the base space forward as an OPTIONAL note so a *nested* wedge (whose next
     # operand is this very result, e.g. the ``wedge_all`` fold) recovers V from the note
     # instead of re-deriving it structurally. Identity-transparent (see ``Expr.with_note``).
     return result.with_note(base_space=V, exterior_k=k + l)
@@ -265,10 +282,11 @@ def hodge_star(omega: Expr, k: int) -> Expr:
 
         ``⋆ = M⁻¹ ∘ ♭``,   ``M : Λⁿ⁻ᵏ → (Λᵏ)*``,  ``M(γ) = (α ↦ ⟨α ∧ γ, vol⟩)``,
 
-    where ``♭ = flat`` is the metric lower on ``Λᵏ`` and ``M`` is the wedge-into-volume pairing.
+    where ``♭ = flat`` is the metric lower (:func:`grassmann.embed.flat`) on ``Λᵏ`` and ``M``
+    is the wedge-into-volume pairing.
     The metric on ``Λᵏ`` is the one INDUCED by the embedding ``Λᵏ ⊑ V⊗ᵏ`` (so no metric need be
-    supplied — change ``V``'s metric and ``⋆`` follows), and ``pinv`` realises ``M⁻¹`` (``M`` is a
-    square isomorphism).  Valid for ``1 ≤ k ≤ n−1``.
+    supplied — change ``V``'s metric and ``⋆`` follows), and :func:`grassmann.embed.pinv`
+    realises ``M⁻¹`` (``M`` is a square isomorphism).  Valid for ``1 ≤ k ≤ n−1``.
 
     NOTE on normalization: the induced ``Λᵏ`` metric is ``k!``-scaled vs. the textbook orthonormal
     one (``⟨a∧b, a∧b⟩ = 2|a×b|²``).  ``⋆`` satisfies the defining property exactly for THAT metric;
@@ -321,8 +339,8 @@ def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
     ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` with ``Ωᵏ = Λᵏ(V*)``, by the coordinate formula
     ``dω = Σⱼ eʲ ∧ ∂ⱼω``:
 
-    - ``∂ⱼω = ∂ω/∂xⱼ`` — the partial derivative, ``diff(ω, x)`` applied to the ``j``-th basis
-      vector ``eⱼ ∈ V``;
+    - ``∂ⱼω = ∂ω/∂xⱼ`` — the partial derivative, :func:`grassmann.transform.diff.diff`
+      of ``ω`` in ``x`` applied to the ``j``-th basis vector ``eⱼ ∈ V``;
     - ``eʲ ∈ Λ¹(V*)`` — the ``j``-th standard dual basis 1-form (a constant);
     - ``k = 0`` (a scalar field) has no wedge: ``df = Σⱼ (∂ⱼf) · eʲ`` (the differential 1-form).
 

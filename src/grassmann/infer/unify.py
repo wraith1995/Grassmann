@@ -1,14 +1,14 @@
-"""First-order unification on SPACE terms (`25 §2`).
+"""First-order unification on SPACE terms.
 
 This is **not** a higher-order unifier. It unifies *space* metavariables (``?α``,
-modeled by :class:`SpaceMeta`) and decomposes structurally over the Space ADT. Per the
-locked decision (`25 §F5`):
+modeled by :class:`SpaceMeta`) and decomposes structurally over the Space ADT. Two
+locked decisions govern it:
 
 - **Dimensions are compared (``≡``), never unified** — ``Base(n,d) ~ Base(n,d')`` checks
   ``d ≡ d'`` via :mod:`grassmann.infer.dims`.
 - **Nats/ints stay out of unification** — int-indexed ops are primitives; an
-  ``OPlusRep`` count must match by dim-equality, a ground ``?n`` only by a ground nat
-  (`25 §2`, last line). We do not introduce nat metavars.
+  ``OPlusRep`` count must match by dim-equality, a ground ``?n`` only by a ground nat.
+  We do not introduce nat metavars.
 
 A :class:`SpaceMeta` is a fresh placeholder space (it is itself a ``Space`` subtype so it
 can sit inside core nodes during inference); the :class:`MetaStore` records solutions and
@@ -72,12 +72,12 @@ class AssociationMismatch(UnifyError):
 
 
 def fresh_meta(hint: str = "α") -> SpaceMeta:
-    """Allocate a fresh space metavariable ``?α`` (`SpaceMeta` is a core Space node)."""
+    """Allocate a fresh space metavariable ``?α`` as a :class:`SpaceMeta` (itself a core Space node)."""
     return SpaceMeta(hint=hint)
 
 
 class MetaStore:
-    """The metavar store ``Θ`` (`25 §0`): solutions for :class:`SpaceMeta`."""
+    """The metavar store ``Θ``: solutions for :class:`SpaceMeta`."""
 
     def __init__(self) -> None:
         self._solved: dict[int, Space] = {}
@@ -147,7 +147,7 @@ class MetaStore:
         Descends into FFS defining maps / endpoints and ``App`` like
         :func:`grassmann.infer.subst.subst_space` — a metavar hiding inside
         ``Img(f, source=…)`` counts. ``WithInner.metric``
-        is skipped for parity with ``subst_space``; ``Dim``s carry no metavars.
+        is skipped for parity with ``subst_space``; a ``Dim`` carries no metavars.
         """
         s = self.walk(s)
         match s:
@@ -237,7 +237,7 @@ def _space_pred_in_term(term: object, pred: Callable[[Space], bool]) -> bool:
 
 
 def unify(a: Space, b: Space, store: MetaStore) -> None:
-    """Unify ``a ~ b`` (`25 §2`), mutating ``store``. Raises :class:`UnifyError`.
+    """Unify ``a ~ b``, mutating ``store``. Raises :class:`UnifyError`.
 
     Dimensions are compared by ``≡`` (never unified); nats are not unified.
     """
@@ -375,7 +375,7 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             unify(a, b.space, store)
             return
         case ((Ker() | Img() | CoKer() | CoImg()), _) if type(a) is type(b):
-            # FFS unify by α-equivalence of the keying map (`25 §2`): two independently-built
+            # FFS unify by α-equivalence of the keying map: two independently-built
             # FFS spaces — e.g. `Img(alt(V,k))` from two `exterior_power` sites — differ only in
             # binder uids, yet denote the SAME subspace. Fast path is raw equality; on a raw
             # mismatch fall back to α-canonical comparison (binders renamed to a canonical form).
@@ -386,7 +386,7 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             if a.g != b.g or a.positions != b.positions or a.args != b.args:
                 raise UnifyError(f"SpaceFunction application mismatch: {a!r} ~ {b!r}")
             return
-        # Involution ``s** ≡ s`` (`20 §5`).  Tried only AFTER the structural cases (so
+        # Involution ``s** ≡ s``.  Tried only AFTER the structural cases (so
         # ``Dual(Dual(V)) ~ Dual(?α)`` still solves ``?α := Dual(V)`` via the ``(Dual,
         # Dual)`` rule above, never collapsing prematurely).  When ONE side is a bare
         # double dual and the other is NOT a ``Dual`` (e.g. a contraction against an

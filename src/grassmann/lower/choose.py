@@ -1,10 +1,10 @@
-"""``choose`` — symbolic-aware basis-choice heuristic (`41 §1b`, the ★ min-sym lever).
+"""``choose`` — symbolic-aware basis-choice heuristic.
 
 ``choose(space, candidates, *, term=None, in_basis=None)`` scores the candidate bases by
-*expected symbolic content of the result* and returns the winner. This is the v1
-**heuristic** (`41 §1b`): a global basis search is deferred.
+*expected symbolic content of the result* and returns the winner. This is a local
+**heuristic**: a global basis search is deferred.
 
-The levers, as scored here (`41 §1b`):
+The levers, as scored here:
 
 * **Absorb operator structure into the basis.** A value derived from a symbolic operator
   ``f`` scores best in ``f``'s SVD / structure-aligned basis (``ImageBasis`` /
@@ -36,7 +36,7 @@ def choose(
     term: object | None = None,
     in_basis: B.Basis | None = None,
 ) -> B.Basis:
-    """Pick the symbolic-minimizing basis from ``candidates`` for ``space`` (`41 §1b`).
+    """Pick the symbolic-minimizing basis from ``candidates`` for ``space``.
 
     ``candidates`` is typically the second element of
     :func:`grassmann.lower.space_basis.space_basis`. ``term`` is the (optional) core-IR
@@ -63,7 +63,7 @@ def score_basis(
     term: object | None = None,
     in_basis: B.Basis | None = None,
 ) -> int:
-    """Heuristic score for ``candidate`` (higher = fewer expected symbolics) (`41 §1b`)."""
+    """Heuristic score for ``candidate`` (higher = fewer expected symbolics)."""
     score = 0
 
     # ── Parametric in/out ⇒ same basis: a candidate matching the input side wins big.
@@ -102,7 +102,7 @@ def score_basis(
     # ── Fold-preservation: the RATIONAL literal image frame of an un-pinned ``Img`` leaf, when
     #   no metric/orthonormality demand forces the orthonormal frame.  Symmetric with the +10
     #   above (exactly one of the two operator bases earns it), so the rational ``ImageBasis``
-    #   now WINS (50 vs 40) where the orthonormal ``ProjectedBasis`` used to (`73 Topic 2`).
+    #   now WINS (50 vs 40) where the orthonormal ``ProjectedBasis`` used to.
     elif is_op_basis and isinstance(candidate, B.ImageBasis) and fold_alt and not demands:
         score += 10
 

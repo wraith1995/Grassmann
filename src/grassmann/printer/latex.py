@@ -89,11 +89,23 @@ _LATEX_SPECIAL = {
 
 
 def latex(node: object) -> str:
-    """Render a core ``Term``/``Space`` (or an embed ``Expr`` wrapping one) to LaTeX.
+    """Render a core term or space (or an embed ``Expr`` wrapping one) to a LaTeX string.
 
-    Accepts a raw core node or an :class:`~grassmann.embed.ops.Expr` handle (its ``.node``
-    is unwrapped); the output of :func:`grassmann.transform.diff.diff` (an ``LLam``) is a
+    Accepts a raw core :class:`~grassmann.core.term.Term` /
+    :class:`~grassmann.core.space.Space` node or an :class:`~grassmann.embed.ops.Expr`
+    handle (its ``.node`` is unwrapped); the output of
+    :func:`grassmann.transform.diff.diff` (an :class:`~grassmann.core.term.LLam`) is a
     plain term and renders like any other.
+
+    Parameters
+    ----------
+    node
+        A core term/space/dim/kind node, or an embed ``Expr`` handle wrapping one.
+
+    Returns
+    -------
+    str
+        The rendered LaTeX, ready to drop into math mode.
     """
     inner = getattr(node, "node", node)  # unwrap an embed Expr handle if given
     s, _ = _render(inner)

@@ -1,9 +1,8 @@
-"""IW5 — basic nonlinear scalar ops (derived ops, NOT core IR).
+"""Basic nonlinear scalar ops: derived elementwise ops, not core IR.
 
-The elementwise nonlinear scalar operations the old FEMOracle ``base/algebra.py``
-``BaseNonLinear`` provided (an "NEval-style" foreign op): ``sqrt`` / ``absval`` / ``sign``
-/ ``div`` / ``reciprocal``, extended with the elementary transcendental, trigonometric and
-hyperbolic library a matrix-calculus front end needs (``exp`` / ``log`` / ``square`` /
+The elementwise nonlinear scalar operations a matrix-calculus front end needs:
+``sqrt`` / ``absval`` / ``sign`` / ``div`` / ``reciprocal``, extended with an elementary
+transcendental, trigonometric and hyperbolic library (``exp`` / ``log`` / ``square`` /
 ``sin`` / ``cos`` / ``tan`` / ``sinh`` / ``cosh`` / ``tanh``). Each builds a core
 :class:`~grassmann.core.term.External`
 node over ``Scalar`` operands, whose ``data`` is an
@@ -241,7 +240,8 @@ def hadamard(x: Expr, y: Expr) -> Expr:
 
     ``x`` and ``y`` live in the same Euclidean space; the result is in that space. This is
     the pointwise *linear* op (linear in each operand) the matrix-calculus front end needs —
-    e.g. the elementwise chain rule ``d f(u) = f'(u) ⊙ du`` differentiates through it.
+    e.g. the elementwise chain rule ``d f(u) = f'(u) ⊙ du`` that
+    :mod:`grassmann.transform.diff` differentiates through.
     """
     return _external("hadamard", np.multiply, x, y)
 

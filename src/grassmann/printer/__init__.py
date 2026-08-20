@@ -1,12 +1,13 @@
-"""Pretty-printers over the core IR (Goal 4).
+"""Pretty-printers over the core IR.
 
-Currently a single back end — a **term → LaTeX** printer (:mod:`grassmann.printer.latex`)
-rendering any :class:`~grassmann.core.term.Term` / :class:`~grassmann.core.space.Space`
-(and the output of :func:`grassmann.transform.diff.diff`) as readable mathematical LaTeX.
+The back end is a term-to-LaTeX printer (:mod:`grassmann.printer.latex`) that
+renders any :class:`~grassmann.core.term.Term` or
+:class:`~grassmann.core.space.Space`, and the output of
+:func:`grassmann.transform.diff.diff`, as readable mathematical LaTeX.
 
-The operator/precedence vocabulary lives in :mod:`grassmann.printer.precedence`, kept
-deliberately free of LaTeX-specific strings so a future plaintext unparser (goal 5) can
-share the same precedence model.
+The operator and precedence vocabulary lives in
+:mod:`grassmann.printer.precedence`, kept free of LaTeX-specific strings so a
+plaintext renderer can share the same precedence model.
 """
 
 from __future__ import annotations

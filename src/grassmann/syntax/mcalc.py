@@ -13,11 +13,12 @@ Pipeline (mirrors :mod:`grassmann.syntax.parse`):
 The AST nodes are the ones shared with the Unicode parser (:mod:`grassmann.syntax.parse`):
 ``Name / Num / Bin / Post / Pre / App / ListN``. Only the *lexer* (ASCII glyphs) and the
 *precedence table* (matrixcalculus order) differ here; the type-directed builder that turns
-the AST into core terms (resolving the overloaded ``*`` / ``'`` against scalar/vector/matrix
-declarations) lives alongside.
+the AST into core :class:`~grassmann.core.term.Term` nodes (resolving the overloaded ``*`` /
+``'`` against scalar/vector/matrix declarations) lives alongside.
 
 The public entry points are :func:`build_problem` (primal + optional derivative +
-variable/dimension metadata), :func:`mcbuild`, and :func:`mcdiff`.
+variable/dimension metadata), :func:`mcbuild`, and :func:`mcdiff`; derivatives are taken by
+:mod:`grassmann.transform.diff`.
 """
 
 from __future__ import annotations
@@ -151,30 +152,37 @@ _PREFIX_BP = 80           # unary minus
 
 
 class _Parser:
+    """Pratt parser over matrixcalculus tokens, producing the shared generic AST."""
+
     def __init__(self, toks: list[Tok], src: str) -> None:
         self.toks = toks
         self.src = src
         self.k = 0
 
     def peek(self) -> Tok:
+        """Return the current token without consuming it."""
         return self.toks[self.k]
 
     def next(self) -> Tok:
+        """Consume and return the current token, advancing the cursor."""
         t = self.toks[self.k]
         self.k += 1
         return t
 
     def at_op(self, op: str) -> bool:
+        """Report whether the current token is the operator ``op``."""
         t = self.peek()
         return t.kind == "OP" and t.text == op
 
     def expect_op(self, op: str) -> Tok:
+        """Consume the current token, requiring it to be the operator ``op``."""
         t = self.peek()
         if t.kind != "OP" or t.text != op:
             raise McalcParseError(f"expected {op!r}", t.pos, self.src)
         return self.next()
 
     def expr(self, min_bp: int = 0) -> object:
+        """Parse an expression by precedence climbing, binding no looser than ``min_bp``."""
         left = self.atom()
         while True:
             t = self.peek()
@@ -198,6 +206,7 @@ class _Parser:
         return left
 
     def atom(self) -> object:
+        """Parse an atom: a number, a name, a unary +/- form, a parenthesized expression, or a list."""
         t = self.peek()
         if t.kind == "NUM":
             self.next()
@@ -372,9 +381,11 @@ class _SpaceParser:
         self.toks, self.src, self.env, self.params, self.i = toks, src, env, params, 0
 
     def peek(self) -> str | None:
+        """Return the current space token, or ``None`` at the end."""
         return self.toks[self.i] if self.i < len(self.toks) else None
 
     def eat(self, want: str | None = None) -> str | None:
+        """Consume the current token, optionally requiring it to equal ``want``."""
         t = self.peek()
         if want is not None and t != want:
             raise McalcBuildError(f"space {self.src!r}: expected {want!r}, got {t!r}")
@@ -382,6 +393,7 @@ class _SpaceParser:
         return t
 
     def arrow(self) -> Expr:
+        """Parse the loosest space form: a right-associative map space ``A -> B``."""
         a = self.osum()
         if self.peek() == "->":
             self.eat("->")
@@ -389,24 +401,28 @@ class _SpaceParser:
         return a
 
     def osum(self) -> Expr:
+        """Parse a direct-sum chain ``A (+) B (+) …``."""
         a = self.tensor()
         while self.peek() == "(+)":
             self.eat(); a = _G.osum(a, self.tensor())
         return a
 
     def tensor(self) -> Expr:
+        """Parse a tensor-product chain ``A (x) B``."""
         a = self.dual()
         while self.peek() == "(x)":
             self.eat(); a = _G.tensor(a, self.dual())
         return a
 
     def dual(self) -> Expr:
+        """Parse a postfix-dual chain ``S*``."""
         a = self.atom()
         while self.peek() == "*":
             self.eat(); a = _G.dual(a)
         return a
 
     def atom(self) -> Expr:
+        """Parse a space atom — ``R^n``, a named space, a parenthesized space, or a geometry/exterior form."""
         t = self.eat()
         if t == "(":
             inner = self.arrow(); self.eat(")"); return inner
@@ -563,24 +579,29 @@ class _UF:
         self.fixed: dict[int, Expr] = {}   # root -> a fixed geometry space (Img(J) etc.)
 
     def fresh(self) -> int:
+        """Allocate a fresh space slot and return its index."""
         self.parent.append(len(self.parent))
         return len(self.parent) - 1
 
     def set_name(self, slot: int, name: str) -> None:
+        """Attach a user dimension name to ``slot``'s class."""
         self.names[self.find(slot)] = name
 
     def set_fixed(self, slot: int, space: Expr, label: str) -> None:
+        """Pin ``slot``'s class to a fixed (geometry or declared) space, recorded under ``label``."""
         r = self.find(slot)
         self.fixed[r] = space
         self.names[r] = label
 
     def find(self, a: int) -> int:
+        """Return the representative slot of ``a``'s class, with path compression."""
         while self.parent[a] != a:
             self.parent[a] = self.parent[self.parent[a]]
             a = self.parent[a]
         return a
 
     def union(self, a: int, b: int) -> int:
+        """Merge the classes of slots ``a`` and ``b``, reconciling their names and fixed spaces."""
         ra, rb = self.find(a), self.find(b)
         if ra == rb:
             return ra
@@ -634,6 +655,13 @@ class _TN:
 
 
 class _Builder:
+    """Type-directed builder resolving an overloaded matrixcalculus AST into core terms.
+
+    Unifies each variable's (initially fresh) space as the expression constrains it, and
+    emits core :class:`~grassmann.core.term.Term` nodes once the slots have materialized to
+    concrete spaces.
+    """
+
     def __init__(self, decls: dict[str, str], src: str, params: dict | None = None,
                  spaces: dict | None = None, functions: dict | None = None,
                  bases: dict | None = None) -> None:
@@ -760,6 +788,7 @@ class _Builder:
         return self.space_cache[rep]
 
     def err(self, msg: str) -> McalcBuildError:
+        """Build a :class:`McalcBuildError` with message ``msg``."""
         return McalcBuildError(msg)
 
     def _inner(self, slot: int, x_expr: Expr, y_expr: Expr) -> Expr:
@@ -872,6 +901,7 @@ class _Builder:
     # -- the recursive inference / build -------------------------------------
 
     def infer(self, node: object) -> _TN:
+        """Infer the typed node (:class:`_TN`) for an AST node, resolving its kind and space slots."""
         if isinstance(node, Num):
             val = float(node.text)
             return _TN("scalar", (lambda val=val: _wrap_lit(val)))
@@ -936,7 +966,7 @@ class _Builder:
         raise self.err(f"operator {op!r} not yet supported")
 
     def _solve(self, a: _TN, b: _TN) -> _TN:
-        r"""Solve ``A x = b`` — the ``A \ b`` form, i.e. ``A⁻¹ b``.
+        r"""Solve ``A x = b`` for ``x`` — the backslash form ``A \ b`` (that is, ``A⁻¹ b``).
 
         ``A`` must be a (square, invertible) map.
         """
@@ -1288,9 +1318,9 @@ def _wrap_lit(val: float) -> Expr:
 class McalcResult:
     """The compiled result of a matrixcalculus-style problem.
 
-    The integration surface the oracle harness and the website drive. Carries the primal term, the (shared)
-    variable ``Expr``s and their program-input keys, the symbolic dimension names, and the optional
-    derivative; plus helpers to instantiate the symbolic dims to concrete sizes and run.
+    Carries the primal :class:`~grassmann.core.term.Term`, the shared variable ``Expr``
+    handles with their program-input keys, the symbolic dimension names, and the optional
+    derivative, plus helpers to instantiate the symbolic dims to concrete sizes and run.
     """
 
     builder: _Builder
@@ -1334,7 +1364,7 @@ class McalcResult:
     def bases(self) -> dict[str, object]:
         """The declared bases resolved to core ``Basis`` nodes (raises per-basis on bad refs).
 
-        Used to validate the Bases section and to realize values (`realize_run`).
+        Used to validate the Bases section and to realize values (``realize_run``).
         """
         return {nm: self.builder.resolve_basis(nm) for nm in self.builder.bases_src}
 
@@ -1367,8 +1397,7 @@ class McalcResult:
         Instantiate symbolic dims, feed variable values (matrixcalculus numpy
         convention), **finite-difference each opaque ∂f from its kernel**, realize chosen
         bases, and return ``{"value", "gradient"}`` — the gradient being present for a
-        scalar primal differentiated w.r.t. a vector/matrix ``wrt``. This is the wiring
-        behind step ④.
+        scalar primal differentiated w.r.t. a vector/matrix ``wrt``.
         """
         import numpy as np
 
@@ -1430,10 +1459,10 @@ class McalcResult:
 
     @property
     def required_derivatives(self) -> list[dict]:
-        """The opaque-function derivatives the engine requires to evaluate the derivative (step ④ in the UI).
+        """The opaque-function derivatives the engine requires to evaluate the derivative.
 
-        One per opaque ``f`` used, with its source name and order. The user supplies these numerically (a
-        provided Jacobian or finite-difference) + a frame.
+        One per opaque ``f`` used, with its source name and order. The user supplies these
+        numerically (a provided Jacobian or finite difference) plus a frame.
         """
         if self.derivative is None:
             return []
@@ -1687,7 +1716,8 @@ def mcdiff(expr: str, wrt: str, decls: dict[str, str] | None = None) -> Expr | N
     """Parse and differentiate — return ``G.diff(expr, wrt)``.
 
     That is the coordinate-free derivative map with respect to the declared variable
-    ``wrt``.
+    ``wrt``, computed by :mod:`grassmann.transform.diff`. See :func:`build_problem` for the
+    full result surface (primal, derivative, and run helpers).
     """
     return _build(expr, decls, wrt).derivative
 

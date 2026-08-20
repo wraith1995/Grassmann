@@ -1,21 +1,24 @@
-"""Grassmann lowering substrate (IW4) — basis selection + change of basis (`41 §1`/`§2`).
+"""The lowering substrate: basis selection and change of basis.
 
-This package is the **substrate** of the Grassmann→polyarray lowering (`60 §1–§2`): the
-basis machinery the per-node ``representDown`` rules build on. It does **not** contain the
-per-node rules (``represent.py``) — those need IW3 and come later (`60`, batch 3).
+This package is where coordinates are chosen. It holds the basis machinery the
+per-node representation rules build on as a term is lowered to a
+:mod:`polyarray` program: how a space picks its default basis and its
+candidates, how one basis is changed into another, and which candidate to prefer.
+The per-node rules themselves live in :mod:`grassmann.lower.represent`.
 
 Public API:
 
-* :func:`space_basis` (`41 §1`) — ``space_basis(space) -> (default_basis, candidates)``;
-  the default is the inner-product-orthonormal standard basis (metric = identity in
-  coords), candidates feed the §1b choice.
-* :func:`cob` (`41 §2`) — ``cob(program, from_basis, to_basis) -> SymArray``; the
-  change-of-basis matrix, emitting numeric ``Stmt``s into a polyarray ``Program``.
-* :func:`choose` (`41 §1b`) — the symbolic-aware basis-choice heuristic (the ★ min-sym
-  lever): score candidates and pick the one minimizing the result's symbolic surface.
+* :func:`space_basis` — ``space_basis(space) -> (default_basis, candidates)``. The
+  default is the standard basis orthonormal in the space's inner product (the
+  metric is the identity in coordinates); the candidates feed :func:`choose`.
+* :func:`cob` — ``cob(program, from_basis, to_basis) -> SymArray``, the
+  change-of-basis matrix, emitting numeric statements into a polyarray program.
+* :func:`choose` — the symbolic-aware basis-choice heuristic: score the
+  candidates and pick the one that minimizes the symbolic surface of the result.
 
-Also re-exported: :func:`realize_basis` / :func:`realize_ffs_basis` (the FFS SVD/QR/GSVD
-seam) and :func:`default_basis` / :func:`candidate_bases` / :func:`score_basis`.
+Also re-exported: :func:`realize_basis` and :func:`realize_ffs_basis` (the
+subspace SVD/QR/GSVD seam), and :func:`default_basis`, :func:`candidate_bases`,
+and :func:`score_basis`.
 """
 
 from __future__ import annotations

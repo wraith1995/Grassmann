@@ -1,19 +1,23 @@
-"""Types, and Space/Type Functions (`20 §4`).
+"""The Type level: spaces used as types, and Π (function) types.
 
-```
-Type  τ ::= ⟦ Space ⟧                 -- a space as a type (vectors & linear maps); IMPLICIT embed
-          | Π(b:σ). τ                 -- function type (non-linear / dependent); kind *
-          | App(g, positions, args…)  -- apply a TypeFunction → a Type
-```
+A :class:`Type` classifies a term. There are only two shapes: a space used as a
+type, which is how vectors and linear maps are typed, and a Π-type, which types a
+nonlinear or dependent function::
 
-- **Linear maps are spaces** (``s₀⊸s₁ = ⟦s₀*⊗s₁⟧``); the **only** non-space types are
-  Π-types. ``s₀→s₁ = Π(_:s).⟦s₁⟧``.
-- **SpaceFunctions / TypeFunctions** are not modeled here: they are a ``Lam`` whose body
-  is a Space / a Type (see :mod:`grassmann.core.term`), kinded by the arrow kinds in
-  :mod:`grassmann.core.kinds`. This module models the *Type* level (Π / TypeApp) and the
-  ``SpaceAsType`` wrapper used when a Space is used in a type position.
-- No special dependent-output node: a dependent function's output type is just a
-  :class:`TypeApp` of the right Space/Type Function (or substitution when concrete).
+    Type  τ ::= ⟦ Space ⟧                a space as a type (vectors and linear maps)
+              | Π(b:σ). τ                a function type; its kind is *
+              | App(g, positions, args…)  the type produced by applying a type function
+
+Linear maps are spaces: ``s₀ ⊸ s₁`` is the space ``s₀* ⊗ s₁``, so the only
+non-space types are the Π-types, and an ordinary function type ``s₀ → s₁`` is
+``Π(_ : s₀). ⟦s₁⟧``. The space-as-type wrapper is the implicit embedding used
+whenever a space appears in a type position.
+
+Space functions and type functions are not modeled here. Each is a
+:class:`~grassmann.core.term.Lam` whose body is a space or a type, kinded by the
+arrow kinds in :mod:`grassmann.core.kinds`. A dependent function needs no special
+output node either: its output type is just an application of the right space or
+type function, resolved by substitution once the argument is concrete.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ class TypeError_(Exception):
 
 @dataclass(frozen=True)
 class SpaceAsType:
-    """``⟦s⟧`` — a Space used directly as a Type (the implicit embedding, `20 §4`)."""
+    """A space used directly as a type, written ``⟦s⟧`` — the implicit embedding."""
 
     space: Space
 
@@ -44,7 +48,7 @@ class SpaceAsType:
 
 @dataclass(frozen=True)
 class Pi:
-    """``Π(b:σ). τ`` — a (possibly dependent) function type; kind ``*``.
+    """A function type, possibly dependent: it binds ``b : σ`` in a codomain ``τ`` and has kind ``*``.
 
     ``binder`` is the bound name; ``domain`` is a sort ``σ`` (a :class:`Sort`,
     :class:`SpaceSort` for a value domain); ``codomain`` is a :class:`Type` that may
@@ -67,7 +71,7 @@ class Pi:
 
 @dataclass(frozen=True)
 class TypeApp:
-    """``App(g, positions, args…)`` — apply a TypeFunction → a Type (`20 §4`)."""
+    """The type produced by applying a type function to its arguments."""
 
     g: object  # a TypeFunction (a Lam whose body is a Type)
     positions: tuple[int, ...]
@@ -122,12 +126,12 @@ def space_as_type(s: Space) -> SpaceAsType:
 
 
 def pi(binder: str, domain: Kind, codomain: object) -> Pi:
-    """Build the dependent function type ``Π(binder:domain). codomain``."""
+    """Build the dependent function type binding ``binder : domain`` in ``codomain``."""
     return Pi(binder, domain, as_type(codomain))
 
 
 def fn(s0: Space, s1: Space) -> Pi:
-    """Non-dependent function type ``s0 → s1 = Π(_:s0). ⟦s1⟧``."""
+    """The non-dependent function type from ``s0`` to ``s1`` (that is, ``Π`` over ``s0`` into ``s1``)."""
     if not is_space(s0):
         raise TypeError_(f"fn: domain must be a Space, got {s0!r}")
     return Pi("_", SpaceSort(s0), as_type(s1))

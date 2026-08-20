@@ -5,7 +5,7 @@ Abstract spaces, duals, ``⊕``/``⊗``, linear maps, the four fundamental subsp
 typed core IR with a Python operator-overload embedding, bidirectional inference, and a
 lowering to the standalone :mod:`polyarray` symbolic IR that runs to numbers.
 
-Everything hangs off a single import (`27 §2`)::
+Everything hangs off a single import::
 
     import grassmann as G
 

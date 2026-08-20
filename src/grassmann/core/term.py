@@ -1,25 +1,31 @@
-"""Term (vector) ADT, with the two binders.
+"""The Term sum type: maps between spaces, and the two lambdas.
 
-Favors the FEMOracle impl, n-ary, real-only. The two binders replace the impl's
-``Abstract`` + ``nonLinearVars``:
+A :class:`Term` is a linear or nonlinear map. The family is closed and n-ary,
+over real spaces, and it carries the operations one expects of a coordinate-free
+algebra: application and composition, the adjoint :class:`Dagger`,
+:class:`Solve` and :class:`Pinv`, the musical isomorphisms :class:`Flat` and
+:class:`Sharp`, projections and embeddings between a space and its subspaces, the
+:class:`Trace`, and foreign values. Two binders sit above them:
 
-- **``LLam``** — the **linear** lambda ``⊸`` (multi-var). Result space is **independent**
-  of the linear args (representable as a value in ``⊗(Dual sᵢ) ⊗ s_e``). Linearity ⊥
-  dependence: a linear arg may not appear in a binder domain annotation nor as an
-  explicit space/nat argument (those would make the result depend on it) — that is the
-  structural well-formedness rule enforced here.
-- **``Lam``** — the one general, body-polymorphic **non-linear** binder ``Lam(b:σ. body)``
-  whose body may be a Term, Space, Type, or Nat, and whose domain ``b:σ`` is a value
-  (a space ``s``), a space, or a nat. A ``Lam`` whose body is a Space / Type is a
-  **SpaceFunction / TypeFunction**.
+``LLam`` is the linear lambda, the map arrow ``⊸``. Its result space is
+independent of the linear arguments, so it is itself representable as a value in
+``⊗(sᵢ*) ⊗ s_e``. Linearity forbids dependence: a linear argument may not appear
+in a binder's domain annotation nor as an explicit space or nat argument, since
+either would make the result depend on it. That independence is the structural
+rule enforced here.
 
-Position/index convention: one mechanism — an integer index list selects
-parameter slots (``Eval``/``NEval``/``Compose``), tensor indices to fuse
-(``Lift``/``InvLift`` + optional ``k``), or indices to contract (``Trace``).
+``Lam`` is the one general nonlinear binder ``Lam(b:σ. body)``. Its body may be
+a term, a space, a type, or a nat, and its domain ``b:σ`` is a value (an element
+of a space ``s``), a space, or a nat. A ``Lam`` whose body is a space or a type
+is a space function or a type function.
 
-Well-formedness here is **structural only** (arity, child kinds, the LLam linearity
-guard). Full *type* checking — that the contracted slots are dual, that summands share a
-space, etc. — is IW3.
+One index convention runs through the family: an integer index list selects the
+parameter slots to feed (``Eval``, ``NEval``, ``Compose``), the tensor indices to
+fuse (``Lift``, ``InvLift``), or the indices to contract (``Trace``).
+
+Well-formedness enforced here is structural only — arity, child kinds, and the
+linearity guard on ``LLam``. Checking that contracted slots are dual and that
+summands share a space is type checking, done in :mod:`grassmann.infer`.
 """
 
 from __future__ import annotations
@@ -53,7 +59,7 @@ _counter = itertools.count()
 
 @dataclass(frozen=True)
 class Var:
-    """``Var(x, props?)`` — a (term) variable, optionally carrying asserted map properties.
+    """A term variable, optionally carrying asserted map properties.
 
     Properties live ON VARS ONLY. ``space`` is the variable's space; ``uid`` is a fresh
     identity so that two distinct binders' variables of the same name/space do not collide
@@ -79,7 +85,7 @@ class Var:
 
 @dataclass(frozen=True)
 class External:
-    """``External(s, data, args…)`` — foreign fn/value: opaque data + arg deps."""
+    """A foreign function or value — opaque ``data`` together with the argument terms it depends on."""
 
     space: Space
     data: object
@@ -97,9 +103,9 @@ class External:
 
 @dataclass(frozen=True)
 class Zero:
-    """``Zero(s?)`` — the zero vector of a space.
+    """The zero vector of a space.
 
-    ``space`` is **optional** (B1): when ``None`` the space is left to inference, which
+    ``space`` is **optional**: when ``None`` the space is left to inference, which
     recovers it via first-order unification (a fresh ``SpaceMeta`` solved by the
     surrounding context — a ``Sum`` sibling, a ``check``/``Assert`` against an expected
     space, etc.). Supplying ``space`` explicitly works exactly as before.
@@ -116,7 +122,7 @@ class Zero:
 
 @dataclass(frozen=True)
 class Identity:
-    """``Identity(s)`` — the identity map on ``s`` (space ``~s ⊗ s``)."""
+    """The identity map on a space ``s`` (a value in ``~s ⊗ s``)."""
 
     space: Space
 
@@ -129,7 +135,7 @@ class Identity:
 
 @dataclass(frozen=True)
 class Lit:
-    """``Scalar(r)`` — a real scalar literal (term-level)."""
+    """A real scalar literal at the term level."""
 
     value: float
 
@@ -143,7 +149,10 @@ class Lit:
 
 @dataclass(frozen=True)
 class Scale:
-    """``Scale(r, v)`` — scalar multiple. ``r`` is a real or a scalar-valued Term."""
+    """The scalar multiple of a vector by a real number or scalar-valued term.
+
+    ``scalar`` is a real or a scalar-valued ``Term``; ``vector`` is the term it scales.
+    """
 
     scalar: float | Term
     vector: Term
@@ -159,7 +168,7 @@ class Scale:
 
 @dataclass(frozen=True)
 class Sum:
-    """``Sum(v…)`` — n-ary vector addition (all summands share a space; checked IW3)."""
+    """The n-ary vector addition of terms that share a space."""
 
     vectors: tuple[Term, ...]
 
@@ -175,7 +184,7 @@ class Sum:
 
 @dataclass(frozen=True)
 class OPlusV:
-    """``OPlus(v…)`` — n-ary direct-sum *stack* of vectors (space ``⊕(sᵢ)``)."""
+    """The n-ary direct-sum stack of vectors (a value in ``⊕(sᵢ)``)."""
 
     vectors: tuple[Term, ...]
 
@@ -191,7 +200,7 @@ class OPlusV:
 
 @dataclass(frozen=True)
 class OProdV:
-    """``OProd(v…)`` — n-ary tensor product of vectors (space ``⊗(sᵢ)``)."""
+    """The n-ary tensor product of vectors (a value in ``⊗(sᵢ)``)."""
 
     vectors: tuple[Term, ...]
 
@@ -227,7 +236,7 @@ def _check_positions_args(ctx: str, positions: tuple[int, ...], args: tuple[Term
 
 @dataclass(frozen=True)
 class Eval:
-    """``Eval(f, positions, args…)`` — **linear** application (contraction view).
+    """The **linear** application of a map, viewed as a contraction.
 
     Apply a linear map ``f`` at the selected dual slots ``positions`` with ``args``.
     """
@@ -246,7 +255,7 @@ class Eval:
 
 @dataclass(frozen=True)
 class NEval:
-    """``NEval(f, positions, args…)`` — **non-linear** application (apply a ``Lam``)."""
+    """The **non-linear** application of a ``Lam`` to term, space, or nat arguments."""
 
     f: Term
     positions: tuple[int, ...]
@@ -274,7 +283,7 @@ class NEval:
 
 @dataclass(frozen=True)
 class Compose:
-    """``Compose(f, positions, gs…)`` — contract each ``gₖ``'s codomain into ``f``'s selected slot."""
+    """Composition of maps: contract each ``gₖ``'s codomain into ``f``'s selected slot."""
 
     f: Term
     positions: tuple[int, ...]
@@ -290,7 +299,7 @@ class Compose:
 
 @dataclass(frozen=True)
 class Trace:
-    """``Trace(f, i, j)`` — contract (primal) index ``i`` with dual index ``j``."""
+    """The contraction of a map's primal index ``i`` with its dual index ``j``."""
 
     f: Term
     i: int
@@ -309,7 +318,7 @@ class Trace:
 
 @dataclass(frozen=True)
 class Det:
-    """``Det(f)`` — the determinant of a square endomorphism ``f : V ⊸ V`` (a ``Scalar``)."""
+    """The determinant of a square endomorphism ``f : V ⊸ V`` (a scalar)."""
 
     f: Term
 
@@ -322,7 +331,7 @@ class Det:
 
 @dataclass(frozen=True)
 class LogDet:
-    """``LogDet(f)`` — the log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``.
+    """The log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``.
 
     The result is a ``Scalar``.  A dedicated node (not ``log(det f)``) because its derivative
     is the clean ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`.
@@ -364,9 +373,8 @@ class OpaqueOp:
 
 @dataclass(frozen=True)
 class OpaqueApply:
-    """``OpaqueApply(op, arg)``.
+    """The application of an opaque map ``op`` to ``arg``, a term in ``op.dom``, yielding a term in ``op.cod``.
 
-    Apply an opaque map ``op`` to ``arg`` (a Term in ``op.dom``), yielding a Term in ``op.cod``.
     Differentiated via an auto-allocated Jacobian tracer input — see :mod:`grassmann.transform.diff`.
     """
 
@@ -389,7 +397,8 @@ class OpaqueApply:
 
 @dataclass(frozen=True)
 class Solve:
-    """``Solve(f)`` — the inverse map ``f⁻¹`` (requires ``f`` asserted ``bij``; IW3)."""
+    """The two-sided inverse ``f⁻¹`` of a map asserted bijective. The bijectivity is
+    required (``props=bij``) and checked during type inference."""
 
     f: Term
 
@@ -402,7 +411,9 @@ class Solve:
 
 @dataclass(frozen=True)
 class Pinv:
-    """``Pinv(f)`` — the Moore–Penrose pseudo-inverse map ``f†``."""
+    """The Moore–Penrose pseudo-inverse ``f⁺`` of a map: the least-squares,
+    minimum-norm inverse. It is an exact one-sided inverse when the map is asserted
+    injective or surjective, and the true inverse when it is bijective."""
 
     f: Term
 
@@ -415,7 +426,7 @@ class Pinv:
 
 @dataclass(frozen=True)
 class Corestrict:
-    """``Corestrict(f)`` — the **corestriction** of an injective map onto its own image.
+    """The **corestriction** of an injective map onto its own image.
 
     It is the map ``f~ : dom(f) ⊸ Img(f)``.  This is the induced isomorphism of the **first
     isomorphism theorem**, in its ``ker f = 0`` form: ``f`` factors as
@@ -451,7 +462,7 @@ class Corestrict:
 
 @dataclass(frozen=True)
 class SolveApply:
-    """``SolveApply(f, v)`` — solve ``f·x = v`` (the applied form of ``Solve``)."""
+    """The solution ``x`` of the system ``f·x = v`` — the applied form of ``Solve``."""
 
     f: Term
     v: Term
@@ -466,7 +477,7 @@ class SolveApply:
 
 @dataclass(frozen=True)
 class PinvApply:
-    """``PinvApply(f, v)`` — apply the pseudo-inverse: ``f†·v``."""
+    """The pseudo-inverse of a map applied to a vector, ``f†·v``."""
 
     f: Term
     v: Term
@@ -481,7 +492,10 @@ class PinvApply:
 
 @dataclass(frozen=True)
 class Dagger:
-    """``Dagger(f)`` — metric-transpose adjoint (real ⇒ no conjugate)."""
+    """The adjoint of a map, ``f†``: the map satisfying ``⟨f x, y⟩ = ⟨x, f† y⟩`` for the
+    inner products of its domain and codomain. Over real spaces it is the metric
+    transpose, with no conjugation; which transpose that becomes is resolved during
+    lowering from the two metrics."""
 
     f: Term
 
@@ -494,7 +508,7 @@ class Dagger:
 
 @dataclass(frozen=True)
 class Sqrt:
-    """``Sqrt(f)`` — the symmetric positive-definite **operator square root** of ``f : V ⊸ V``.
+    """The symmetric positive-definite **operator square root** of an endomorphism ``f : V ⊸ V``.
 
     It is the unique SPD ``S`` with ``S·S = f``.  Lowers via an eigendecomposition and
     **fails loudly if ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization
@@ -513,7 +527,8 @@ class Sqrt:
 
 @dataclass(frozen=True)
 class Inner:
-    """``Inner(s)`` — the inner-product map of ``s`` (reads ``s``'s metric)."""
+    """The inner-product map of a space: the bilinear form ``s ⊗ s ⊸ Scalar`` read
+    from the metric of ``s``."""
 
     space: Space
 
@@ -526,7 +541,8 @@ class Inner:
 
 @dataclass(frozen=True)
 class Flat:
-    """``Flat(s)`` — musical ♭, primal→dual ``s ⊸ s*`` (reads metric)."""
+    """The musical isomorphism ♭, lowering an index: the metric map ``s ⊸ s*`` that
+    sends a vector to the covector pairing with it. It reads the inner product of ``s``."""
 
     space: Space
 
@@ -539,7 +555,8 @@ class Flat:
 
 @dataclass(frozen=True)
 class Sharp:
-    """``Sharp(s)`` — musical ♯, dual→primal ``s* ⊸ s`` (reads metric)."""
+    """The musical isomorphism ♯, raising an index: the inverse metric map ``s* ⊸ s``,
+    the inverse of :class:`Flat`. It reads the inner product of ``s``."""
 
     space: Space
 
@@ -557,9 +574,9 @@ class Sharp:
 
 @dataclass(frozen=True)
 class Project:
-    """``Project(v, s?)`` — project ``v`` onto a subspace ``s`` (``s ⊑ space(v)``; IW3).
+    """The projection of ``v`` onto a subspace ``s`` (``s ⊑ space(v)``).
 
-    ``space`` (the *target subspace*) is **optional** (B1): when ``None`` it is left to
+    ``space`` (the *target subspace*) is **optional**: when ``None`` it is left to
     inference. Because a subspace is not unique, the omitted target is recoverable only
     when an expected space flows in from the surrounding context (the ⇐ check direction),
     which unifies the fresh ``SpaceMeta`` and then the deferred ``s ⊑ space(v)`` obligation
@@ -579,7 +596,7 @@ class Project:
 
 @dataclass(frozen=True)
 class Embed:
-    """``Embed(v, s)`` — embed ``v`` into a larger space ``s`` (``space(v) ⊑ s``)."""
+    """The embedding of ``v`` into a larger space ``s`` (``space(v) ⊑ s``)."""
 
     vector: Term
     space: Space
@@ -594,7 +611,7 @@ class Embed:
 
 @dataclass(frozen=True)
 class Assert:
-    """``Assert(v, s)`` — assert ``v`` has space ``s`` (``space(v) ~ s``; IW3)."""
+    """An assertion that ``v`` has space ``s`` (``space(v) ~ s``)."""
 
     vector: Term
     space: Space
@@ -609,7 +626,7 @@ class Assert:
 
 @dataclass(frozen=True)
 class TupleEmbed:
-    """``TupleEmbed(s, i)`` — inject the ``i``-th ⊕ component (pad). ``s = ⊕(sₖ)``."""
+    """The injection of a value into the ``i``-th ⊕ component of ``s = ⊕(sₖ)`` (zero-padding the rest)."""
 
     space: Space
     i: int
@@ -625,7 +642,7 @@ class TupleEmbed:
 
 @dataclass(frozen=True)
 class TupleProject:
-    """``TupleProject(s, i)`` — extract the ``i``-th ⊕ component (slice)."""
+    """The extraction of the ``i``-th ⊕ component of a direct-sum value (a slice)."""
 
     space: Space
     i: int
@@ -641,7 +658,7 @@ class TupleProject:
 
 @dataclass(frozen=True)
 class Remetric:
-    """``Remetric(v, g)`` — enter ``WithInner(s, g)`` (`20` point 9)."""
+    """A value re-metricized into the space ``WithInner(s, g)``."""
 
     vector: Term
     metric: Term
@@ -656,7 +673,8 @@ class Remetric:
 
 @dataclass(frozen=True)
 class Lift:
-    """``Lift(v, fused, k?)`` — index reshape (≡ curry); fuse the listed tensor indices."""
+    """A reshape that fuses the listed tensor indices of a value into one, currying its
+    factors together. The inverse is :class:`InvLift`."""
 
     vector: Term
     fused: tuple[int, ...]
@@ -674,7 +692,7 @@ class Lift:
 
 @dataclass(frozen=True)
 class InvLift:
-    """``InvLift(v, fused, k?)`` — inverse index reshape (≡ uncurry)."""
+    """The inverse index reshape of :class:`Lift`, splitting a fused index back into its factors (uncurry)."""
 
     vector: Term
     fused: tuple[int, ...]
@@ -692,7 +710,7 @@ class InvLift:
 
 @dataclass(frozen=True)
 class Permute:
-    """``Permute(v, perm)`` — reorder the tensor factors of ``v``'s space.
+    """Reorder the tensor factors of ``v``'s space.
 
     ``perm`` is a permutation: the result's factor ``i`` is ``v``'s factor ``perm[i]``
     (so ``Permute(v, (1, 0))`` transposes a 2-factor tensor / form). The arity must match
@@ -714,10 +732,7 @@ class Permute:
 
 @dataclass(frozen=True)
 class TuplePermute:
-    """``TuplePermute(v, perm)``.
-
-    Reorder the ``⊕`` *components* of ``v`` (the direct-sum analogue of :class:`Permute`, which reorders ``⊗``
-    factors).
+    """Reorder the ``⊕`` components of ``v`` — the direct-sum analogue of :class:`Permute`, which reorders ``⊗`` factors.
 
     ``perm`` is a permutation: the result's component ``i`` is ``v``'s component ``perm[i]``,
     so ``v : ⊕(sₖ)`` maps to ``⊕(s_{perm[i]})``. Lowers to a block (stack-slice) permutation.
@@ -739,7 +754,8 @@ class TuplePermute:
 
 @dataclass(frozen=True)
 class Kron:
-    """``Kron(f, g)`` — Kronecker product of maps (first-class)."""
+    """The Kronecker product ``f ⊗ g`` of two maps, acting factor-wise on a tensor
+    product of spaces."""
 
     f: Term
     g: Term
@@ -759,13 +775,13 @@ class Kron:
 
 @dataclass(frozen=True)
 class LLam:
-    """``LLam(xs:[x:s]. e)`` — the linear lambda ``⊸`` (multi-var).
+    """The linear lambda ``⊸``, binding one or more linear variables in a body.
 
-    Result space must be **independent** of the linear vars (`20 §1`/`§2`). The
+    Result space must be **independent** of the linear vars. The
     structural well-formedness guard enforced here: each bound var must NOT appear in a
     position that makes the result space depend on it — i.e. it may not occur inside a
     ``Lam`` binder *domain* annotation, nor as an explicit space/nat argument of an
-    ``NEval``/``App``. (Full linearity checking is IW3; this catches the structurally
+    ``NEval``/``App``. (Full linearity checking is done during type inference; this catches the structurally
     detectable violations the spec calls out.)
     """
 
@@ -787,7 +803,7 @@ class LLam:
 
 @dataclass(frozen=True)
 class Lam:
-    """``Lam(bs:[b:σ]. body)`` — the general non-linear binder (`20 §4`).
+    """The general non-linear binder, abstracting a body over a value, space, or nat variable.
 
     Each bound entry is a ``(name, sort)`` pair where ``sort`` is a :class:`Sort`
     (``space``/``nat``/``*``) or a :class:`SpaceSort` (a value domain). The ``body`` may
@@ -827,9 +843,9 @@ class Lam:
 
 @dataclass(frozen=True)
 class Frame:
-    """``Frame`` over a value — the value-binding ``BLam`` (`20 §7`).
+    """The value-binding lambda ``BLam``, binding a runtime value to a basis.
 
-    Listed in the IW1 Term scope (`60 §1`). A ``Frame`` binds a runtime value ``x:s`` to
+    A ``Frame`` binds a runtime value ``x:s`` to
     a basis (``x ↦ basis of τ(x)``). The basis-producing body lives in :mod:`basis`; we
     store the bound term ``Var`` and the basis body (a ``Basis`` forward ref, to avoid a
     runtime basis.py import cycle).
@@ -915,7 +931,7 @@ def _require_space_field(s: object, ctx: str) -> None:
 
 
 def _require_space_or_none(s: object, ctx: str) -> None:
-    """Require ``s`` to be a Space, or ``None`` for an OPTIONAL space left to inference (B1)."""
+    """Require ``s`` to be a Space, or ``None`` for an OPTIONAL space left to inference."""
     if s is not None and not is_space(s):
         raise TermError(f"{ctx}: expected a Space or None, got {s!r}")
 
@@ -947,7 +963,7 @@ def _check_llam_linearity(vars: tuple[Var, ...], body: Term) -> None:
     argument of an ``NEval``/``App``.
 
     Also requires each linear var to occur at least once in the body (a vacuous linear
-    binder is almost always a mistake; full per-variable linearity is IW3).
+    binder is almost always a mistake; full per-variable linearity is checked during inference).
     """
     var_ids = {v.uid for v in vars}
     seen: set[int] = set()
@@ -1039,70 +1055,70 @@ def _space_children(s: object) -> tuple[object, ...]:
 
 
 def var(name: str, space: Space, props: MapProps | None = None) -> Var:
-    """Build a ``Var`` — a term variable of ``space``, with optional asserted map ``props``."""
+    """Build a term variable of ``space``, with optional asserted map ``props``."""
     return Var(name, space, props)
 
 
 def external(space: Space, data: object, *args: Term) -> External:
-    """Build an ``External`` — a foreign value in ``space`` from opaque ``data`` and arg deps."""
+    """Build a foreign value in ``space`` from opaque ``data`` and its argument dependencies."""
     return External(space, data, tuple(args))
 
 
 def zero(space: Space | None = None) -> Zero:
-    """Build a ``Zero`` — the zero vector of ``space`` (``None`` leaves the space to inference)."""
+    """Build the zero vector of ``space`` (``None`` leaves the space to inference)."""
     return Zero(space)
 
 
 def identity(space: Space) -> Identity:
-    """Build an ``Identity`` — the identity map on ``space``."""
+    """Build the identity map on ``space``."""
     return Identity(space)
 
 
 def lit(value: float) -> Lit:
-    """Build a ``Lit`` — a real scalar literal."""
+    """Build a real scalar literal."""
     return Lit(value)
 
 
 def scale(scalar: float | Term, vector: Term) -> Scale:
-    """Build a ``Scale`` — the scalar multiple ``scalar · vector``."""
+    """Build the scalar multiple ``scalar · vector``."""
     return Scale(scalar, vector)
 
 
 def sum_(*vectors: Term) -> Sum:
-    """Build a ``Sum`` — the n-ary vector addition of ``vectors``."""
+    """Build the n-ary vector addition of ``vectors``."""
     return Sum(tuple(vectors))
 
 
 def oplus_v(*vectors: Term) -> OPlusV:
-    """Build an ``OPlusV`` — the direct-sum stack of ``vectors``."""
+    """Build the direct-sum stack of ``vectors``."""
     return OPlusV(tuple(vectors))
 
 
 def oprod_v(*vectors: Term) -> OProdV:
-    """Build an ``OProdV`` — the tensor product of ``vectors``."""
+    """Build the tensor product of ``vectors``."""
     return OProdV(tuple(vectors))
 
 
 def eval_(f: Term, positions: tuple[int, ...], *args: Term) -> Eval:
-    """Build an ``Eval`` — the linear application of ``f`` to ``args`` at ``positions``."""
+    """Build the linear application of ``f`` to ``args`` at ``positions``."""
     return Eval(f, tuple(positions), tuple(args))
 
 
 def neval(f: Term, positions: tuple[int, ...], *args: Term | Space | Dim) -> NEval:
-    """Build an ``NEval`` — the non-linear application of ``f`` to ``args`` at ``positions``."""
+    """Build the non-linear application of ``f`` to ``args`` at ``positions``."""
     return NEval(f, tuple(positions), tuple(args))
 
 
 def compose(f: Term, positions: tuple[int, ...], *gs: Term) -> Compose:
-    """Build a ``Compose`` — contract each ``gₖ``'s codomain into ``f``'s slot ``positions[k]``."""
+    """Build the composition contracting each ``gₖ``'s codomain into ``f``'s slot ``positions[k]``."""
     return Compose(f, tuple(positions), tuple(gs))
 
 
 def chain(*fs: Term, at: int = 0) -> Term:
     """Compose ``fs`` in series, ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]``, right-applied at dual slot ``at``.
 
-    A thin smart constructor — **no new core node**. It mimics FEMOracle's nested
-    single-arg ``Compose``: ``proj ∘ conv ∘ embed`` is ``Compose(proj, (0,),
+    A thin smart constructor — **no new core node**. It expands to nested single-arg
+    :class:`Compose` nodes: ``proj ∘ conv ∘ embed`` is ``Compose(proj, (0,),
     (Compose(conv, (0,), (embed,)),))``. Each junction feeds
     one map's codomain into the dual slot ``at`` of the map to its left, so
     ``chain(f, g) == Compose(f, (at,), (g,))`` and longer chains nest right-to-left.
@@ -1120,77 +1136,77 @@ def chain(*fs: Term, at: int = 0) -> Term:
 
 
 def trace(f: Term, i: int, j: int) -> Trace:
-    """Build a ``Trace`` — contract the primal index ``i`` of ``f`` with its dual index ``j``."""
+    """Build the contraction of ``f``'s primal index ``i`` with its dual index ``j``."""
     return Trace(f, i, j)
 
 
 def det(f: Term) -> Det:
-    """Build a ``Det`` — the determinant of the endomorphism ``f``."""
+    """Build the determinant of the endomorphism ``f``."""
     return Det(f)
 
 
 def logdet(f: Term) -> LogDet:
-    """Build a ``LogDet`` — the log-determinant of the endomorphism ``f``."""
+    """Build the log-determinant of the endomorphism ``f``."""
     return LogDet(f)
 
 
 def opaque_apply(op: OpaqueOp, arg: Term) -> OpaqueApply:
-    """Build an ``OpaqueApply`` — the application of the opaque map ``op`` to ``arg``."""
+    """Build the application of the opaque map ``op`` to ``arg``."""
     return OpaqueApply(op, arg)
 
 
 def solve(f: Term) -> Solve:
-    """Build a ``Solve`` — the inverse map ``f⁻¹``."""
+    """Build the inverse map ``f⁻¹`` of a bijective ``f``."""
     return Solve(f)
 
 
 def pinv(f: Term) -> Pinv:
-    """Build a ``Pinv`` — the Moore–Penrose pseudo-inverse map ``f†``."""
+    """Build the Moore–Penrose pseudo-inverse map ``f†``."""
     return Pinv(f)
 
 
 def corestrict(f: Term) -> Corestrict:
-    """``f~ : dom(f) ⊸ Img(f)`` — the corestriction of an INJECTIVE ``f`` onto its image."""
+    """Build the corestriction ``f~ : dom(f) ⊸ Img(f)`` of an INJECTIVE ``f`` onto its image."""
     return Corestrict(f)
 
 
 def sqrt(f: Term) -> Sqrt:
-    """Build a ``Sqrt`` — the SPD operator square root of the endomorphism ``f``."""
+    """Build the SPD operator square root of the endomorphism ``f``."""
     return Sqrt(f)
 
 
 def solve_apply(f: Term, v: Term) -> SolveApply:
-    """Build a ``SolveApply`` — the solution of ``f·x = v``."""
+    """Build the solution of the system ``f·x = v``."""
     return SolveApply(f, v)
 
 
 def pinv_apply(f: Term, v: Term) -> PinvApply:
-    """Build a ``PinvApply`` — the applied pseudo-inverse ``f†·v``."""
+    """Build the applied pseudo-inverse ``f†·v``."""
     return PinvApply(f, v)
 
 
 def dagger(f: Term) -> Dagger:
-    """Build a ``Dagger`` — the metric-transpose adjoint of ``f``."""
+    """Build the metric-transpose adjoint ``f†`` of ``f``."""
     return Dagger(f)
 
 
 def inner(space: Space) -> Inner:
-    """Build an ``Inner`` — the inner-product map of ``space``."""
+    """Build the inner-product map of ``space``."""
     return Inner(space)
 
 
 def flat(space: Space) -> Flat:
-    """Build a ``Flat`` — the musical ♭ ``space ⊸ space*``."""
+    """Build the musical isomorphism ♭ ``space ⊸ space*``."""
     return Flat(space)
 
 
 def sharp(space: Space) -> Sharp:
-    """Build a ``Sharp`` — the musical ♯ ``space* ⊸ space``."""
+    """Build the musical isomorphism ♯ ``space* ⊸ space``."""
     return Sharp(space)
 
 
 def project(vector: Term, space: Space | None = None) -> Project:
-    """Build a ``Project`` — project ``vector`` onto the subspace ``space``.
+    """Build the projection of ``vector`` onto the subspace ``space``.
 
     ``space=None`` leaves the target subspace to inference.
     """
@@ -1198,57 +1214,57 @@ def project(vector: Term, space: Space | None = None) -> Project:
 
 
 def embed(vector: Term, space: Space) -> Embed:
-    """Build an ``Embed`` — embed ``vector`` into the larger space ``space``."""
+    """Build the embedding of ``vector`` into the larger space ``space``."""
     return Embed(vector, space)
 
 
 def assert_(vector: Term, space: Space) -> Assert:
-    """Build an ``Assert`` — assert that ``vector`` has space ``space``."""
+    """Build the assertion that ``vector`` has space ``space``."""
     return Assert(vector, space)
 
 
 def tuple_embed(space: Space, i: int) -> TupleEmbed:
-    """Build a ``TupleEmbed`` — inject the ``i``-th ⊕ component of ``space``."""
+    """Build the injection into the ``i``-th ⊕ component of ``space``."""
     return TupleEmbed(space, i)
 
 
 def tuple_project(space: Space, i: int) -> TupleProject:
-    """Build a ``TupleProject`` — extract the ``i``-th ⊕ component of ``space``."""
+    """Build the extraction of the ``i``-th ⊕ component of ``space``."""
     return TupleProject(space, i)
 
 
 def remetric(vector: Term, metric: Term) -> Remetric:
-    """Build a ``Remetric`` — move ``vector`` into ``WithInner(space(vector), metric)``."""
+    """Build the re-metricization moving ``vector`` into ``WithInner(space(vector), metric)``."""
     return Remetric(vector, metric)
 
 
 def lift(vector: Term, fused: tuple[int, ...], k: int | None = None) -> Lift:
-    """Build a ``Lift`` — fuse the tensor indices ``fused`` of ``vector``."""
+    """Build the reshape fusing the tensor indices ``fused`` of ``vector``."""
     return Lift(vector, tuple(fused), k)
 
 
 def inv_lift(vector: Term, fused: tuple[int, ...], k: int | None = None) -> InvLift:
-    """Build an ``InvLift`` — the inverse reshape, splitting the indices ``fused`` apart."""
+    """Build the inverse reshape splitting the indices ``fused`` apart."""
     return InvLift(vector, tuple(fused), k)
 
 
 def permute(vector: Term, perm: tuple[int, ...]) -> Permute:
-    """Build a ``Permute`` — reorder the ⊗ factors of ``vector``'s space by ``perm``."""
+    """Build the reordering of the ⊗ factors of ``vector``'s space by ``perm``."""
     return Permute(vector, tuple(perm))
 
 
 def tuple_permute(vector: Term, perm: tuple[int, ...]) -> TuplePermute:
-    """Build a ``TuplePermute`` — reorder the ⊕ components of ``vector`` by ``perm``."""
+    """Build the reordering of the ⊕ components of ``vector`` by ``perm``."""
     return TuplePermute(vector, tuple(perm))
 
 
 def kron(f: Term, g: Term) -> Kron:
-    """Build a ``Kron`` — the Kronecker product of the maps ``f`` and ``g``."""
+    """Build the Kronecker product ``f ⊗ g`` of the maps ``f`` and ``g``."""
     return Kron(f, g)
 
 
 def llam(*vars: Var, body: Term) -> LLam:
-    """``LLam`` — pass the bound :class:`Var`s positionally and ``body=`` as keyword."""
+    """Build the linear lambda ``⊸`` — pass the bound :class:`Var` variables positionally and ``body`` as a keyword argument."""
     return LLam(tuple(vars), body)
 
 
@@ -1257,12 +1273,12 @@ def lam(
     body: Term | Space | Type | Dim,
     term_vars: tuple[Var, ...] = (),
 ) -> Lam:
-    """Build a ``Lam`` — the general non-linear binder over ``binders``."""
+    """Build the general non-linear binder over ``binders``."""
     return Lam(tuple(binders), body, tuple(term_vars))
 
 
 def frame(var: Var, basis_body: Basis) -> Frame:
-    """Build a ``Frame`` — bind the value ``var`` to the basis ``basis_body``."""
+    """Build the value-binding lambda that binds ``var`` to the basis ``basis_body``."""
     return Frame(var, basis_body)
 
 

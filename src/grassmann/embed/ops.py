@@ -1,20 +1,21 @@
-"""IW2 operator-overload layer: lightweight handles wrapping IW1 core nodes.
+"""The operator-overload layer: handles that wrap core nodes and desugar to them.
 
-Every surface value is an :class:`Expr` that wraps exactly one core node (a Space,
-Term, or Basis) and tags which tower it lives in. Operators desugar **eagerly** to the
-IW1 smart constructors; we never mutate or re-implement the core.
+Every surface value is an :class:`Expr` wrapping exactly one core node — a space,
+term, type, or basis — and tagged with which tower it lives in. The operators
+desugar eagerly to the core smart constructors; this layer never mutates or
+re-implements the core.
 
-Operator allocation (locked):
+The operators are ``&`` for the direct sum ⊕, ``*`` for the tensor product ⊗,
+``@`` for composition, ``+`` for a sum of terms, ``~`` for the dual, ``>>`` for a
+linear-map space (right-associating), ``()`` to apply a map, and ``f[α]`` for
+type application.
 
-``&``=⊕ · ``*``=⊗ · ``@``=Compose · ``+``=Sum · ``~``=Dual · ``>>``=linear-map space
-(auto right-re-associating) · ``()``=apply (Eval/NEval) · ``f[α]``=type
-application.
-
-``__call__`` picks ``Eval`` vs ``NEval`` by the callee's INFERRED type: it
-runs IW3 synthesis — a value/linear map (a ``Space``) ⇒ ``Eval``, a ``Π``/dependent
-function (non-``Space``) ⇒ ``NEval`` — falling back to the structural guess (a literal
-``Lam``) only when synthesis can't run (see :func:`_callee_is_neval`). Other operators
-(``>>``/``~`` etc.) build the obvious core node; deeper mismatches still surface in IW3.
+Application picks its meaning from the callee's inferred type. It runs type
+synthesis: a value or linear map, which synthesizes to a space, applies by linear
+contraction, while a Π or dependent function, which does not, applies as a
+nonlinear evaluation. When synthesis cannot run on an under-determined callee, it
+falls back to the structural guess of a literal lambda. The other operators build
+the obvious core node; a deeper mismatch surfaces later, during type checking.
 """
 
 from __future__ import annotations
@@ -66,8 +67,20 @@ def _callee_is_neval(node: object) -> bool:
 class Expr:
     """A surface handle wrapping a single core node, with operator sugar.
 
-    ``node`` is the underlying IW1 node; ``tower`` is one of :data:`SPACE`/:data:`TERM`/
+    ``node`` is the underlying core node; ``tower`` is one of :data:`SPACE`/:data:`TERM`/
     :data:`BASIS`/:data:`TYPE`. Use :func:`wrap` to build one (it classifies the node).
+
+    The operators desugar eagerly to the core smart constructors, each with a functional
+    ``G.*`` twin in :mod:`grassmann.embed.builders`:
+
+    * ``a & b`` — the direct sum ⊕.
+    * ``a * b`` — the tensor product ⊗; a Python number instead scalar-scales a vector.
+    * ``f @ g`` — composition of maps.
+    * ``a + b`` — a sum of vectors.
+    * ``~a`` — the dual of a space or basis.
+    * ``a >> b`` — the linear-map space, right-associating.
+    * ``f(x)`` — application, ``Eval`` when linear and ``NEval`` when dependent.
+    * ``f[α]`` — type application.
     """
 
     __slots__ = ("node", "tower", "note")
@@ -313,7 +326,7 @@ class Expr:
         return wrap(_t.assert_(self.node, _node(s)))
 
     def at(self, positions: list[int] | tuple[int, ...]) -> _AtHandle:
-        """Pin the slot ``positions`` a following application contracts."""
+        """Pin the slots ``positions`` that a following application contracts."""
         return _AtHandle(self.node, tuple(positions))
 
     def lift(self, fused: list[int] | tuple[int, ...], k: int | None = None) -> Expr:

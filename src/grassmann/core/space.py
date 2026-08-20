@@ -1,26 +1,30 @@
-"""Space ADT + symbolic dimensions (`20 §5`).
+"""The Space sum type and its symbolic dimensions.
 
-```
-Dim   := symbolic Nat expr   (literal | n | dim(s) | n+m | n·m | …)
-Space :=
-  | Scalar                         -- ℝ (real only);  ⊥ = OPlus()  (nullary ⊕)
-  -- (no Base atom: ℝⁿ = ⊕ⁿ Scalar; Scalar is the only ground)
-  | SVar(α)                        -- space variable, bound by a Lam over `space`
-  | Dual(Space)                    -- s*
-  | OPlus(Space, …)                -- n-ary ⊕
-  | OProd(Space, …)                -- n-ary ⊗
-  | OPlusRep(Dim n, Space s)       -- ⊕ⁿ s  (symbolic-count direct sum); NO OProdRep
-  | Ker/Img/CoKer/CoImg(f, source?, target?)   -- four explicit FFS, NO co-flag
-  | WithInner(Space s, g)          -- s re-metricized; g : s*⊗s*
-  | App(g, positions, args…)       -- apply a SpaceFunction → a Space
-```
+A :class:`Space` is an abstract real vector space. It is one of a closed set of
+node kinds, and every space in the language is built from them::
 
-Deltas from FEMOracle ``base/algebra.py``: add ``SVar``/``OPlusRep``/``WithInner``/
-``App``, symbolic ``Dim``, four explicit FFS (no ``co`` flag); drop ``IsoSpace``;
-real-only (no ``Field``); no ``OProdRep``.
+    Scalar                     ℝ, the only ground space (ℝⁿ is ⊕ⁿ Scalar; the
+                               empty ⊕ is the zero space)
+    SVar(α)                    a space variable, bound by a lambda over spaces
+    Dual(s)                    the dual space s*
+    OPlus(s, …)                the n-ary direct sum  s₁ ⊕ … ⊕ sₙ
+    OProd(s, …)                the n-ary tensor product  s₁ ⊗ … ⊗ sₙ
+    OPlusRep(n, s)             ⊕ⁿ s, a direct sum whose count n is symbolic
+    Ker/Img/CoKer/CoImg(f)     the four fundamental subspaces of a map f
+    WithInner(s, g)            s re-metricized by an inner product g : s* ⊗ s*
+    App(g, positions, args…)   the space produced by applying a space function g
 
-Well-formedness here is structural only (every child must itself be a ``Space``,
-arities respected). Full *type* checking (dims/properties matching) is IW3.
+The four fundamental subspaces are first-class spaces, not a flag on a map, so
+one builds further maps against ``img(f)`` or ``ker(f)`` directly. A metricized
+space ``WithInner(s, g)`` is a genuinely different space from ``s``; crossing
+between them is the explicit :class:`~grassmann.core.term.Remetric`, never a
+silent identification. A dimension :class:`Dim` is a symbolic natural-number
+expression — a literal, a variable, the dimension of a space, or a sum or product
+of these — so a space can have a size that is known only symbolically.
+
+Well-formedness enforced here is structural only: every child is itself a
+:class:`Space`, and arities are respected. Matching dimensions and map
+properties is type checking, done in :mod:`grassmann.infer`.
 """
 
 from __future__ import annotations
@@ -86,7 +90,7 @@ class DimVar:
 
 @dataclass(frozen=True)
 class DimOf:
-    """``dim(s)`` — the dimension of a space (used for SVar / opaque spaces)."""
+    """The dimension of a space, used for a space variable or an opaque space."""
 
     space: Space
 
@@ -116,7 +120,7 @@ class DimAtomRef:
 
 @dataclass(frozen=True)
 class DimSum:
-    """``n + m + …`` (n-ary sum of dims)."""
+    """The n-ary sum of dimensions ``n + m + …``."""
 
     terms: tuple[Dim, ...]
 
@@ -129,7 +133,7 @@ class DimSum:
 
 @dataclass(frozen=True)
 class DimProd:
-    """``n · m · …`` (n-ary product of dims)."""
+    """The n-ary product of dimensions ``n · m · …``."""
 
     terms: tuple[Dim, ...]
 
@@ -142,10 +146,11 @@ class DimProd:
 
 @dataclass(frozen=True)
 class DimNeg:
-    """``-d`` (negated dim) — appears only inside a ``DimSum`` to express subtraction, e.g.
+    """A negated dimension.
 
-    ``|Ker f| = |dom| + (-rank)``. Keeps the ``Dim`` algebra closed under the differences the FFS dimension
-    laws require (`20 §5`).
+    Appears only inside a ``DimSum``, where it expresses subtraction — for example
+    ``|Ker f| = |dom| + (-rank)``. Keeps the ``Dim`` algebra closed under the differences the FFS
+    dimension laws require.
     """
 
     term: Dim
@@ -159,10 +164,10 @@ class DimNeg:
 
 @dataclass(frozen=True)
 class DimMod:
-    """``a mod b`` (modular reduction of a dim).
+    """A dimension reduced modulo another.
 
     Closes the ``Dim`` algebra under the cyclic/periodic dimensions that e.g. circulant or torus constructions
-    need (`20 §5`). Convention: Python-style non-negative remainder, so ``0 ≤ a mod b < b`` and ``a mod 0`` is
+    need. Convention: Python-style non-negative remainder, so ``0 ≤ a mod b < b`` and ``a mod 0`` is
     undefined (rejected at construction). Mirrors :class:`DimNeg`'s style: a thin frozen node;
     constant-folding happens in :mod:`grassmann.infer.dims`, kept symbolic otherwise.
     """
@@ -221,7 +226,7 @@ def dim_prod(*ds: object) -> Dim:
 
 
 def dim_mod(term: object, modulus: object) -> Dim:
-    """``term mod modulus`` (Python-style non-negative remainder).
+    """Build the reduction ``term mod modulus`` with the Python-style non-negative remainder.
 
     Coerces ints to :class:`DimLit`. The modulus must be non-zero; a literal ``0``
     modulus is rejected here, and a symbolic-but-statically-zero modulus is caught by
@@ -241,7 +246,7 @@ def dim_mod(term: object, modulus: object) -> Dim:
 
 @dataclass(frozen=True)
 class Scalar:
-    """ℝ — the scalar space (dim 1, real only)."""
+    """The scalar space ``ℝ``, the one-dimensional ground space (real only)."""
 
     def __repr__(self) -> str:
         return "Scalar()"
@@ -249,7 +254,7 @@ class Scalar:
 
 @dataclass(frozen=True)
 class SVar:
-    """A space variable, bound by a ``Lam`` over the sort ``space`` (`20 §5`)."""
+    """A space variable, bound by a ``Lam`` over the sort ``space``."""
 
     name: str
 
@@ -263,7 +268,7 @@ class SVar:
 
 @dataclass(frozen=True)
 class Dual:
-    """``s*`` — the dual of a space."""
+    """The dual space ``s*``: the space of linear functionals on ``s``."""
 
     space: Space
 
@@ -276,7 +281,7 @@ class Dual:
 
 @dataclass(frozen=True)
 class OPlus:
-    """``⊕`` — n-ary direct sum. Nullary ``OPlus()`` is the bottom space ⊥."""
+    """The n-ary direct sum of spaces. The nullary ``OPlus()`` is the bottom space ⊥."""
 
     spaces: tuple[Space, ...]
 
@@ -290,7 +295,7 @@ class OPlus:
 
 @dataclass(frozen=True)
 class OProd:
-    """``⊗`` — n-ary tensor product."""
+    """The n-ary tensor product ``s₁ ⊗ … ⊗ sₙ`` of spaces."""
 
     spaces: tuple[Space, ...]
 
@@ -304,7 +309,7 @@ class OProd:
 
 @dataclass(frozen=True)
 class OPlusRep:
-    """``⊕ⁿ s`` — symbolic-count direct sum (`20 §5`). No ``OProdRep``."""
+    """The replicated direct sum ``⊕ⁿ s``, whose count is symbolic (there is no ``OProdRep``)."""
 
     count: Dim
     space: Space
@@ -322,7 +327,9 @@ class OPlusRep:
 
 @dataclass(frozen=True)
 class Ker:
-    """``Ker(f)`` — kernel of a linear map. source = dom(f), target = cod(f)."""
+    """The kernel of a map: the subspace of its domain that ``f`` sends to zero, a
+    first-class space. ``source`` and ``target`` record the bases of ``f``'s domain
+    and codomain."""
 
     f: Term  # a linear map; forward ref to avoid a runtime term.py import cycle
     source: Space | None = None
@@ -337,7 +344,8 @@ class Ker:
 
 @dataclass(frozen=True)
 class Img:
-    """``Img(f)`` — image (range) of a linear map."""
+    """The image of a map: the subspace of its codomain that ``f`` reaches, a
+    first-class space."""
 
     f: Term
     source: Space | None = None
@@ -352,7 +360,8 @@ class Img:
 
 @dataclass(frozen=True)
 class CoKer:
-    """``CoKer(f)`` — cokernel of a linear map."""
+    """The cokernel of a map: its codomain modulo the image, equivalently the kernel of
+    the adjoint. A first-class space."""
 
     f: Term
     source: Space | None = None
@@ -367,7 +376,8 @@ class CoKer:
 
 @dataclass(frozen=True)
 class CoImg:
-    """``CoImg(f)`` — coimage of a linear map."""
+    """The coimage of a map: its domain modulo the kernel, equivalently the orthogonal
+    complement of the kernel. A first-class space."""
 
     f: Term
     source: Space | None = None
@@ -382,9 +392,9 @@ class CoImg:
 
 @dataclass(frozen=True)
 class WithInner:
-    """``WithInner(s, g)`` — ``s`` re-metricized by ``g : s*⊗s*`` (`20` point 9).
+    """The space ``s`` re-metricized by an inner product ``g`` — a genuinely different space from ``s``.
 
-    ``g`` is a metric **Term** (a forward ref to ``Term`` to avoid a runtime cycle): the metric
+    Written ``WithInner(s, g)``, with ``g`` a metric of type ``s*⊗s*``. ``g`` is a metric **Term** (a forward ref to ``Term`` to avoid a runtime cycle): the metric
     is part of the language, NOT a raw numeric array.  A concrete numeric metric is supplied as a
     ``Var`` fed at run time (or any symbolic term), never embedded as an array — that keeps the
     space hashable and the lowering uniform (a single ``_rep(metric)`` path).
@@ -403,12 +413,12 @@ class WithInner:
 
 @dataclass(frozen=True)
 class App:
-    """``App(g, positions, args…)`` — apply a SpaceFunction → a Space (`20 §5`).
+    """The space produced by applying a space function to its arguments.
 
-    ``g`` is a SpaceFunction (a ``Lam`` whose body is a Space); ``positions`` selects
-    the slots filled; ``args`` are the supplied arguments (spaces, nats, or values).
-    Forward refs (``Term``) avoid a runtime cycle — kind-level checking of the
-    application is IW3.
+    Written ``App(g, positions, args…)``: ``g`` is a SpaceFunction (a ``Lam`` whose
+    body is a Space); ``positions`` selects the slots filled; ``args`` are the supplied
+    arguments (spaces, nats, or values). Forward refs (``Term``) avoid a runtime cycle —
+    kind-level checking of the application is done during type inference.
     """
 
     g: Term
@@ -507,7 +517,7 @@ def _check_ffs_endpoints(node: object) -> None:
         _require_space(src, f"{cls}.source")
     if tgt is not None:
         _require_space(tgt, f"{cls}.target")
-    # f must be present and a Term; full "f is a linear map" check is IW3.
+    # f must be present and a Term; full "f is a linear map" check is done during type inference.
     if getattr(node, "f") is None:
         raise SpaceError(f"{cls}: linear-map argument `f` is required")
     _require_term(getattr(node, "f"), f"{cls}.f")
@@ -560,19 +570,19 @@ def dual(s: Space) -> Dual:
 
 
 def oplus(*spaces: Space) -> OPlus:
-    """n-ary ⊕ (variadic, may be nullary = ⊥)."""
+    """Build the n-ary direct sum (variadic; may be nullary, giving ⊥)."""
     return OPlus(tuple(spaces))
 
 
 def oprod(*spaces: Space) -> OProd:
-    """n-ary ⊗ (variadic). Requires at least one factor."""
+    """Build the n-ary tensor product (variadic); requires at least one factor."""
     if not spaces:
         raise SpaceError("OProd needs at least one factor")
     return OProd(tuple(spaces))
 
 
 def spliced_oprod(*parts: Space) -> OProd:
-    """⊗ of ``parts`` with any PRODUCT operand SPLICED IN — ``X ⊗ (Y ⊗ Z) ↦ X ⊗ Y ⊗ Z``.
+    """Build the flat tensor product of ``parts``, splicing in any operand that is itself a product — ``X ⊗ (Y ⊗ Z) ↦ X ⊗ Y ⊗ Z``.
 
     ⊗ is associative, so a nested and a flat product denote ONE space; but they are different
     NODES, each top-level factor is a separate ARRAY AXIS (``lower.represent._shape_of_space``),
@@ -634,7 +644,7 @@ def drop_unit_factors(s: Space) -> Space:
 
     This is a PURE space operator, applied by the consumer that wants the reduced form (grassmann
     does not fold it silently anywhere): e.g. a transported top-form whose codomain is built as
-    ``OProd((𝟙, Img(alt∘J)))`` applies it to hand the FFS realizer a plain ``Λⁿ = Img`` (`§A3`).
+    ``OProd((𝟙, Img(alt∘J)))`` applies it to expose a plain ``Λⁿ = Img`` codomain.
     """
     match s:
         case OProd(spaces=spaces):
@@ -737,7 +747,7 @@ def space_app(g: Term, positions: tuple[int, ...], *args: Space | Dim | Term) ->
 
 # Sugar: linear-map space  s0 ⊸ s1  ≡  ~s0 ⊗ s1.
 def linear_map_space(s0: Space, s1: Space) -> OProd:
-    """``s0 ⊸ s1 = ~s0 * s1`` — the space of linear maps ``s0 → s1``."""
+    """Build the space of linear maps ``s0 → s1``, namely ``~s0 ⊗ s1``."""
     return oprod(dual(s0), s1)
 
 

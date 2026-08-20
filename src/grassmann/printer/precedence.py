@@ -38,7 +38,7 @@ class Op:
     """A binary operator: its precedence plus the surface symbol per back end.
 
     ``latex`` is the infix LaTeX symbol; ``text`` is the plaintext/Unicode symbol the
-    goal-5 unparser will use. Keeping both here means the precedence table is authored
+    plaintext unparser uses. Keeping both here means the precedence table is authored
     once and the two printers stay in lock-step.
     """
 

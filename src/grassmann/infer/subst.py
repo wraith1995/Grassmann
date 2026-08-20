@@ -1,8 +1,8 @@
-"""Capture-avoiding substitution on Spaces (and a Term passthrough), `25 §0`.
+"""Capture-avoiding substitution on Spaces (and a Term passthrough).
 
-``s[α := s']`` replaces a rigid space variable ``SVar(α)`` (or, equivalently, an ``SVar``
-named ``α`` standing for a Π-bound space parameter) by a space throughout ``s``. This is
-the operation that *closes open spaces on application* (`25 §3` note).
+``s[α := s']`` replaces a rigid space variable :class:`~grassmann.core.space.SVar` ``SVar(α)``
+(or, equivalently, an ``SVar`` named ``α`` standing for a Π-bound space parameter) by a
+space throughout ``s``. This is the operation that *closes open spaces on application*.
 
 Only the substitutions the inference rules actually need are implemented; nats/ints are
 not substituted here (they are concrete per the locked decision).
@@ -149,8 +149,8 @@ def subst_type_space(t: object, name: str, repl: Space) -> object:
     """``τ[name := repl]`` over a rigid space var ``SVar(name)`` *throughout a Type*.
 
     Recurses into ``Π`` domains/codomains and ``⟦s⟧`` wrappers so that applying a space
-    parameter closes every later occurrence of it in the codomain type (`25 §3` note:
-    *substitution closes open spaces on apply*). Capture-avoidance: a nested ``Π`` whose
+    parameter closes every later occurrence of it in the codomain type (substitution
+    closes open spaces on apply). Capture-avoidance: a nested ``Π`` whose
     own space binder shadows ``name`` stops the substitution under it.
     """
     from grassmann.core.kinds import SPACE, SpaceSort
@@ -176,8 +176,8 @@ def subst_type_space(t: object, name: str, repl: Space) -> object:
 def subst_term(t: object, name: str, repl: object) -> object:
     """Term-level substitution passthrough.
 
-    The §26 examples never substitute a *value* into a synthesized Space (codomains there
-    are value-independent), so this is the identity in v1. Kept as an entry point so the
+    The examples never substitute a *value* into a synthesized Space (codomains there
+    are value-independent), so this is the identity. Kept as an entry point so the
     synth rules read uniformly and future dependent codomains can hook in here.
     """
     return t
