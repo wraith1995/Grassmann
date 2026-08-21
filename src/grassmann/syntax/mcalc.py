@@ -1,6 +1,6 @@
 """``mcalc`` — a matrixcalculus.org-style **ASCII** surface for Grassmann.
 
-This is the *input* language for the matrixcalculus-style web tool. It is a strict
+It is a strict
 superset of matrixcalculus.org's grammar — their examples (``0.5*x'*A*x``,
 ``norm2(A*x-y)^2``, ``tr(A*X'*B*X*C)``, ``log(det(inv(X)))``) parse verbatim — plus
 coordinate-free extensions (``@`` compose, ``(+)`` direct sum, ``[a;b]`` stack,
@@ -271,7 +271,7 @@ def parse_ast(src: str) -> object:
 def free_vars(expression: str) -> list[str]:
     """Give the free variable names of an expression, in first-appearance order.
 
-    These are the names the web tool renders type dropdowns for. Function heads
+    These are the names a caller supplies types for. Function heads
     (``sin``/``tr``/…) and the reserved identity ``eye`` are excluded.
     """
     seen: dict[str, None] = {}
@@ -299,8 +299,8 @@ def free_vars(expression: str) -> list[str]:
 def default_decls(expression: str) -> dict[str, str]:
     """Give ``{name: "scalar"|"vector"|"matrix"}`` for each free variable.
 
-    The kind of each name follows the naming convention (:func:`default_type`); these are
-    the initial dropdown selections for the web tool.
+    The kind of each name follows the naming convention (:func:`default_type`) — a
+    reasonable default type for each free variable.
     """
     return {n: default_type(n) for n in free_vars(expression)}
 

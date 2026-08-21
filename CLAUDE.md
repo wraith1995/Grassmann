@@ -79,8 +79,7 @@ as above; orthonormal tangent frames use **sign-adjusted QR**
 
 ## Non-negotiable invariants (from this repo's audit docs)
 
-1. **I1**: transforms are coordinate-free — they never realize a basis
-   (`plans/05-design-invariants.md`).
+1. **I1**: transforms are coordinate-free — they never realize a basis.
 2. **No implicit conversions** — ℝ≅ℝ*, V≅V**, V≅WithInner(V,g): always explicit
    (`docs/design-problems.md`).
 3. **Canonical arm structure** (`docs/auditing.md` §0): every `_rep_X` / `_cob_from_*`
@@ -102,8 +101,7 @@ as above; orthonormal tangent frames use **sign-adjusted QR**
 `docs/auditing.md` (the three multi-agent audit procedures + hard-won lessons),
 `docs/arm-conformance.md` (per-arm STD/AUTO/MATCH grades incl. deliberate bails),
 `docs/basis-honesty-handoff.md` (14 fixed silent-wrong bugs), `docs/target-basis-roadmap.md`,
-`docs/design-problems.md` (decided subtle rules), `docs/bases-guide.md`, `docs/testing.md`,
-`plans/` (25 numbered design docs; `42-polyarray-additions.md` tracks the polyarray seam).
+`docs/design-problems.md` (decided subtle rules), `docs/bases-guide.md`, `docs/testing.md`.
 
 ## Workflow
 

@@ -68,9 +68,4 @@ vector — all lowered and run through `G.run`.
 ## Status
 
 Implementation in progress (core IR, embedding, inference, lowering, and a derived
-stdlib are live). Start with the design docs:
-
-- [`plans/60-implementation-plan.md`](plans/60-implementation-plan.md) — the implementation-workstream build.
-- [`plans/20-core-language.md`](plans/20-core-language.md) — the core IR.
-- [`plans/00-landscape.md`](plans/00-landscape.md) — facts about the source systems.
-- [`plans/01-meta-plan.md`](plans/01-meta-plan.md) — the roadmap.
+stdlib are live).
