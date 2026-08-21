@@ -27,6 +27,16 @@ surface flat):
 - `G.standard_basis(space)` — the standard (inner-product-orthonormal) frame of a space.
 - Subpackages: `G.core / G.embed / G.infer / G.lower / G.stdlib`.
 
+**Consuming grassmann.** A consumer embeds grassmann by importing it, building a term
+with the operator eDSL / `G.*` builders, and lowering it with `compile`/`compile_in`.
+The resulting `polyarray.Program` is what a consumer actually uses: call `prog.run(inputs)`
+to evaluate on numpy arrays, or emit it as a standalone, dependency-light **subset of
+Python** with `polyarray.numpy_source.to_numpy_source(prog)` (also reachable as
+`G.pa.to_numpy_source`) and inline that source into the consumer. Nothing above the
+`polyarray.Program` needs to be shipped with the consumer — grassmann is a build-time
+front end that produces plain array code. Downstream `fem` repos (`pointwise`, `oracle`)
+consume grassmann this way.
+
 Grassmann implements **no numerics of its own** — it lowers to `polyarray`, whose cells
 are exact rational functions, so closed-form parts stay symbolic and the rest becomes
 ordinary array work. The only lowering target confirmed in-tree is the numpy reference
