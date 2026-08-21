@@ -1,18 +1,25 @@
-Tutorial: the exterior algebra grassmann builds
-===============================================
+Tutorial: exterior algebra, gently
+==================================
 
-Grassmann's exterior algebra and calculus are a *derived library* over the core:
-:func:`~grassmann.exterior_power`, :func:`~grassmann.wedge`, the Hodge star, and
-the exterior derivative are not new IR nodes — each composes the existing core
-operations (a multi-variable linear lambda, :class:`~grassmann.core.term.Lift`,
-:class:`~grassmann.core.term.Img`, :class:`~grassmann.core.term.Embed` /
-:class:`~grassmann.core.term.Project`, :class:`~grassmann.core.term.Scale`). The
-construction is uniform in the dimension ``n`` and the degree ``k``. This tutorial
-walks that general construction and checks its laws hold — coordinate-free, across
-dimensions and degrees — by lowering each term to a program and running it.
+Exterior algebra is the algebra of **oriented** lengths, areas, and volumes. A
+single vector is an oriented length. Two vectors span an oriented parallelogram — an
+*area* that also remembers a sense of rotation. Three span an oriented volume.
+Exterior algebra is the arithmetic of these pieces: one operation, the **wedge**
+``∧``, that builds higher-dimensional pieces from lower ones, and a small family of
+derived operators — the Hodge star, the interior product, the exterior derivative —
+that turn out to be exactly the gradient, curl, divergence, and cross product you
+already know, only written without ever choosing coordinates.
 
-Setup
------
+This tutorial builds that world up one idea at a time in grassmann, and **checks
+every claim by compiling the expression to a program and running it**. You never
+have to take the algebra on faith — you can watch it compute. We work mostly in
+ordinary three-dimensional space ``ℝ³`` and let the dimension ``n`` and degree ``k``
+go general only at the end.
+
+Getting set up
+--------------
+
+Two imports — grassmann, and the exterior-algebra helpers it ships:
 
 .. doctest::
 
@@ -21,47 +28,110 @@ Setup
    >>> import grassmann as G
    >>> from grassmann.stdlib.exterior import wedge, hodge_star, interior, exterior_derivative
 
-Three helpers: the space ``ℝⁿ``, the inner product of a space as a two-argument
-map, and a runner that compiles a term and feeds each variable by name.
+And four small conveniences we reuse throughout. ``R(n)`` names the space ``ℝⁿ``;
+``run`` compiles a grassmann expression and evaluates it on numbers; ``show`` does
+the same but tidies the array for reading; ``pair`` is the inner product ``⟨·,·⟩``
+of a space:
 
 .. doctest::
 
    >>> def R(n):
    ...     return G.space(f"R{n}", n)
-   >>> def pair(s, a, b):
-   ...     return G.inner(s).at([0, 1])(a, b)              # ⟨·, ·⟩ on the space s
    >>> def run(term, **values):
    ...     prog = G.compile(term)
    ...     feed = {i.name: values[i.name.rsplit("_", 1)[0]] for i in prog.inputs}
    ...     return np.asarray(prog.run(feed)["result"], float)
+   >>> def show(term, **values):
+   ...     return (np.round(run(term, **values).ravel(), 4) + 0.0).tolist()
+   >>> def pair(s, a, b):
+   ...     return G.inner(s).at([0, 1])(a, b)
    >>> rng = np.random.default_rng(0)
 
-The antisymmetrizer and the exterior powers
--------------------------------------------
+To get our bearings on familiar ground, here is the ordinary dot product of two
+vectors of ``ℝ³``. A grassmann *variable* stands for an input, and ``run`` supplies
+its value by name:
 
-The whole construction rests on one map. The **antisymmetrizer** ``Alt : V⊗ᵏ ⊸
-V⊗ᵏ`` is ``(1/k!) Σ_σ sign(σ)`` over the permutations of the ``k`` factors — built
-as a multi-variable linear lambda that permutes its ``k`` arguments, uncurried by
-a :class:`~grassmann.core.term.Lift` into a single ``V⊗ᵏ`` input, and scaled by
-``1/k!``. The **``k``-th exterior power** is its image,
+.. doctest::
 
-    ``Λᵏ(V) = Img(Alt(V, k))``,
+   >>> V = R(3)
+   >>> u, v = G.var("u", V), G.var("v", V)
+   >>> float(run(G.dot(u, v), u=np.array([1., 2., 3.]), v=np.array([0., 1., -1.])))
+   -1.0
 
-a first-class space whose dimension is ``rank(Alt) = C(n, k)``. A ``k``-vector is
-just a variable of that space. One immediate consequence: wedging two 1-vectors
-lands in ``Λ²``, which has dimension ``C(n, 2)`` —
+Nothing surprising — ``1·0 + 2·1 + 3·(−1) = −1``. The point is the *shape* of the
+workflow: build an expression out of variables, then run it on data. Everything
+below is the same, with richer expressions.
+
+The wedge product: areas from vectors
+-------------------------------------
+
+The wedge ``u ∧ v`` of two vectors is the **oriented parallelogram** they span. Two
+facts capture what "oriented" means, and you can read both straight off the numbers.
+First, **swapping the two vectors reverses the orientation**, which flips the sign.
+Second, **a vector wedged with itself is zero** — a parallelogram with two equal
+sides is degenerate; it has no area. Take ``u`` and ``v`` along the first two axes:
+
+.. doctest::
+
+   >>> uu, vv = np.array([1., 0., 0.]), np.array([0., 1., 0.])
+   >>> show(wedge(u, v, 1, 1), u=uu, v=vv)      # u ∧ v
+   [1.4142, 0.0, 0.0]
+   >>> show(wedge(v, u, 1, 1), u=uu, v=vv)      # v ∧ u — same size, opposite sign
+   [-1.4142, 0.0, 0.0]
+   >>> show(wedge(u, u, 1, 1), u=uu)            # u ∧ u — degenerate, zero
+   [0.0, 0.0, 0.0]
+
+Don't read too much into the number ``1.4142`` itself — it is the area of the
+parallelogram measured in grassmann's own frame for these two-dimensional pieces.
+What matters is the *pattern*: the second result is the negative of the first, and
+the third is zero.
+
+The result ``u ∧ v`` is no longer a vector — it is a **2-vector**, a new kind of
+object living in a space grassmann calls ``Λ²``. The call ``wedge(u, v, 1, 1)`` reads
+"wedge a ``1``-vector with a ``1``-vector"; in general ``wedge(a, b, k, l)`` takes a
+``k``-vector and an ``l``-vector and returns a ``(k+l)``-vector.
+
+The sign rule generalizes: sliding a ``k``-vector past an ``l``-vector costs a sign
+``(-1)^{kl}``. This **graded anticommutativity** holds in every dimension and degree.
+Here it is checked by running both sides on random inputs and comparing:
+
+.. doctest::
+
+   >>> def anticommutes(n, k, l):
+   ...     V = R(n)
+   ...     a, b = G.var("a", G.exterior_power(V, k)), G.var("b", G.exterior_power(V, l))
+   ...     av, bv = rng.standard_normal(comb(n, k)), rng.standard_normal(comb(n, l))
+   ...     lhs = run(wedge(a, b, k, l), a=av, b=bv)
+   ...     rhs = run(G.scale(float((-1) ** (k * l)), wedge(b, a, l, k)), a=av, b=bv)
+   ...     return np.allclose(lhs, rhs, atol=1e-8)
+   >>> bool(all(anticommutes(n, k, l) for n, k, l in [(3, 1, 1), (3, 1, 2), (4, 1, 1)]))
+   True
+
+The exterior powers: where the wedge lives
+------------------------------------------
+
+The wedge climbs a ladder of spaces, and its rungs are the **exterior powers**:
+
+- ``Λ⁰(V)`` — the scalars,
+- ``Λ¹(V)`` — ``V`` itself, ordinary vectors,
+- ``Λ²(V)`` — the 2-vectors (oriented areas),
+- ``Λ³(V)`` — the 3-vectors (oriented volumes), and so on.
+
+``exterior_power(V, k)`` is the space ``Λᵏ(V)``, and a ``k``-vector is just a variable
+of it. How big is each rung? Exactly ``C(n, k)`` — the number of ways to pick ``k`` of
+the ``n`` axes. Wedging two vectors of ``ℝⁿ``, for instance, gives a 2-vector with
+``C(n, 2)`` components:
 
 .. doctest::
 
    >>> def wedge_dim(n):
    ...     V = R(n)
-   ...     u, v = G.var("u", V), G.var("v", V)
-   ...     out = run(wedge(u, v, 1, 1), u=rng.standard_normal(n), v=rng.standard_normal(n))
-   ...     return out.size
-   >>> [wedge_dim(3), wedge_dim(4)]                        # = C(3,2), C(4,2)
+   ...     a, b = G.var("a", V), G.var("b", V)
+   ...     return run(wedge(a, b, 1, 1), a=rng.standard_normal(n), b=rng.standard_normal(n)).size
+   >>> [wedge_dim(3), wedge_dim(4)]              # = C(3,2), C(4,2)
    [3, 6]
 
-Those dimensions ``C(n, k)`` are just Pascal's triangle. Up to ``n = 4``:
+Those dimensions ``C(n, k)`` are just Pascal's triangle:
 
 .. list-table:: ``dim Λᵏ(ℝⁿ) = C(n, k)``
    :header-rows: 1
@@ -98,56 +168,72 @@ Those dimensions ``C(n, k)`` are just Pascal's triangle. Up to ``n = 4``:
      - 4
      - 1
 
-The operations move around this table in fixed ways: the **wedge** adds degrees
-(``Λᵏ × Λˡ → Λ^{k+l}``), the **interior product** lowers a form by one
-(``Λᵏ → Λ^{k-1}``), the **Hodge star** reflects a column to its mirror
-(``Λᵏ → Λⁿ⁻ᵏ``, equal dimension), and the **exterior derivative** raises a form
-field by one (``Ωᵏ → Ωᵏ⁺¹``).
+Notice the symmetry of each row: ``Λᵏ`` and ``Λⁿ⁻ᵏ`` always have the *same* dimension.
+That coincidence is the seed of the Hodge star, below. And each operator we are about
+to meet shifts you around this table in a fixed way — the wedge adds degrees, the
+interior product and the codifferential lower a degree by one, the Hodge star reflects
+a row to its mirror, and the exterior derivative raises a form field by one.
 
-The wedge product
------------------
+.. admonition:: How grassmann builds it — optional
 
-``wedge(a, b, k, l) : Λᵏ × Λˡ → Λ^{k+l}`` is a *derived* function, not a core
-primitive. It embeds ``a`` and ``b`` back into ``V⊗ᵏ`` and ``V⊗ˡ`` (an exterior
-power is a subspace of the tensor power), tensors them, reassociates the nested
-product into the flat ``V⊗^{k+l}`` (an ``InvLift`` the core lowers as a reshape —
-the core never silently flattens a nested ``⊗``), antisymmetrizes, projects onto
-``Λ^{k+l}``, and scales. From that construction the graded anticommutativity
-``a ∧ b = (-1)^{kl} b ∧ a`` follows — and holds across degrees:
+   None of these spaces are built into grassmann's core; the whole exterior algebra
+   is a small *library* on top of it. The one ingredient is the **antisymmetrizer**
+   ``Alt``, the map that averages a tensor over all orderings of its slots with a sign,
+   ``(1/k!) Σ_σ sign(σ)``. The ``k``-th exterior power is literally its image,
+   ``Λᵏ(V) = Img(Alt)``, and the wedge is "embed into the tensor power, multiply,
+   antisymmetrize, project back." You never need this to *use* the algebra — but it is
+   why every law here holds by construction rather than by convention.
+
+Measuring k-vectors: the inner product
+--------------------------------------
+
+You can measure lengths and angles of ``k``-vectors, not just of ordinary vectors,
+and grassmann hands you that inner product for free — it rides along from the way each
+``Λᵏ`` sits inside the tensor power. On ordinary vectors (``k = 1``) it is nothing but
+the dot product:
 
 .. doctest::
 
-   >>> def anticommutes(n, k, l):
-   ...     V = R(n)
-   ...     a, b = G.var("a", G.exterior_power(V, k)), G.var("b", G.exterior_power(V, l))
-   ...     av, bv = rng.standard_normal(comb(n, k)), rng.standard_normal(comb(n, l))
-   ...     lhs = run(wedge(a, b, k, l), a=av, b=bv)
-   ...     rhs = run(G.scale(float((-1) ** (k * l)), wedge(b, a, l, k)), a=av, b=bv)
-   ...     return np.allclose(lhs, rhs, atol=1e-8)
-   >>> bool(all(anticommutes(n, k, l) for n, k, l in [(3, 1, 1), (3, 1, 2), (4, 1, 1)]))
+   >>> a, b = G.var("a", V), G.var("b", V)
+   >>> aa, bb = np.array([1., 2., 3.]), np.array([0., 1., -1.])
+   >>> bool(np.isclose(float(run(pair(V, a, b), a=aa, b=bb)), float(aa @ bb)))
    True
 
-The inner product and the Hodge star
-------------------------------------
+The Hodge star: a k-vector and its complement
+---------------------------------------------
 
-The inner product on ``Λᵏ`` is *induced* — it rides for free from the embedding
-``Λᵏ ⊑ V⊗ᵏ``, so ``pair`` above needs nothing extra to work on any exterior power.
-The **Hodge star** ``⋆ : Λᵏ(V) → Λⁿ⁻ᵏ(V)`` is built coordinate-free as ``⋆ = M⁻¹ ∘
-♭``, where ``♭`` lowers with the metric and ``M(γ) = (α ↦ ⟨α ∧ γ, vol⟩)`` is the
-wedge-into-volume pairing. Equivalently, ``⋆`` is *characterized* by
+Here the symmetry of Pascal's triangle pays off. Because ``Λᵏ`` and ``Λⁿ⁻ᵏ`` have the
+same size, there is a natural way to turn one into the other — the **Hodge star**
+``⋆``. It sends a ``k``-vector to the ``(n−k)``-vector that is, in a precise sense, its
+orthogonal complement.
 
-    ``α ∧ ⋆β = ⟨α, β⟩ · vol``   for all ``α, β ∈ Λᵏ``,
+In ``ℝ³`` this is an old friend. A 2-vector ``u ∧ v`` is the plane spanned by ``u``
+and ``v``; its complement is the line perpendicular to that plane — and that line,
+with the right orientation, is exactly the **cross product** ``u × v``:
 
-with ``vol`` the unit volume form ``e₁ ∧ … ∧ eₙ``. We build that volume form
-generally and check the identity across ``(n, k)``:
+.. doctest::
+
+   >>> show(hodge_star(wedge(u, v, 1, 1), 2), u=uu, v=vv)   # ⋆(u ∧ v)
+   [0.0, 0.0, 0.8165]
+   >>> np.cross(uu, vv).tolist()                            # u × v
+   [0.0, 0.0, 1.0]
+
+Both point straight up the third axis: ``⋆(u ∧ v)`` *is* the cross product, up to a
+fixed scale (the ``0.8165`` is grassmann's internal normalization for these areas;
+the direction is what carries the meaning).
+
+In general, ``⋆`` is pinned down by a single identity — wedging any ``α`` against
+``⋆β`` and comparing to the unit volume form recovers the inner product,
+``α ∧ ⋆β = ⟨α, β⟩ · vol``. We can build the volume form and confirm it across
+dimensions and degrees:
 
 .. doctest::
 
    >>> def unit_vol(n):
    ...     V, Ln = R(n), G.exterior_power(R(n), n)
    ...     e = lambda i: G.ostack(*[G.lit(1.0 if j == i else 0.0) for j in range(n)])
-   ...     raw = G.project(G.tensor(*[e(i) for i in range(n)]), Ln)   # e₁∧…∧eₙ
-   ...     return V, Ln, G.scale(G.reciprocal(G.sqrt(pair(Ln, raw, raw))), raw)   # ⟨vol,vol⟩=1
+   ...     raw = G.project(G.tensor(*[e(i) for i in range(n)]), Ln)          # e₁∧…∧eₙ
+   ...     return V, Ln, G.scale(G.reciprocal(G.sqrt(pair(Ln, raw, raw))), raw)
    >>> def hodge_characterizes(n, k):
    ...     V, Ln, vol = unit_vol(n)
    ...     Lk = G.exterior_power(V, k)
@@ -159,45 +245,59 @@ generally and check the identity across ``(n, k)``:
    >>> bool(all(hodge_characterizes(n, k) for n, k in [(2, 1), (3, 1), (3, 2)]))
    True
 
-The interior product
---------------------
+Forms, and the interior product
+-------------------------------
 
-The **interior product** ``ι_v`` contracts a form with a vector, lowering the
-degree by one: ``ι_v : Λᵏ(V*) → Λ^{k-1}(V*)``. Forms live over the dual ``V*``, so
-a 1-form is a covector; grassmann builds ``ι_v`` by embedding the form into
-``(V*)⊗ᵏ``, applying ``v`` to the first slot, and projecting back onto
-``Λ^{k-1}``. On a 1-form it is exactly the pairing ``ι_v ω = ω(v)``; on higher
-forms it is an antiderivation, and on a wedge of 1-forms that reads
-``ι_v(a ∧ b) = ⟨a, v⟩ b − ⟨b, v⟩ a`` — which holds across dimensions:
+So far a ``k``-vector has been a *thing* — an area, a volume. Its dual is a
+``k``-**form**: a *measurement*, something that eats ``k`` vectors and returns a
+number. A 1-form is an ordinary covector, and the dual pairing ``ω(v)`` is just
+application. Forms live over the dual space ``V*``.
+
+The **interior product** ``ι_v`` feeds a single vector ``v`` into a form and hands
+back a form of one lower degree. On a 1-form it is exactly the pairing, ``ι_v ω = ω(v)``.
+On a wedge of 1-forms it distributes with alternating signs — the **Leibniz rule**
+``ι_v(a ∧ b) = ⟨a, v⟩ b − ⟨b, v⟩ a`` — which we can again confirm by running:
 
 .. doctest::
 
    >>> def contracts_by_leibniz(n):
    ...     W, Ws = R(n), G.dual(R(n))                 # 1-forms live in V* = Dual(V)
    ...     a, b = G.var("a", Ws), G.var("b", Ws)
-   ...     v = G.var("v", W)                          # a vector to contract with
+   ...     v = G.var("v", W)
    ...     av, bv, vv = (rng.standard_normal(n) for _ in range(3))
    ...     lhs = run(interior(wedge(a, b, 1, 1), v, 2), a=av, b=bv, v=vv)
-   ...     rhs = (av @ vv) * bv - (bv @ vv) * av      # ⟨a,v⟩ b − ⟨b,v⟩ a
+   ...     rhs = (av @ vv) * bv - (bv @ vv) * av
    ...     return np.allclose(lhs.ravel(), rhs, atol=1e-8)
    >>> bool(all(contracts_by_leibniz(n) for n in (3, 4)))
    True
 
-The exterior derivative
------------------------
+Calculus: the exterior derivative
+---------------------------------
 
-The calculus is the same story. ``exterior_derivative(ω, x, k)`` is the coordinate
-formula ``dω = Σⱼ eʲ ∧ ∂ⱼω``: the partial ``∂ⱼω`` is the covariant derivative
-(:func:`~grassmann.diff`) of the form field ``ω`` applied to the ``j``-th basis
-vector, and ``eʲ`` is the ``j``-th dual 1-form. Because it is a genuine exterior
-derivative, it is nilpotent — ``d ∘ d = 0`` — in every dimension:
+Everything so far was algebra at a single point. Now let a form *vary over space* — a
+**form field** — and differentiate it. The **exterior derivative** ``d`` raises the
+degree of a form field by one, and it is the one operator that, in the right
+dimension, is the gradient, the curl, and the divergence all at once.
+
+Start with a scalar field ``f`` (a 0-form). Its exterior derivative ``df`` is the
+**gradient**. For ``f = ½|x|²`` the gradient is ``x`` itself:
+
+.. doctest::
+
+   >>> x = G.var("x", V)
+   >>> f = G.scale(0.5, G.dot(x, x))                  # f = ½|x|²
+   >>> df = exterior_derivative(f, x, 0)              # df : a 1-form field
+   >>> run(df, x=np.array([1., 2., 3.])).ravel()
+   array([1., 2., 3.])
+
+The deepest fact about ``d`` is that **doing it twice gives zero**, ``d ∘ d = 0``
+(geometrically: the boundary of a boundary is empty). In every dimension:
 
 .. doctest::
 
    >>> def d_squared_zero(n):
-   ...     V = R(n)
-   ...     x = G.var("x", V)
-   ...     f = G.scale(0.5, G.dot(x, x))                  # f = ½|x|²  (a 0-form field)
+   ...     V = R(n); x = G.var("x", V)
+   ...     f = G.scale(0.5, G.dot(x, x))
    ...     ddf = exterior_derivative(exterior_derivative(f, x, 0), x, 1)
    ...     return np.allclose(run(ddf, x=rng.standard_normal(n)), 0.0, atol=1e-9)
    >>> bool(all(d_squared_zero(n) for n in (2, 3, 4)))
@@ -206,55 +306,29 @@ derivative, it is nilpotent — ``d ∘ d = 0`` — in every dimension:
 The codifferential
 ------------------
 
-The **codifferential** ``δ`` is the formal adjoint of ``d``: it lowers the degree
-by one, ``δ : Ωᵏ → Ωᵏ⁻¹``, and is built as ``δ = ± ⋆ d ⋆``. On a 1-form it is the
-divergence up to sign, and — being ``d`` conjugated by the star — it is nilpotent
-too, ``δ ∘ δ = 0``:
+``d`` raises the degree; its partner the **codifferential** ``δ`` lowers it. It is
+built by conjugating ``d`` with the Hodge star, ``δ = ± ⋆ d ⋆`` — informally "star,
+differentiate, star back." On a 1-form it is the divergence (up to sign), and because
+it is ``d`` in a mirror, it inherits ``d``'s nilpotency, ``δ ∘ δ = 0``:
 
 .. doctest::
 
-   >>> def codifferential(omega, x, k, n):        # δ = ⋆ d ⋆ : Ωᵏ → Ωᵏ⁻¹
+   >>> def codifferential(omega, x, k, n):
    ...     return hodge_star(exterior_derivative(hodge_star(omega, k), x, n - k), n - k + 1)
    >>> def delta_squared_zero(n):
-   ...     W = R(n)
-   ...     x, A = G.var("x", W), G.var("A", W >> W)
-   ...     omega = hodge_star(G.flat(W)(A(x)), 1)      # ⋆♭(A·x): an (n-1)-form field
+   ...     W = R(n); x, A = G.var("x", W), G.var("A", W >> W)
+   ...     omega = hodge_star(G.flat(W)(A(x)), 1)      # ⋆♭(A·x): an (n−1)-form field
    ...     dd = codifferential(codifferential(omega, x, n - 1, n), x, n - 2, n)
    ...     return np.allclose(run(dd, A=np.eye(n), x=rng.standard_normal(n)), 0.0, atol=1e-8)
    >>> bool(delta_squared_zero(3))
    True
 
-Moving a value between spaces
------------------------------
+These are the operators you already know
+----------------------------------------
 
-Not every transport needs a metric or a derivative. ``pullback(v, target)`` moves
-a value into a related target space, inserting whatever projection, embedding, or
-change of basis the relationship calls for — coordinate-free. Projecting onto a
-summand of a direct sum keeps its coordinates and drops the rest; embedding into a
-larger space pads with zeros; and embedding then projecting is the identity on the
-subspace:
-
-.. doctest::
-
-   >>> A3, B2 = G.space("A", 3), G.space("B", 2)
-   >>> S = G.osum(A3, B2)                          # the direct sum A ⊕ B = ℝ⁵
-   >>> z = G.var("z", S)
-   >>> run(G.pullback(z, A3), z=np.array([1., 2., 3., 4., 5.])).ravel()      # project A⊕B → A
-   array([1., 2., 3.])
-   >>> p = G.var("p", A3)
-   >>> run(G.pullback(p, S), p=np.array([7., 8., 9.])).ravel()               # embed A → A⊕B (pad)
-   array([7., 8., 9., 0., 0.])
-   >>> bool(np.allclose(run(G.pullback(G.pullback(p, S), A3),
-   ...                      p=np.array([7., 8., 9.])).ravel(), [7., 8., 9.]))   # embed then project = id
-   True
-
-What these operators are, concretely
-------------------------------------
-
-In low dimensions these coordinate-free operators are exactly the familiar ones
-of vector calculus. The Hodge star carries the induced-metric normalization from
-before, so the metric identifications hold up to that scale (for instance
-``⋆(u ∧ v)`` points *along* ``u × v`` rather than being equal to it):
+Put ``d``, ``⋆``, and the musical isomorphisms ``♭`` / ``♯`` together (``♭`` trades a
+vector for the 1-form that measures against it; ``♯`` is the reverse) and the whole of
+vector calculus falls out — coordinate-free, in any dimension. In ``ℝ³``:
 
 .. list-table:: the coordinate-free operators as classical operations
    :header-rows: 1
@@ -302,8 +376,9 @@ before, so the metric identifications hold up to that scale (for instance
      - related spaces
      - project or embed a value into ``U``
 
-Three of these we can check outright. The divergence of a linear field ``F = A·x``
-is the trace of ``A``, and ``⋆(u ∧ v)`` is parallel to the cross product:
+Three of these we can check outright: the divergence of the linear field ``F = A·x``
+is the trace of ``A``, ``⋆(u ∧ v)`` lies along ``u × v``, and ``⋆(u ∧ v ∧ w)`` is the
+signed volume ``det[u, v, w]`` (each up to the Hodge star's fixed scale):
 
 .. doctest::
 
@@ -320,9 +395,39 @@ is the trace of ``A``, and ``⋆(u ∧ v)`` is parallel to the cross product:
    >>> bool(np.allclose(np.cross(s, np.cross(uu, vv)), 0.0, atol=1e-8))   # ⋆(u∧v) ∥ u×v
    True
    >>> tp = float(run(hodge_star(wedge(wedge(u, v, 1, 1), w, 2, 1), 3), u=uu, v=vv, w=ww))
-   >>> bool(np.isclose(tp, np.sqrt(6) * np.linalg.det(np.array([uu, vv, ww]))))   # ⋆(u∧v∧w) = √6·det[u,v,w]
+   >>> bool(np.isclose(tp, np.sqrt(6) * np.linalg.det(np.array([uu, vv, ww]))))   # ⋆(u∧v∧w) = √6·det
    True
 
-None of these laws were written into the toolkit; each one is a fact about the
-general construction that held because grassmann lowered the coordinate-free term
-to the right computation — for whichever ``n`` and ``k`` we asked.
+Moving a value between spaces
+-----------------------------
+
+One last operator, of a different flavour. Not every transport needs a metric or a
+derivative — sometimes you just want to carry a value from one space into a related
+one. ``pullback(v, target)`` does exactly that, inserting whatever projection,
+embedding, or change of basis the relationship calls for. Projecting onto a summand of
+a direct sum keeps its coordinates and drops the rest; embedding into a larger space
+pads with zeros; and embedding then projecting is the identity on the subspace:
+
+.. doctest::
+
+   >>> A3, B2 = G.space("A", 3), G.space("B", 2)
+   >>> S = G.osum(A3, B2)                          # the direct sum A ⊕ B = ℝ⁵
+   >>> z = G.var("z", S)
+   >>> run(G.pullback(z, A3), z=np.array([1., 2., 3., 4., 5.])).ravel()      # project A⊕B → A
+   array([1., 2., 3.])
+   >>> p = G.var("p", A3)
+   >>> run(G.pullback(p, S), p=np.array([7., 8., 9.])).ravel()               # embed A → A⊕B (pad)
+   array([7., 8., 9., 0., 0.])
+   >>> bool(np.allclose(run(G.pullback(G.pullback(p, S), A3),
+   ...                      p=np.array([7., 8., 9.])).ravel(), [7., 8., 9.]))   # embed then project = id
+   True
+
+Where to go next
+----------------
+
+Every law in this tour was checked by compiling a coordinate-free expression and
+running the result — none were written into the toolkit by hand. That is the whole
+idea: you write the mathematics you mean, and grassmann turns it into the computation
+that mathematics denotes, for whichever ``n`` and ``k`` you ask. From here, the
+:doc:`grammar` sets out the four families of objects precisely, and :doc:`public_api`
+is the catalogue of everything importable.
