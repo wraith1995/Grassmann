@@ -75,6 +75,46 @@ def test_constant_is_zero_map() -> None:
     assert isinstance(J, T.Zero)
 
 
+def test_xindependent_direct_sum_is_zero_map() -> None:
+    """An x-independent ``OPlusV`` differentiates to the zero map, not an unused-seed ``LLam``.
+
+    The ``OPlusV`` arm builds ``⊕ᵢ dvᵢ``; when every component is x-independent that is
+    ``⊕ᵢ 0``, which must collapse to ``Zero`` (as the ``Sum`` / ``OProdV`` arms do).  A
+    regression guard: it previously produced ``OPlusV(Zero, Zero)`` and the diff wrapper then
+    wrapped it in ``LLam((h,), …)`` over an unused seed, which ``LLam`` rejects
+    (``linear variable(s) do not occur in the body``).
+    """
+    A = S.base("A", 2)
+    x = T.var("x", S.base("X", 2))
+    c1, c2 = T.var("c1", A), T.var("c2", A)
+    assert isinstance(diff(T.OPlusV((c1, c2)), x), T.Zero)
+    # also through a nonlinearity on a constant component
+    assert isinstance(diff(T.OPlusV((L.tanh(c1).node, c2)), x), T.Zero)
+
+
+def test_mixed_direct_sum_derivative_matches_fd() -> None:
+    """A direct sum with one x-dependent component differentiates correctly (the x-independent
+    block reads zero), confirming the all-zero collapse did not disturb the mixed case."""
+    A = S.base("A", 2)
+    X = S.base("X", 2)
+    x = T.var("x", X)
+    M = T.var("M", S.oprod(S.dual(X), A))
+    c = T.var("c", A)  # x-independent block
+    F = T.OPlusV((T.Eval(M, (0,), (x,)), c))  # (M x) ⊕ c
+    J = diff(F, x)
+    assert isinstance(J, T.LLam)
+    Mval, cval, xval = np.random.randn(2, 2), np.random.randn(2), np.random.randn(2)
+    feed = {f"M_{M.uid}": Mval, f"c_{c.uid}": cval, _xkey(x): xval}
+    h = np.random.randn(2)
+    seed = J.vars[0]
+    got = _run(J.body, {**feed, f"{seed.name}_{seed.uid}": h}).ravel()
+    fd = _fd_jacobian(F, x, feed, 2) @ h
+    np.testing.assert_allclose(got, fd, atol=1e-5)
+    # the map lowers as xᵀM (value shape (dom, cod)), so d(M x)·h = Mᵀh in the first block;
+    # the constant block is 0
+    np.testing.assert_allclose(got, np.concatenate([Mval.T @ h, np.zeros(2)]), atol=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # Product / chain rule vs finite differences.
 # ---------------------------------------------------------------------------
@@ -2293,3 +2333,62 @@ def test_noninj_img_immersion_gauge_raises() -> None:
                 diff(e, x, deps={v.uid: Dv, J.uid: DJ})
         finally:
             clear_subspace_gauges()
+
+
+def test_diff_logdet_det_of_nonbij_endomorphism_is_welltyped() -> None:
+    """diff of det/logdet of an x-dependent square endomorphism that is NOT a bij-asserted Var
+    (here ``M0{bij} + bump(x)``, a Sum) must produce a WELL-TYPED Jacobian.
+
+    Jacobi's formula ``d det = det·tr(f⁻¹ df)`` needs ``f⁻¹`` = ``Solve(f)``, which requires ``f``
+    asserted ``bij``.  ``diff`` now emits that assertion (``Assert(f, …, bij)``); regression guard
+    that (a) the derivative type-checks, (b) it matches finite differences, (c) the load-bearing
+    assertion survives ``simplify``/``normal_form``/``beta``."""
+    from grassmann.core.props import bij
+    from grassmann.infer.synth import synth_space
+    import grassmann as G
+
+    V = S.base("V", 3)
+    x = T.var("x", V)
+    M0 = T.var("M0", S.oprod(S.dual(V), V), props=bij)
+    bump = T.scale(0.05, T.oprod_v(T.Eval(T.flat(V), (0,), (x,)), x))
+    Mx = T.sum_(M0, bump)  # an x-dependent square endomorphism; NOT itself asserted bij
+
+    M0v = 1.5 * np.eye(3) + 0.3 * np.random.randn(3, 3)
+    for build in (T.LogDet, T.Det):
+        F = build(Mx)
+        J = diff(F, x)
+        assert isinstance(J, T.LLam)
+        synth_space(J.body)  # must type-check (raised InferError before the fix)
+        feed = {"M0_%d" % M0.uid: M0v, _xkey(x): np.random.randn(3)}
+        h = np.random.randn(3)
+        got = _run(J.body, {**feed, "%s_%d" % (J.vars[0].name, J.vars[0].uid): h}).ravel()
+        fd = _fd_jacobian(F, x, feed, 3) @ h
+        np.testing.assert_allclose(got, fd, atol=1e-4)
+        # the bij assertion must survive every value-preserving rewrite
+        for rw in (G.simplify, G.normal_form, G.beta):
+            r = rw(J.body)
+            synth_space(r.node if hasattr(r, "node") else r)
+
+
+def test_direct_sum_diagonal_is_linear_and_second_diff_is_zero() -> None:
+    """``x ⊕ x`` uses x twice, so its Jacobian is the direct-sum DIAGONAL ``h ↦ h⊕h``.  ``⊕`` is
+    additive (parallel slots), so that is a valid LINEAR map (h consumed once, not twice), and the
+    second derivative of the linear ``Mo(x⊕x)`` is the zero map.  Regression: the exactly-once
+    linearity check used to treat OPlusV as multiplicative and reject ``h⊕h`` (a LinearityError
+    leaked from the second differentiation)."""
+    from grassmann.infer.linearity import check_linearity, LinearityError
+
+    V = S.base("V", 3)
+    h = T.var("h", V)
+    check_linearity(T.LLam((h,), T.OPlusV((h, h))))                 # diagonal: linear
+    check_linearity(T.LLam((h,), T.OPlusV((h, T.zero(V)))))         # injection: linear
+    with pytest.raises(LinearityError):                            # tensor diagonal: nonlinear
+        check_linearity(T.LLam((h,), T.OProdV((h, h))))
+    with pytest.raises(LinearityError):                            # nonzero const slot: affine
+        check_linearity(T.LLam((h,), T.OPlusV((h, T.var("c", V)))))
+
+    x = T.var("x", V)
+    W = S.oplus(V, V)
+    Mo = T.var("Mo", S.oprod(S.dual(W), V))
+    F = T.Eval(Mo, (0,), (T.OPlusV((x, x)),))  # linear in x
+    assert isinstance(diff(diff(F, x), x), T.Zero)  # 2nd derivative of a linear term is 0

@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from grassmann.core.space import is_space
 from grassmann.core.term import (
     LLam,
+    OPlusV,
     Sum,
     Var,
     Zero,
@@ -123,10 +124,20 @@ def _usage(node: object, tracked: set[int], names: dict[int, str]) -> Usage:
             return Usage.single(node.uid)
         return Usage.empty()
 
-    # A Sum is the one ADDITIVE node: its summands are alternative branches that must
-    # each consume the tracked vars identically.
+    # A Sum is ADDITIVE: its summands are alternative branches that must each consume the tracked
+    # vars identically.
     if isinstance(node, Sum):
         branches = [_usage(v, tracked, names) for v in node.vectors]
+        return _add_merge(branches, names)
+
+    # A direct sum ``OPlusV`` is ALSO additive — its slots are PARALLEL, independent components of
+    # ``⊕``, not a shared multiplicative path.  So ``h ⊕ h`` (the direct-sum diagonal, e.g.
+    # ``d(x⊕x)``) consumes ``h`` ONCE, not twice, and ``h ⊕ 0`` (an injection, the derivative of a
+    # slot that is x-independent) is fine.  A ``Zero`` slot is the additive unit (no constraint);
+    # the non-zero slots must consume identically, so genuine nonlinearity in a slot (``h⊗h``, which
+    # is multiplicative inside the slot ⇒ count 2) is still rejected by the outer exactly-once check.
+    if isinstance(node, OPlusV):
+        branches = [_usage(v, tracked, names) for v in node.vectors if not isinstance(v, Zero)]
         return _add_merge(branches, names)
 
     # A nested LLam binds its OWN (fresh-uid) vars; the outer linear vars it mentions are

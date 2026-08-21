@@ -611,17 +611,26 @@ class Embed:
 
 @dataclass(frozen=True)
 class Assert:
-    """An assertion that ``v`` has space ``s`` (``space(v) ~ s``)."""
+    """Assert that ``v`` has space ``s`` (``space(v) ~ s``).
+
+    May also carry asserted map ``props`` (``inj``/``surj``/``bij``/``rank``) that ride with the
+    value the way a ``Var``'s props do — so a *derived* map (not a ``Var``) can be asserted as,
+    e.g., ``bij`` where a rule knows it holds (``diff`` of ``det``/``logdet`` asserts its operand
+    invertible for the ``Solve`` in ``tr(f⁻¹·df)``)."""
 
     vector: Term
     space: Space
+    props: MapProps | None = None
 
     def __post_init__(self) -> None:
         _require_term(self.vector, "Assert.vector")
         _require_space_field(self.space, "Assert")
+        if self.props is not None and not isinstance(self.props, MapProps):
+            raise TermError(f"Assert: props must be a MapProps, got {self.props!r}")
 
     def __repr__(self) -> str:
-        return f"Assert({self.vector!r}, {self.space!r})"
+        p = f", props={self.props!r}" if self.props is not None else ""
+        return f"Assert({self.vector!r}, {self.space!r}{p})"
 
 
 @dataclass(frozen=True)
@@ -1217,9 +1226,9 @@ def embed(vector: Term, space: Space) -> Embed:
     return Embed(vector, space)
 
 
-def assert_(vector: Term, space: Space) -> Assert:
-    """Build the assertion that ``vector`` has space ``space``."""
-    return Assert(vector, space)
+def assert_(vector: Term, space: Space, props: MapProps | None = None) -> Assert:
+    """Build an ``Assert`` — assert that ``vector`` has space ``space`` (and optional map ``props``)."""
+    return Assert(vector, space, props)
 
 
 def tuple_embed(space: Space, i: int) -> TupleEmbed:

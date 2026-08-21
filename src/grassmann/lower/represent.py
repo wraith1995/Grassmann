@@ -111,6 +111,15 @@ class RepresentError(Exception):
     """Raised when a term cannot be lowered to a polyarray ``Program``."""
 
 
+class ShapeInvariantError(RepresentError):
+    """The canonical-shape hook found a node realizing its space to a non-canonical shape.
+
+    A *subclass* of :class:`RepresentError` (it is a lowering-invariant violation), but a distinct
+    type so a debug/fuzz harness can tell a genuine defect from a clean "not-yet-wired" bail.  Only
+    raised when the hook is armed (:func:`set_shape_check`), which is off by default.
+    """
+
+
 @dataclass
 class Rep:
     """The lowering of one subterm: its coordinate array + the basis/space it lives in.
@@ -573,6 +582,65 @@ class _Ctx:
 # ===========================================================================
 
 
+# ---------------------------------------------------------------------------
+# Canonical-shape invariant hook (debug/fuzz — OFF by default, zero cost when off).
+#
+# The invariant: a grassmann Space has exactly ONE canonical numeric shape,
+# ``_shape_of_space(space)``, and every node that realizes a value of that space MUST produce
+# an array whose (space) axes equal it.  When enabled, this fires at the PRODUCING node —
+# catching a shape divergence there rather than downstream at a Sum/Concat.  Toggle via
+# ``GRASSMANN_REP_SHAPE_CHECK=1`` or :func:`set_shape_check`.
+# ---------------------------------------------------------------------------
+
+_SHAPE_CHECK: bool = os.environ.get("GRASSMANN_REP_SHAPE_CHECK", "") not in ("", "0", "false", "no")
+
+
+def set_shape_check(on: bool) -> bool:
+    """Enable/disable the canonical-shape invariant hook at runtime; returns the previous value."""
+    global _SHAPE_CHECK
+    prev, _SHAPE_CHECK = _SHAPE_CHECK, bool(on)
+    return prev
+
+
+def _assert_canonical_shape(rep: Rep, e: T.Term) -> None:
+    """Assert ``rep``'s realized space-axes match the canonical shape of ``rep.space``.
+
+    Static case (all axes concrete): the exact shape must equal ``_shape_of_space``.  Dynamic case
+    (a symbolic/``DimAtom`` axis, from the ``DimVar`` n-generic lane): the concrete sizes are not
+    known at compile time, so the check falls back to the **rank** (axis count), which must equal
+    the space's canonical axis count.  Rank is computed with ``_space_axes`` — pure structure, so
+    no FFS realization is triggered (the hook must not mutate the program).
+    """
+    shape = _shape_of(rep.array)
+    n_space = len(shape) - len(rep.free_labels)
+    space_axes = tuple(shape[:n_space])
+    if all(isinstance(d, int) for d in space_axes):
+        try:
+            canon = tuple(_shape_of_space(rep.space))
+        except (RepresentError, S.SpaceError):
+            return  # no static canonical shape (SVar/App) — nothing to compare
+        if not all(isinstance(d, int) for d in canon):
+            return
+        if space_axes != canon:
+            raise ShapeInvariantError(
+                f"canonical-shape invariant violated: {type(e).__name__} of space {rep.space!r} "
+                f"realized space-axes {space_axes} but _shape_of_space is {canon} "
+                f"(a node lowered its space to a non-canonical shape)"
+            )
+    else:
+        # dynamic axes present ⇒ compare the RANK (side-effect-free structural axis count).
+        try:
+            want_rank = len(_space_axes(rep.space))
+        except Exception:  # noqa: BLE001 — an unshaped space just skips the check
+            return
+        if n_space != want_rank:
+            raise ShapeInvariantError(
+                f"canonical-shape invariant violated: {type(e).__name__} of space {rep.space!r} "
+                f"realized {n_space} space-axis/es but the canonical rank is {want_rank} "
+                f"(a node lowered its space to a non-canonical rank, dynamic-dim lane)"
+            )
+
+
 def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     """``⟦e⟧ ⇒ Rep`` — represent ``e``, then re-express it in the ``target`` basis.
 
@@ -590,6 +658,8 @@ def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
     # The node sees ``target`` and realizes directly in it where it cheaply can (a Var declares
     # its input in that basis; a Sum/Scale builds its operands in it) — so no cob is needed.
     rep = _rep_node(e, ctx, target)
+    if _SHAPE_CHECK:
+        _assert_canonical_shape(rep, e)
     # Safety net: any node that produced a different (natural) basis is cob'd here — a no-op when
     # the node already honored ``target``.
     want = _resolve_target(ctx, rep.space, target)
@@ -1263,10 +1333,22 @@ def _rep_oplus(
     # the concat's length is the SUM of the operand lengths — derive it from the realized
     # operands (a runtime sum atom when any is dynamic) so a symbolic ℝⁿ ⊕ ℝⁿ sizes correctly.
     _arrs = [r.array for r in reps]
-    # A 0-d SCALAR summand (e.g. euclidean built as ⊕ⁿ Scalar) contributes length 1 — consistent with
-    # `_ConcatOp`, which flattens every operand (`reshape(-1)`), so a scalar rides as a single element.
-    _dims = [(_shape_of(a)[0] if _shape_of(a) else 1) for a in _arrs]
-    _sum = _combined_dim(ctx, _dims, "sum", _arrs, 0, label="oplus")
+    # `_ConcatOp` flattens every operand (`reshape(-1)`), so each summand contributes its
+    # FLATTENED length — a 0-d Scalar rides as one element, a multi-axis (⊗-typed) summand as its
+    # full product.  Reading axis 0 only (`_shape_of(a)[0]`) undercounts a multi-axis summand, so
+    # the declared concat length disagreed with the (correct) flattened data — e.g. a ``(2,3)``
+    # summand counted as 2, declaring ``(4,)`` where the concat produced 8.  Size from the flattened
+    # total instead; it also equals ``_shape_of_space(⊕)`` = ``Σ|sᵢ|``.
+    _shapes = [_shape_of(a) for a in _arrs]
+    if all(all(isinstance(dax, int) for dax in sh) for sh in _shapes):
+        _sum: int | pa.DimAtom = sum(int(np.prod(sh)) if sh else 1 for sh in _shapes)
+    else:
+        # `_ConcatOp` flattens every summand and produces Σ|sᵢ| = _shape_of_space(⊕) directly, so
+        # declare the length as a fresh runtime atom sourced from THIS concat and let _bind_output
+        # size it from the realized array.  Reading one summand axis (the old path) both crashed on
+        # a 0-d Scalar (no axis 0) and undercounted a multi-axis ⊗-typed summand (n for ℝⁿ⊗ℝⁿ, not
+        # n²); self-sizing from the produced concat is right for every summand shape.
+        _sum = pa.DimAtom(name="oplus-len", source=("stmt", len(ctx.prog.statements), 0))
     [out] = ctx.prog.emit_stmt(
         pa.ConcatOp(), _arrs, [pa.OutSpec("oplus", (_sum,))], note="oplus:concat",
     )
@@ -1294,14 +1376,16 @@ def _rep_oprod(
     carries — the ``LLam`` → coordinate-tensor binding — ride through verbatim to
     the output, so the outer product of LLam-bound matrix operands is the full map tensor.
 
-    A ``Scalar`` factor is PRESENT in the output as its own singleton axis:
-    ``_shape_of_space``'s ⊗ contract is one axis per factor, and a bare ``Var`` of the same
-    ``OProd`` space already declares that way — so a value REDUCED from an ``OProdV`` must
-    match, else the same space lowers to two shapes depending on the term's syntactic form
-    (measured: the σ readout's ``Eval(Kron(Identity(Scalar()), …))`` produced ``(1, 1)``
-    where the canonical weighted body produced ``(1,)``, and the two rows could not stack).
-    The scalar's array is 0-axis, so the einsum cannot mint the axis; a bulk-preserving
-    ``ReshapeOp`` inserts the singletons after the fold.
+    The output is then reshaped to the **canonical** ⊗ shape — ONE axis per top-level factor,
+    exactly what ``_shape_of_space`` assigns the space (``⊗(sᵢ) → (|s₀|, …)``) and what a bare
+    ``Var`` of the same ``OProd`` space declares.  A factor that itself realizes multi-axis (a
+    nested tensor, most easily a unit ``Scalar`` factor such as ``V⊗𝟙``) is FUSED down to its
+    single flattened axis; a 0-axis ``Scalar`` factor is GIVEN its unit axis.  Without this the
+    same space lowered to two shapes depending on the term's syntactic form — a bare ``Var`` at
+    ``_shape_of_space`` rank, an ``OProdV`` at a higher rank — and the two could not stack
+    (measured: the σ readout's ``Eval(Kron(Identity(Scalar()), …))``; and ``(V⊗𝟙)⊗𝟙`` realizing
+    ``(3,1,1)`` where its ``Var`` realized ``(3,1)``).  The einsum cannot mint/fuse these axes,
+    so a bulk-preserving ``ReshapeOp`` fixes the shape after the fold.
     """
     space = _synth(e)
     # (B) structural split: a BasisProd target of matching arity ⇒ build each factor in its
@@ -1329,10 +1413,28 @@ def _rep_oprod(
         space_labels += these_space
         free_labels += r.free_labels
         space_dims.extend(ashape[:n_space])
-        if n_space == 0 and isinstance(_synth(v), S.Scalar):
-            canonical_dims.append(1)                  # the ⊗-unit still owns an output axis
+        # Canonical shape = ONE axis per top-level ⊗ factor, mirroring ``_shape_of_space``
+        # (``⊗(sᵢ) → (|s₀|, …)``), so an ``OProdV`` and a bare ``Var`` of the SAME space realize
+        # to the same shape.  A factor that itself realizes multi-axis — a nested tensor, most
+        # easily produced by a unit ``Scalar`` factor (``R3⊗𝟙``) — is FUSED to its flattened dim;
+        # a 0-axis ``Scalar`` factor still owns a unit axis.  (Without this, a ``V⊗𝟙`` factor kept
+        # its inner unit axis and the value lowered to a higher rank than its space's shape.)
+        factor_axes = ashape[:n_space]
+        if n_space == 0:
+            if isinstance(_synth(v), S.Scalar):
+                canonical_dims.append(1)              # the ⊗-unit still owns an output axis
+        elif all(isinstance(dax, int) for dax in factor_axes):
+            canonical_dims.append(int(np.prod(factor_axes)))   # fuse a multi-axis factor to one
+        elif len(factor_axes) == 1:
+            canonical_dims.append(factor_axes[0])     # already one axis (possibly a DimAtom)
         else:
-            canonical_dims.extend(ashape[:n_space])
+            # dynamic multi-axis factor: fuse to its product ``DimAtom`` (the n-generic canonical
+            # shape — one axis per top-level ⊗ factor), so a bare Var and an OProdV of the same
+            # symbolic space realize alike and a downstream Permute/Sum axis-count matches.
+            try:
+                canonical_dims.append(_combine_atom_dims(ctx, list(factor_axes), "prod"))
+            except RepresentError:
+                canonical_dims.extend(factor_axes)    # non-input-sourced ⇒ leave unfused (bail)
     out_labels = space_labels + free_labels
     spec = ",".join(operand_specs) + "->" + out_labels
     free_dims = tuple(_dim_of_free(reps))
@@ -1341,12 +1443,17 @@ def _rep_oprod(
         pa.EinsumStmtOp(spec), [r.array for r in reps],
         [pa.OutSpec("oprod", out_shape)], note="oprod:outer-einsum",
     )
-    if canonical_dims != space_dims:                  # some Scalar factor lacked its axis ⇒ insert it
-        [out] = ctx.prog.emit_stmt(
-            pa.ReshapeOp(tuple(canonical_dims) + free_dims), [out],
-            [pa.OutSpec("oprod", tuple(canonical_dims) + free_dims)],
-            note="oprod:scalar-factor-axes",
-        )
+    if canonical_dims != space_dims:                  # a factor realized to a non-canonical rank
+        _canon_shape = tuple(canonical_dims) + free_dims
+        if all(isinstance(d, int) for d in _canon_shape):
+            [out] = ctx.prog.emit_stmt(
+                pa.ReshapeOp(_canon_shape), [out], [pa.OutSpec("oprod", _canon_shape)],
+                note="oprod:scalar-factor-axes",
+            )
+        else:  # symbolic canonical dims ⇒ dynamic reshape (leave unfused if not input-sourced)
+            dyn = _dyn_reshape(ctx, out, _canon_shape, note="oprod:fuse-factors-dyn") if not free_dims else None
+            if dyn is not None:
+                out = dyn
     rep = Rep(out, basis, space, free_labels=free_labels)
     if subs is not None:
         return rep  # already in `want`
@@ -2734,7 +2841,7 @@ def _rep_eval(
             arg_rep = _reconcile_pairing(
                 ctx, _slot_basis_at(f_rep.basis, pos), arg_rep, note=f"eval-reconcile@{pos}",
             )
-        arg_rep = _fuse_arg_to_slot(ctx, f_rep.array, pos, arg_rep)
+        arg_rep = _fuse_arg_to_slot(ctx, f_rep.array, pos, arg_rep, slot_space=f_factors[pos])
         # dim-agreement assert at the contraction site.
         _assert_axis_dims(ctx, f_rep.array, pos, arg_rep, note=f"assert:eval-dim@{pos}")
         operands.append(arg_rep.array)
@@ -2791,12 +2898,23 @@ def _rep_eval(
             return _match_result(ctx, rep, target)
 
 
+def _slot_covers_arg(slot_space: S.Space | None, arg_space: S.Space) -> bool:
+    """Does ``f``'s dual slot span the arg's WHOLE space (a fused map-operator slot, e.g. a
+    ``Kron``/``Lift`` domain ``dual(A⊗B)``) rather than a single sub-factor (a partial
+    contraction, ``dual(A)`` against a value in ``A⊗B``)?  Structural — works for symbolic dims,
+    where the static ``slot == ∏(arg axes)`` dim test cannot decide."""
+    if slot_space is None:
+        return False
+    primal = slot_space.space if isinstance(slot_space, S.Dual) else slot_space
+    return _norm_space(primal) == _norm_space(arg_space)
+
+
 def _fuse_arg_to_slot(
-    ctx: _Ctx, f_arr: pa.SymArray, pos: int, arg_rep: Rep,
+    ctx: _Ctx, f_arr: pa.SymArray, pos: int, arg_rep: Rep, slot_space: S.Space | None = None,
 ) -> Rep:
     """Fuse ``arg_rep``'s space axes into one when ``f``'s slot ``pos`` is a fused dual.
 
-    A map produced by ``alt``/``Lift`` has a single fused input slot of dim ``nᵏ``;
+    A map produced by ``alt``/``Lift``/``Kron`` has a single fused input slot of dim ``nᵏ``;
     a value of ``V⊗ᵏ`` arrives over ``k`` separate axes. When the slot dim equals the
     product of the arg's *space* axes (and doesn't already match its leading axis), reshape
     those axes into one fused axis (the free/basis axes are untouched). No-op otherwise, so
@@ -2804,7 +2922,29 @@ def _fuse_arg_to_slot(
     """
     fshape = _shape_of(f_arr)
     ashape = _shape_of(arg_rep.array)
-    if pos >= len(fshape) or not isinstance(fshape[pos], int):
+    if pos >= len(fshape):
+        return arg_rep
+    if not isinstance(fshape[pos], int):
+        # DYNAMIC (DimVar) slot: the static ``slot == ∏(axes)`` test can't decide, so fuse iff f's
+        # slot STRUCTURALLY spans the arg's whole space (a Kron/Lift/alt fused domain) — then reshape
+        # the arg's symbolic space axes into one via a product ``DimAtom``.
+        n_free = len(arg_rep.free_labels)
+        n_space = len(ashape) - n_free
+        free_dims = ashape[n_space:]
+        if (n_space > 1 and _slot_covers_arg(slot_space, arg_rep.space)
+                and all(isinstance(d, int) for d in free_dims)):
+            try:
+                fused = _combine_atom_dims(ctx, list(ashape[:n_space]), "prod")  # symbolic product dim
+            except RepresentError:
+                return arg_rep  # non-input-sourced atom ⇒ can't form the product; let the assert speak
+            # ``ReshapeOp`` is static, but numpy ``-1`` infers the fused length at run; the OutSpec
+            # carries the symbolic product ``DimAtom`` so downstream dim tracking is exact.
+            op_shape = (-1, *[int(d) for d in free_dims])
+            [out] = ctx.prog.emit_stmt(
+                pa.ReshapeOp(op_shape), [arg_rep.array],
+                [pa.OutSpec("fuse-arg-dyn", (fused, *free_dims))], note=f"eval:fuse-arg-dyn@{pos}",
+            )
+            return Rep(out, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
         return arg_rep
     slot = fshape[pos]
     n_free = len(arg_rep.free_labels)
@@ -2854,6 +2994,63 @@ def _fuse_arg_to_slot(
     return Rep(fused, arg_rep.basis, arg_rep.space, free_labels=arg_rep.free_labels)
 
 
+def _dyn_reshape(ctx: _Ctx, arr: pa.SymArray, target: tuple[object, ...], *, note: str) -> pa.SymArray | None:
+    """Reshape ``arr`` to ``target`` with a :class:`polyarray.DynReshapeOp`.
+
+    Each target axis becomes a ``spec`` entry: a static ``int`` (kind 0), an input-sourced
+    ``DimAtom`` read from its source input (kind 1), or numpy ``-1`` (kind 2, *infer*) for a
+    computed/product atom that is not a single input axis.  ``None`` if more than one axis would
+    need inferring (numpy allows a single ``-1``), so the caller leaves the array unreshaped."""
+    spec: list[tuple[int, int]] = []
+    refs: list[pa.SymArray] = [arr]
+    infer_used = False
+    for d in target:
+        if isinstance(d, int):
+            spec.append((0, int(d)))
+        elif isinstance(d, pa.DimAtom) and d.source and d.source[0] == "in":
+            _, in_name, axis = d.source
+            ref = ctx.prog.input_arrays.get(in_name)
+            if ref is None:
+                return None
+            spec.append((1, int(axis)))
+            refs.append(ref)
+        else:  # a computed/non-input atom (e.g. a product nₐ·n_b) — let numpy infer it
+            if infer_used:
+                return None
+            infer_used = True
+            spec.append((2, 0))
+    [out] = ctx.prog.emit_stmt(
+        pa.DynReshapeOp(tuple(spec)), refs, [pa.OutSpec(note, tuple(target))], note=note,
+    )
+    return out
+
+
+def _dyn_unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
+    """Un-fuse a symbolic-dim ``Eval`` result whose surviving map-operator slot came back as one
+    fused axis (the ``DimVar`` mirror of :func:`_unfuse_eval_result`).
+
+    The result space's per-factor dynamic axes are sized from their source inputs at run via a
+    :class:`polyarray.DynReshapeOp`.  Bails (leaves the fused array) on any FFS factor (avoid an
+    SVD realization here), a static/non-input-sourced axis, or a trailing free (basis) axis — those
+    stay the documented n-generic gaps rather than a wrong reshape."""
+    if rep.free_labels:
+        return rep  # a trailing free axis would be dropped by the space-only reshape
+    axes_spaces = _space_axes(rep.space)
+    if any(isinstance(s, (S.Img, S.Ker, S.CoImg, S.CoKer)) for s in axes_spaces):
+        return rep  # an FFS factor would realize an SVD/QR — not this pass's job
+    try:
+        target = _shape_of_space_dyn(rep.space, ctx)
+    except (RepresentError, S.SpaceError):
+        return rep
+    n_space = len(_shape_of(rep.array))
+    if n_space >= len(target) or len(target) < 2:
+        return rep  # already unfused (or single-axis) — nothing to do
+    out = _dyn_reshape(ctx, rep.array, tuple(target), note="eval:unfuse-dyn")
+    if out is None:
+        return rep  # a static / non-input-sourced factor dim (mixed) — leave fused
+    return Rep(out, rep.basis, rep.space, free_labels=rep.free_labels)
+
+
 def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     """Reshape an ``Eval`` result whose surviving slot is a *fused* map-space axis.
 
@@ -2872,9 +3069,9 @@ def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     try:
         want_space_shape = _shape_of_space(rep.space)
     except RepresentError:
-        return rep  # dynamic/FFS axis ⇒ single-axis, nothing to un-fuse (the intended bail)
+        return _dyn_unfuse_eval_result(ctx, rep)  # symbolic (DimVar) axes ⇒ dynamic un-fuse
     if not all(isinstance(d, int) for d in want_space_shape):
-        return rep
+        return _dyn_unfuse_eval_result(ctx, rep)
     ashape = _shape_of(rep.array)
     n_free = len(rep.free_labels)
     n_space = len(ashape) - n_free

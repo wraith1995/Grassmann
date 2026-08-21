@@ -22,6 +22,7 @@ import os
 
 import numpy as np
 import polyarray as pa
+import pytest
 
 import grassmann.core as C
 import grassmann.core.props as P
@@ -613,3 +614,102 @@ def test_permute_reorders_three_factors() -> None:
     Wv = np.arange(27.0).reshape(3, 3, 3)
     out = represent(C.Permute(w, (2, 0, 1))).run({_var_key(w): Wv})["result"]
     np.testing.assert_allclose(out, Wv.transpose(2, 0, 1))
+
+
+# Canonical shape invariant — a Space realizes to exactly _shape_of_space(space),
+# regardless of the producing node (regression for the OProd/OPlus shape-divergence bugs
+# found by the gfuzz fuzzer).
+
+
+def _canon(term) -> tuple[int, ...]:
+    from grassmann.infer.synth import synth_space
+    from grassmann.lower.represent import _shape_of_space
+
+    return tuple(int(x) for x in _shape_of_space(synth_space(term)))
+
+
+def test_oprodv_with_unit_factor_matches_canonical_shape() -> None:
+    """``(z1 ⊗ v2) + z2`` over ``(ℝ³⊗𝟙)⊗𝟙`` — the OProdV of a unit-carrying factor once
+    realized ``(3,1,1)`` while a bare ``Var`` of the same space realized ``(3,1)``, so the
+    ``Sum`` shape-check crashed.  Both must now realize at the canonical ``(3,1)``."""
+    R3 = C.base("R3", 3)
+    inner = C.oprod(R3, C.scalar())            # ℝ³ ⊗ 𝟙
+    y = C.oprod(inner, C.scalar())             # (ℝ³ ⊗ 𝟙) ⊗ 𝟙
+    z1 = C.var("z1", inner)
+    v2 = C.var("v2", C.scalar())
+    z2 = C.var("z2", y)
+    prod = C.OProdV((z1, v2))
+    prod_shape = represent(prod).run(
+        {_var_key(z1): np.ones((3, 1)), _var_key(v2): np.ones(())})["result"].shape
+    z2_shape = represent(z2).run({_var_key(z2): np.ones((3, 1))})["result"].shape
+    assert prod_shape == _canon(prod) == (3, 1)
+    assert z2_shape == _canon(z2) == (3, 1)
+    # the Sum of the two (same space, different producing nodes) must now lower and run
+    F = C.sum_(prod, z2)
+    out = represent(F).run({
+        _var_key(z1): np.ones((3, 1)), _var_key(v2): np.ones(()), _var_key(z2): np.ones((3, 1)),
+    })["result"]
+    assert out.shape == (3, 1)
+
+
+def test_oplusv_of_multiaxis_summand_matches_canonical_length() -> None:
+    """``A ⊕ B`` with ``A : (ℝ²)*⊗ℝ³`` (realizes ``(2,3)``) and ``B : (ℝ²)*`` — the concat
+    length was read from axis 0 (2) instead of the flattened total (6), declaring ``(4,)``
+    where the data is ``(8,)``.  Must now declare and realize ``(8,)``."""
+    R2d, R3 = C.dual(C.base("R2", 2)), C.base("R3", 3)
+    A = C.var("A", C.oprod(R2d, R3))
+    Bv = C.var("B", R2d)
+    F = C.OPlusV((A, Bv))
+    assert _canon(F) == (8,)
+    out = represent(F).run({_var_key(A): np.ones((2, 3)), _var_key(Bv): np.ones(2)})["result"]
+    assert out.shape == (8,)
+
+
+# Canonical-shape invariant HOOK — off by default (zero cost), fires at the producing node.
+# (`represent` in this module is the re-exported FUNCTION; the module object — carrying the hook
+#  globals — is fetched separately, since the package shadows the submodule name.)
+import importlib as _importlib
+
+_rep_mod = _importlib.import_module("grassmann.lower.represent")
+
+
+def test_shape_hook_is_off_by_default() -> None:
+    assert _rep_mod._SHAPE_CHECK is False
+
+
+def test_shape_hook_fires_on_noncanonical_shape(monkeypatch) -> None:
+    """With the hook on, a node whose realized shape ≠ `_shape_of_space` raises AT that node.
+
+    Simulated by making `_shape_of_space` disagree with the (correct) realizer for `OProd`,
+    so the hook catches the divergence the way it would a real `_rep_*` regression."""
+    from grassmann.core import space as S
+
+    prev = _rep_mod.set_shape_check(True)
+    try:
+        orig = _rep_mod._shape_of_space
+        monkeypatch.setattr(
+            _rep_mod, "_shape_of_space",
+            lambda sp: orig(sp) + (1,) if isinstance(sp, S.OProd) else orig(sp),
+        )
+        u = C.var("u", C.base("V", 2))
+        v = C.var("v", C.base("W", 3))
+        with pytest.raises(_rep_mod.ShapeInvariantError, match="canonical-shape invariant"):
+            represent(C.OProdV((u, v)))
+        assert issubclass(_rep_mod.ShapeInvariantError, _rep_mod.RepresentError)
+    finally:
+        _rep_mod.set_shape_check(prev)
+
+
+def test_shape_hook_on_passes_canonical_terms() -> None:
+    """With the hook on, ordinary well-formed terms (incl. the fixed OProd/OPlus cases) lower fine."""
+    prev = _rep_mod.set_shape_check(True)
+    try:
+        R3 = C.base("R3", 3)
+        z1 = C.var("z1", C.oprod(R3, C.scalar()))
+        v2 = C.var("v2", C.scalar())
+        represent(C.OProdV((z1, v2))).run({_var_key(z1): np.ones((3, 1)), _var_key(v2): np.ones(())})
+        A = C.var("A", C.oprod(C.dual(C.base("R2", 2)), R3))
+        Bv = C.var("B", C.dual(C.base("R2", 2)))
+        represent(C.OPlusV((A, Bv))).run({_var_key(A): np.ones((2, 3)), _var_key(Bv): np.ones(2)})
+    finally:
+        _rep_mod.set_shape_check(prev)
