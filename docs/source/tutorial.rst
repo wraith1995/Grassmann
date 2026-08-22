@@ -206,9 +206,53 @@ resolves statically instead:
    ...   for k in range(1, n + 1)] for n in (1, 2, 3)]
    [[1], [2, 1], [3, 3, 1]]
 
-Those are the binomial coefficients ``C(n, k)``, as they should be. We keep the
-unasserted :func:`ext_power` as our working definition — its rank costs an SVD but
-is *derived*, not promised.
+Those are the binomial coefficients ``C(n, k)`` — the number of ways to pick ``k`` of
+the ``n`` axes — laid out as Pascal's triangle:
+
+.. list-table:: ``dim Λᵏ(ℝⁿ) = C(n, k)``
+   :header-rows: 1
+   :stub-columns: 1
+
+   * - ``n``
+     - ``Λ⁰``
+     - ``Λ¹``
+     - ``Λ²``
+     - ``Λ³``
+     - ``Λ⁴``
+   * - 1
+     - 1
+     - 1
+     - –
+     - –
+     - –
+   * - 2
+     - 1
+     - 2
+     - 1
+     - –
+     - –
+   * - 3
+     - 1
+     - 3
+     - 3
+     - 1
+     - –
+   * - 4
+     - 1
+     - 4
+     - 6
+     - 4
+     - 1
+
+Notice the symmetry of each row: ``Λᵏ`` and ``Λⁿ⁻ᵏ`` always have the *same* dimension.
+That coincidence is the seed of the Hodge star, below. And each operator we are about
+to build shifts you around this table in a fixed way — the wedge adds degrees, the
+interior product and the codifferential lower a degree by one, the Hodge star reflects
+a row to its mirror, and the exterior derivative raises a form field by one.
+
+We keep the unasserted :func:`ext_power` as our working definition, though — its rank
+costs an SVD, but it is *derived* rather than promised, and once the wedge exists we
+can make it prove itself.
 
 We can also see the alternator as a higher order array by supplying an appropriate
 basis. In this case, we should define first a basis for say ``ℝ³``, ``k = 2`` (the
@@ -371,27 +415,15 @@ axes:
    [0.0, 0.0, 0.0]
 
 The second result is the negative of the first, and the third is zero. Hold on to the
-``1.4142`` — it is ``√2``, and the next section says where the ``√2`` comes from.
-
-Where the result lives
-~~~~~~~~~~~~~~~~~~~~~~
+``1.4142`` — it is ``√2``, and the inner-product section below says where the ``√2``
+comes from.
 
 ``u ∧ v`` is no longer a vector. It is a **2-vector**, and its space is the
 :math:`\Lambda^{2}` we built out of the alternator — the wedge's codomain is not an
-afterthought, it is the thing the whole construction was for. Running the ladder up,
-:func:`ext_power` gives
-
-- ``Λ⁰(V)`` — the scalars,
-- ``Λ¹(V)`` — ``V`` itself, ordinary vectors,
-- ``Λ²(V)`` — the 2-vectors (oriented areas),
-- ``Λ³(V)`` — the 3-vectors (oriented volumes), and so on,
-
-and the wedge is the map that climbs it: ``wedge(V, a, b, k, l)`` takes a ``k``-vector
-and an ``l``-vector to a ``(k+l)``-vector, so ``Λᵏ × Λˡ → Λᵏ⁺ˡ``.
-
-How big is each rung? We declined to assert it back when we defined ``ext_power``, so
-let the program tell us — wedge ``k`` generic vectors of ``ℝⁿ`` together and measure
-the answer:
+afterthought, it is the thing the whole construction was for. ``wedge(V, a, b, k, l)``
+climbs the ladder of exterior powers, ``Λᵏ × Λˡ → Λᵏ⁺ˡ``, and now that we can climb it
+we can settle the dimensions we declined to assert. Wedge ``k`` generic vectors of
+``ℝⁿ`` together and measure the answer:
 
 .. doctest::
 
@@ -406,50 +438,8 @@ the answer:
    >>> [[measured_dim(n, k) for k in range(1, n + 1)] for n in (1, 2, 3)]
    [[1], [2, 1], [3, 3, 1]]
 
-Exactly the ``C(n, k)`` the asserted-rank version promised — the number of ways to
-pick ``k`` of the ``n`` axes — but here *deduced*, by an SVD of the alternator, from a
-term that was never told the answer. Those dimensions are just Pascal's triangle:
-
-.. list-table:: ``dim Λᵏ(ℝⁿ) = C(n, k)``
-   :header-rows: 1
-   :stub-columns: 1
-
-   * - ``n``
-     - ``Λ⁰``
-     - ``Λ¹``
-     - ``Λ²``
-     - ``Λ³``
-     - ``Λ⁴``
-   * - 1
-     - 1
-     - 1
-     - –
-     - –
-     - –
-   * - 2
-     - 1
-     - 2
-     - 1
-     - –
-     - –
-   * - 3
-     - 1
-     - 3
-     - 3
-     - 1
-     - –
-   * - 4
-     - 1
-     - 4
-     - 6
-     - 4
-     - 1
-
-Notice the symmetry of each row: ``Λᵏ`` and ``Λⁿ⁻ᵏ`` always have the *same* dimension.
-That coincidence is the seed of the Hodge star, below. And each operator we are about
-to build shifts you around this table in a fixed way — the wedge adds degrees, the
-interior product and the codifferential lower a degree by one, the Hodge star reflects
-a row to its mirror, and the exterior derivative raises a form field by one.
+The same Pascal's triangle the asserted-rank version promised — but *deduced* here, by
+an SVD of the alternator, from a term that was never told the answer.
 
 The sign rule generalizes: sliding a ``k``-vector past an ``l``-vector costs a sign
 :math:`(-1)^{kl}`. This **graded anticommutativity** holds in every dimension and
