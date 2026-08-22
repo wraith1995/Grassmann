@@ -332,19 +332,14 @@ And not only for a rescaling: the alternator's array is the same for *any* basis
 :math:`P_{\sigma}` commutes with :math:`S \otimes S` for every invertible ``S``, so
 the change of basis cancels itself.
 
-We could have intermixed them and not gotten the same result. Read the very same
-tensor off in a frame whose first factor uses one basis and whose second factor uses
-the other — grassmann inserts the change of basis, and the components move:
+We could have intermixed them and not gotten the same result. Ask for the alternator in
+a frame whose first factor uses one basis and whose second factor uses the other, and
+the components move:
 
 .. doctest::
 
    >>> mixed = G.tensor(b, scaled)             # standard in one factor, scaled in the other
-   >>> T = G.tensor(V, V)
-   >>> Mvar = G.var("M", G.tensor(G.dual(T), T))
-   >>> key = f"M_{Mvar.node.uid}"
-   >>> prog = G.compile_in(Mvar, {Mvar: G.tensor(G.dual(bb), bb)},
-   ...                     target=G.tensor(G.dual(mixed), mixed))
-   >>> M_mixed = np.asarray(prog.run({key: M})["result"], float)
+   >>> M_mixed = represent(alt(V, 2), G.tensor(G.dual(mixed), mixed))
    >>> bool(np.allclose(M, M_mixed))
    False
    >>> [round(float(x), 3) for x in (M[1, 3], M_mixed[1, 3], M[3, 1], M_mixed[3, 1])]
