@@ -302,12 +302,137 @@ depends on the dimension (a fixed enumeration of basis vectors, an exterior powe
 symbolic degree) still instantiates. Where a symbolic dimension cannot be carried,
 grassmann says so rather than silently picking a size.
 
-Also worth knowing
-------------------
+Lambda calculus and linear-algebra rewriting (experimental)
+-----------------------------------------------------------
 
-Terms can be beta-reduced, simplified, and put in a normal form
-(:func:`~grassmann.beta`, :func:`~grassmann.simplify`, :func:`~grassmann.normal_form`), so
-two expressions that are algebraically equal can be recognized as equal. And a term
-round-trips through a Unicode surface syntax and renders to LaTeX
+Underneath the builders, a grassmann term is a typed lambda calculus, and the algebra is
+a rewriting system over it. Both are usable directly, and both are still moving.
+
+Four binders
+~~~~~~~~~~~~
+
+:func:`~grassmann.llam` binds a **linear** variable — the ``⊸`` of linear logic;
+:func:`~grassmann.lam` binds a space or type, which is where the parametric polymorphism
+above comes from; :func:`~grassmann.bfn` binds a *basis*; and :func:`~grassmann.frame`
+binds a *point*, giving a basis that varies over a space — a moving frame.
+:func:`~grassmann.lift` and :func:`~grassmann.unlift` uncurry and curry, fusing argument
+slots into one tensor input or splitting them apart.
+
+Terms print in the notation they denote (bound-variable numbering is normalized here so
+the output is stable):
+
+.. doctest::
+
+   >>> def show_term(t):
+   ...     return re.sub(r"\b([ax])\d+\b", r"\1", G.unparse(t))
+   >>> Vs = G.space("V", 3)
+   >>> show_term(G.llam(Vs, lambda z: G.scale(2.0, z)))
+   'λ x:ℝ^3. 2.0 · x'
+   >>> show_term(G.lam(G.Space, lambda t: G.llam(t, lambda z: z)))
+   'Λ a:Space. λ x:a. x'
+
+Linearity is a resource calculus, not a naming convention
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A linear binder must consume each of its variables **exactly once**, and
+:func:`~grassmann.infer.check_linearity` counts uses along every evaluation path to
+enforce it. The counting distinguishes the two combinators of linear logic:
+multiplicative nodes (``⊗`` stacks, application, composition, scaling) *add* their
+children's usage, while the one additive node, ``Sum``, requires its branches to *agree*.
+
+So a variable used in both summands of a ``+`` is used once, and a variable appearing in
+both factors of a ``⊗`` is used twice and rejected:
+
+.. doctest::
+
+   >>> from grassmann.infer import check_linearity
+   >>> check_linearity(G.llam(Vs, lambda z: G.sum(z, z)).node)          # additive: fine
+   >>> check_linearity(G.llam(Vs, lambda z: G.tensor(z, z)).node)       # multiplicative
+   Traceback (most recent call last):
+       ...
+   grassmann.infer.linearity.LinearityError: linear variable ... is used 2 times; ...
+
+That additive rule is not a technicality: it is what lets the antisymmetrizer
+``Σ_σ sgn(σ)·(v_{σ(0)} ⊗ … )`` typecheck as a linear map, since each ``vᵢ`` is consumed
+once *within every summand*. The :doc:`tutorial` builds exactly that term.
+
+Three strengths of rewriting
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:func:`~grassmann.beta` β-reduces applied binders and nothing else.
+:func:`~grassmann.simplify` adds the always-valid cleanups — scalar, zero and identity
+laws, sum flattening, involutions — and strictly shrinks a term.
+:func:`~grassmann.normal_form` (alias ``sum_of_products``) adds the linearity and
+multilinearity distribution rules, pushing every linear operator through ``+``, pulling
+scalars to the front, and collecting like terms:
+
+.. doctest::
+
+   >>> pp, qq = G.var("p", Vs), G.var("q", Vs)
+   >>> show_term(G.beta(G.llam(Vs, lambda z: G.scale(2.0, z))(pp)))
+   'p : ℝ^3 ⊢ 2.0 · p'
+   >>> show_term(G.simplify(G.sum(G.scale(1.0, pp), G.zero(Vs))))
+   'p : ℝ^3 ⊢ p'
+
+Every rule is an equality of the coordinate-free algebra, so a rewritten term lowers to
+the same numbers. The point of a normal form is that two expressions which are
+*algebraically* equal become *syntactically* equal, and can then simply be compared:
+
+.. doctest::
+
+   >>> from grassmann.transform.rewrite import term_key
+   >>> m = G.var("m", Vs >> Vs)
+   >>> left, right = G.normal_form(m(G.sum(pp, qq))), G.normal_form(G.sum(m(pp), m(qq)))
+   >>> show_term(left)
+   'm : (ℝ^3)* ⊗ ℝ^3, p : ℝ^3, q : ℝ^3 ⊢ m(p) + m(q)'
+   >>> term_key(left.node) == term_key(right.node)
+   True
+
+The comparison is up to α-equivalence, so two terms differing only in bound-variable
+names are already equal.
+
+η through the Riesz representation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The most interesting rules are the ones that make a lambda *disappear* into the object it
+denotes. Differentiating gives you a linear map as a lambda; the opt-in ``RIESZ_SOP``
+preset folds a seed-linear lambda into the covector or linear map it represents:
+
+.. doctest::
+
+   >>> from grassmann.transform.rewrite import RIESZ_SOP
+   >>> deriv = G.diff(G.scale(0.5, G.dot(pp, pp)), pp)     # d(½⟨p,p⟩)
+   >>> show_term(deriv)
+   'p : ℝ^3 ⊢ λ dp:ℝ^3. 0.5 · (⟨dp, p⟩ + ⟨p, dp⟩)'
+   >>> show_term(G.normal_form(deriv, RIESZ_SOP))
+   'p : ℝ^3 ⊢ inner(ℝ^3)(p)'
+
+The binder is gone and what remains is the covector ``⟨p, ·⟩`` — the gradient, named
+rather than described.
+
+What "experimental" means here
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:class:`~grassmann.transform.rewrite.SoPConfig` turns each rule group on or off, and the
+ladder from ``DEFAULT_SOP`` through ``AGGRESSIVE_SOP`` and ``RIESZ_SOP`` trades reach for
+caution. The default preset is value-*exact* and layout-identical: only the commutative
+``+`` is reordered. The rules above that — canonical ``⊗`` factor order, ``⊕`` component
+order, dissolving ``⊕`` into injections — are canonical only *up to isomorphism*, so they
+emit an explicit ``Permute`` correction to restore the layout exactly, and they are off by
+default.
+
+**Confluence is not assumed.** The engine runs the enabled rules to a fixpoint under a
+global step cap, so a non-confluent rule set raises
+:class:`~grassmann.transform.rewrite.RewriteError` rather than hanging. Rather than
+promising a unique normal form, :func:`~grassmann.transform.rewrite.is_normalized_sop`
+certifies exactly what the enabled groups were supposed to produce:
+
+.. doctest::
+
+   >>> from grassmann.transform.rewrite import is_normalized_sop
+   >>> is_normalized_sop(left.node)
+   True
+
+Terms also round-trip through the Unicode surface syntax and render to LaTeX
 (:func:`~grassmann.latex`, :func:`~grassmann.unparse`, :func:`~grassmann.parse`), so what
-you build, print, and parse back is the notation the mathematics is written in.
+you build, print, rewrite, and parse back is the notation the mathematics is written in.
