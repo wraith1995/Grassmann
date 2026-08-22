@@ -145,3 +145,34 @@ distinct defects (each independently surfaced by more than one method):
   boundary. B is the direct-sum analog (`bulk Stmt output 'oplus': expected (m,) got (n,)`).
 
 These are reported for the maintainer's triage — the fuzzer does not patch grassmann.
+
+## The frame lane — `gfuzz.frames` / `gfuzz.frames_matrix`
+
+`COVERAGE.md` lists `Frame` (the basis binder) as *intentionally out of scope* for the numeric
+differential campaign above. `gfuzz/frames.py` covers exactly that gap: it compiles the **same**
+term in many explicit frames (`compile_in(t, inputs=…, target=…)`) and checks the answers against
+each other, with **change-of-basis consistency** as the oracle rather than crash-vs-no-crash.
+
+```sh
+.venv/bin/python -m gfuzz.frames --trials 3000 --seed 11    # the campaign
+.venv/bin/python -m gfuzz.frames --seed 11 --only 47        # re-run one sample
+.venv/bin/python -m gfuzz.frames_matrix                     # the deterministic (term × frame) grid
+.venv/bin/python -m gfuzz.frames_matrix --repros            # the minimised repro per cluster
+```
+
+The *frame transform* `T_F` (std coords → `F` coords) is read off numerically by compiling a bare
+`u : S` with `inputs={u: standard_basis(S)}, target=F` and sweeping the unit tensors — i.e. from
+the one lowering path (a `Var` plus a single cob) simple enough to be the reference. Four lanes:
+`target` (`rep_F(t) == T_F·rep_std(t)`), `input` (a pinned input frame must cancel), `rebuild`
+(an identically-rebuilt frame must agree bit-for-bit), and `auto` (target omitted, so a `Sum`
+reconciles its own operands — crash + finiteness only).
+
+Frames are built structurally over a term's space, one basis per base-space leaf, so
+"factors EQUAL vs DIFFERENT" and "domain frame vs codomain frame" are just leaf-assignment
+policies (`--policies all-same all-diff per-top-factor dual-vs-primal one-odd`).
+
+Failures are clustered by the **note of the deepest failing `Stmt`** (`sum:cob`,
+`cob:target-match`, …), stamped onto the exception object by a `Program._run_stmt` probe —
+polyarray raises from inside numpy, so the python traceback alone names `einsumfunc.py`, and
+`fold_numeric` *swallows* a const-fold failure at compile time, which an "attribute the last
+failure seen" scheme would mis-attribute.
