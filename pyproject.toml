@@ -32,9 +32,18 @@ test = [
     # tests/test_diff_analytic.py as an EXACT (non-FD) reference for the gauge-aware FFS AD.
     "scipy>=1.10",
 ]
-# Reference doc site (tools/gen_docs.py + mkdocs). Build with `mkdocs build`, preview
-# with `mkdocs serve`. Doc-only — never a runtime dep.
+# Both doc sites. Doc-only — never a runtime dep.
+#   - The Sphinx public reference under `docs/source` (`make -C docs html`, and
+#     `make -C docs doctest`, which runs the tutorial and fails if the API drifts).
+#     numpydoc renders the docstring sections, myst-parser the Markdown narrative
+#     pages, alabaster is the theme `docs/source/conf.py` names.
+#   - The per-node reference site (tools/gen_docs.py + mkdocs): `mkdocs build`,
+#     preview with `mkdocs serve`.
 docs = [
+    "sphinx>=8.0",
+    "numpydoc>=1.8",
+    "alabaster>=1.0",
+    "myst-parser>=4.0",
     "mkdocs-material>=9.5",
 ]
 
