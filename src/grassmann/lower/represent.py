@@ -705,15 +705,78 @@ def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) ->
         and len(src.bases) == len(target.bases)
     ):
         arr = rep.array
-        for axis, (sb, tb) in enumerate(zip(src.bases, target.bases)):
-            if _basis_eq(sb, tb):
-                continue
-            m = _basis_cob_matrix(ctx, sb, tb)
-            arr = _apply_cob_on_axis(ctx, m, arr, axis, rep.free_labels, note=note)
+        n_space = len(_shape_of(arr)) - len(rep.free_labels)
+        widths = _factor_axis_widths(ctx, src.bases, n_space)
+        axis = 0
+        for sb, tb, width in zip(src.bases, target.bases, widths):
+            # A basis factor need NOT span exactly one array axis: an ``LLam`` tags its
+            # result ``BasisProd(dual(v₀), …, body_basis)`` whose LAST factor is the body's
+            # own (possibly nested) product, deliberately kept unflattened (see
+            # ``_rep_llam_vmap``).  Walking factor index == axis index therefore applied a
+            # factor-sized cob to the wrong (and wrongly sized) axis.
+            arr = _cob_basis_block(ctx, arr, sb, tb, axis, width, rep.free_labels, note=note)
+            axis += width
         return Rep(arr, target, rep.space, free_labels=rep.free_labels)
     m = _basis_cob_matrix(ctx, src, target)
     arr = _apply_cob_on_axis(ctx, m, rep.array, 0, rep.free_labels, note=note)
     return Rep(arr, target, rep.space, free_labels=rep.free_labels)
+
+
+def _factor_axis_widths(
+    ctx: _Ctx, bases: tuple[B.Basis, ...], n_axes: int,
+) -> list[int]:
+    """Give how many array axes each basis factor spans, for an array of ``n_axes`` space axes.
+
+    A factor's natural width is the axis count of the space it is a basis of (so it agrees with
+    :func:`_shape_of_space`, the same space→shape map the reps are built against).  A *nested*
+    product factor therefore spans several axes — which is how an ``LLam`` tags its body.
+
+    But an operand is not always stored one-axis-per-leaf: a map over ⊗-spaces arrives FUSED,
+    ``(|dom|, |cod|)``, two axes for two factors whose natural widths are larger.  So the
+    natural widths are used only when they account for exactly the axes present; otherwise the
+    array is fused and each factor owns one axis (the assumption this walker always made).
+    """
+    natural = []
+    for b in bases:
+        space = _space_of_basis(ctx, b)
+        natural.append(1 if space is None else len(_shape_of_space(space)))
+    if sum(natural) == n_axes:
+        return natural
+    return [1] * len(bases)
+
+
+def _cob_basis_block(
+    ctx: _Ctx, arr: pa.SymArray, sb: B.Basis, tb: B.Basis, axis: int, width: int,
+    free_labels: str, *, note: str,
+) -> pa.SymArray:
+    """Cob the ``width`` array axes starting at ``axis`` that the factor pair ``(sb, tb)`` covers.
+
+    One axis is the ordinary :func:`_apply_cob_on_axis` case.  A factor spanning several axes is
+    cob'd factor-by-factor when both sides are ``BasisProd``s of equal length — which is the
+    shape an ``LLam`` body tag actually has — so no reshape is needed and each sub-factor still
+    rides on its own axis.
+    """
+    if _basis_eq(sb, tb):
+        return arr
+    if width == 1:
+        m = _basis_cob_matrix(ctx, sb, tb)
+        return _apply_cob_on_axis(ctx, m, arr, axis, free_labels, note=note)
+    if (
+        isinstance(sb, B.BasisProd)
+        and isinstance(tb, B.BasisProd)
+        and len(sb.bases) == len(tb.bases)
+    ):
+        widths = _factor_axis_widths(ctx, sb.bases, width)
+        off = axis
+        for s2, t2, w2 in zip(sb.bases, tb.bases, widths):
+            arr = _cob_basis_block(ctx, arr, s2, t2, off, w2, free_labels, note=note)
+            off += w2
+        return arr
+    raise RepresentError(
+        f"cob: cannot change a {width}-axis basis factor that is not a product on both sides "
+        f"({sb!r} -> {tb!r}); the block spans array axes {axis}..{axis + width - 1} and there "
+        f"is no per-axis decomposition to apply the cob through"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -5545,6 +5608,13 @@ def _coerce_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> pa.SymA
     """
     if _basis_eq(rep.basis, target):
         return rep.array
+    if len(_shape_of(rep.array)) - len(rep.free_labels) > 1:
+        # A MULTI-AXIS operand (any ⊗-space: an operator, a tensor, an antisymmetrizer
+        # summand).  The ``ij,j->i`` emitted below applies one matrix to one axis and is
+        # correct only for a rank-1 coordinate vector; on a multi-axis array it fed einsum
+        # a spec that does not match the operand's rank.  Route through the per-axis walker,
+        # which cobs each space axis against its own basis factor and rides the free axes.
+        return _coerce_rep_to_target(ctx, rep, target, note=note).array
     M = _basis_cob_matrix(ctx, rep.basis, target)
     if len(_shape_of(rep.array)) == 0:
         # R ≅ R¹ (the empty-product law, as in `_fuse_arg_to_slot`): a Scalar-space
