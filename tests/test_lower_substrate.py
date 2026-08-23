@@ -457,13 +457,13 @@ def test_choose_prefers_rational_image_frame_under_propagated_lane() -> None:
     """The fold-preserving scorer, gated on the propagated rational-frame lane.
 
     At an un-pinned INJECTIVE ``Img(f)`` leaf: OFF (default) the orthonormalizing
-    ``ProjectedBasis`` (QR/SVD) wins; ON (the ``literal_ffs_frames`` lane the
+    ``ProjectedBasis`` (QR/SVD) wins; ON (the ``literal_ffs_bases`` lane the
     exact/certificate consumer propagates) the RATIONAL literal ``ImageBasis`` wins, so the
     algebraic-irrational QR ``R`` never enters and polyarray's exact lane survives.  A
     NON-injective image (rank-deficient literal columns) keeps the orthonormal default on BOTH
     lanes (nothing rational to prefer).
     """
-    from grassmann.lower.represent import literal_ffs_frames
+    from grassmann.lower.represent import literal_ffs_bases
 
     V, W = C.base("V", 2), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W), P.inj)          # an INJECTIVE immersion
@@ -471,7 +471,7 @@ def test_choose_prefers_rational_image_frame_under_propagated_lane() -> None:
     _, cands = space_basis(sp)
     off = choose(sp, cands, term=f)
     assert isinstance(off, C.ProjectedBasis) and off.which == "image"   # numeric default unmoved
-    with literal_ffs_frames(True):
+    with literal_ffs_bases(True):
         on = choose(sp, cands, term=f)
     assert isinstance(on, C.ImageBasis) and (on.f is f)                 # rational frame, fold survives
 
@@ -479,7 +479,7 @@ def test_choose_prefers_rational_image_frame_under_propagated_lane() -> None:
     g = C.var("g", C.linear_map_space(C.base("A", 3), C.base("B", 3)))  # no inj assertion
     spg = C.img(g)
     _, candsg = space_basis(spg)
-    with literal_ffs_frames(True):
+    with literal_ffs_bases(True):
         assert isinstance(choose(spg, candsg, term=g), C.ProjectedBasis)
 
 

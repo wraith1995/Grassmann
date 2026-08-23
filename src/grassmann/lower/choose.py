@@ -106,7 +106,7 @@ def score_basis(
     #   it goes to the rational basis instead, below.
     #
     #   The alternative is only ever considered under the propagated rational-basis lane
-    #   (`literal_ffs_frames`), which is off by default, so ordinarily the orthonormal default
+    #   (`literal_ffs_bases`), which is off by default, so ordinarily the orthonormal default
     #   simply wins.  Flipping every leaf unconditionally would be unsound: an un-pinned ``Img``
     #   leaf feeding a metric, a gauge or a Λᵏ inner product needs the orthonormal basis.  A
     #   consumer that wants exactness opts in, and only then does the fold-preserving
@@ -166,13 +166,13 @@ def _rational_frame_lane() -> bool:
 
     The scorer's preference for a rational basis is opt-in, and the switch is the same one that
     makes the frame's *realization* rational: ``represent(literal_frames=True)`` or the
-    :func:`~grassmann.lower.represent.literal_ffs_frames` context. It is off by default, so the
+    :func:`~grassmann.lower.represent.literal_ffs_bases` context. It is off by default, so the
     orthonormal default ordinarily wins unopposed. The import is deferred to the call to keep
     :mod:`represent` and :mod:`choose` from importing each other at module load.
     """
-    from .represent import _literal_ffs_frames
+    from .represent import _literal_ffs_bases
 
-    return _literal_ffs_frames()
+    return _literal_ffs_bases()
 
 
 def _fold_preserving_alternative_exists(space: S.Space) -> bool:

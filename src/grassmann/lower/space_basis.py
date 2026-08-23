@@ -410,7 +410,7 @@ def realize_ffs_basis(
     metric_cod: pa.SymArray | None = None,
     label: str = "f",
     dim_atom: pa.DimAtom | None = None,
-    literal_frame: bool = False,
+    literal_basis: bool = False,
 ) -> FfsRealization:
     """Realize one fundamental subspace of a map as concrete basis columns.
 
@@ -438,7 +438,7 @@ def realize_ffs_basis(
     their einsums will not unify. Left ``None``, the seam mints a fresh atom and reports it in
     :attr:`FfsRealization.rank_dim` for the caller to record and pass back.
 
-    ``literal_frame`` applies to the injective-image route alone, where it realizes the map's
+    ``literal_basis`` applies to the injective-image route alone, where it realizes the map's
     literal columns instead of the orthonormal ``Q``. That is the same subspace in a different
     basis; :func:`_realize_via_gram` gives the precondition and the price in conditioning.
     """
@@ -451,7 +451,7 @@ def realize_ffs_basis(
     has_metric = metric_dom is not None or metric_cod is not None
 
     if which == "img" and injective and not has_metric:
-        if literal_frame:
+        if literal_basis:
             return _realize_via_gram(program, f_matrix, dom_dim, label)
         return _realize_via_qr(program, f_matrix, dom_dim, label)
     if has_metric:

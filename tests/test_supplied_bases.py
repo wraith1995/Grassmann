@@ -1,4 +1,4 @@
-"""``represent(..., supplied_frames=...)`` — the consumer half of "frame becomes a
+"""``represent(..., supplied_bases=...)`` — the consumer half of "frame becomes a
 kernel argument" (additive, OFF by default).
 
 A caller who has already computed the orthonormal frame of a fundamental subspace of a
@@ -63,7 +63,7 @@ def _fingerprint(prog) -> tuple:
 
 
 def test_default_path_still_factorizes_frame() -> None:
-    """Baseline: with NO supplied_frames the injective image frame is realized by the
+    """Baseline: with NO supplied_bases the injective image frame is realized by the
     QrOp seam and ``f`` is a program input."""
     term, f, _W = _build()
     prog = represent(term)
@@ -79,7 +79,7 @@ def test_supplied_frame_becomes_input_and_skips_factorization() -> None:
     (c) ``f`` is no longer factorized, so it is no longer a program input."""
     term, f, W = _build()
     supplied = {("img", id(f)): ("frame_img", 4, 2)}  # (name, n_rows=|W|, n_cols=dim Img)
-    prog = represent(term, supplied_frames=supplied)
+    prog = represent(term, supplied_bases=supplied)
 
     names = [i.name for i in prog.inputs]
     assert "frame_img" in names                                   # (a) new input
@@ -100,17 +100,17 @@ def test_supplied_frame_becomes_input_and_skips_factorization() -> None:
 
 
 def test_unused_kwarg_is_byte_identical() -> None:
-    """Regression guard: ``supplied_frames`` defaulting to ``None`` (or ``{}``, or an
+    """Regression guard: ``supplied_bases`` defaulting to ``None`` (or ``{}``, or an
     UNRELATED key) leaves the program structurally identical to the baseline lowering —
     a strict no-op when the ``(which, id(f))`` is not present."""
     # Build ONE term (stable Var uids) and lower it four ways; only the kwarg differs.
     term, _f, _W = _build()
     base = _fingerprint(represent(term))
-    assert _fingerprint(represent(term, supplied_frames=None)) == base
-    assert _fingerprint(represent(term, supplied_frames={})) == base
+    assert _fingerprint(represent(term, supplied_bases=None)) == base
+    assert _fingerprint(represent(term, supplied_bases={})) == base
     # A key that matches NO map in this term must also be inert.
     assert _fingerprint(
-        represent(term, supplied_frames={("img", 123456789): ("nope", 4, 2)})
+        represent(term, supplied_bases={("img", 123456789): ("nope", 4, 2)})
     ) == base
 
     # Sanity: the baseline really did factorize (so the guard is meaningful, not vacuous).
@@ -126,7 +126,7 @@ def test_unused_kwarg_is_byte_identical() -> None:
 def _supplied_ctx(f, name="frame_img", nrow=4, ncol=2):
     ctx_cls = _RM._Ctx
     return ctx_cls(prog=pa.Program("t"), basis_env={}, inputs={},
-                   supplied_frames={("img", id(f)): (name, nrow, ncol)})
+                   supplied_bases={("img", id(f)): (name, nrow, ncol)})
 
 
 def test_one_input_per_supplied_frame_per_program() -> None:
@@ -174,7 +174,7 @@ def test_frame_realized_inside_a_vmap_body_is_declared_on_the_parent() -> None:
     x = C.var("x", W)
     term = C.llam(x, body=C.project(x, imgf))                # the projection AS A MAP (vmap'd body)
 
-    prog = represent(term, supplied_frames={("img", id(f)): ("frame_img", 4, 2)})
+    prog = represent(term, supplied_bases={("img", id(f)): ("frame_img", 4, 2)})
 
     names = [i.name for i in prog.inputs]
     assert names.count("frame_img") == 1, names              # declared on the parent, exactly once

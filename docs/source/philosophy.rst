@@ -94,7 +94,7 @@ Four binders is not a large language, and that is the point. The mathematics is 
 the space and term constructors; the binders only say how a construction is abstracted and
 applied.
 
-Linearity is a resource calculus, not a naming convention
+Linearity is a resource calculus
 ---------------------------------------------------------
 
 A linear binder must consume each of its variables **exactly once**, and
@@ -142,8 +142,9 @@ different bases.
 A universal property indicates a natural family of bases
 --------------------------------------------------------
 
-Naming objects by their universal properties is not only tidier; it is what makes the
-compiler's job tractable. **A space that knows what it is knows which bases suit it.**
+Naming objects by their universal properties is not only tidier; it is what tells the
+compiler where to look for coordinates. **A space that knows what it is knows which bases
+suit it.**
 
 Because the space tower is closed and each node carries a universal property, grassmann can
 *derive* the candidate coordinatizations rather than being handed one. The derivation
@@ -169,26 +170,112 @@ The image of ``J`` offers two bases, and both come from ``J`` itself: the orthon
 subspace basis, and the literal pushforward of the domain's basis along ``J``. Neither had
 to be supplied, because ``Img(J)`` says what it is.
 
-The compiler then *chooses*, and the criterion is how much symbolic content survives. A
-value derived from an operator ``f`` scores best in a basis aligned to ``f``'s own
-structure, because in that basis the projection onto the subspace is the identity and the
-coordinates come out numeric. Absent any operator structure, the inner-product-orthonormal
-standard basis wins by default, since it makes the metric the identity and so renders the
-inner product, the adjoint and the pseudo-inverse numeric too. Realizing such a basis is
-the one place the numerical linear algebra actually enters: an SVD in general, a QR when
-the defining map is injective, a generalized SVD when a metric is in play.
+Which of them to use is the interesting question, and the criterion is **how much of the
+term survives as a constant**.
 
-The payoff is that operations which look expensive on the page frequently are not. A
-pseudo-inverse of a *constant* pairing — the wedge-into-volume map that defines the Hodge
-star — becomes, once bases are chosen, a concrete matrix whose inverse is folded to a
-literal while compiling; the emitted code contains no pseudo-inverse at all. The
-:doc:`tutorial` shows exactly that happening. Writing ``pinv`` cost nothing because ``pinv``
-named an operation rather than prescribing an algorithm.
+Take the wedge on a tangent plane. Let ``J`` be a chart's differential and
+``T = Img(J)`` the plane it spans; ``T`` moves as the chart does, so nothing about it is
+fixed in advance. Wedging two tangent vectors is an operation on that moving plane, and
+one might expect the chart to be all over the answer:
+
+.. doctest::
+
+   >>> import re
+   >>> import polyarray as pa
+   >>> from grassmann.stdlib.exterior import wedge
+   >>> from grassmann.lower.numpy_renderers import op_renderers
+   >>> U, X = G.space("U", 2), G.space("X", 3)
+   >>> Jc = G.var("J", U >> X, props=G.inj)
+   >>> T = G.img(Jc)
+   >>> u, v = G.var("u", T), G.var("v", T)
+   >>> prog = G.compile(wedge(u, v, 1, 1))
+   >>> src = pa.to_numpy_source(prog, func_name="w", op_renderers=op_renderers())
+   >>> body = "\n".join(l for l in src.splitlines() if not l.strip().startswith("def "))
+
+It is not. The chart is declared as an input, because the space mentions it — and then it
+never appears in the arithmetic, which is two einsums against constant matrices and no
+numerical linear algebra whatsoever:
+
+.. doctest::
+
+   >>> bool(re.search(r"\bJ_\d", body))          # does the chart enter the computation?
+   False
+   >>> "np.linalg" in body, body.count("np.einsum")
+   (False, 2)
+
+The constant it contracts against is the alternator, ``½(I − swap)``, exactly as it would
+be on a fixed ``ℝ²``:
+
+.. doctest::
+
+   >>> bool(re.search(r"0\.5, -0\.5", body))     # the ½(I − swap) pattern, as a literal
+   True
+
+That is the whole argument in one example. The wedge is defined by antisymmetry, which is a
+statement about permuting slots and mentions no metric and no coordinates. Read in a basis
+pushed forward from the chart, its structure constants are therefore the *reference* ones —
+literals — and the chart cancels. Choose a basis with no relation to ``J`` and it would not:
+the same operation would arrive as an expression in the chart, recomputed at every point.
+
+So the preference is not aesthetic. Grassmann scores the candidate bases by how numeric the
+result becomes, and a basis aligned to the operator that defines the space wins by a wide
+margin, because there the projection onto the subspace is the identity. Absent any operator
+structure the inner-product-orthonormal basis wins instead, since it makes the metric the
+identity and so renders the inner product, the adjoint and the pseudo-inverse numeric too.
+The distinction between those two is exactly the distinction between the metric-free part of
+the algebra and the rest: the wedge and the alternator do not care which basis of the
+subspace you pick, while the Hodge star and the induced inner product very much do.
+
+Realizing such a basis is the one place numerical linear algebra actually enters — an SVD in
+general, a QR when the defining map is injective, a generalized SVD when a metric is in play
+— and the point of the scoring is to make that entrance as rare as possible.
+
+The same mechanism explains an earlier surprise. A pseudo-inverse of a *constant* pairing —
+the wedge-into-volume map that defines the Hodge star — becomes, once bases are chosen, a
+concrete matrix whose inverse is folded to a literal while compiling, so the emitted code
+contains no pseudo-inverse at all. The :doc:`tutorial` shows that happening. Writing
+``pinv`` cost nothing because ``pinv`` named an operation rather than prescribing an
+algorithm, and the basis choice then discovered that the operation was constant.
 
 Two honest caveats. The choice is a local heuristic scored per space, not a global search
 over the whole term; and a basis adapted to an operator is only available when the term
 actually exposes that operator, which is one more reason the universal property belongs in
 the type rather than in a comment.
+
+Deducing the program
+--------------------
+
+Put the previous two sections together and a compilation strategy falls out that needs no
+guidance from the author. A grassmann program is two things — a coordinate-free
+specification, and a choice of bases — and the second is *derivable from the first*.
+
+The pipeline is short, and each step is answerable because of how the terms are written:
+
+1. **What space is this?** Inference synthesizes a space for every subterm. It can, because
+   the operations are typed and the four fundamental subspaces are spaces rather than
+   properties of a matrix.
+2. **Which bases does that space admit?** The universal property in the space node answers
+   it: the structure is mirrored onto the basis tower, and a subspace contributes the bases
+   adapted to its defining map. The author is never asked.
+3. **Which one should we use?** Score them by how much of the result stays constant. This
+   is the step that turns a naming convention into an optimization, and the previous section
+   is what it looks like when it pays.
+4. **Emit.** Realize the chosen bases and lower each node against them, which is where an
+   SVD or QR appears if one is needed at all.
+5. **Fold.** Anything that came out constant is evaluated once, at compile time, rather than
+   at every call.
+
+Nothing in that sequence is a heuristic about *arrays*. It is a sequence of questions about
+the mathematics, and each one has an answer only because the term said what it meant instead
+of how to compute it. A specification that had been written as array code would have made
+step 1 impossible and the rest moot: there would be no space to ask about, only a shape.
+
+This is also why the same term can be compiled twice and give two different programs without
+either being wrong. :func:`~grassmann.compile_in` lets an author pin the bases and skip
+step 3 — useful when the coordinates are dictated from outside, as a reference element
+dictates them in a finite element method — and the compiler then inserts whatever change of
+basis is needed to keep the pinned choices consistent. The specification did not change; only
+the answer to one question did.
 
 No silent identifications
 -------------------------

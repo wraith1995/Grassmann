@@ -1,4 +1,4 @@
-"""``frame_cols_program(f, which)`` — the PRODUCER half of "frame becomes a kernel
+"""``basis_cols_program(f, which)`` — the PRODUCER half of "frame becomes a kernel
 argument".
 
 Given a frame map ``f`` (e.g. the Jacobian ``Img(J)``), this builds a standalone
@@ -6,7 +6,7 @@ Given a frame map ``f`` (e.g. the Jacobian ``Img(J)``), this builds a standalone
 ``Q`` is the orthonormal frame columns — EXACTLY the ``FfsRealization.cols`` that
 :func:`_realize_ffs_by_which` produces inside a full :func:`represent`.  Pointwise (a later
 phase) runs it once per cell to obtain the numeric ``Q`` and feeds it to the
-``supplied_frames`` short-circuit (see ``test_supplied_frames.py``).
+``supplied_bases`` short-circuit (see ``test_supplied_bases.py``).
 
 The correctness anchor: the ``Q`` this frame-prep program computes must equal what the main
 :func:`represent` factorizes for the same map.  QR/SVD frames may differ by column
@@ -25,7 +25,7 @@ import pytest
 import grassmann.core as C
 import grassmann.core.props as P
 import grassmann.lower.represent  # noqa: F401 - register the submodule in sys.modules
-from grassmann.lower import frame_cols_program
+from grassmann.lower import basis_cols_program
 
 _RM = sys.modules["grassmann.lower.represent"]
 represent = _RM.represent
@@ -33,7 +33,7 @@ represent = _RM.represent
 
 def _build():
     """The injective ℝ²↪ℝ⁴ image — the canonical QrOp-seam frame case (mirrors
-    ``test_supplied_frames._build`` / ``test_represent``'s QR-seam test)."""
+    ``test_supplied_bases._build`` / ``test_represent``'s QR-seam test)."""
     V, W = C.base("V", 2), C.base("W", 4)
     f = C.var("f", C.linear_map_space(V, W), props=P.inj)
     imgf = C.img(f, source=V, target=W)
@@ -49,7 +49,7 @@ def test_frame_prep_has_J_input_and_Q_output() -> None:
     """The frame-prep program declares ``f``'s raw input (the Jacobian ``J`` var) as ITS
     input and exposes the orthonormal frame columns ``Q`` as its single named output."""
     _term, f, _W = _build()
-    prog, out_name = frame_cols_program(f, "img")
+    prog, out_name = basis_cols_program(f, "img")
 
     assert out_name == "frame_img"
     input_names = [i.name for i in prog.inputs]
@@ -74,7 +74,7 @@ def test_frame_prep_Q_matches_represent_factorization() -> None:
     term, f, _W = _build()
     fname = _f_name(f)
 
-    prog, out_name = frame_cols_program(f, "img")
+    prog, out_name = basis_cols_program(f, "img")
 
     rng = np.random.default_rng(0)
     Fm = rng.standard_normal((2, 4))            # the (|dom|,|cod|) map matrix = the "J" input
@@ -106,8 +106,8 @@ def test_frame_prep_default_which_is_img() -> None:
     """``which`` defaults to ``"img"`` and ``"image"`` is accepted as its alias (both name
     the orthonormal range frame), giving the identical program/output."""
     _term, f, _W = _build()
-    prog_default, name_default = frame_cols_program(f)
-    prog_image, name_image = frame_cols_program(f, "image")
+    prog_default, name_default = basis_cols_program(f)
+    prog_image, name_image = basis_cols_program(f, "image")
     assert name_default == "frame_img"
     assert name_image == "frame_img"           # "image" normalizes to "img"
 

@@ -233,12 +233,12 @@ def _rational_lane() -> bool:
 # — the exactness-seeking consumer builds through the ordinary `force_stmts` lane over a
 # symbolic geometry, while the sole `rational_lane()` caller wants the orthonormal basis.
 _LITERAL_FFS_FRAMES: contextvars.ContextVar = contextvars.ContextVar(
-    "_gr_literal_ffs_frames", default=None
+    "_gr_literal_ffs_bases", default=None
 )
 
 
 @contextlib.contextmanager
-def literal_ffs_frames(enabled: bool = True) -> Iterator[None]:
+def literal_ffs_bases(enabled: bool = True) -> Iterator[None]:
     """Realize the image basis of an injective map as its literal columns inside this context.
 
     The literal columns are ``f``'s own columns ``f(eᵢ)``, which are rational in the program
@@ -256,10 +256,10 @@ def literal_ffs_frames(enabled: bool = True) -> Iterator[None]:
         _LITERAL_FFS_FRAMES.reset(tok)
 
 
-def _literal_ffs_frames() -> bool:
+def _literal_ffs_bases() -> bool:
     """Report whether the literal (Gram) image frame is requested for this lowering.
 
-    The :func:`literal_ffs_frames` context decides when it is active; otherwise the answer
+    The :func:`literal_ffs_bases` context decides when it is active; otherwise the answer
     comes from the process-wide ``GRASSMANN_FFS_FRAME=literal`` environment variable, which
     lets a consumer select the lane without wrapping its call site.
     """
@@ -279,7 +279,7 @@ def represent(
     *,
     basis_env: dict[int, B.Basis] | None = None,
     target: B.TargetBasis | B.Basis = B.AUTO,
-    supplied_frames: dict[tuple[str, int], tuple[str, int, int]] | None = None,
+    supplied_bases: dict[tuple[str, int], tuple[str, int, int]] | None = None,
     literal_frames: bool = False,
 ) -> pa.Program:
     """Lower a typed core ``term`` to a :class:`polyarray.Program`.
@@ -304,16 +304,16 @@ def represent(
     * a concrete :class:`~grassmann.core.basis.Basis` pins the result to that basis, which must
       be a basis of the result's space.
 
-    ``supplied_frames`` lets a caller hand in fundamental-subspace frames it has already
+    ``supplied_bases`` lets a caller hand in fundamental-subspace frames it has already
     computed, as a table ``(which, id(f)) -> (input_name, n_rows, n_cols)`` with ``which`` one
     of ``img``/``ker``/``coimg``/``coker`` (``"image"`` is normalized to ``"img"``). Where a
     key is present, the orthonormal basis of that subspace of ``f`` becomes a declared program
     input of the given name and shape instead of an SVD, QR or GSVD of ``f``. This is the
     consumer half of treating a basis as a kernel argument: every re-factorization of the same
-    map collapses to an input reference. :func:`frame_cols_program` is the producer half.
+    map collapses to an input reference. :func:`basis_cols_program` is the producer half.
 
     ``literal_frames`` propagates the rational frame lane over the whole lowering — the
-    argument form of the :func:`literal_ffs_frames` context. With it on, an un-pinned injective
+    argument form of the :func:`literal_ffs_bases` context. With it on, an un-pinned injective
     ``Img(f)`` leaf is represented in the literal ``ImageBasis(f)`` rather than the
     orthonormalizing ``ProjectedBasis``, and any injective image basis that has to be realized
     uses ``f``'s own columns and a Gram solve instead of the QR ``Q``. The two bases span the
@@ -327,12 +327,12 @@ def represent(
     :func:`_post_pass` before it is returned.
     """
     if literal_frames:
-        with literal_ffs_frames(True):
+        with literal_ffs_bases(True):
             return represent(term, basis_env=basis_env, target=target,
-                             supplied_frames=supplied_frames)
+                             supplied_bases=supplied_bases)
     prog = pa.Program("represent", budget=_lowering_budget())
     ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={},
-               supplied_frames=supplied_frames or {})
+               supplied_bases=supplied_bases or {})
 
     # pre-REALIZE every free input var that carries a symbolic ``DimVar('n')``, so its
     # canonical runtime atom AND its input array both exist before any node needs an ℝⁿ shape (e.g.
@@ -357,7 +357,7 @@ def represent(
     return out
 
 
-def frame_cols_program(
+def basis_cols_program(
     f: T.Term,
     which: str = "img",
     *,
@@ -368,13 +368,13 @@ def frame_cols_program(
     """Build a standalone program that computes one fundamental-subspace basis of map ``f``.
 
     This is the producer half of treating a frame as a kernel argument, whose consumer half is
-    ``represent(..., supplied_frames=...)``. The returned program takes ``f``'s own free term
+    ``represent(..., supplied_bases=...)``. The returned program takes ``f``'s own free term
     variables as inputs — the Jacobian variable's array, say — and yields a single output, the
     basis columns, under the name returned alongside it::
 
         f's input vars ──► [ SvdOp / QrOp / GSvdOp ] ──► basis columns
                                                             │
-        represent(..., supplied_frames={(which, id(f)): (name, r, c)})
+        represent(..., supplied_bases={(which, id(f)): (name, r, c)})
                                                             ▼
                                         the basis is read as a program input,
                                         not refactorized per use
@@ -382,7 +382,7 @@ def frame_cols_program(
     Those columns are exactly the :attr:`~grassmann.lower.space_basis.FfsRealization.cols`
     that :func:`_realize_ffs_by_which` produces for subspace ``which`` of ``f`` inside a full
     :func:`represent`, so a caller can evaluate this program once and feed the result back
-    through ``supplied_frames``, collapsing every re-factorization of ``f`` to an input
+    through ``supplied_bases``, collapsing every re-factorization of ``f`` to an input
     reference.
 
     ``which`` is one of ``img``, ``image``, ``ker``, ``coimg`` or ``coker``, with ``"image"``
@@ -401,7 +401,7 @@ def frame_cols_program(
     """
     norm = "img" if which == "image" else which
     prog = pa.Program("frame_cols", budget=_lowering_budget())
-    ctx = _Ctx(prog=prog, basis_env={}, inputs={}, supplied_frames={})
+    ctx = _Ctx(prog=prog, basis_env={}, inputs={}, supplied_bases={})
 
     # (mirrors `represent`): pre-REALIZE every free input var of ``f`` that carries a
     # symbolic ``DimVar('n')``, so its canonical runtime atom + input array exist before the
@@ -599,7 +599,7 @@ class _Ctx:
     # reference.  It is read-only and shared by reference across each sub-``_Ctx``, like
     # ``basis_env``, and keyed on the same ``(which, id(f))`` normalization the memo uses
     # (``"image"`` folded to ``"img"``).
-    supplied_frames: dict[tuple[str, int], tuple[str, int, int]] = field(default_factory=dict)
+    supplied_bases: dict[tuple[str, int], tuple[str, int, int]] = field(default_factory=dict)
     # The canonical subspace-dimension ``DimAtom`` for each ``(which, id(f))``.
     # A map's FFS dimension is metric-independent — it is the rank, or the ambient dimension
     # less the rank for ker/coker — so the metric-free SVD, the metric GSVD and every
@@ -3648,7 +3648,7 @@ def _build_lam_subprogram(
     input_uids = {v.uid for v in sub_inputs}
     sub_env = {k: val for k, val in parent.basis_env.items() if k not in input_uids}
     sub_ctx = _Ctx(prog=sub, basis_env=sub_env, inputs={},
-                   supplied_frames=parent.supplied_frames)
+                   supplied_bases=parent.supplied_bases)
     # Force each sub-input to be allocated as a sub-Program input, in the declared order
     # (so the parent's operand list lines up positionally with sub.inputs).
     in_bases = [_rep_var(v, sub_ctx).basis for v in sub_inputs]
@@ -5443,7 +5443,7 @@ def _rep_llam_vmap(
     # 1. Build the body sub-Program (mirror ``_build_lam_subprogram``'s structure).
     sub = pa.Program("llam_body", budget=_lowering_budget())
     sub_ctx = _Ctx(prog=sub, basis_env=ctx.basis_env, inputs={},
-                   supplied_frames=ctx.supplied_frames)
+                   supplied_bases=ctx.supplied_bases)
     # 2. Inputs IN ORDER: the bound vars FIRST (each a rank-1 input in its binding basis), then the
     #    body's free vars.  Lowering the body may ALSO pull in extra inputs (e.g. the abstract
     #    vectors of a pinned ``ListBasis`` basis), which appear AFTER in ``sub.inputs`` order.
@@ -7747,7 +7747,7 @@ def _realize_ffs_by_which(
     # and the covariant branch above) produces a DIFFERENT, G-orthonormal basis, so the supply
     # must NOT stand in for it: take the offer only on the metric-free path.  (Same rule the
     # constant-basis fold uses in ``space_basis.realize_ffs_basis``.)
-    supplied = (ctx.supplied_frames.get((norm, id(f)))
+    supplied = (ctx.supplied_bases.get((norm, id(f)))
                 if metric_dom is None and metric_cod is None else None)
     if supplied is not None:
         # ONE input per supplied basis per Program: the memo key carries the metric basis, so the
@@ -7788,8 +7788,8 @@ def _realize_ffs_by_which(
         label=getattr(f, "name", "f"),
         dim_atom=ctx.ffs_dim_atoms.get(dim_key),
         # The certificate lane's LITERAL (rational) image basis, when opted in — see the
-        # `literal_ffs_frames` note.  The seam applies it on the injective-image route only.
-        literal_frame=_literal_ffs_frames(),
+        # `literal_ffs_bases` note.  The seam applies it on the injective-image route only.
+        literal_basis=_literal_ffs_bases(),
     )
     # Record the canonical SUBSPACE atom (the column axis of ``cols``) the first time it is
     # minted, so later realizations of the same ``(which, id(f))`` reuse the very same atom.
@@ -8009,18 +8009,18 @@ def _uid_of_var_name(name: str) -> int | None:
 def _supplied_frame_shape(ctx: _Ctx, name: str) -> tuple[int, int] | None:
     """Give the ``(n_rows, n_cols)`` of the caller-supplied frame named ``name``.
 
-    ``None`` if ``name`` is not one of ``ctx.supplied_frames``' input names.  The frame table is keyed by the
+    ``None`` if ``name`` is not one of ``ctx.supplied_bases``' input names.  The frame table is keyed by the
     map, so this is the reverse lookup (by input NAME), which is how the lowering recognizes a supplied basis
     wherever it meets one as a bare Program-input name.
     """
-    for supplied_name, nrow, ncol in ctx.supplied_frames.values():
+    for supplied_name, nrow, ncol in ctx.supplied_bases.values():
         if supplied_name == name:
             return (nrow, ncol)
     return None
 
 
 def _declare_supplied_frame(ctx: _Ctx, name: str) -> pa.SymArray | None:
-    """Declare a caller-SUPPLIED frame (``supplied_frames``) as an input of ``ctx``'s program.
+    """Declare a caller-SUPPLIED frame (``supplied_bases``) as an input of ``ctx``'s program.
 
     ``None`` when ``name`` is not one of the supplied bases.
 
@@ -8034,7 +8034,7 @@ def _declare_supplied_frame(ctx: _Ctx, name: str) -> pa.SymArray | None:
     existing = ctx.prog.input_arrays.get(name)
     if existing is not None:
         return existing
-    for supplied_name, nrow, ncol in ctx.supplied_frames.values():
+    for supplied_name, nrow, ncol in ctx.supplied_bases.values():
         if supplied_name == name:
             return _make_input(ctx, name, (nrow, ncol), note=f"ffs-supplied:{name}")
     return None
