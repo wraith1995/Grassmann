@@ -43,17 +43,17 @@ of a space; ``dim`` asks a space how big it is:
 
 .. doctest::
 
-   >>> def R(n: int) -> G.space:
+   >>> def R(n: int) -> G.Expr:
    ...     return G.space(f"R{n}", n)
-   >>> def run(term, **values):
+   >>> def run(term: G.Expr, **values: np.ndarray) -> np.ndarray:
    ...     prog = G.compile(term)
    ...     feed = {i.name: values[i.name.rsplit("_", 1)[0]] for i in prog.inputs}
    ...     return np.asarray(prog.run(feed)["result"], float)
-   >>> def show(term, **values):
+   >>> def show(term: G.Expr, **values: np.ndarray) -> list[float]:
    ...     return (np.round(run(term, **values).ravel(), 4) + 0.0).tolist()
-   >>> def pair(s, a, b):
+   >>> def pair(s: G.Expr, a: G.Expr, b: G.Expr) -> G.Expr:
    ...     return G.inner(s).at([0, 1])(a, b)
-   >>> def dim(s):
+   >>> def dim(s: G.Expr) -> int:
    ...     return math.prod(G.shape_of_space(s.node))
    >>> rng = np.random.default_rng(0)
 
@@ -102,7 +102,7 @@ flat one:
 
 .. doctest::
 
-   >>> def tensor_power(V, k):
+   >>> def tensor_power(V: G.Expr, k: int) -> G.Expr:
    ...     return G.tensor(*[V] * k)
 
 We can define this space as parametric over a variable unknown space ``V`` — a
@@ -142,11 +142,11 @@ the ``k`` argument slots into one :math:`V^{\otimes k}` input with
 
 .. doctest::
 
-   >>> def sgn(sigma):
+   >>> def sgn(sigma: tuple[int, ...]) -> int:
    ...     inv = sum(1 for i in range(len(sigma))
    ...               for j in range(i + 1, len(sigma)) if sigma[i] > sigma[j])
    ...     return 1 if inv % 2 == 0 else -1
-   >>> def alt(V, k):
+   >>> def alt(V: G.Expr, k: int) -> G.Expr:
    ...     def body(*vs):
    ...         return G.sum(*[G.scale(sgn(s), G.tensor(*[vs[s[j]] for j in range(k)]))
    ...                        for s in itertools.permutations(range(k))])
@@ -167,8 +167,8 @@ first-class space, not a shape:
 
 .. doctest::
 
-   >>> _POWERS = {}
-   >>> def ext_power(V, k):
+   >>> _POWERS: dict[object, G.Expr] = {}
+   >>> def ext_power(V: G.Expr, k: int) -> G.Expr:
    ...     key = (V.node, k)
    ...     if key not in _POWERS:                  # canonical: one node per (V, k)
    ...         _POWERS[key] = G.img(alt(V, k))
@@ -198,7 +198,7 @@ resolves statically instead:
 
 .. doctest::
 
-   >>> def ext_power_ranked(V, k, r):
+   >>> def ext_power_ranked(V: G.Expr, k: int, r: int) -> G.Expr:
    ...     Vk = tensor_power(V, k)
    ...     P = G.var(f"Alt{k}", G.tensor(G.dual(Vk), Vk), props=G.rank(r))
    ...     return G.img(P)
@@ -287,7 +287,7 @@ pinned: it compiles the term into the frames you name rather than ones it picks:
 
 .. doctest::
 
-   >>> def represent(term, target):
+   >>> def represent(term: G.Expr, target: G.Expr) -> np.ndarray:
    ...     return np.asarray(G.compile_in(term, target=target).run({})["result"], float)
    >>> M = represent(alt(V, 2), frame)
    >>> print(np.round(M, 3) + 0.0)
@@ -317,7 +317,7 @@ and gotten the same result. A basis is built from explicit vectors with
 
 .. doctest::
 
-   >>> def basis_vec(S, i, n):
+   >>> def basis_vec(S: G.Expr, i: int, n: int) -> G.Expr:
    ...     a = np.zeros(n); a[i] = 1.0
    ...     return G.external(S, ExternalOp(f"e{i}", lambda a=a: a))
    >>> scaled = G.list_basis(*[G.scale(2.0 if i == 0 else 1.0, basis_vec(V, i, 3))
@@ -380,7 +380,7 @@ project onto :math:`\Lambda^{k+l}`:
 
 .. doctest::
 
-   >>> def wedge(V, a, b, k, l):
+   >>> def wedge(V: G.Expr, a: G.Expr, b: G.Expr, k: int, l: int) -> G.Expr:
    ...     A = embed(a, tensor_power(V, k))        # Λᵏ ⊑ V⊗ᵏ
    ...     B = embed(b, tensor_power(V, l))        # Λˡ ⊑ V⊗ˡ
    ...     flat = G.unlift(A * B, [0, 1])          # (V⊗ᵏ)⊗(V⊗ˡ) ⇒ V⊗ᵏ⁺ˡ  (a reshape)
@@ -422,7 +422,7 @@ we can settle the dimensions we declined to assert. Wedge ``k`` generic vectors 
 
 .. doctest::
 
-   >>> def measured_dim(n, k):
+   >>> def measured_dim(n: int, k: int) -> int:
    ...     V = R(n)
    ...     xs = [G.var(f"x{i}", V) for i in range(k)]
    ...     term = xs[0]
@@ -443,7 +443,7 @@ Here it is checked by running both sides on random inputs and comparing:
 
 .. doctest::
 
-   >>> def anticommutes(n, k, l):
+   >>> def anticommutes(n: int, k: int, l: int) -> bool:
    ...     V = R(n)
    ...     a = G.var("a", ext_power(V, k))
    ...     b = G.var("b", ext_power(V, l))
@@ -539,7 +539,7 @@ transcribed:
 
 .. doctest::
 
-   >>> def interior(V, omega, v, k):
+   >>> def interior(V: G.Expr, omega: G.Expr, v: G.Expr, k: int) -> G.Expr:
    ...     if k == 1:                              # Λ⁰ = scalars: ι_v is the pairing
    ...         return pair(V, v, omega)
    ...     Lkm1 = ext_power(V, k - 1) if k - 1 > 1 else V
@@ -574,7 +574,7 @@ with the same ``k!`` carried by the induced metric. Checked by running:
 
 .. doctest::
 
-   >>> def contracts_by_leibniz(n):
+   >>> def contracts_by_leibniz(n: int) -> bool:
    ...     V = R(n)
    ...     a, b, v = G.var("a", V), G.var("b", V), G.var("v", V)
    ...     av, bv, vv = (rng.standard_normal(n) for _ in range(3))
@@ -611,7 +611,7 @@ First the unit volume form, the wedge of the standard basis normalized to length
 
 .. doctest::
 
-   >>> def unit_vol(V, n):
+   >>> def unit_vol(V: G.Expr, n: int) -> G.Expr:
    ...     Ln = ext_power(V, n)
    ...     raw = G.project(G.tensor(*[basis_vec(V, i, n) for i in range(n)]), Ln)
    ...     return G.scale(G.reciprocal(G.sqrt(pair(Ln, raw, raw))), raw)
@@ -620,7 +620,7 @@ and then the star itself:
 
 .. doctest::
 
-   >>> def hodge_star(V, omega, k):
+   >>> def hodge_star(V: G.Expr, omega: G.Expr, k: int) -> G.Expr:
    ...     n = dim(V)
    ...     Ln, vol = ext_power(V, n), unit_vol(V, n)
    ...     if k == 0:                       # ⋆c = c · vol
@@ -652,7 +652,7 @@ the right ones. Across dimensions and degrees:
 
 .. doctest::
 
-   >>> def hodge_characterizes(n, k):
+   >>> def hodge_characterizes(n: int, k: int) -> bool:
    ...     V = R(n)
    ...     Ln, Lk = ext_power(V, n), ext_power(V, k)
    ...     vol = unit_vol(V, n)
@@ -680,10 +680,10 @@ We can simply look. A grassmann program renders to standalone numpy, so the ques
    >>> import re
    >>> import polyarray as pa
    >>> from grassmann.lower.numpy_renderers import op_renderers
-   >>> def generated_source(term):
+   >>> def generated_source(term: G.Expr) -> str:
    ...     return pa.to_numpy_source(G.compile(term), func_name="f",
    ...                               op_renderers=op_renderers())
-   >>> def linalg_calls(term):
+   >>> def linalg_calls(term: G.Expr) -> list[str]:
    ...     return sorted(set(re.findall(r"np\.linalg\.\w+", generated_source(term))))
 
 Applied to a pseudo-inverse of a map grassmann knows nothing about, we get exactly what
@@ -860,7 +860,7 @@ partial:
 
 .. doctest::
 
-   >>> def exterior_derivative(omega, x, k):
+   >>> def exterior_derivative(omega: G.Expr, x: G.Expr, k: int) -> G.Expr:
    ...     V = G.Expr(x.node.space)
    ...     Vs, n = G.dual(V), dim(G.Expr(x.node.space))
    ...     L1 = ext_power(Vs, 1)
@@ -895,7 +895,7 @@ every dimension:
 
 .. doctest::
 
-   >>> def d_squared_zero(n):
+   >>> def d_squared_zero(n: int) -> bool:
    ...     V = R(n); x = G.var("x", V)
    ...     f = G.scale(0.5, G.dot(x, x))
    ...     ddf = exterior_derivative(exterior_derivative(f, x, 0), x, 1)
@@ -912,7 +912,7 @@ need a new construction at all — it is ``d`` conjugated by the Hodge star,
 
 .. doctest::
 
-   >>> def codifferential(base, omega, x, k, n):
+   >>> def codifferential(base: G.Expr, omega: G.Expr, x: G.Expr, k: int, n: int) -> G.Expr:
    ...     return hodge_star(base, exterior_derivative(hodge_star(base, omega, k),
    ...                                                 x, n - k), n - k + 1)
 
@@ -921,7 +921,7 @@ inherits ``d``'s nilpotency, ``δ ∘ δ = 0``:
 
 .. doctest::
 
-   >>> def delta_squared_zero(n):
+   >>> def delta_squared_zero(n: int) -> bool:
    ...     W, Ws = R(n), G.dual(R(n))
    ...     x, A = G.var("x", W), G.var("A", W >> W)
    ...     omega = hodge_star(Ws, G.flat(W)(A(x)), 1)   # ⋆♭(A·x): an (n−1)-form field

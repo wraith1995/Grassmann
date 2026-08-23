@@ -35,14 +35,14 @@ inner product:
    >>> from grassmann.lower.represent import ExternalOp
    >>> V = G.space("R3", 3)
    >>> u, v = G.var("u", V), G.var("v", V)
-   >>> def e(i, n=3):
+   >>> def e(i: int, n: int = 3) -> G.Expr:
    ...     a = np.zeros(n); a[i] = 1.0
    ...     return G.external(V, ExternalOp(f"e{i}", lambda a=a: a))
    >>> std = G.standard_basis(V)
    >>> skew = G.list_basis(e(0), G.sum(e(0), e(1)), e(2))    # not orthonormal
    >>> S = np.array([[1., 1., 0.], [0., 1., 0.], [0., 0., 1.]])   # its frame vectors
    >>> ku, kv = f"u_{u.node.uid}", f"v_{v.node.uid}"
-   >>> def inner_in(frame, cu, cv):
+   >>> def inner_in(frame: G.Expr, cu: np.ndarray, cv: np.ndarray) -> float:
    ...     prog = G.compile_in(G.dot(u, v), {u: frame, v: frame})
    ...     return round(float(np.asarray(prog.run({ku: cu, kv: cv})["result"], float)), 6)
    >>> x, y = np.array([1., 2., 3.]), np.array([0., 1., -1.])     # the two vectors
@@ -237,7 +237,7 @@ unit sphere, whose induced metric should be ``diag(1, sin²u₁)``:
 
    >>> from grassmann.syntax.geometry import Parameterization
    >>> from grassmann.syntax.mcalc import build_problem
-   >>> def sphere(uu):
+   >>> def sphere(uu: np.ndarray) -> np.ndarray:
    ...     a, b = uu
    ...     return np.array([np.sin(a) * np.cos(b), np.sin(a) * np.sin(b), np.cos(a)])
    >>> phi = Parameterization("phi", 2, 3, immersion=sphere)
@@ -323,7 +323,7 @@ the output is stable):
 
 .. doctest::
 
-   >>> def show_term(t):
+   >>> def show_term(t: G.Expr) -> str:
    ...     return re.sub(r"\b([ax])\d+\b", r"\1", G.unparse(t))
    >>> Vs = G.space("V", 3)
    >>> show_term(G.llam(Vs, lambda z: G.scale(2.0, z)))

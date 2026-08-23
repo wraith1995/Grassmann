@@ -41,7 +41,7 @@ A simple example shows how changes of basis are appropriately inserted:
        return result
 
    >>> # (2) the SAME term, but x's coordinates are read in a swapped frame of V:
-   >>> def e(*cs): return G.ostack(*[G.lit(float(c)) for c in cs])
+   >>> def e(*cs: float) -> G.Expr: return G.ostack(*[G.lit(float(c)) for c in cs])
    >>> swapV = G.list_basis(e(0, 1), e(1, 0))       # the standard basis of V, swapped
    >>> cobbed = G.compile_in(f(x), inputs={f: G.standard_basis(V >> W), x: swapV}, target=G.standard_basis(W))
    >>> cobbed.run({i.name: {"f": fmat, "x": xvec}[i.name.split("_")[0]] for i in cobbed.inputs})

@@ -96,7 +96,7 @@ fundamental subspace contributes the frames adapted to the very map that defines
 
    >>> import grassmann as G
    >>> from grassmann.lower.space_basis import space_basis
-   >>> def candidates(space):
+   >>> def candidates(space: G.Expr) -> list[str]:
    ...     _default, cands = space_basis(space.node)
    ...     return [type(b).__name__ for b in cands]
    >>> A, B = G.space("A", 2), G.space("B", 3)
