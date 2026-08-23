@@ -44,9 +44,7 @@ programming-language idea, put to mathematical work:
   fundamental subspaces are known before any basis is chosen, and a mismatch is a typing
   error rather than a shape crash at run time.
 - **A linear type system.** The linear binder ``⊸`` is enforced by a resource calculus
-  that requires each linear variable to be consumed exactly once, distinguishing the
-  multiplicative and additive combinators of linear logic — which is not pedantry, since
-  it is precisely what makes an antisymmetrizer's signed sum a well-formed linear map.
+  rather than by convention, as the next two sections set out.
 - **Parametric polymorphism.** A term can abstract over a *space*, so one construction
   serves every space it is instantiated at.
 - **Limited dependent types.** A space may be indexed by a term: ``Img(f)`` depends on the
@@ -61,6 +59,63 @@ programming-language idea, put to mathematical work:
 The point of the borrowing is that these ideas earn their keep here. A type system that
 cannot tell ``V`` from ``V*`` catches nothing interesting; one that can turns a family of
 classic modelling mistakes into build-time errors.
+
+The term language is a lambda calculus
+--------------------------------------
+
+Underneath the builders, a grassmann term is a typed lambda calculus with four binders.
+:func:`~grassmann.llam` binds a **linear** variable — the ``⊸`` of linear logic;
+:func:`~grassmann.lam` binds a space or a type, which is where the parametric polymorphism
+comes from; :func:`~grassmann.bfn` binds a *basis*; and :func:`~grassmann.frame` binds a
+*point*, giving a basis that varies over a space — a moving frame.
+:func:`~grassmann.lift` and :func:`~grassmann.unlift` uncurry and curry, fusing argument
+slots into one tensor input or splitting them apart.
+
+Terms print in the notation they denote (bound-variable numbering is normalized here so
+the output is stable):
+
+.. doctest::
+
+   >>> import re
+   >>> import grassmann as G
+   >>> def show_term(t: G.Expr) -> str:
+   ...     return re.sub(r"\b([ax])\d+\b", r"\1", G.unparse(t))
+   >>> Vs = G.space("V", 3)
+   >>> show_term(G.llam(Vs, lambda z: G.scale(2.0, z)))
+   'λ x:ℝ^3. 2.0 · x'
+   >>> show_term(G.lam(G.Space, lambda t: G.llam(t, lambda z: z)))
+   'Λ a:Space. λ x:a. x'
+
+Four binders is not a large language, and that is the point. The mathematics is carried by
+the space and term constructors; the binders only say how a construction is abstracted and
+applied.
+
+Linearity is a resource calculus, not a naming convention
+---------------------------------------------------------
+
+A linear binder must consume each of its variables **exactly once**, and
+:func:`~grassmann.infer.check_linearity` counts uses along every evaluation path to enforce
+it. The counting distinguishes the two combinators of linear logic: multiplicative nodes
+(``⊗`` stacks, application, composition, scaling) *add* their children's usage, while the
+one additive node, ``Sum``, requires its branches to *agree*.
+
+So a variable used in both summands of a ``+`` is used once, and a variable appearing in
+both factors of a ``⊗`` is used twice and rejected:
+
+.. doctest::
+
+   >>> from grassmann.infer import check_linearity
+   >>> check_linearity(G.llam(Vs, lambda z: G.sum(z, z)).node)          # additive: fine
+   >>> check_linearity(G.llam(Vs, lambda z: G.tensor(z, z)).node)       # multiplicative
+   Traceback (most recent call last):
+       ...
+   grassmann.infer.linearity.LinearityError: linear variable ... is used 2 times; ...
+
+That additive rule is not a technicality. It is what lets the antisymmetrizer
+``Σ_σ sgn(σ)·(v_{σ(0)} ⊗ … )`` typecheck as a linear map, since each ``vᵢ`` is consumed
+once *within every summand*; the :doc:`tutorial` builds exactly that term. A language that
+merely called its binder linear would have nothing to say here, and would accept the terms
+that are not.
 
 Universal properties are the terms
 ----------------------------------

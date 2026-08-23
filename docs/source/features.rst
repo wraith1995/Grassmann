@@ -3,7 +3,7 @@ Features
 
 Grassmann lets you write linear and multilinear algebra the way you think about it —
 coordinate-free, typed, and close to the mathematics — and then compiles it to plain,
-fast array code you can run or ship. Every claim on this page is checked by running it.
+fast array code you can run or ship.
 
 .. doctest::
 
@@ -19,10 +19,10 @@ transpose-and-conjugate that becomes depends on the inner products at both ends,
 resolving it is the compiler's job rather than yours. The same holds of
 :func:`~grassmann.solve` and :func:`~grassmann.pinv`, of the trace and the determinant, of
 the musical isomorphisms :func:`~grassmann.sharp` and :func:`~grassmann.flat`, and of
-projection onto a subspace — :doc:`public_api` is the full surface.
+projection onto a subspace — see :doc:`public_api` and :doc:`grammar` for more.
 
-That is a claim about meaning, so it ought to be testable. Take two vectors of ``ℝ³``, and
-two frames for that space: the standard one, and a skew frame that is not orthonormal.
+We provide a simple demonstration. Take two vectors of ``ℝ³``, and
+two frames for that space: the standard one, and a skew frame that is not orthonormal:
 
 .. doctest::
 
@@ -36,8 +36,8 @@ two frames for that space: the standard one, and a skew frame that is not orthon
    >>> skew = G.list_basis(e(0), G.sum(e(0), e(1)), e(2))       # not orthonormal
    >>> ku, kv = f"u_{u.node.uid}", f"v_{v.node.uid}"
 
-The two frames describe the same vectors with different numbers, and grassmann is what
-moves between them: compiling the bare term ``u`` out of one frame and into the other *is*
+The two frames describe the same vectors with different numbers, and Grassmann manages the details:
+compiling the bare term ``u`` out of one frame and into the other *is*
 the change of basis, so no arithmetic has to be done by hand to set the comparison up.
 
 .. doctest::
@@ -49,7 +49,7 @@ the change of basis, so no arithmetic has to be done by hand to set the comparis
    >>> xs.tolist(), ys.tolist()
    ([-1.0, 2.0, 3.0], [-1.0, 1.0, -1.0])
 
-Now ask one term — ``G.dot(u, v)``, written once and never edited — for the inner product:
+Now we consider ``G.dot(u, v)``, the inner product:
 first of the standard coordinates in the standard frame, then of the skew coordinates in
 the skew frame.
 
@@ -68,7 +68,7 @@ way to notice.
 
 Keeping coordinates out of the term is also what makes the type system worth having. Every
 expression carries its space, so a mismatch is a build-time error rather than a shape crash
-or, worse, a plausible wrong answer. Dimensions have to agree:
+or, worse, a plausible wrong answer. For example:
 
 .. doctest::
 
@@ -79,7 +79,7 @@ or, worse, a plausible wrong answer. Dimensions have to agree:
        ...
    grassmann.infer.unify.UnifyError: ⊕ⁿ count mismatch: DimLit(3) ≢ DimLit(2)
 
-and a space is never quietly confused with its dual, though the two have equal dimension
+Similarly, a space is never quietly confused with its dual, though the two have equal dimension
 and identically shaped arrays. A covector applied to a vector is the dual pairing and
 compiles; asking the same two values to pair as though both were vectors does not:
 
@@ -103,16 +103,12 @@ A metricized space behaves the same way: attaching an inner product with
 :func:`~grassmann.with_inner` yields a genuinely different space, and
 :func:`~grassmann.remetric` is how you cross into it on purpose.
 
-Finally, the four fundamental subspaces ``ker``, ``img``, ``coker`` and ``coimg`` are spaces
-in their own right rather than descriptions of a matrix, so a further map can be typed
-against them. That is not a nicety: it is what makes a tangent space expressible at all, as
-the section on dependent types below shows.
-
 Basis-driven compilation to array code
 --------------------------------------
 
-Choosing a basis is a separate, later decision from writing the mathematics — and it is
-the decision that turns a symbolic operation into a numeric one.
+Choosing a basis is a separate, later decision from writing the mathematics — and it is the
+decision that turns a coordinate-independent program, which cannot be run in general, into
+an array program, which we know how to compile.
 :func:`~grassmann.compile` picks frames for you; :func:`~grassmann.compile_in` pins an
 explicit frame to each variable and to the result, inserting whatever change of basis is
 needed to keep them consistent.
@@ -141,14 +137,45 @@ or emit it as standalone, dependency-light Python and paste that into your own c
 Nothing above the program ships with you: grassmann is a build-time front end that
 produces ordinary array code.
 
-Compatible with PyTorch
-~~~~~~~~~~~~~~~~~~~~~~~
+Compiles to a subset of Python + Numpy Compatible With PyTorch
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The emitted vocabulary is deliberately small — across gradients, pseudo-inverses, solves,
-traces, Kronecker products and determinants it stays within ``asarray``, ``array``,
-``einsum``, ``eye``, ``stack``, ``prod``, elementwise scalar functions, and
-``linalg.{det,inv,pinv}``. Every one of those has a one-to-one torch counterpart, so the
+The emitted vocabulary is deliberately small. Across gradients, pseudo-inverses, solves,
+traces, Kronecker products and determinants it stays inside ten names:
+
+.. doctest::
+
+   >>> vocabulary = set()
+   >>> for expr, decls in [("D(0.5*x'*A*x, x)", {"x": "R^n", "A": "R^n -> R^n"}),
+   ...                     ("pinv(A)*y", {"A": "R^n -> R^n", "y": "R^n"}),
+   ...                     ("A\\y", {"A": "R^n -> R^n", "y": "R^n"}),
+   ...                     ("kron(A, B)", {"A": "R^n -> R^n", "B": "R^n -> R^n"}),
+   ...                     ("log(det(inv(X)))", {"X": "R^n -> R^n"})]:
+   ...     text = pa.to_numpy_source(G.compile(build_problem(expr, decls=decls).primal),
+   ...                               func_name="f", op_renderers=op_renderers())
+   ...     vocabulary |= set(re.findall(r"np\.[a-z_]+(?:\.[a-z_]+)?", text))
+   >>> sorted(vocabulary)
+   ['np.array', 'np.asarray', 'np.einsum', 'np.eye', 'np.linalg.det', 'np.linalg.inv', 'np.linalg.pinv', 'np.log', 'np.prod', 'np.stack']
+
+Every one of those has a one-to-one counterpart in ``torch`` and in ``jax.numpy``, so the
 generated source ports by substituting the namespace.
+
+The shape of the code matters as much as the vocabulary. The functions that carry the
+mathematics are straight-line: a sequence of assignments, no loops, no branches, no
+mutation. Control flow appears in exactly one place — a generated ``vmap`` shim, emitted
+when a derivative has to be evaluated across a batch of seeds, which is the one construct
+torch and JAX already provide natively:
+
+.. doctest::
+
+   >>> src = pa.to_numpy_source(
+   ...     G.compile(build_problem("D(0.5*x'*A*x, x)",
+   ...                             decls={"x": "R^n", "A": "R^n -> R^n"}).primal),
+   ...     func_name="grad", op_renderers=op_renderers())
+   >>> import ast
+   >>> [(fn.name, any(isinstance(n, (ast.For, ast.If)) for n in ast.walk(fn)))
+   ...  for fn in ast.parse(src).body if isinstance(fn, ast.FunctionDef)]
+   [('_sub0', False), ('_vmap1', True), ('grad', False)]
 
 For running rather than porting, polyarray ships a torch backend:
 :func:`polyarray.torch_batch.batched_torch` lowers a ``Program`` through ``pyab`` and
@@ -230,6 +257,73 @@ facts a map carries (:func:`~grassmann.rank`, :func:`~grassmann.inj`,
 :func:`~grassmann.surj`, :func:`~grassmann.bij`) are assertions that refine a type rather
 than proofs the checker demands.
 
+Transporting values between spaces
+----------------------------------
+
+A great deal of practical linear algebra is carrying a value from one space to a related
+one: a reference element to a physical element, a subspace to its ambient, one summand of
+a direct sum to the whole. Grassmann separates the ways that can happen, because they are
+not the same operation.
+
+:func:`~grassmann.pullback` moves a value by *structure* alone — it walks the source and
+target spaces in step, through ``⊗``, ``⊕``, ``Dual`` and the fundamental subspaces, and
+inserts whichever projection or embedding each position calls for. No map is involved.
+:func:`~grassmann.pushforward` carries a value *along a map* into that map's image, and
+:func:`~grassmann.pull_along` comes back through the adjoint. Frames travel too:
+:func:`~grassmann.transport_basis` pushes a reference frame forward along a map, and
+:func:`~grassmann.transport_cobasis` carries the frame dual to it.
+
+The reference-element pattern of the finite element method is exactly this. Basis
+functions and quadrature are worked out once on a reference element; each physical element
+is reached through the element map, whose differential is an injective ``J``:
+
+.. doctest::
+
+   >>> Ref, Phys = G.space("Ref", 2), G.space("Phys", 2)
+   >>> J = G.var("J", Ref >> Phys, props=G.inj)     # the element map's differential
+   >>> ref = G.var("ref", Ref)
+   >>> physical = G.pushforward(ref, J)             # the same value, on the element
+   >>> G.unparse(G.infer.synth_space(physical.node))
+   'J : (ℝ^2)* ⊗ ℝ^2 {inj} ⊢ Img(J)'
+
+The value now lives on the element's tangent space. What it *looks like* depends on which
+frame you read it in, and both readings are available. In the frame transported from the
+reference element the coordinates are the reference coordinates, unchanged; in the ambient
+standard frame they are the physical ones:
+
+.. doctest::
+
+   >>> Jm = np.array([[2., 0.], [1., 3.]])         # one element's map
+   >>> kJ, kref = f"J_{J.node.uid}", f"ref_{ref.node.uid}"
+   >>> feed = {kJ: Jm, kref: np.array([1., 2.])}
+   >>> transported = G.transport_basis(None, J)    # the reference frame, pushed forward
+   >>> in_ref = G.compile_in(physical, {ref: G.standard_basis(Ref)}, target=transported)
+   >>> np.asarray(in_ref.run(feed)["result"], float).tolist()
+   [1.0, 2.0]
+   >>> in_std = G.compile_in(physical, {ref: G.standard_basis(Ref)})
+   >>> np.asarray(in_std.run(feed)["result"], float).tolist()
+   [4.0, 6.0]
+
+The transported frame is not orthonormalized — it is literally ``J(b₁), …, J(bₙ)`` — which
+is what keeps the coordinates rational, since orthonormalizing would introduce square
+roots. Its dual travels with it, and the pairing is preserved exactly, so a functional
+assembled on the reference element evaluates on the physical one with no Jacobian factors
+written by hand:
+
+.. doctest::
+
+   >>> w = G.var("w", G.dual(G.img(J)))
+   >>> pairing = G.compile_in(w(physical), {ref: G.standard_basis(Ref),
+   ...                                      w: G.transport_cobasis(None, J)})
+   >>> kw = f"w_{w.node.uid}"
+   >>> float(np.asarray(pairing.run({**feed, kw: np.array([3., -1.])})["result"], float))
+   1.0
+   >>> float(np.array([3., -1.]) @ np.array([1., 2.]))      # the reference pairing
+   1.0
+
+The Jacobian never appears in the expression. It appears in the frames, which is where a
+change of element belongs.
+
 Built-in libraries for differential geometry
 --------------------------------------------
 
@@ -260,55 +354,95 @@ Automatic covariant differentiation
 
 :func:`~grassmann.diff` differentiates a term with respect to one of its variables and
 returns *another term* — the derivative as a map, ready to be simplified, wedged, or
-lowered like anything else. On a subspace it is a **covariant** derivative: differentiate
-a value living on a tangent space under the immersion gauge and the chart's Christoffel
-connection appears on its own.
+lowered like anything else. When the value lives on a moving subspace, that derivative is
+automatically the **covariant** one, and nothing has to be said about a connection.
 
-:class:`~grassmann.syntax.geometry.Parameterization` wraps that up. You supply φ as an
-ordinary Python callable; the Jacobian and Hessian are differentiated for you. Here is the
-unit sphere, whose induced metric should be ``diag(1, sin²u₁)``:
+We build the situation directly. A chart's differential is an injective map ``J`` from the
+parameter domain into the ambient, the tangent space is its image, and a tangent field
+``v`` has a derivative section ``Dv``. ``DJ`` is how ``J`` itself varies:
 
 .. doctest::
 
-   >>> from grassmann.syntax.geometry import Parameterization
-   >>> from grassmann.syntax.mcalc import build_problem
-   >>> def sphere(uu: np.ndarray) -> np.ndarray:
-   ...     a, b = uu
+   >>> from grassmann.embed import embed
+   >>> from grassmann.transform.diff import set_subspace_gauge, clear_subspace_gauges
+   >>> U, X = G.space("U", 2), G.space("X", 3)
+   >>> J = G.var("J", U >> X, props=G.inj)               # the chart differential dφ
+   >>> DJ = G.var("DJ", G.tensor(G.dual(U), G.dual(U), X))   # and how it moves, d²φ
+   >>> tangent = G.img(J)
+   >>> v = G.var("v", tangent)
+   >>> Dv = G.var("Dv", G.tensor(G.dual(U), tangent))
+   >>> pt = G.var("x", U)
+
+Now differentiate the ambient value of ``v`` with respect to the point, telling ``diff``
+how the two point-dependent variables move:
+
+.. doctest::
+
+   >>> clear_subspace_gauges(); set_subspace_gauge(J.node, "immersion")
+   >>> deriv = G.diff(embed(v, X), pt, deps={v.node.uid: Dv.node, J.node.uid: DJ.node})
+   >>> clear_subspace_gauges()
+   >>> G.unparse(G.infer.synth_space(deriv.node))
+   '(ℝ^2)* ⊗ ℝ^3'
+
+To evaluate it we realize the tangent values in the frame ``J`` pushes forward, and give
+the sphere's Jacobian and Hessian at a point. The field is held at *constant tangent
+coordinates* — ``Dv`` is fed zeros — so anything left in the answer is the connection:
+
+.. doctest::
+
+   >>> from grassmann.core import basis as B
+   >>> from grassmann.lower.represent import represent, default_basis
+   >>> def sphere(u: np.ndarray) -> np.ndarray:
+   ...     a, b = u
    ...     return np.array([np.sin(a) * np.cos(b), np.sin(a) * np.sin(b), np.cos(a)])
-   >>> phi = Parameterization("phi", 2, 3, immersion=sphere)
-   >>> u0 = np.array([0.9, 0.5])
-   >>> prob = build_problem("v'*w", decls={"v": "tangent(phi)", "w": "tangent(phi)"},
-   ...                      params={"phi": phi})
-   >>> metric = np.array([[float(prob.run_geometry({"phi": u0},
-   ...                                             {"v": np.eye(2)[i], "w": np.eye(2)[j]}))
-   ...                     for j in range(2)] for i in range(2)])
-   >>> bool(np.allclose(metric, np.diag([1.0, np.sin(u0[0]) ** 2])))
+   >>> def d1(u: np.ndarray, h: float = 1e-4) -> np.ndarray:
+   ...     return np.array([(sphere(u + h * np.eye(2)[a]) - sphere(u - h * np.eye(2)[a]))
+   ...                      / (2 * h) for a in range(2)])
+   >>> def d2(u: np.ndarray, h: float = 1e-4) -> np.ndarray:
+   ...     out = np.zeros((2, 2, 3))
+   ...     for a in range(2):
+   ...         for b in range(2):
+   ...             ea, eb = h * np.eye(2)[a], h * np.eye(2)[b]
+   ...             out[a, b] = (sphere(u + ea + eb) - sphere(u + ea - eb)
+   ...                          - sphere(u - ea + eb) + sphere(u - ea - eb)) / (4 * h * h)
+   ...     return out
+   >>> frame = B.ImageBasis(J.node)
+   >>> env = {v.node.uid: frame,
+   ...        Dv.node.uid: B.basis_prod(B.dual_basis(default_basis(U.node)), frame)}
+   >>> prog = represent(deriv.node, basis_env=env)
+   >>> u0, vc = np.array([0.9, 0.5]), np.array([0.7, -0.3])
+   >>> got = np.asarray(prog.run({f"J_{J.node.uid}": d1(u0), f"DJ_{DJ.node.uid}": d2(u0),
+   ...                            f"v_{v.node.uid}": vc,
+   ...                            f"Dv_{Dv.node.uid}": np.zeros((2, 2))})["result"], float)
+   >>> bool(np.allclose(got, np.einsum("abp,b->ap", d2(u0), vc), atol=1e-6))
    True
 
-Note that ``v'*w`` was written as an ordinary inner product; that it means the first
-fundamental form is a consequence of ``v`` living on ``tangent(phi)``. And the covariant
-derivative of a tangent field matches the analytic Christoffel symbols of the sphere,
-``Γ¹₂₂ = −sin u₁ cos u₁`` and ``Γ²₁₂ = Γ²₂₁ = cot u₁``:
+The coordinates of ``v`` never changed and the derivative is not zero: the frame moved
+under it. Projecting that back onto the tangent space with the induced metric leaves the
+Christoffel symbols of the sphere, ``Γ¹₂₂ = −sin u₁ cos u₁`` and ``Γ²₁₂ = Γ²₂₁ = cot u₁``:
 
 .. doctest::
 
-   >>> vc = np.array([0.7, -0.3])
-   >>> grad_v = phi.covariant_derivative(u0, vc)          # J and d²φ auto-derived
+   >>> Jm = d1(u0)
+   >>> tangential = np.einsum("cd,dp,ap->ac", np.linalg.inv(Jm @ Jm.T), Jm, got)
    >>> a = u0[0]
    >>> Gamma = np.zeros((2, 2, 2))
    >>> Gamma[0, 1, 1] = -np.sin(a) * np.cos(a)
    >>> Gamma[1, 0, 1] = Gamma[1, 1, 0] = np.cos(a) / np.sin(a)
-   >>> bool(np.allclose(grad_v, np.einsum("cab,b->ca", Gamma, vc).T, atol=1e-4))
+   >>> bool(np.allclose(tangential, np.einsum("cab,b->ca", Gamma, vc).T, atol=1e-4))
    True
 
-The four geometric subspaces — ``tangent``, ``normal``, ``cotangent``, ``conormal`` — are
-available as declarations in the matrix-calculus surface syntax, so a problem can be
-stated over a manifold as directly as over ``ℝⁿ``.
+We never wrote a Christoffel symbol. The connection is a consequence of ``v`` living in
+``Img(J)`` and ``J`` depending on the point, and :func:`~grassmann.diff` reads both off
+the types. The gauge names which frame the derivative is taken against — the subspace is
+fixed only up to an orthogonal transformation, and the derivative depends on that choice —
+with ``"immersion"`` selecting the pushforward frame used above.
 
-Experimental: n-dimensional polymorphism
------------------------------------------
+Experimental: polymorphism in the dimension of a space
+------------------------------------------------------
 
-A symbolic dimension can survive all the way through lowering. The compiled program then
+The dimension ``n`` of a space ``ℝⁿ`` can be left symbolic and survive all the way
+through lowering. The compiled program then
 takes ``n`` from the shapes of its inputs at run time, so **one** program serves every
 size — no re-compilation, no unrolling, no hardcoded extent:
 
@@ -330,66 +464,21 @@ size — no re-compilation, no unrolling, no hardcoded extent:
 
 The same source computed ``½(A + Aᵀ)x`` at both sizes, and was never told either one.
 
-This lane is **experimental**. It is exercised over a corpus of matrix-calculus problems —
-gradients, Jacobians, pseudo-inverses, solves, traces, Kronecker and direct-sum
-constructions — but not every construction stays generic: anything whose *structure*
-depends on the dimension (a fixed enumeration of basis vectors, an exterior power of a
-symbolic degree) still instantiates. Where a symbolic dimension cannot be carried,
-grassmann says so rather than silently picking a size.
+Linear-algebra rewriting (experimental)
+---------------------------------------
 
-Lambda calculus and linear-algebra rewriting (experimental)
------------------------------------------------------------
+The algebra's laws are rewrite rules over the term language, so a term can be reduced,
+simplified and normalized before any basis is chosen. The term language itself — its
+binders and its linear discipline — is described in :doc:`philosophy`.
 
-Underneath the builders, a grassmann term is a typed lambda calculus, and the algebra is
-a rewriting system over it. Both are usable directly, and both are still moving.
-
-Four binders
-~~~~~~~~~~~~
-
-:func:`~grassmann.llam` binds a **linear** variable — the ``⊸`` of linear logic;
-:func:`~grassmann.lam` binds a space or type, which is where the parametric polymorphism
-above comes from; :func:`~grassmann.bfn` binds a *basis*; and :func:`~grassmann.frame`
-binds a *point*, giving a basis that varies over a space — a moving frame.
-:func:`~grassmann.lift` and :func:`~grassmann.unlift` uncurry and curry, fusing argument
-slots into one tensor input or splitting them apart.
-
-Terms print in the notation they denote (bound-variable numbering is normalized here so
-the output is stable):
+Terms print in the notation they denote. Bound-variable numbering comes from a global
+counter, so the examples below normalize it to keep the output stable:
 
 .. doctest::
 
    >>> def show_term(t: G.Expr) -> str:
    ...     return re.sub(r"\b([ax])\d+\b", r"\1", G.unparse(t))
    >>> Vs = G.space("V", 3)
-   >>> show_term(G.llam(Vs, lambda z: G.scale(2.0, z)))
-   'λ x:ℝ^3. 2.0 · x'
-   >>> show_term(G.lam(G.Space, lambda t: G.llam(t, lambda z: z)))
-   'Λ a:Space. λ x:a. x'
-
-Linearity is a resource calculus, not a naming convention
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-A linear binder must consume each of its variables **exactly once**, and
-:func:`~grassmann.infer.check_linearity` counts uses along every evaluation path to
-enforce it. The counting distinguishes the two combinators of linear logic:
-multiplicative nodes (``⊗`` stacks, application, composition, scaling) *add* their
-children's usage, while the one additive node, ``Sum``, requires its branches to *agree*.
-
-So a variable used in both summands of a ``+`` is used once, and a variable appearing in
-both factors of a ``⊗`` is used twice and rejected:
-
-.. doctest::
-
-   >>> from grassmann.infer import check_linearity
-   >>> check_linearity(G.llam(Vs, lambda z: G.sum(z, z)).node)          # additive: fine
-   >>> check_linearity(G.llam(Vs, lambda z: G.tensor(z, z)).node)       # multiplicative
-   Traceback (most recent call last):
-       ...
-   grassmann.infer.linearity.LinearityError: linear variable ... is used 2 times; ...
-
-That additive rule is not a technicality: it is what lets the antisymmetrizer
-``Σ_σ sgn(σ)·(v_{σ(0)} ⊗ … )`` typecheck as a linear map, since each ``vᵢ`` is consumed
-once *within every summand*. The :doc:`tutorial` builds exactly that term.
 
 Three strengths of rewriting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
