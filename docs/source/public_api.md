@@ -24,7 +24,7 @@ here.
 A space is an abstract vector space, built up coordinate-free. `V >> W` is the
 space of linear maps from `V` to `W` — itself a space, namely `V* ⊗ W`.
 
-| Denotation | grassmann |
+| Space | grassmann |
 |---|---|
 | an abstract vector space of dimension `n` | `space("V", n)` |
 | a space of symbolic dimension | `svar` |
@@ -51,7 +51,7 @@ calling it a *map* is a convenient misnomer and every operation below is a
 vector operation. (A genuinely nonlinear function, built with `lam`, is the one
 exception — that is a map, not a vector.)
 
-| Denotation | grassmann |
+| Vector | grassmann |
 |---|---|
 | a variable of a given space | `var("x", V)` |
 | a linear map as a vector of `V >> W` | `llam` |
@@ -85,7 +85,7 @@ exception — that is a map, not a vector.)
 Bases are realized only at the lowering boundary; above it the language stays
 coordinate-free.
 
-| Denotation | grassmann |
+| Basis | grassmann |
 |---|---|
 | the standard (inner-product-orthonormal) basis of a space | `standard_basis(V)` |
 | pick or name a basis for a space | `basis` |
@@ -100,7 +100,7 @@ coordinate-free.
 
 The seam with `chartlib`.
 
-| Denotation | grassmann |
+| Construction | grassmann |
 |---|---|
 | the `k`-th exterior power `Λᵏ V` | `exterior_power` |
 | the alternating projection | `alt` |
@@ -117,7 +117,7 @@ The seam with `chartlib`.
 
 Elementwise functions on scalar-valued vectors.
 
-| Denotation | grassmann |
+| Function | grassmann |
 |---|---|
 | square root | `sqrt` |
 | exponential | `exp` |
@@ -131,7 +131,7 @@ Elementwise functions on scalar-valued vectors.
 
 ## Rendering and normalization
 
-| Denotation | grassmann |
+| Operation | grassmann |
 |---|---|
 | beta-normalize a term | `beta` |
 | simplify a term | `simplify` |
@@ -142,7 +142,7 @@ Elementwise functions on scalar-valued vectors.
 
 ## Pipeline
 
-| Denotation | grassmann |
+| Stage | grassmann |
 |---|---|
 | lower a term to a `polyarray` program | `compile(term)` |
 | lower a term in explicit frames | `compile_in(term, inputs=…, target=…)` |
