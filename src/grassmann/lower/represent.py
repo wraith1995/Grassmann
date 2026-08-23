@@ -782,6 +782,18 @@ def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) ->
             arr = _cob_basis_block(ctx, arr, sb, tb, axis, width, rep.free_labels, note=note)
             axis += width
         return Rep(arr, target, rep.space, free_labels=rep.free_labels)
+    n_space = len(_shape_of(rep.array)) - len(rep.free_labels)
+    if n_space > 1:
+        # The per-axis walk above needs a factor per axis on both sides. Without one the only
+        # move left is a single flat cob on axis 0, which would leave every other space axis
+        # in its old basis while tagging the whole ``Rep`` as ``target`` — a dishonest label
+        # rather than a wrong number, and the hardest kind of fault to trace. Refuse instead,
+        # exactly as ``_cob_basis_block`` refuses the analogous nested case.
+        raise RepresentError(
+            f"cob: cannot change the basis of a {n_space}-axis operand whose source and "
+            f"target are not products of matching arity ({src!r} -> {target!r}); there is no "
+            f"per-axis decomposition to apply the change of basis through"
+        )
     m = _basis_cob_matrix(ctx, src, target)
     arr = _apply_cob_on_axis(ctx, m, rep.array, 0, rep.free_labels, note=note)
     return Rep(arr, target, rep.space, free_labels=rep.free_labels)
@@ -814,7 +826,13 @@ def _factor_axis_widths(
     natural = []
     for b in bases:
         space = _space_of_basis(ctx, b)
-        natural.append(1 if space is None else len(_shape_of_space(space)))
+        if space is None:
+            natural.append(1)
+            continue
+        try:
+            natural.append(len(_shape_of_space(space)))
+        except RepresentError:
+            return [1] * len(bases)   # dimension-generic: no static shape to count axes with
     if sum(natural) == n_axes:
         return natural
     return [1] * len(bases)
