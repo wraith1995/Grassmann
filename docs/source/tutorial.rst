@@ -369,8 +369,7 @@ against ``−1.0``:
 Nothing about the object changed. :math:`P_{\sigma}` does **not** commute with
 :math:`S \otimes T` when ``S ≠ T``, and an array that does not record which basis each
 of its axes is written in cannot warn you. A grassmann term never mentions a basis, so
-it cannot be read in the wrong one by accident; :doc:`philosophy` takes up that contrast
-in full.
+it cannot be read in the wrong one by accident.
 
 With this space defined, we can now define natural operations on it.
 

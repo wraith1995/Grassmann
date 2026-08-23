@@ -77,7 +77,6 @@ A simple example shows how changes of basis are appropriately inserted:
 
    features
    tutorial
-   philosophy
    grammar
 
 .. toctree::

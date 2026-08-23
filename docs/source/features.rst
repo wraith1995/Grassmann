@@ -468,8 +468,7 @@ Linear-algebra rewriting (experimental)
 ---------------------------------------
 
 The algebra's laws are rewrite rules over the term language, so a term can be reduced,
-simplified and normalized before any basis is chosen. The term language itself — its
-binders and its linear discipline — is described in :doc:`philosophy`.
+simplified and normalized before any basis is chosen.
 
 Terms print in the notation they denote. Bound-variable numbering comes from a global
 counter, so the examples below normalize it to keep the output stable:
