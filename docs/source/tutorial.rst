@@ -29,13 +29,6 @@ constants and permutations:
    >>> from grassmann.infer import dim_of, is_runtime_dim, synth_space
    >>> from grassmann.lower.represent import ExternalOp
 
-Two of those imports deserve a word. ``G.embed`` is the *subpackage*, so the
-movement builder that coerces a value into an ambient space is imported by name as
-:func:`~grassmann.embed.embed`. And :class:`~grassmann.lower.represent.ExternalOp`
-is how a constant array enters a term: ``G.external(S, ExternalOp(name, fn))`` is a
-value **of the declared space** ``S``, which matters below when we need the same
-numbers to be sometimes a vector and sometimes a covector.
-
 And five small conveniences we reuse throughout. ``R(n)`` names the space ``ℝⁿ``;
 ``run`` compiles a grassmann expression and evaluates it on numbers; ``show`` does
 the same but tidies the array for reading; ``pair`` is the inner product ``⟨·,·⟩``
@@ -59,7 +52,16 @@ of a space; ``dim`` asks a space how big it is:
 
 To get our bearings on familiar ground, here is the ordinary dot product of two
 vectors of ``ℝ³``. A grassmann *variable* stands for an input, and ``run`` supplies
-its value by name:
+its value by name.
+
+One thing is worth saying before the first number appears. A grassmann term names spaces
+and values; it never names a **basis**. But numbers only exist in coordinates, so a basis
+has to be chosen somewhere, and that somewhere is compilation. ``run`` and
+:func:`~grassmann.compile` choose for you; :func:`~grassmann.compile_in` lets you say
+which basis each variable and the result are written in. Until then the arrays below are
+coordinates in whatever basis the compiler picked — which for ``ℝⁿ`` is the standard one,
+so they read as you expect. We make that choice explicit later, once there is something
+interesting to choose between.
 
 .. doctest::
 
@@ -75,9 +77,39 @@ below is the same, with richer expressions.
 
 The alternator and the exterior algebra space
 ---------------------------------------------
+Here is the definition we are going to build. Fix a space ``V``. Inside the tensor power
+:math:`V^{\otimes k}` sits the subspace of tensors whose components pick up the sign of
+any permutation of their slots:
 
-Exterior algebra is algebra on the space of fully anti-symmetric tensors. Given
-some space ``V`` (e.g. :math:`\mathbb{R}^{n}`) we can define the tensor power
+.. math::
+
+   \Lambda^{k}(V) \;=\;
+     \bigl\{\, T \in V^{\otimes k} \;:\;
+       T_{\sigma(1)\,\ldots\,\sigma(k)}
+         = \operatorname{sgn}(\sigma)\, T_{1\,\ldots\,k}
+       \ \text{ for all } \sigma \in S_{k} \,\bigr\}.
+
+That description is a condition to check rather than a thing to build, so the standard
+move is to exhibit the subspace as the image of a projector — the **alternator**, which
+averages over the symmetric group with a sign:
+
+.. math::
+
+   \operatorname{Alt}
+     \;=\; \frac{1}{k!} \sum_{\sigma \in S_{k}}
+            \operatorname{sgn}(\sigma)\, P_{\sigma}
+   \;:\; V^{\otimes k} \longrightarrow V^{\otimes k},
+   \qquad
+   \Lambda^{k}(V) \;=\; \operatorname{Img}(\operatorname{Alt}),
+
+where :math:`P_{\sigma}` permutes the ``k`` tensor slots. The rest of this section is that
+definition, one clause at a time: the tensor power, then the permutation sum, then the
+image. Each clause is a single grassmann construction.
+
+The tensor power
+~~~~~~~~~~~~~~~~
+
+Given some space ``V`` (e.g. :math:`\mathbb{R}^{n}`) we can define
 :math:`V^{\otimes k}` in grassmann via the builder :func:`~grassmann.tensor`:
 
 .. doctest::
@@ -114,29 +146,11 @@ We can define this space as parametric over a variable unknown space ``V`` — a
    >>> G.unparse(tensor_power(A, 3))
    'V : Space ⊢ V ⊗ V ⊗ V'
 
-The space of fully anti-symmetric tensors of order ``k`` is the subspace of
-:math:`V^{\otimes k}` whose components pick up the sign of the permutation that
-shuffles them:
+The permutation sum
+~~~~~~~~~~~~~~~~~~~
 
-.. math::
-
-   T_{\sigma(1)\,\sigma(2)\,\ldots\,\sigma(k)}
-     \;=\; \operatorname{sgn}(\sigma)\; T_{1\,2\,\ldots\,k}
-   \qquad\text{for every } \sigma \in S_k .
-
-Traditionally, we can define this as the image of the **alternator** map, the
-averaging projector that kills everything not obeying that relation:
-
-.. math::
-
-   \operatorname{Alt}
-     \;=\; \frac{1}{k!} \sum_{\sigma \in S_{k}}
-            \operatorname{sgn}(\sigma)\, P_{\sigma}
-   \;:\; V^{\otimes k} \longrightarrow V^{\otimes k},
-
-where :math:`P_{\sigma}` permutes the ``k`` tensor slots. Only the symmetric group
-is Python; the map itself is grassmann. We write it as a ``k``-ary **linear**
-lambda (:func:`~grassmann.llam`) that permutes its own bound variables, then fuse
+Now the alternator itself. Only the symmetric group is Python; the map is grassmann. We
+write it as a ``k``-ary **linear** lambda (:func:`~grassmann.llam`) that permutes its own bound variables, then fuse
 the ``k`` argument slots into one :math:`V^{\otimes k}` input with
 :func:`~grassmann.lift`, and normalize with :func:`~grassmann.scale`:
 
@@ -161,9 +175,12 @@ Inference reads off the space it lives in, with no annotation from us:
    >>> G.unparse(synth_space(alt(V, 2).node))
    '(ℝ^3 ⊗ ℝ^3)* ⊗ (ℝ^3 ⊗ ℝ^3)'
 
-This directly translates into Grassmann, which allows us to define an image of a
-space — :math:`\Lambda^{k}(V) = \operatorname{Img}(\operatorname{Alt})` is a
-first-class space, not a shape:
+The image
+~~~~~~~~~
+
+The last clause of the definition is the one grassmann takes most literally. An image is a
+space, so :math:`\Lambda^{k}(V) = \operatorname{Img}(\operatorname{Alt})` is written
+exactly as it reads — a first-class space, not a shape:
 
 .. doctest::
 
@@ -244,11 +261,6 @@ the ``n`` axes — laid out as Pascal's triangle:
      - 4
      - 1
 
-Notice the symmetry of each row: ``Λᵏ`` and ``Λⁿ⁻ᵏ`` always have the *same* dimension.
-That coincidence is the seed of the Hodge star, below. And each operator we are about
-to build shifts you around this table in a fixed way — the wedge adds degrees, the
-interior product and the codifferential lower a degree by one, the Hodge star reflects
-a row to its mirror, and the exterior derivative raises a form field by one.
 
 We keep the unasserted :func:`ext_power` as our working definition, though — its rank
 costs an SVD, but it is *derived* rather than promised, and once the wedge exists we
@@ -279,17 +291,17 @@ then the dual of that product, and then the product of these two items:
 .. doctest::
 
    >>> bb = G.tensor(b, b)                     # a basis of ℝ³ ⊗ ℝ³
-   >>> frame = G.tensor(G.dual(bb), bb)        # a basis of (ℝ³ ⊗ ℝ³)* ⊗ (ℝ³ ⊗ ℝ³)
+   >>> alt_basis = G.tensor(G.dual(bb), bb)    # a basis of (ℝ³ ⊗ ℝ³)* ⊗ (ℝ³ ⊗ ℝ³)
 
 We can ask for a representation of the alternator in this basis.
 :func:`~grassmann.compile_in` is :func:`~grassmann.compile` with the coordinates
-pinned: it compiles the term into the frames you name rather than ones it picks:
+pinned: it compiles the term into the bases you name rather than ones it picks:
 
 .. doctest::
 
    >>> def represent(term: G.Expr, target: G.Expr) -> np.ndarray:
    ...     return np.asarray(G.compile_in(term, target=target).run({})["result"], float)
-   >>> M = represent(alt(V, 2), frame)
+   >>> M = represent(alt(V, 2), alt_basis)
    >>> print(np.round(M, 3) + 0.0)
    [[ 0.   0.   0.   0.   0.   0.   0.   0.   0. ]
     [ 0.   0.5  0.  -0.5  0.   0.   0.   0.   0. ]
@@ -333,7 +345,7 @@ And not only for a rescaling: the alternator's array is the same for *any* basis
 the change of basis cancels itself.
 
 We could have intermixed them and not gotten the same result. Ask for the alternator in
-a frame whose first factor uses one basis and whose second factor uses the other, and
+a basis whose first factor is one basis of ``ℝ³`` and whose second factor is the other, and
 the components move:
 
 .. doctest::
@@ -416,9 +428,11 @@ comes from.
 ``u ∧ v`` is no longer a vector. It is a **2-vector**, and its space is the
 :math:`\Lambda^{2}` we built out of the alternator — the wedge's codomain is not an
 afterthought, it is the thing the whole construction was for. ``wedge(V, a, b, k, l)``
-climbs the ladder of exterior powers, ``Λᵏ × Λˡ → Λᵏ⁺ˡ``, and now that we can climb it
-we can settle the dimensions we declined to assert. Wedge ``k`` generic vectors of
-``ℝⁿ`` together and measure the answer:
+climbs the ladder of exterior powers, ``Λᵏ × Λˡ → Λᵏ⁺ˡ``.
+
+Earlier we asserted the dimension of each rung and got Pascal's triangle. With the wedge
+in hand we can instead *measure* it: wedge ``k`` generic vectors of ``ℝⁿ`` together and
+look at how big the answer is.
 
 .. doctest::
 
@@ -456,6 +470,18 @@ Here it is checked by running both sides on random inputs and comparing:
 
 Measuring k-vectors: the inner product
 --------------------------------------
+
+The inner product of ``V`` extends to each exterior power, and on decomposable
+``k``-vectors it is the Gram determinant of the pairwise inner products:
+
+.. math::
+
+   \langle a_{1} \wedge \cdots \wedge a_{k},\;
+           b_{1} \wedge \cdots \wedge b_{k} \rangle
+     \;=\; \det \bigl[\, \langle a_{i}, b_{j} \rangle \,\bigr]_{i,j=1}^{k}.
+
+For ``k = 2`` that is the squared area of a parallelogram when the two arguments agree,
+which is what makes it the right notion of length for an oriented area.
 
 You can measure lengths and angles of ``k``-vectors, not just of ordinary vectors,
 and grassmann hands you that inner product for free. Nothing had to be supplied: the
@@ -519,7 +545,7 @@ running the pairing on every combination:
 Orthogonal, as geometry demands, and each of squared length ``2``. So
 ``|e₁ ∧ e₂| = √2 = 1.4142`` — which is the number the wedge section told you to hold
 on to. The ``1.4142`` was never arbitrary: it is the length of a unit square measured
-in the metric ``Λ²`` inherits, reported in an orthonormal frame for ``Λ²``.
+in the metric ``Λ²`` inherits, reported in an orthonormal basis for ``Λ²``.
 
 The interior product: contracting a k-vector
 --------------------------------------------
@@ -669,7 +695,7 @@ Where the pseudo-inverse went
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 There is a :func:`~grassmann.pinv` sitting in the middle of that definition, and a
-pseudo-inverse is an SVD — the most expensive thing in numerical linear algebra. It
+pseudo-inverse is an SVD — one of the most expensive things in numerical linear algebra. It
 would be reasonable to worry that we have written something elegant and unusable.
 
 We can simply look. A grassmann program renders to standalone numpy, so the question
@@ -723,8 +749,33 @@ were free to define ``⋆`` by the property that characterises it, in the most d
 notation available, because choosing a basis is a *later* and separate decision — and
 it is at that point that ``M⁻¹`` stops being a pseudo-inverse and becomes a number.
 
-Forms, frames, and the tangent space
-------------------------------------
+Forms, bases, and the tangent space
+-----------------------------------
+
+Two definitions before any code.
+
+A ``k``-**form** on ``V`` is a ``k``-vector of the *dual*: an element of
+:math:`\Lambda^{k}(V^{*})`. Where a ``k``-vector is an oriented piece of ``V``, a
+``k``-form is a measurement of such pieces, and the exterior algebra of ``V*`` is built by
+the same alternator over a different space.
+
+A **tangent space** is what a form is usually measuring. Let a chart
+:math:`\varphi : \mathbb{R}^{k} \to \mathbb{R}^{n}` trace a surface. What matters is not
+:math:`\varphi` but its differential :math:`J = d\varphi`, an injective linear map, and the
+tangent plane at a point is its image:
+
+.. math::
+
+   T \;=\; \operatorname{Img}(J), \qquad
+   T^{*} \;=\; \operatorname{Img}(J)^{*}, \qquad
+   g \;=\; J J^{\mathsf{T}},
+
+with ``g`` the metric ``T`` inherits from the ambient — the first fundamental form. A form
+field on the surface is then a form over ``T*`` that varies from point to point, and
+differentiating one is the subject of the section after this.
+
+Both definitions are already expressible: an image is a space, and a dual is a space. The
+rest of this section is those two lines written in grassmann.
 
 So far a ``k``-vector has been a *thing* — an area, a volume. Its dual is a
 ``k``-**form**: a *measurement*, something that eats ``k`` vectors and returns a
@@ -737,17 +788,23 @@ identifies ``V`` with ``V*`` and the coordinates of a vector and its covector ag
 The distinction becomes visible the moment the space is not ``ℝⁿ`` — and the honest
 way to get there is to build a tangent space.
 
-Frames
-~~~~~~
+Bases, and frames
+~~~~~~~~~~~~~~~~~
 
-First, the notion we have been leaning on. A **frame** is a basis chosen to realize a
-space in coordinates. Grassmann keeps it separate from the space itself, which is why
-``compile_in`` takes frames as an argument, and why the same term can be realized in
-different ones. ``G.standard_basis(S)`` is the frame that makes ``S``'s inner product
-the identity; ``G.dual(b)`` is the frame dual to ``b``, the one that realizes ``S*``;
-``G.list_basis(...)`` builds one from explicit vectors, as we did for the alternator's
-array. There is also ``G.frame(S, lambda p: ...)``, whose body may depend on a point —
-a *moving* frame, which is exactly what a manifold needs.
+The two words are not synonyms, and the difference is about to matter.
+
+A **basis** of a space is a fixed choice of coordinates for it. That is what we have been
+using: ``G.standard_basis(S)`` is the basis making ``S``'s inner product the identity,
+``G.dual(b)`` is the basis dual to ``b``, and ``G.list_basis(...)`` builds one from
+explicit vectors, as we did for the alternator's array. A basis is separate from the space
+it coordinatizes, which is why :func:`~grassmann.compile_in` takes bases as an argument and
+why one term can be realized in several.
+
+A **frame** is a basis that *varies with a value* — one basis at each point, rather than
+one basis. :func:`~grassmann.frame` builds exactly that: ``G.frame(S, lambda p: ...)``
+binds a point of ``S`` and returns a basis that may be built from it. A tangent plane that
+turns as you move along a surface has a frame, not a basis, and that is the only reason the
+distinction is worth making here.
 
 A tangent space, from an immersion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -766,8 +823,10 @@ that map, a fundamental subspace we already know how to name:
    >>> dim(tangent), dim(cotangent)
    (2, 2)
 
-The frame that realizes the tangent space is the pushforward of the chart's own basis
-— the columns of the Jacobian, which is what ``G.image_basis`` builds:
+The tangent space is coordinatized by the pushforward of the chart's own basis — the
+columns of the Jacobian, which is what ``G.image_basis`` builds. This is a frame in the
+sense just defined, not a fixed basis: it is built from ``J``, so it turns as the chart
+does.
 
 .. doctest::
 
@@ -931,6 +990,21 @@ inherits ``d``'s nilpotency, ``δ ∘ δ = 0``:
    >>> bool(delta_squared_zero(3))
    True
 
+In ``ℝ³`` the codifferential of a 1-form is exactly the divergence of the corresponding
+vector field — no sign and no scale factor. For the linear field ``F = A·x`` the
+divergence is the trace of ``A``:
+
+.. doctest::
+
+   >>> W3, W3s = R(3), G.dual(R(3))
+   >>> xx, AA = G.var("x", W3), G.var("A", W3 >> W3)
+   >>> Amat = np.array([[1., -3, 2], [3, 2, -1], [-2, 1, 3]])
+   >>> div = codifferential(W3s, G.flat(W3)(AA(xx)), xx, 1, 3)      # δ♭F
+   >>> round(float(run(div, A=Amat.T, x=np.array([0.5, -1., 2.]))), 8)
+   6.0
+   >>> float(np.trace(Amat))
+   6.0
+
 These are the operators you already know
 ----------------------------------------
 
@@ -1013,6 +1087,57 @@ and ``d`` each realize their operands somewhere. None of the expressions mention
 That is the arrangement the whole tutorial has been demonstrating: the term says what
 the object is, the compiler decides what to compute it in.
 
+Pulling forms back along a map
+------------------------------
+
+Forms pull back. Given a linear map :math:`f : V \to W` and a ``k``-form ``ω`` on ``W``,
+the **pullback** :math:`f^{*}\omega` is the ``k``-form on ``V`` that measures the images:
+
+.. math::
+
+   (f^{*}\omega)(z_{1}, \ldots, z_{k})
+     \;=\; \omega\bigl(f z_{1}, \ldots, f z_{k}\bigr).
+
+For ``k = 1`` that is just composition, and grassmann writes it as such — a 1-form is a
+map to the scalars, so precomposing with ``f`` is the whole construction:
+
+.. doctest::
+
+   >>> Vp, Wp = R(2), R(3)
+   >>> fmap = G.var("f", Vp >> Wp)
+   >>> zz = G.var("z", Vp)
+   >>> def pull_1form(f: G.Expr, U: G.Expr, omega: G.Expr) -> G.Expr:
+   ...     return G.llam(U, lambda z: omega(f(z)))            # (f*ω)(z) = ω(f z)
+   >>> om = G.var("om", G.dual(Wp))
+   >>> G.unparse(synth_space(pull_1form(fmap, Vp, om).node))
+   '(ℝ^2)* ⊗ ℝ'
+
+The reason the pullback is worth naming is that it commutes with everything else. It
+respects the wedge, ``f*(α ∧ β) = f*α ∧ f*β``, and — the fact that makes differential
+forms work on manifolds — it commutes with the exterior derivative:
+
+.. math::
+
+   f^{*}(d\omega) \;=\; d\,(f^{*}\omega).
+
+On a scalar field the right-hand side is the derivative of ``g ∘ f``, so the identity says
+you may differentiate before pulling back or after, and get the same 1-form. Taking
+``g(w) = ½|w|²``:
+
+.. doctest::
+
+   >>> g_after_f = G.scale(0.5, G.dot(fmap(zz), fmap(zz)))    # (g ∘ f)(z) = ½|f z|²
+   >>> Fm, zv = np.arange(6.).reshape(2, 3), np.array([1., 2.])
+   >>> lhs = run(exterior_derivative(g_after_f, zz, 0), f=Fm, z=zv)   # d(g ∘ f)
+   >>> lhs.ravel().tolist()
+   [33.0, 114.0]
+   >>> (Fm @ (zv @ Fm)).tolist()                              # f*(dg) = fᵀ(f z)
+   [33.0, 114.0]
+
+Nothing had to be added to the language for this. ``f*`` is composition, ``d`` is
+:func:`~grassmann.diff` with a wedge, and the identity between them is a consequence of
+both, not an axiom either one needed.
+
 Moving a value between spaces
 -----------------------------
 
@@ -1073,12 +1198,3 @@ These are also on the top-level namespace as ``G.wedge``, ``G.alt``,
 ``G.exterior_power`` and friends. Use them; just know there is nothing in them you have
 not now built yourself.
 
-Where to go next
-----------------
-
-Every law in this tour was checked by compiling a coordinate-free expression and
-running the result — none were written into the toolkit by hand. That is the whole
-idea: you write the mathematics you mean, and grassmann turns it into the computation
-that mathematics denotes, for whichever ``n`` and ``k`` you ask. From here, the
-:doc:`grammar` sets out the four families of objects precisely, and :doc:`public_api`
-is the catalogue of everything importable.

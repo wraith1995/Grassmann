@@ -160,6 +160,6 @@ coordinate-free::
                | BasisSum(…) | BasisProd(…) | BasisRep(b, n)   ⊕ / ⊗ / replicate
                | BLam(b, …) | BApp(f, …)  a basis lambda and its application
 
-``ImageBasis`` keeps the transported frame verbatim (it is not orthonormalized);
+``ImageBasis`` keeps the transported basis verbatim (it is not orthonormalized);
 ``ProjectedBasis`` is the orthonormalized one, and orthonormalization is never
 implicit.

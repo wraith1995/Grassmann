@@ -1,6 +1,6 @@
 grassmann
 =========
-Grassmann is a programming language with core language for coordinate free multi-linear algebra.
+Grassmann is a programming language, a lambda calculus like language, for coordinate free multi-linear algebra.
 Grassmann's compiler takes two programs: a term, a vector (or non-linear map between vectors), and a basis (or non-linear map to a basis).
 Grassmann's compiler produces a subset of Python (Jax/PyTorch) that computes the given term in the given basis.
 Grassmann's compiler applies knowledge of the properties of bases and multi-linear algebra to find an efficient representation.
@@ -15,11 +15,11 @@ A simple example shows how changes of basis are appropriately inserted:
    >>> import grassmann as G
    >>> V, W = G.space("V", 2), G.space("W", 3)      # two spaces
    >>> f, x = G.var("f", V >> W), G.var("x", V)     # a linear map V ⊸ W, and a vector of V
-   >>> frames = {f: G.standard_basis(V >> W), x: G.standard_basis(V)}  # a basis for each variable
+   >>> bases = {f: G.standard_basis(V >> W), x: G.standard_basis(V)}   # a basis for each variable
    >>> fmat, xvec = np.array([[1., 0., 1.], [0., 1., 1.]]), np.array([2., 3.])  # their values, in those bases
 
-   >>> # (1) x in the standard frame of V — the program is just the contraction:
-   >>> prog = G.compile_in(f(x), inputs=frames, target=G.standard_basis(W))
+   >>> # (1) x in the standard basis of V — the program is just the contraction:
+   >>> prog = G.compile_in(f(x), inputs=bases, target=G.standard_basis(W))
    >>> prog.run({i.name: {"f": fmat, "x": xvec}[i.name.split("_")[0]] for i in prog.inputs})
    {'result': array([2., 3., 5.])}
    >>> src = G.pa.to_numpy_source(prog, func_name="apply")
@@ -40,7 +40,7 @@ A simple example shows how changes of basis are appropriately inserted:
        result = _t3_0
        return result
 
-   >>> # (2) the SAME term, but x's coordinates are read in a swapped frame of V:
+   >>> # (2) the SAME term, but x's coordinates are read in a swapped basis of V:
    >>> def e(*cs: float) -> G.Expr: return G.ostack(*[G.lit(float(c)) for c in cs])
    >>> swapV = G.list_basis(e(0, 1), e(1, 0))       # the standard basis of V, swapped
    >>> cobbed = G.compile_in(f(x), inputs={f: G.standard_basis(V >> W), x: swapV}, target=G.standard_basis(W))

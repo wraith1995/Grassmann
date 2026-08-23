@@ -133,7 +133,7 @@ built or coordinatized.
 This is what makes the algebra above the lowering boundary total. A term never mentions a
 basis, so every transform — differentiation, the pullback, simplification, normal-forming —
 operates on the mathematical object, and the same term can afterwards be compiled against
-different frames.
+different bases.
 
 A universal property is a basis waiting to happen
 -------------------------------------------------
@@ -145,7 +145,7 @@ Because the space tower is closed and each node carries a universal property, gr
 *derive* the candidate coordinatizations rather than being handed one. The derivation
 mirrors the space structure onto the basis structure — a direct sum's basis is the sum of
 its summands' bases, a tensor product's is the product, a dual's is the dual — and a
-fundamental subspace contributes the frames adapted to the very map that defines it:
+fundamental subspace contributes the bases adapted to the very map that defines it:
 
 .. doctest::
 
@@ -161,28 +161,28 @@ fundamental subspace contributes the frames adapted to the very map that defines
    >>> candidates(G.img(J))
    ['ProjectedBasis', 'ImageBasis']
 
-The image of ``J`` offers two frames, and both come from ``J`` itself: the orthonormalized
+The image of ``J`` offers two bases, and both come from ``J`` itself: the orthonormalized
 subspace basis, and the literal pushforward of the domain's basis along ``J``. Neither had
 to be supplied, because ``Img(J)`` says what it is.
 
 The compiler then *chooses*, and the criterion is how much symbolic content survives. A
-value derived from an operator ``f`` scores best in a frame aligned to ``f``'s own
-structure, because in that frame the projection onto the subspace is the identity and the
+value derived from an operator ``f`` scores best in a basis aligned to ``f``'s own
+structure, because in that basis the projection onto the subspace is the identity and the
 coordinates come out numeric. Absent any operator structure, the inner-product-orthonormal
 standard basis wins by default, since it makes the metric the identity and so renders the
-inner product, the adjoint and the pseudo-inverse numeric too. Realizing such a frame is
+inner product, the adjoint and the pseudo-inverse numeric too. Realizing such a basis is
 the one place the numerical linear algebra actually enters: an SVD in general, a QR when
 the defining map is injective, a generalized SVD when a metric is in play.
 
 The payoff is that operations which look expensive on the page frequently are not. A
 pseudo-inverse of a *constant* pairing — the wedge-into-volume map that defines the Hodge
-star — becomes, once frames are chosen, a concrete matrix whose inverse is folded to a
+star — becomes, once bases are chosen, a concrete matrix whose inverse is folded to a
 literal while compiling; the emitted code contains no pseudo-inverse at all. The
 :doc:`tutorial` shows exactly that happening. Writing ``pinv`` cost nothing because ``pinv``
 named an operation rather than prescribing an algorithm.
 
 Two honest caveats. The choice is a local heuristic scored per space, not a global search
-over the whole term; and a frame adapted to an operator is only available when the term
+over the whole term; and a basis adapted to an operator is only available when the term
 actually exposes that operator, which is one more reason the universal property belongs in
 the type rather than in a comment.
 
@@ -202,7 +202,7 @@ A linear map is a vector
 Because a space of linear maps ``V ⊸ W`` is itself a space — namely ``V* ⊗ W`` — a linear
 map is an element of a space, that is, a vector. The adjoint, the solve, the trace and the
 inner product are all vector operations, and the same machinery that moves a vector between
-frames moves a map between them. One tower of spaces, one tower of bases, and no separate
+bases moves a map between them. One tower of spaces, one tower of bases, and no separate
 special case for "the matrix ones".
 
 Symbolic where it pays

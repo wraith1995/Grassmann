@@ -93,8 +93,8 @@ coordinate-free.
 | an orthonormalized subspace basis | `projected_basis` |
 | an explicit basis from listed vectors | `list_basis` |
 | a basis carrying an attached metric | `with_inner_basis` |
-| the transported (pushforward) frame along a map | `transport_basis(b, f)` |
-| the transported dual frame | `transport_cobasis` |
+| the transported (pushforward) basis along a map | `transport_basis(b, f)` |
+| the transported dual basis | `transport_cobasis` |
 
 ## Exterior algebra and differential geometry
 
@@ -145,5 +145,5 @@ Elementwise functions on scalar-valued vectors.
 | Stage | grassmann |
 |---|---|
 | lower a term to a `polyarray` program | `compile(term)` |
-| lower a term in explicit frames | `compile_in(term, inputs=…, target=…)` |
+| lower a term in explicit bases | `compile_in(term, inputs=…, target=…)` |
 | compile and run to numbers | `run(term, values)` |

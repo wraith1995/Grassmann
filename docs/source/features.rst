@@ -22,7 +22,7 @@ the musical isomorphisms :func:`~grassmann.sharp` and :func:`~grassmann.flat`, a
 projection onto a subspace — see :doc:`public_api` and :doc:`grammar` for more.
 
 We provide a simple demonstration. Take two vectors of ``ℝ³``, and
-two frames for that space: the standard one, and a skew frame that is not orthonormal:
+two bases for that space: the standard one, and a skew basis that is not orthonormal:
 
 .. doctest::
 
@@ -36,8 +36,8 @@ two frames for that space: the standard one, and a skew frame that is not orthon
    >>> skew = G.list_basis(e(0), G.sum(e(0), e(1)), e(2))       # not orthonormal
    >>> ku, kv = f"u_{u.node.uid}", f"v_{v.node.uid}"
 
-The two frames describe the same vectors with different numbers, and Grassmann manages the details:
-compiling the bare term ``u`` out of one frame and into the other *is*
+The two bases describe the same vectors with different numbers, and Grassmann manages the details:
+compiling the bare term ``u`` out of one basis and into the other *is*
 the change of basis, so no arithmetic has to be done by hand to set the comparison up.
 
 .. doctest::
@@ -50,20 +50,20 @@ the change of basis, so no arithmetic has to be done by hand to set the comparis
    ([-1.0, 2.0, 3.0], [-1.0, 1.0, -1.0])
 
 Now we consider ``G.dot(u, v)``, the inner product:
-first of the standard coordinates in the standard frame, then of the skew coordinates in
-the skew frame.
+first of the standard coordinates in the standard basis, then of the skew coordinates in
+the skew basis.
 
 .. doctest::
 
-   >>> def inner_in(frame: G.Expr, cu: np.ndarray, cv: np.ndarray) -> float:
-   ...     prog = G.compile_in(G.dot(u, v), {u: frame, v: frame})
+   >>> def inner_in(basis: G.Expr, cu: np.ndarray, cv: np.ndarray) -> float:
+   ...     prog = G.compile_in(G.dot(u, v), {u: basis, v: basis})
    ...     return round(float(np.asarray(prog.run({ku: cu, kv: cv})["result"], float)), 6)
    >>> inner_in(std, x, y), inner_in(skew, xs, ys)
    (-1.0, -1.0)
 
 Two programs, different numbers going in, different arithmetic inside, one answer — because
-the frame is not part of what ``G.dot(u, v)`` says. An array expression written against the
-standard frame would have returned something else for the skew one, and would have had no
+the basis is not part of what ``G.dot(u, v)`` says. An array expression written against the
+standard basis would have returned something else for the skew one, and would have had no
 way to notice.
 
 Keeping coordinates out of the term is also what makes the type system worth having. Every
@@ -109,8 +109,8 @@ Basis-driven compilation to array code
 Choosing a basis is a separate, later decision from writing the mathematics — and it is the
 decision that turns a coordinate-independent program, which cannot be run in general, into
 an array program, which we know how to compile.
-:func:`~grassmann.compile` picks frames for you; :func:`~grassmann.compile_in` pins an
-explicit frame to each variable and to the result, inserting whatever change of basis is
+:func:`~grassmann.compile` picks bases for you; :func:`~grassmann.compile_in` pins an
+explicit basis to each variable and to the result, inserting whatever change of basis is
 needed to keep them consistent.
 
 That separation is worth more than tidiness. A pseudo-inverse written in a term does not
@@ -215,7 +215,7 @@ One term, instantiated and run at two different spaces:
 
 :func:`~grassmann.spacefn` and :func:`~grassmann.typefn` are the space- and type-level
 shorthands, and :func:`~grassmann.bfn` abstracts over a *basis* — so a construction can be
-generic in the frame it will eventually be realized in.
+generic in the basis it will eventually be realized in.
 
 Limited dependent types
 -----------------------
@@ -269,9 +269,9 @@ not the same operation.
 target spaces in step, through ``⊗``, ``⊕``, ``Dual`` and the fundamental subspaces, and
 inserts whichever projection or embedding each position calls for. No map is involved.
 :func:`~grassmann.pushforward` carries a value *along a map* into that map's image, and
-:func:`~grassmann.pull_along` comes back through the adjoint. Frames travel too:
-:func:`~grassmann.transport_basis` pushes a reference frame forward along a map, and
-:func:`~grassmann.transport_cobasis` carries the frame dual to it.
+:func:`~grassmann.pull_along` comes back through the adjoint. Bases travel too:
+:func:`~grassmann.transport_basis` pushes a reference basis forward along a map, and
+:func:`~grassmann.transport_cobasis` carries the basis dual to it.
 
 The reference-element pattern of the finite element method is exactly this. Basis
 functions and quadrature are worked out once on a reference element; each physical element
@@ -287,16 +287,16 @@ is reached through the element map, whose differential is an injective ``J``:
    'J : (ℝ^2)* ⊗ ℝ^2 {inj} ⊢ Img(J)'
 
 The value now lives on the element's tangent space. What it *looks like* depends on which
-frame you read it in, and both readings are available. In the frame transported from the
+basis you read it in, and both readings are available. In the basis transported from the
 reference element the coordinates are the reference coordinates, unchanged; in the ambient
-standard frame they are the physical ones:
+standard basis they are the physical ones:
 
 .. doctest::
 
    >>> Jm = np.array([[2., 0.], [1., 3.]])         # one element's map
    >>> kJ, kref = f"J_{J.node.uid}", f"ref_{ref.node.uid}"
    >>> feed = {kJ: Jm, kref: np.array([1., 2.])}
-   >>> transported = G.transport_basis(None, J)    # the reference frame, pushed forward
+   >>> transported = G.transport_basis(None, J)    # the reference basis, pushed forward
    >>> in_ref = G.compile_in(physical, {ref: G.standard_basis(Ref)}, target=transported)
    >>> np.asarray(in_ref.run(feed)["result"], float).tolist()
    [1.0, 2.0]
@@ -304,7 +304,7 @@ standard frame they are the physical ones:
    >>> np.asarray(in_std.run(feed)["result"], float).tolist()
    [4.0, 6.0]
 
-The transported frame is not orthonormalized — it is literally ``J(b₁), …, J(bₙ)`` — which
+The transported basis is not orthonormalized — it is literally ``J(b₁), …, J(bₙ)`` — which
 is what keeps the coordinates rational, since orthonormalizing would introduce square
 roots. Its dual travels with it, and the pairing is preserved exactly, so a functional
 assembled on the reference element evaluates on the physical one with no Jacobian factors
@@ -321,7 +321,7 @@ written by hand:
    >>> float(np.array([3., -1.]) @ np.array([1., 2.]))      # the reference pairing
    1.0
 
-The Jacobian never appears in the expression. It appears in the frames, which is where a
+The Jacobian never appears in the expression. It appears in the bases, which is where a
 change of element belongs.
 
 Built-in libraries for differential geometry
