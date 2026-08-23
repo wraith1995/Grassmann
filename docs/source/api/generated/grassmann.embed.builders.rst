@@ -4,6 +4,21 @@
 .. automodule:: grassmann.embed.builders
 
    
+   .. rubric:: Module Attributes
+
+   .. autosummary::
+   
+      Space
+      Nat
+      Type
+      R
+      bot
+      sum_of_products
+      scalar_basis
+      inj
+      surj
+      bij
+   
    .. rubric:: Functions
 
    .. autosummary::
