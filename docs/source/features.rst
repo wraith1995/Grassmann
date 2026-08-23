@@ -433,6 +433,3 @@ certifies exactly what the enabled groups were supposed to produce:
    >>> is_normalized_sop(left.node)
    True
 
-Terms also round-trip through the Unicode surface syntax and render to LaTeX
-(:func:`~grassmann.latex`, :func:`~grassmann.unparse`, :func:`~grassmann.parse`), so what
-you build, print, rewrite, and parse back is the notation the mathematics is written in.
