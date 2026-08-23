@@ -13,7 +13,6 @@ languages to linear algebra: a type system, binders, inference, rewriting, an IR
 compiler. And it insists that the linear algebra being treated is *linear algebra* —
 spaces, duals, maps, subspaces — rather than the arrays that eventually represent it.
 
-We now outline some corollaries to our philosophy.
 
 Linear algebra as a language, not an array library
 --------------------------------------------------
@@ -54,15 +53,9 @@ programming-language idea, put to mathematical work:
 - **Limited dependent types.** A space may be indexed by a term: ``Img(f)`` depends on the
   map ``f``. That is enough dependency to give a tangent space a type, and stops short of
   the proof obligations of a fully dependent language.
-- **Rewriting and normal forms.** The algebra's laws are rewrite rules, so two expressions
-  that are mathematically equal can be *recognized* as equal instead of merely computing
-  the same numbers.
+- **Rewriting and normal forms.** The algebra's laws are rewrite rules.
 - **An IR and a lowering.** The term is a program in a small typed IR, and compilation is
   a real lowering pass to a target language of array operations.
-
-The point of the borrowing is that these ideas earn their keep here. A type system that
-cannot tell ``V`` from ``V*`` catches nothing interesting; one that can turns a family of
-classic modelling mistakes into build-time errors.
 
 The term language is a lambda calculus
 --------------------------------------
@@ -90,9 +83,6 @@ the output is stable):
    >>> show_term(G.lam(G.Space, lambda t: G.llam(t, lambda z: z)))
    'Λ a:Space. λ x:a. x'
 
-Four binders is not a large language, and that is the point. The mathematics is carried by
-the space and term constructors; the binders only say how a construction is abstracted and
-applied.
 
 Linearity is a resource calculus
 ---------------------------------------------------------
