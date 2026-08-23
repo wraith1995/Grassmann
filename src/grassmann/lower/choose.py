@@ -7,9 +7,9 @@ lowered result, scored by an additive heuristic over the candidates
 
     candidates ──► score each ──► the highest wins
       standard orthonormal        +10   metric is the identity, so the cob is numeric
-      the operator's own frame    +40   its projection is the identity there
+      the operator's own basis    +40   its projection is the identity there
       the basis the input is in  +100   one basis on both sides, so no cob at all
-      the g-orthonormal frame     +20   of a metric space, so ⟨·,·⟩ is numeric
+      the g-orthonormal basis     +20   of a metric space, so ⟨·,·⟩ is numeric
 
 Four considerations produce those scores. A value derived from a symbolic operator ``f``
 is cheapest in a basis aligned to ``f``'s own structure — an ``ImageBasis`` or a
@@ -96,26 +96,26 @@ def score_basis(
     #   An orthonormal basis makes the metric the identity, so ``Inner``, ``Dagger`` and
     #   ``Solve`` lower to numeric operations.  That is a convenience, not a correctness
     #   requirement, and at an un-pinned ``Img(f)`` leaf it has a price: the default there is
-    #   the ``ProjectedBasis``, the orthonormalizing QR/SVD frame, whose ``R`` factor is
+    #   the ``ProjectedBasis``, the orthonormalizing QR/SVD basis, whose ``R`` factor is
     #   algebraic-irrational in the program inputs and therefore cannot be carried by
     #   polyarray's exact rational lane.  The literal ``ImageBasis(f)``, the ``f(eᵢ)`` columns,
     #   spans the same subspace and is rational in the inputs, so the exact lane runs through
     #   it.  The +10 is awarded where orthonormality is free — a space whose default is already
     #   rational, so no alternative is being given up — or where ``term`` genuinely pairs the
     #   value through an operation that consumes a metric (`_demands_orthonormal`).  Otherwise
-    #   it goes to the rational frame instead, below.
+    #   it goes to the rational basis instead, below.
     #
-    #   The alternative is only ever considered under the propagated rational-frame lane
+    #   The alternative is only ever considered under the propagated rational-basis lane
     #   (`literal_ffs_frames`), which is off by default, so ordinarily the orthonormal default
     #   simply wins.  Flipping every leaf unconditionally would be unsound: an un-pinned ``Img``
-    #   leaf feeding a metric, a gauge or a Λᵏ inner product needs the orthonormal frame.  A
+    #   leaf feeding a metric, a gauge or a Λᵏ inner product needs the orthonormal basis.  A
     #   consumer that wants exactness opts in, and only then does the fold-preserving
     #   ``ImageBasis`` take the bonus.
     demands = _demands_orthonormal(term)
     fold_alt = _rational_frame_lane() and _fold_preserving_alternative_exists(space)
     if _is_orthonormal_default(space, candidate) and (not fold_alt or demands):
         score += 10
-    # ── The rational literal image frame of an un-pinned ``Img`` leaf, where no metric or
+    # ── The rational literal image basis of an un-pinned ``Img`` leaf, where no metric or
     #   orthonormality demand forces the orthonormal one.  This is symmetric with the +10
     #   above — exactly one of the two operator bases earns it — so the rational ``ImageBasis``
     #   takes the leaf at 50 against the orthonormal ``ProjectedBasis``'s 40.
@@ -149,7 +149,7 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
     """Report whether ``candidate`` is a structure basis of the map ``op`` itself.
 
     Only an ``ImageBasis`` or a ``ProjectedBasis`` carries a defining map, and it counts here
-    only when that map is ``op``: a frame of some *other* operator buys none of the structure
+    only when that map is ``op``: a basis of some *other* operator buys none of the structure
     the bonus is paying for.
     """
     match candidate:
@@ -162,9 +162,9 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
 
 
 def _rational_frame_lane() -> bool:
-    """Report whether the rational (literal) frame lane is active for this lowering.
+    """Report whether the rational (literal) basis lane is active for this lowering.
 
-    The scorer's preference for a rational frame is opt-in, and the switch is the same one that
+    The scorer's preference for a rational basis is opt-in, and the switch is the same one that
     makes the frame's *realization* rational: ``represent(literal_frames=True)`` or the
     :func:`~grassmann.lower.represent.literal_ffs_frames` context. It is off by default, so the
     orthonormal default ordinarily wins unopposed. The import is deferred to the call to keep
@@ -176,17 +176,17 @@ def _rational_frame_lane() -> bool:
 
 
 def _fold_preserving_alternative_exists(space: S.Space) -> bool:
-    """Report whether ``space`` has a rational frame available beside its orthonormal default.
+    """Report whether ``space`` has a rational basis available beside its orthonormal default.
 
     The image of an injective map is the one case. Its orthonormal default, the
-    ``ProjectedBasis``, is the QR frame whose ``R`` factor is algebraic-irrational and so
+    ``ProjectedBasis``, is the QR basis whose ``R`` factor is algebraic-irrational and so
     cannot be carried by the exact lane, while the literal ``ImageBasis(f)`` — the columns
     ``f(eᵢ)`` — is rational in the inputs and, because injectivity means full column rank, is a
     genuine basis of that same image.
 
     Nothing else qualifies. A non-injective map's literal columns are rank-deficient and hence
     not a basis at all, so the SVD ``ProjectedBasis`` remains the honest default there. ``Ker``,
-    ``CoImg``, ``CoKer`` and the non-subspace spaces are never offered a literal frame in the
+    ``CoImg``, ``CoKer`` and the non-subspace spaces are never offered a literal basis in the
     first place: :func:`~grassmann.lower.space_basis.candidate_bases` adds an ``ImageBasis``
     only for an ``Img``.
     """
@@ -198,9 +198,9 @@ def _fold_preserving_alternative_exists(space: S.Space) -> bool:
     return p is not None and p.inj
 
 
-# The nodes whose coordinates are numeric only in an orthonormal frame: the ones that consume a
+# The nodes whose coordinates are numeric only in an orthonormal basis: the ones that consume a
 # metric or an orthonormality.  Their presence in a term is what makes the orthonormal default's
-# identity metric worth the QR/SVD radical; without them the rational frame is preferred at an
+# identity metric worth the QR/SVD radical; without them the rational basis is preferred at an
 # ``Img`` leaf.  Trace, Det and LogDet are basis-independent scalars, and Project, Embed and
 # Corestrict act in any basis, so none of those demands orthonormality.
 def _demands_orthonormal(term: object | None) -> bool:
@@ -213,7 +213,7 @@ def _demands_orthonormal(term: object | None) -> bool:
     node kind it has never seen costs it nothing.
 
     A missing term, or a shape it cannot walk, answers ``False``. That is the conservative
-    direction: it keeps the rational frame, which the exact lane can carry.
+    direction: it keeps the rational basis, which the exact lane can carry.
     """
     if term is None:
         return False

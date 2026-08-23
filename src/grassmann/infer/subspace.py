@@ -22,7 +22,7 @@ The decision is structural. Spaces are compared up to the one spelling differenc
 carries no meaning — a static ``⊕ⁿ s`` against the explicit ``⊕(s,…,s)``, and a product
 against itself with ⊗-units dropped — and a subspace node's ambient comes from its
 declared endpoint when it has one, otherwise from synthesizing the defining map's space.
-No coordinates are involved: realizing a containment as an actual inclusion of frames is
+No coordinates are involved: realizing a containment as an actual inclusion of bases is
 lowering's job, through :class:`~grassmann.core.basis.CompleteBasis`.
 """
 

@@ -697,7 +697,7 @@ def pull_along(v: object, f: object) -> Expr:
 def transport_basis(b: object, f: object, target: object = None) -> Expr:
     """Transport the reference basis ``b`` of ``dom(f)`` along ``f`` into ``Img(f)``.
 
-    The transported frame is the literal pushforward: the vectors ``f(b₁), …, f(bₙ)``
+    The transported basis is the literal pushforward: the vectors ``f(b₁), …, f(bₙ)``
     themselves, in that order. They are not orthonormalized, which is what keeps the
     coordinates rational — orthonormalizing would introduce square roots. Pass ``b=None``
     for the standard basis of the domain. See
@@ -904,7 +904,7 @@ def typefn(fn: Callable[[Expr], object]) -> Expr:
 
 
 # ===========================================================================
-# Bases & frames.
+# Bases & bases.
 # ===========================================================================
 
 #: The basis of ``ℝ``, the single vector ``1``. Coordinatizing a scalar is trivial, but
@@ -915,7 +915,7 @@ scalar_basis = wrap(_b.scalar_basis())
 def basis(name: str, s: object) -> Expr:  # noqa: ARG001 - s documents the space; a BVar carries only its name
     """Build a basis variable named ``name``, standing for some basis of the space ``s``.
 
-    A placeholder for a frame that is not yet chosen, so a construction can be written
+    A placeholder for a basis that is not yet chosen, so a construction can be written
     against "a basis" and the concrete one supplied at the lowering boundary. The node
     holds only the name; ``s`` documents the intended space at the call site and is not
     recorded on it.
@@ -927,9 +927,9 @@ def image_basis(f: object) -> Expr:
     """Build the basis of literal pushforward columns ``f(sᵢ)`` of ``Img(f)``.
 
     Given the standard basis ``s`` of ``f``'s domain, this coordinatizes the image by the
-    vectors ``f(s₁), …, f(sₙ)`` themselves — for an immersion, the frame of ``dφ``
+    vectors ``f(s₁), …, f(sₙ)`` themselves — for an immersion, the basis of ``dφ``
     columns that geometry consumers transport along. It is not orthonormalized, which
-    keeps the coordinates rational; :func:`projected_basis` supplies an orthonormal frame
+    keeps the coordinates rational; :func:`projected_basis` supplies an orthonormal basis
     for the same subspace when one is wanted.
     """
     return wrap(_b.image_basis(_node(f)))
@@ -939,7 +939,7 @@ def projected_basis(f: object, which: str, source: object = None, target: object
     """Build an orthonormal basis of one of ``f``'s four fundamental subspaces.
 
     ``which`` selects the subspace: ``"image"``, ``"ker"``, ``"coimg"`` or ``"coker"``.
-    Unlike :func:`image_basis` the frame is orthonormalized, so the subspace's inner
+    Unlike :func:`image_basis` the basis is orthonormalized, so the subspace's inner
     product is the identity in these coordinates at the cost of leaving the rationals.
     ``source`` / ``target`` give the bases of ``f``'s domain and codomain that ``f`` is
     read in; ``None`` means the standard basis of each.
@@ -957,19 +957,19 @@ def projected_basis(f: object, which: str, source: object = None, target: object
 def list_basis(*vectors: object) -> Expr:
     """Build a basis out of explicitly given vectors.
 
-    The frame is exactly the terms passed, in order, so this is how a hand-chosen or
-    computed frame enters the language. Nothing is orthonormalized and independence is
+    The basis is exactly the terms passed, in order, so this is how a hand-chosen or
+    computed basis enters the language. Nothing is orthonormalized and independence is
     not checked here.
     """
     return wrap(_b.list_basis(*(_node(v) for v in vectors)))
 
 
 def with_inner_basis(b: object, g: object) -> Expr:
-    """Attach the metric ``g`` to the basis ``b``, leaving the frame itself untouched.
+    """Attach the metric ``g`` to the basis ``b``, leaving the basis itself untouched.
 
     The basis coordinatizes the same space it did, but now carries ``g`` as the metric to
     read inner products and adjoints through. Nothing is orthonormalized — the Gram
-    matrix is generally not the identity in this frame, and that is the point.
+    matrix is generally not the identity in this basis, and that is the point.
     """
     return wrap(_b.with_inner_basis(_node(b), _node(g)))
 
@@ -977,8 +977,8 @@ def with_inner_basis(b: object, g: object) -> Expr:
 def complete(sub: object, comp: object) -> Expr:
     """Complete the sub-basis ``sub`` to a basis of the whole space, using ``comp``.
 
-    The frames of a subspace and of its complement, concatenated, coordinatize the
-    ambient space — the frame in which a :func:`project` is a slice and an
+    The bases of a subspace and of its complement, concatenated, coordinatize the
+    ambient space — the basis in which a :func:`project` is a slice and an
     :func:`embed` is a pad.
     """
     return wrap(_b.complete_basis(_node(sub), _node(comp)))
@@ -988,9 +988,9 @@ def standard_basis(s: object) -> Expr:
     """Build the standard (inner-product-orthonormal) basis of the space ``s``.
 
     The standard basis makes the space's inner product the identity in coordinates,
-    so ``Inner`` / ``Dagger`` / pseudo-inverse become numeric. The returned frame
+    so ``Inner`` / ``Dagger`` / pseudo-inverse become numeric. The returned basis
     records the space it coordinatizes, so :func:`grassmann.compile_in` can check
-    that a frame supplied for a variable is a basis of that variable's space.
+    that a basis supplied for a variable is a basis of that variable's space.
     """
     from grassmann.lower.space_basis import default_basis
 
@@ -1022,7 +1022,7 @@ def bfn(dom: object, fn: Callable[[Expr], object]) -> Expr:
     """Abstract a basis over a basis, ``bfn(G.Space, lambda β: <basis>)``.
 
     A fresh basis-variable handle over the binder domain ``dom`` is yielded to ``fn``,
-    and the basis it returns is the body — a frame written in terms of another frame, to
+    and the basis it returns is the body — a basis written in terms of another basis, to
     be instantiated once that one is known.
 
     Raises

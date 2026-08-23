@@ -477,9 +477,9 @@ def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
     ``Img``, and with both corestrictions in place the chain is an ordinary well-typed
     composite. Each ``f~`` is an isomorphism, so ``Pinv(f~_A)`` and ``f~_B`` are exact.
 
-    They are not decoration either: ``f~_A⁺`` divides out A's image-frame ``R`` factor and
+    They are not decoration either: ``f~_A⁺`` divides out A's image-basis ``R`` factor and
     ``f~_B`` multiplies in B's, so the composite converts between the two *realized image
-    frames* rather than between the two parameter domains, which agree only when the two
+    bases* rather than between the two parameter domains, which agree only when the two
     ``R`` factors have equal determinant.
 
     This is also the map that carries an orientation. Two parameterizations of one edge are
@@ -509,8 +509,8 @@ def _ffs_chart_to_chart(S: Space, T: Space) -> Term | None:
                 return None
     except DynamicDim:
         return None
-    # applied right-to-left: out of A's image frame, into A's domain, into the ambient, into B's
-    # domain, into B's image frame.
+    # applied right-to-left: out of A's image basis, into A's domain, into the ambient, into B's
+    # domain, into B's image basis.
     return chain(Corestrict(T.f), Pinv(T.f), S.f, Pinv(Corestrict(S.f)))
 
 

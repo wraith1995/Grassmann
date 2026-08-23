@@ -67,7 +67,7 @@ def _is_euclidean(s: object) -> bool:
     ``Dual`` / ``OPlus`` / ``OProd`` / ``OPlusRep`` built from those, so the test recurses
     through the structure. It fails for a ``WithInner`` space, whose metric is not the
     standard one, and for the fundamental subspaces ``Img`` / ``Ker`` / ``CoImg`` /
-    ``CoKer``, whose frame is not the standard one. An elementwise kernel is only
+    ``CoKer``, whose basis is not the standard one. An elementwise kernel is only
     meaningful in standard coordinates, so those are refused rather than computed
     off-basis.
     """

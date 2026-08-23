@@ -60,12 +60,12 @@ def _external_op(op: _ExternalOp, a: list[str]) -> str:
     raise NotImplementedError(f"numpy_renderers: no rendering for _ExternalOp {op.name!r}")
 
 
-# -- Subspace realization ops (orthonormal frames) ---------------------------
+# -- Subspace realization ops (orthonormal bases) ---------------------------
 
 def _qr_cols(op: _QrColsOp, a: list[str]) -> str:
     """Render a QR's orthonormal columns, signed so that ``R``'s diagonal is positive.
 
-    The sign fix is what makes the frame reproducible: numpy's ``qr`` leaves the column signs
+    The sign fix is what makes the basis reproducible: numpy's ``qr`` leaves the column signs
     free, and a zero on the diagonal is read as ``+1``.
     """
     return ("(lambda _A: (lambda _q, _r: _q * np.where(np.sign(np.diag(_r)) == 0, 1.0, "

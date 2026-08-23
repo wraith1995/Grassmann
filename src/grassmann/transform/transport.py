@@ -113,7 +113,7 @@ def transport_basis(
     The result is an ``ImageBasis``: the literal pushforward columns ``f(b₁), …, f(bₙ)``,
     left as they are rather than orthonormalized, which is what keeps the transport
     rational. Passing ``b=None`` transports the standard basis of ``dom(f)``. This is the
-    fixed reference frame carried into a chart.
+    fixed reference basis carried into a chart.
     """
     _require_map(f, "transport_basis")
     if b is not None and not is_basis(b):

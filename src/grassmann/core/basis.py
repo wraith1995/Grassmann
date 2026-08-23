@@ -20,7 +20,7 @@ built the same way the space is::
 
 Two bases coordinatize an image differently and deliberately.
 :class:`ImageBasis` takes the literal pushforward columns ``f(s₁), …, f(sₙ)`` —
-the frame chartlib transports along ``f`` — and does not orthonormalize them.
+the basis chartlib transports along ``f`` — and does not orthonormalize them.
 :class:`ProjectedBasis` gives the orthonormalized basis of a chosen subspace
 instead; orthonormalization is always explicit here, never implicit.
 
@@ -240,14 +240,14 @@ class ImageBasis:
 
     Given a map ``f`` and a basis ``s`` of its domain, this coordinatizes ``Img(f)`` by
     the vectors ``f(s₁), …, f(sₙ)`` themselves, read in the codomain basis ``target`` —
-    the frame chartlib transports along ``f``. ``source`` defaults to the standard basis
+    the basis chartlib transports along ``f``. ``source`` defaults to the standard basis
     of ``dom f`` when left as ``None``, giving the literal columns ``f(eᵢ)``, and
     ``target`` likewise defaults to the standard basis of ``cod f``.
 
-    It is not orthonormalized. When an orthonormal frame for the image is wanted,
+    It is not orthonormalized. When an orthonormal basis for the image is wanted,
     :class:`ProjectedBasis` with ``which == "image"`` supplies it instead — the ``Q`` of
     the QR factorization, or the leading ``δ_f`` columns of the SVD's ``U`` — and a
-    change of basis built from those same factors carries one frame to the other.
+    change of basis built from those same factors carries one basis to the other.
     """
 
     f: Term
@@ -278,7 +278,7 @@ class ListBasis:
 
     Each entry is a :class:`~grassmann.core.term.Term` vector, and all of them share one
     space, the ambient. At lowering the vectors are stacked into the basis matrix, and a
-    short frame — fewer vectors than the ambient dimension — is completed from
+    short basis — fewer vectors than the ambient dimension — is completed from
     ``backup``, so the node always realizes to a full basis of the ambient rather than to
     a basis of the span of its vectors.
 
@@ -286,8 +286,8 @@ class ListBasis:
     ``RREF`` keeps the independent ones and then completes, and ``ORTHONORMALIZE`` runs a
     QR and completes from the orthonormalized backup. ``backup`` is the basis supplying
     the completing directions, the ambient's standard basis when left as ``None``. A
-    short ℝⁿ frame therefore realizes as an ``n × n`` ambient basis, the explicit vectors
-    followed by a standard completion, while a full-rank frame of ``n`` vectors is used
+    short ℝⁿ basis therefore realizes as an ``n × n`` ambient basis, the explicit vectors
+    followed by a standard completion, while a full-rank basis of ``n`` vectors is used
     unchanged.
 
     A basis of a genuine subspace is a different thing: build it directly, for instance
@@ -324,7 +324,7 @@ class WithInnerBasis:
     The metric rides along as metadata and nothing is done to the columns: they are
     exactly ``b``'s, now living in the metricized space, and they are not assumed
     ``g``-orthonormal. Wrapping the result in :class:`OrthonormalBasis` is what produces
-    the ``g``-orthonormal frame, and that step is always written out, never folded into a
+    the ``g``-orthonormal basis, and that step is always written out, never folded into a
     change of basis.
     """
 
@@ -344,7 +344,7 @@ class OrthonormalBasis:
     """The orthonormalization of a basis, written as a node of its own.
 
     The inner product it orthonormalizes against is the one ``b`` carries: the metric
-    ``g`` when ``b`` is a :class:`WithInnerBasis`, giving a ``g``-orthonormal frame, and
+    ``g`` when ``b`` is a :class:`WithInnerBasis`, giving a ``g``-orthonormal basis, and
     the standard inner product otherwise. Having the node is what keeps
     orthonormalization a step in the term rather than something a change of basis does on
     its own, mirroring the way :class:`~grassmann.core.term.Remetric` spells out a change
@@ -376,7 +376,7 @@ class CompleteBasis:
 
     ``sub_basis`` is meant to be a basis of a genuine subspace of the ambient, such as a
     :class:`ProjectedBasis` of ``Img(f)``, and completion realizes it through its ambient
-    immersion. An explicit short frame of term vectors is a different case: a
+    immersion. An explicit short basis of term vectors is a different case: a
     :class:`ListBasis` is already full for its ambient, so give it a backup —
     ``ListBasis(*vecs, backup=…, reduce=RREF)`` — rather than wrapping it here.
     """

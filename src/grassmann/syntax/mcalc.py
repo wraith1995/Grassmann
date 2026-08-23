@@ -1445,7 +1445,7 @@ class McalcResult:
         """Run ``node`` with chosen values lowered in declared bases rather than the standard one.
 
         ``realize`` maps a variable name to a declared basis name, and that variable is
-        then realized in that frame — the general form of what the geometry run does with
+        then realized in that basis — the general form of what the geometry run does with
         ``ImageBasis(J)``. Naming the standard or Euclidean basis is the default and costs
         nothing. ``values`` are keyed by variable name; ``raw_feed`` adds program inputs
         by their raw key, which is how an immersion ``J`` is supplied.
@@ -1660,7 +1660,7 @@ class McalcResult:
         The derivative map is applied to a direction rather than realized in full, so
         ``direction`` is a tangent direction in ℝᵏ at the point. ``sections`` gives each
         tangent variable's derivative-section coordinates; omitting one means the zero
-        section, a field whose frame coordinates are constant, and the connection term is
+        section, a field whose basis coordinates are constant, and the connection term is
         what remains. Requires a problem built with ``wrt`` naming a parameterization.
 
         Raises
@@ -1690,7 +1690,7 @@ class McalcResult:
         """Build the basis environment alone, without any numeric feed.
 
         Geometry values realize in ``ImageBasis(J)`` and derivative sections in the
-        product of the parameter cobasis with it — the same frames :meth:`_geom_env_feed`
+        product of the parameter cobasis with it — the same bases :meth:`_geom_env_feed`
         picks, but symbolic, so this serves code generation as well as running.
         """
         from grassmann.core import basis as _B
@@ -1709,7 +1709,7 @@ class McalcResult:
         """Emit standalone numpy source for a problem whose variables live on a parameterization.
 
         The primal, and the derivative when one was built, are lowered in the
-        ``ImageBasis(J)`` frame and rendered as plain Python — no grassmann needed at run
+        ``ImageBasis(J)`` basis and rendered as plain Python — no grassmann needed at run
         time. The emitted functions take the immersion ``dφ`` and the tangent coordinates,
         with ``d²φ``, the sections and the direction added for the derivative. The result
         maps ``"primal_py"`` and ``"derivative_py"`` to raw source text.

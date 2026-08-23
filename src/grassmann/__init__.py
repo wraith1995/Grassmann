@@ -182,16 +182,16 @@ def compile_in(
     inputs: dict[object, object] | None = None,
     target: object | None = None,
 ) -> pa.Program:
-    """Compile ``term`` with explicit frames for its variables and its result.
+    """Compile ``term`` with explicit bases for its variables and its result.
 
-    ``inputs`` maps each variable handle (from :func:`var`) to a frame — from
-    :func:`standard_basis` or another basis builder — and ``target`` is the frame
+    ``inputs`` maps each variable handle (from :func:`var`) to a basis — from
+    :func:`standard_basis` or another basis builder — and ``target`` is the basis
     the result is produced in (``None`` chooses one automatically). Unlike
     :func:`compile`, which picks every basis itself, this pins the coordinates the
     term is computed in, then routes into :func:`grassmann.lower.represent.represent`.
 
-    A frame supplied for a variable must be a basis of that variable's space; a
-    frame built for the wrong space raises
+    A basis supplied for a variable must be a basis of that variable's space; a
+    basis built for the wrong space raises
     :class:`~grassmann.core.basis.BasisError`. Two different bases of the *same*
     space are allowed — the compiler inserts a change-of-basis to reconcile them.
     """
@@ -312,7 +312,7 @@ __all__ = [
     "lam",
     "spacefn",
     "typefn",
-    # bases & frames
+    # bases & bases
     "scalar_basis",
     "standard_basis",
     "basis",

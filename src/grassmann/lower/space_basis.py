@@ -129,7 +129,7 @@ def map_basis(space: S.Space, choice: Callable[[S.Space], B.Basis | None]) -> B.
           choice(Dual(Img f))   → None      recurse
             choice(Img f)       → a pin     the caller's basis, used as given
 
-    A consumer that wants a particular frame at one kind of leaf — a pinned image basis for an
+    A consumer that wants a particular basis at one kind of leaf — a pinned image basis for an
     immersed tangent space, say — supplies only that rule and gets the standard basis
     everywhere else, rather than writing the tower walk again.
     """
@@ -343,25 +343,25 @@ class FfsRealization:
     the matched dual ``pinv(P)``.
     """
     # The upper-triangular ``R`` of the injective QR, ``J = Q·R``, kept because it IS the change
-    # of basis between the two frames of the same image: the literal ``ImageBasis`` columns are
+    # of basis between the two bases of the same image: the literal ``ImageBasis`` columns are
     # ``J`` and the orthonormal ``ProjectedBasis`` columns are ``Q``, so converting between them
     # costs one matrix already in hand rather than realizing both and pseudo-inverting.  Absent
     # on the SVD and GSVD routes, which produce no such factor.
     r: pa.SymArray | None = None
-    # The same subspace frame written in the declared endpoint basis rather than the ambient
+    # The same subspace basis written in the declared endpoint basis rather than the ambient
     # canonical one: the covariant realization's ``Q₀``, before the ``cols = T·Q₀`` that exists
     # only to satisfy this dataclass's promise that ``cols`` is in ambient standard coordinates.
     # Only ``represent._realize_image_covariant`` sets it.
     #
     # It is worth carrying because the two factors differ sharply in what they depend on.  For a
-    # natural ``f`` — the exterior antisymmetrizer under transported ⊗ᵏ frames, which
+    # natural ``f`` — the exterior antisymmetrizer under transported ⊗ᵏ bases, which
     # ``try_constant_ffs`` certifies by folding it to a build-time constant — ``Q₀`` is constant,
     # while ``T`` carries every cell dependence and, at an ``Img(J)`` endpoint, the QR radical
     # ``R`` as well.  A consumer whose operand already lives in ``endpoint_basis`` can use
     # ``endpoint_cols`` directly and skip ``T``, its inverse, and its own operand cob.
     #
-    # The two frames span the same subspace and give the same subspace coordinates, because the
-    # ambient change of basis is applied consistently to frame and operand alike — but only where
+    # The two bases span the same subspace and give the same subspace coordinates, because the
+    # ambient change of basis is applied consistently to basis and operand alike — but only where
     # the projection is exact.  With a residual, ``pinv`` projects along the ambient orthogonal
     # complement, and that complement differs between the two ambient bases.  A consumer must
     # therefore guard on exactness.  For a Λᵏ trace the residual is identically zero, since a
@@ -375,7 +375,7 @@ class FfsRealization:
 # exactly, so that ``Pᵀ`` already is the matched dual ``pinv(P) = (PᵀP)⁻¹Pᵀ`` and a consumer can
 # read coordinates with a transpose.  This is a positive list, and anything not on it needs the
 # general ``pinv``: ``GSvdOp`` is orthonormal in a metric instead (``UᵀGU = I``), ``MapApply`` and
-# ``Gram`` are the literal map columns, and a covariant frame is ``T·Q₀``, orthonormal in the
+# ``Gram`` are the literal map columns, and a covariant basis is ``T·Q₀``, orthonormal in the
 # target basis's inner product rather than the standard one.
 _STD_ORTHONORMAL_FFS_OPS = frozenset({"QrOp", "SvdOp", "const", "const-svd", "supplied"})
 
@@ -385,8 +385,8 @@ def ffs_cols_orthonormal(real: FfsRealization) -> bool:
 
     The two answers are not symmetric in their consequences, which is why this is a positive
     list of the operations that provably orthonormalize rather than a test. A ``False`` on an
-    orthonormal frame costs a consumer the general ``pinv`` or Gram solve and nothing else; a
-    ``True`` on a frame that is not orthonormal makes every coordinate read through it silently
+    orthonormal basis costs a consumer the general ``pinv`` or Gram solve and nothing else; a
+    ``True`` on a basis that is not orthonormal makes every coordinate read through it silently
     wrong.
     """
     return real.op in _STD_ORTHONORMAL_FFS_OPS
@@ -440,7 +440,7 @@ def realize_ffs_basis(
 
     ``literal_frame`` applies to the injective-image route alone, where it realizes the map's
     literal columns instead of the orthonormal ``Q``. That is the same subspace in a different
-    frame; :func:`_realize_via_gram` gives the precondition and the price in conditioning.
+    basis; :func:`_realize_via_gram` gives the precondition and the price in conditioning.
     """
     if which == "image":
         which = "img"
@@ -461,14 +461,14 @@ def realize_ffs_basis(
         )
     # A constant fold argued from dependency rather than sampling: when `f_matrix`'s cone is a
     # closed constant subprogram — no live input ref, only `stmt_out` generators, see
-    # `_cone_is_structurally_constant` — its plain-SVD frame is a provable build-time constant,
+    # `_cone_is_structurally_constant` — its plain-SVD basis is a provable build-time constant,
     # so the columns are emitted directly instead of deferring an SvdOp.  Deferring is what hurts:
     # the downstream `fold_numeric` has to work through a dynamic rank-δ axis, and a high-degree
     # integrand repeats that hundreds of times over a handful of distinct constant operators (a
-    # reference tangent-frame identity, a Λᵏ antisymmetrizer) until codegen runs out of memory.
+    # reference tangent-basis identity, a Λᵏ antisymmetrizer) until codegen runs out of memory.
     #
     # Only the plain-SVD route folds.  The metric GSVD and the sign-fixed injective QR
-    # orthonormalize differently, so a euclidean-SVD constant would be the wrong frame for them.
+    # orthonormalize differently, so a euclidean-SVD constant would be the wrong basis for them.
     # The folded columns are what `_realize_via_svd` would produce for this same `M`.  The
     # sampling `try_constant_ffs` covers the case this check deliberately calls non-constant: an
     # operator whose cone does read live generators but whose value is invariant because they
@@ -530,7 +530,7 @@ def try_constant_ffs(
 # Folding a structurally-constant realization to constant columns, by dependency rather than by
 # sampling.  Both constant routes — the sampling ``try_constant_ffs`` above and the structural
 # fold below — go through one shared core, :func:`_const_ffs_from_svd`, which turns a numeric
-# matrix's SVD into the constant frame for a given subspace, so the two agree column for column.
+# matrix's SVD into the constant basis for a given subspace, so the two agree column for column.
 # ---------------------------------------------------------------------------
 
 
@@ -540,19 +540,19 @@ def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
     The result is a function of the subspace and the ambient index order alone, and not of the
     factorization that produced ``q``. That distinction is the whole point of this function.
 
-    A slice ``U[:, :r]`` of an SVD determines the subspace but not a frame within it: inside a
+    A slice ``U[:, :r]`` of an SVD determines the subspace but not a basis within it: inside a
     degenerate singular subspace the columns are fixed only up to a rotation, which makes them a
     discontinuous function of the operator. The exterior antisymmetrizer is exactly such an
     operator — its nonzero singular values are all equal (``σ = 1, 1, 1, 0…`` for a 3-dimensional
     ``Λ²``) and it is invariant only by cancellation, to about 1e-15 rather than bitwise. So a
-    rounding difference of 1e-15 rotates the realized frame by O(1), and two ``Space`` nodes
+    rounding difference of 1e-15 rotates the realized basis by O(1), and two ``Space`` nodes
     naming the same subspace by different maps — the images of a canonical and a permuted
-    antisymmetrizer for a reoriented facet — end up with unrelated frames. The change of basis
+    antisymmetrizer for a reoriented facet — end up with unrelated bases. The change of basis
     composed across them is then a rotation where an oriented degree of freedom owes a signed
     permutation. No memo can tie those two together: their keys are legitimately different, and
     a memo cannot span compilations in any case.
 
-    So the frame is not asked of the factorization. The orthogonal projector ``P = q·qᵀ`` is
+    So the basis is not asked of the factorization. The orthogonal projector ``P = q·qᵀ`` is
     unique to the subspace and continuous in it, where ``q`` is neither, and a basis read off
     ``P`` in a fixed ambient order inherits that stability. The construction is a pivoted
     Cholesky of the projector in index order: orthogonalize the columns ``P·eⱼ`` for
@@ -566,7 +566,7 @@ def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
     It carries no orientation, and must not. A 3-cycle and a transposition of a facet's vertices
     span the same plane, so ``Λᵏ`` of it is the same subspace, and any rule keyed on the subspace
     owes both the same vector. The orientation sign belongs instead to the ambient chart-to-chart
-    conversion in the middle of ``Project ∘ convert ∘ Embed``, where with the two endpoint frames
+    conversion in the middle of ``Project ∘ convert ∘ Embed``, where with the two endpoint bases
     equal to ``p`` the composite is ``pᵀ(det M · p) = det M = ±1``. Making the two endpoints agree
     is precisely what turns that into a clean sign.
     """
@@ -607,23 +607,23 @@ def _const_ffs_from_svd(
         coimg  first r columns of V = Vhᵀ
         ker    last  dom−r columns of V
 
-    The slice fixes the subspace but not a frame inside it, so the columns are re-derived
+    The slice fixes the subspace but not a basis inside it, so the columns are re-derived
     canonically by :func:`_canonical_subspace_basis` before they are returned; that is what
-    makes one subspace have one frame wherever it is realized.
+    makes one subspace have one basis wherever it is realized.
 
     The resulting columns are constant, and both ``rank`` and ``rank_dim`` are absent because
     the rank is known at build and the axis is an ordinary integer. Both constant routes — the
     sampling :func:`try_constant_ffs` and the structural fold in :func:`realize_ffs_basis` —
-    come through here, so they cannot disagree about the frame for a given ``M``.
+    come through here, so they cannot disagree about the basis for a given ``M``.
     """
     if which in ("img", "coker"):
         cols = u[:, :r] if which == "img" else u[:, r:]
     else:                                                        # coimg / ker: right factor V = Vhᵀ
         v = vh.T
         cols = v[:, :r] if which == "coimg" else v[:, r:]
-    # The SLICE fixes the SUBSPACE; the slice's own columns do not fix a frame (they are arbitrary
-    # inside a degenerate singular subspace). Re-derive the frame canonically from that subspace so
-    # one subspace has ONE frame everywhere — see `_canonical_subspace_basis`.
+    # The SLICE fixes the SUBSPACE; the slice's own columns do not fix a basis (they are arbitrary
+    # inside a degenerate singular subspace). Re-derive the basis canonically from that subspace so
+    # one subspace has ONE basis everywhere — see `_canonical_subspace_basis`.
     cols = _canonical_subspace_basis(np.ascontiguousarray(cols))
     return FfsRealization(cols=pa.SymArray(np.ascontiguousarray(cols)),
                           rank=None, rank_dim=None, op=op)
@@ -643,7 +643,7 @@ def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -
     It is exact in one direction and conservative in the other: it never mistakes an operator
     that varies with the feed for a constant, and any ref or generator it cannot positively
     classify as constant-safe — or a cone it cannot enumerate — makes it answer ``False``,
-    leaving the frame to the SVD, QR or GSVD seam.
+    leaving the basis to the SVD, QR or GSVD seam.
     """
     return pa.is_structurally_constant(program, f_matrix)
 
@@ -657,7 +657,7 @@ def _fold_constant_ffs(
     input, any binding evaluates it to the same matrix, so it is evaluated once at build under a
     zero binding and the numeric operator ``M`` handed to :func:`_const_ffs_from_svd`.
 
-    The frame this produces is the one :func:`_realize_via_svd` would produce for the same
+    The basis this produces is the one :func:`_realize_via_svd` would produce for the same
     ``M``: the same full SVD, the same numeric-rank tolerance as :class:`~polyarray.SvdOp`, the
     same column convention. The difference is that it is a constant, and no SVD or rank
     statement enters the program at all.
@@ -685,8 +685,8 @@ def realize_image_application(
 
     The columns are ``f`` applied to each source basis vector, ``f(eᵢ)``, which is to say the
     operator matrix itself in its canonical ``(cod, dom)`` orientation. Nothing is factorized
-    and nothing is orthonormalized — the columns *are* ``f_matrix``, and this is the frame a
-    consumer transports along ``f`` rather than an orthonormal frame for the same subspace.
+    and nothing is orthonormalized — the columns *are* ``f_matrix``, and this is the basis a
+    consumer transports along ``f`` rather than an orthonormal basis for the same subspace.
 
     The column axis is the static source dimension, one column per source basis vector, and
     neither a rank nor a dimension atom arises since no decomposition is taken.
@@ -720,7 +720,7 @@ def _realize_via_qr(
     Injectivity is what makes this route available: full column rank means ``Q`` has exactly
     ``dom_dim`` orthonormal columns spanning the image, so the rank is static and no runtime
     dimension is needed. The ``R`` factor is kept on the realization, since it is the change of
-    basis between this frame and the literal ``ImageBasis`` of the same map.
+    basis between this basis and the literal ``ImageBasis`` of the same map.
     """
     # f : (cod, dom); injective ⇒ Q has dom orthonormal columns (the range basis).
     Q, R = program.emit_stmt(
@@ -749,13 +749,13 @@ def _realize_via_gram(
     """Realize an injective map's image as its own literal columns, read through a Gram solve.
 
     The columns are ``J`` itself, so this is a second realization of the same subspace the QR
-    route realizes, in a different frame. It satisfies the same :class:`FfsRealization`
+    route realizes, in a different basis. It satisfies the same :class:`FfsRealization`
     contract, carries no ``R`` — ``J = cols·I`` — and is tagged so that
     :func:`ffs_cols_orthonormal` reports ``False``. A consumer needing coordinates *in* the
-    frame therefore takes its general route, the matched dual ``pinv(J) = (JᵀJ)⁻¹Jᵀ = G⁻¹Jᵀ``,
+    basis therefore takes its general route, the matched dual ``pinv(J) = (JᵀJ)⁻¹Jᵀ = G⁻¹Jᵀ``,
     which is the Gram solve this realization is named for, rather than a transpose.
 
-    It exists because the frames differ in exactness, not in the subspace they span. QR
+    It exists because the bases differ in exactness, not in the subspace they span. QR
     normalizes by ``√(…)``, so :func:`_realize_via_qr`'s ``Q`` is algebraic-irrational in the
     program inputs and polyarray's exact rational lane cannot carry it; anything downstream that
     wanted an exact answer falls back to probing. ``J`` is rational in those same inputs, so the
@@ -782,7 +782,7 @@ class _QrSignConventionOp:
 
     With ``s = sign(diag R)`` and a zero read as ``+1``, the pair ``(Q·diag(s), diag(s)·R)`` is
     the factorization of the same matrix whose ``R`` has a positive diagonal — the unique one,
-    which is what makes a QR frame reproducible from one realization to the next.
+    which is what makes a QR basis reproducible from one realization to the next.
 
     The same convention is written three times over, for the three ways a program is executed:
     :meth:`__call__` on numpy arrays, :meth:`__numpy_source__` for emitted numpy source, and
@@ -891,11 +891,11 @@ def _realize_via_gsvd(
     metric_dom: pa.SymArray | None, metric_cod: pa.SymArray | None, label: str,
     *, dim_atom: pa.DimAtom | None = None,
 ) -> FfsRealization:
-    """Realize a subspace whose frame must be orthonormal in the endpoint metrics.
+    """Realize a subspace whose basis must be orthonormal in the endpoint metrics.
 
     The generalized decomposition takes the map together with a metric on each endpoint, an
     identity standing in wherever one is absent, and produces factors orthonormal in those
-    metrics rather than in the standard inner product. Its frame is therefore not standard-
+    metrics rather than in the standard inner product. Its basis is therefore not standard-
     orthonormal, and :func:`ffs_cols_orthonormal` reports as much.
     """
     m_v = metric_dom if metric_dom is not None else _eye(program, dom_dim, label + "_Mv")

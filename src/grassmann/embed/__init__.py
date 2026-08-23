@@ -182,7 +182,7 @@ __all__ = [
     "lam",
     "spacefn",
     "typefn",
-    # bases & frames
+    # bases & bases
     "scalar_basis",
     "basis",
     "image_basis",

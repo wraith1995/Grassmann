@@ -473,7 +473,7 @@ class Corestrict:
     :class:`Embed` act on a value, so nothing else in the calculus produces a map whose
     endpoint is ``Img(f)``. The composite ``Pinv(f_B) ∘ f_A`` is not a substitute: it
     synthesizes as ``dom(f_A) ⊸ dom(f_B)``, dropping the ``Img`` identification along
-    with the ``R``-factor scaling and the orientation sign carried by the image frames,
+    with the ``R``-factor scaling and the orientation sign carried by the image bases,
     and every consumer that checks a map endpoint strictly — ``Compose``, and through it
     the contravariant ``Dual`` arm of
     :func:`grassmann.transform.pullback.pullback` — rejects it.
@@ -546,7 +546,7 @@ class Sqrt:
     when ``f`` is not symmetric positive definite. It is the orthonormalization factor
     the metric itself supplies: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the
     stretch and its inverse the whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal
-    frame.
+    basis.
     """
 
     f: Term
@@ -914,7 +914,7 @@ class Frame:
 
     ``var`` is the bound value variable and ``basis_body`` the basis built from it,
     annotated as a forward reference to ``Basis`` because ``basis`` imports ``term``.
-    This is the term-level spelling of a frame; the general basis-level binder and its
+    This is the term-level spelling of a basis; the general basis-level binder and its
     application, ``BLam`` and ``BApp``, live in :mod:`grassmann.core.basis`.
     """
 

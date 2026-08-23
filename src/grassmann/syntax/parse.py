@@ -215,7 +215,7 @@ class LamN:
     annotations, so the node keeps both and leaves the choice to the resolver.
     """
 
-    glyph: str  # "λ" | "Λ" | "frame" | "Π"
+    glyph: str  # "λ" | "Λ" | "basis" | "Π"
     binders: list  # list[(name, annot_node|None)]
     body: object
     pos: int = 0
@@ -363,8 +363,8 @@ class _Parser:
             args.append(self.expr(0))
 
     def binder(self, glyph: str) -> LamN:
-        """Parse a binder form — λ / Λ / Π / frame / basisfn — with its binder list and body."""
-        t = self.next()  # glyph token (λ / Λ / Π / frame-name)
+        """Parse a binder form — λ / Λ / Π / basis / basisfn — with its binder list and body."""
+        t = self.next()  # glyph token (λ / Λ / Π / basis-name)
         binders: list = []
         binders.append(self._binder_decl())
         while self.at_op(","):
