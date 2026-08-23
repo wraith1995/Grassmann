@@ -1,24 +1,31 @@
-"""``choose`` — symbolic-aware basis-choice heuristic.
+"""The basis-choice policy: which of a space's candidate bases lowering represents it in.
 
-``choose(space, candidates, *, term=None, in_basis=None)`` scores the candidate bases by
-*expected symbolic content of the result* and returns the winner. This is a local
-**heuristic**: a global basis search is deferred.
+Every space offers several honest coordinatizations, and they are not equally cheap. The
+one this module picks is the one expected to leave the fewest symbolic cells in the
+lowered result, scored by an additive heuristic over the candidates
+:func:`~grassmann.lower.space_basis.space_basis` supplies::
 
-The levers, as scored here:
+    candidates ──► score each ──► the highest wins
+      standard orthonormal        +10   metric is the identity, so the cob is numeric
+      the operator's own frame    +40   its projection is the identity there
+      the basis the input is in  +100   one basis on both sides, so no cob at all
+      the g-orthonormal frame     +20   of a metric space, so ⟨·,·⟩ is numeric
 
-* **Absorb operator structure into the basis.** A value derived from a symbolic operator
-  ``f`` scores best in ``f``'s SVD / structure-aligned basis (``ImageBasis`` /
-  ``ProjectedBasis``): there the projection is the identity and the coordinates are
-  numeric. So an FFS basis of the *same* operator gets the top score.
-* **Numeric result wins.** A candidate that makes the result numeric is preferred even
-  at the cost of a (numeric) change-of-basis ``Stmt``.
-* **Keep ``cob`` numeric.** The inner-product-orthonormal default makes the metric the
-  identity and the cob numeric, so it is the baseline winner absent operator structure.
-* **Parametric in/out ⇒ same basis.** If an ``in_basis`` is supplied and is among the
-  candidates (an endomorphism / identified parametric spaces), prefer it — one basis for
-  both sides, so no spurious cob (hence no spurious symbolics) appears.
+Four considerations produce those scores. A value derived from a symbolic operator ``f``
+is cheapest in a basis aligned to ``f``'s own structure — an ``ImageBasis`` or a
+``ProjectedBasis`` of that same map — because the projection onto the subspace is the
+identity there and the coordinates come out numeric. A candidate that makes the result
+numeric is worth taking even when it costs a change of basis, provided that cob is itself
+numeric. The inner-product-orthonormal standard basis makes the metric the identity, so
+``Inner``, ``Dagger`` and the solves lower to numeric operations, which makes it the
+baseline winner where no operator structure is available. And when an input basis is
+offered and is among the candidates — an endomorphism, or two parametrically identified
+spaces — using it on both sides avoids a cob entirely, and with it the symbolic entries a
+cob would introduce.
 
-The score is a small integer (higher = better); :func:`score_basis` exposes it for tests.
+The choice is local: each space is scored on its own, with no search over the combinations
+a whole term admits. :func:`score_basis` exposes the score, a small integer where higher is
+better.
 """
 
 from __future__ import annotations
@@ -36,13 +43,16 @@ def choose(
     term: object | None = None,
     in_basis: B.Basis | None = None,
 ) -> B.Basis:
-    """Pick the symbolic-minimizing basis from ``candidates`` for ``space``.
+    """Pick the basis of ``space`` expected to leave the fewest symbolics, from ``candidates``.
 
-    ``candidates`` is typically the second element of
-    :func:`grassmann.lower.space_basis.space_basis`. ``term`` is the (optional) core-IR
-    term being represented — used to recognize when a candidate is the SVD/structure
-    basis of the *same* operator. ``in_basis`` (optional) is the basis already chosen for
-    the input side, enabling the "parametric in/out ⇒ same basis" lever.
+    ``candidates`` is normally the second element of
+    :func:`grassmann.lower.space_basis.space_basis`. ``term`` is the core term being
+    represented, and it is what lets the scorer recognize that a candidate is the structure
+    basis of the very operator the value came from, and whether the term consumes a metric.
+    ``in_basis`` is the basis already chosen for the input side, and a candidate matching it
+    wins outright, since one basis on both sides means no change of basis at all.
+
+    Ties go to the earliest candidate, which is the space's default basis.
     """
     if not candidates:
         raise ValueError("choose: no candidate bases")
@@ -63,7 +73,12 @@ def score_basis(
     term: object | None = None,
     in_basis: B.Basis | None = None,
 ) -> int:
-    """Heuristic score for ``candidate`` (higher = fewer expected symbolics)."""
+    """Score one candidate basis of ``space``: higher means fewer expected symbolic cells.
+
+    The score is additive over the considerations described in the module docstring, so a
+    candidate can collect several bonuses at once — the g-orthonormal basis of a metric space
+    that also happens to be the input basis, say.
+    """
     score = 0
 
     # ── Parametric in/out ⇒ same basis: a candidate matching the input side wins big.
@@ -77,32 +92,33 @@ def score_basis(
         # numeric-result-wins: in the operator's own basis the coordinates are numeric.
         score += 40
 
-    # ── Keep cob numeric / identity metric: the orthonormal standard default.
-    #   The orthonormal default makes the metric the identity (a numeric ``Inner``/
-    #   ``Dagger``/``Solve``), which is a CONVENIENCE, not a correctness requirement.  At an
-    #   un-pinned FFS ``Img(f)`` leaf that default is the ``ProjectedBasis`` — the
-    #   ORTHONORMALIZING QR/SVD frame whose ``R``/``√`` factor is ALGEBRAIC-IRRATIONAL in the
-    #   inputs, so it kills polyarray's exact (rational) lane (the "fold").  The literal
-    #   ``ImageBasis(f)`` (``f(eᵢ)`` columns) spans the SAME subspace, is RATIONAL, and keeps
-    #   the fold alive.  So award the +10 orthonormal bonus only where it is FREE — a space
-    #   with no rational fold-preserving alternative (its default is already rational) — or
-    #   where ``term`` genuinely pairs the value through a metric/orthonormality-consuming op
-    #   (`_demands_orthonormal`); otherwise route the +10 to the rational frame (below).
+    # ── Keep the cob and the metric numeric: the orthonormal standard default.
+    #   An orthonormal basis makes the metric the identity, so ``Inner``, ``Dagger`` and
+    #   ``Solve`` lower to numeric operations.  That is a convenience, not a correctness
+    #   requirement, and at an un-pinned ``Img(f)`` leaf it has a price: the default there is
+    #   the ``ProjectedBasis``, the orthonormalizing QR/SVD frame, whose ``R`` factor is
+    #   algebraic-irrational in the program inputs and therefore cannot be carried by
+    #   polyarray's exact rational lane.  The literal ``ImageBasis(f)``, the ``f(eᵢ)`` columns,
+    #   spans the same subspace and is rational in the inputs, so the exact lane runs through
+    #   it.  The +10 is awarded where orthonormality is free — a space whose default is already
+    #   rational, so no alternative is being given up — or where ``term`` genuinely pairs the
+    #   value through an operation that consumes a metric (`_demands_orthonormal`).  Otherwise
+    #   it goes to the rational frame instead, below.
     #
-    #   GATED ON THE PROPAGATED RATIONAL-FRAME LANE (`literal_ffs_frames`).  Off by default the
-    #   scorer is BYTE-IDENTICAL to the historical orthonormal-default choice — the numeric lane
-    #   must not move, and a global leaf-flip is UNSOUND (it re-frames un-pinned ``Img`` leaves
-    #   that feed the metric/gauge/Λᵏ-inner paths, which currently require the orthonormal frame).
-    #   A consumer that wants the exact/rational lane opts in by PROPAGATION (pointwise's
-    #   immersed-FEEC certificate path), and only then does the fold-preserving ``ImageBasis`` win.
+    #   The alternative is only ever considered under the propagated rational-frame lane
+    #   (`literal_ffs_frames`), which is off by default, so ordinarily the orthonormal default
+    #   simply wins.  Flipping every leaf unconditionally would be unsound: an un-pinned ``Img``
+    #   leaf feeding a metric, a gauge or a Λᵏ inner product needs the orthonormal frame.  A
+    #   consumer that wants exactness opts in, and only then does the fold-preserving
+    #   ``ImageBasis`` take the bonus.
     demands = _demands_orthonormal(term)
     fold_alt = _rational_frame_lane() and _fold_preserving_alternative_exists(space)
     if _is_orthonormal_default(space, candidate) and (not fold_alt or demands):
         score += 10
-    # ── Fold-preservation: the RATIONAL literal image frame of an un-pinned ``Img`` leaf, when
-    #   no metric/orthonormality demand forces the orthonormal frame.  Symmetric with the +10
-    #   above (exactly one of the two operator bases earns it), so the rational ``ImageBasis``
-    #   wins the tie (50 vs 40) over the orthonormal ``ProjectedBasis``.
+    # ── The rational literal image frame of an un-pinned ``Img`` leaf, where no metric or
+    #   orthonormality demand forces the orthonormal one.  This is symmetric with the +10
+    #   above — exactly one of the two operator bases earns it — so the rational ``ImageBasis``
+    #   takes the leaf at 50 against the orthonormal ``ProjectedBasis``'s 40.
     elif is_op_basis and isinstance(candidate, B.ImageBasis) and fold_alt and not demands:
         score += 10
 
@@ -119,13 +135,23 @@ def score_basis(
 
 
 def _operator_of(space: S.Space) -> object | None:
-    """Give the linear-map term whose structure ``space`` is built from (an FFS), or None."""
+    """Give the map a fundamental subspace is defined by, or ``None`` for any other space.
+
+    ``Img(f)``, ``Ker(f)``, ``CoImg(f)`` and ``CoKer(f)`` are all built from ``f``, and it is
+    ``f``'s own structure basis that makes their coordinates numeric.
+    """
     from grassmann.infer.subspace import ffs_defining_map
 
     return ffs_defining_map(space)
 
 
 def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
+    """Report whether ``candidate`` is a structure basis of the map ``op`` itself.
+
+    Only an ``ImageBasis`` or a ``ProjectedBasis`` carries a defining map, and it counts here
+    only when that map is ``op``: a frame of some *other* operator buys none of the structure
+    the bonus is paying for.
+    """
     match candidate:
         case B.ImageBasis(f):
             return f is op or f == op
@@ -136,13 +162,13 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
 
 
 def _rational_frame_lane() -> bool:
-    """Whether the PROPAGATED rational (literal-FFS) frame lane is active for this lowering.
+    """Report whether the rational (literal) frame lane is active for this lowering.
 
-    The scorer's fold-preservation preference is opt-in — the exact/certificate consumer
-    propagates it (``represent(literal_ffs_frames=True)`` / the ``literal_ffs_frames`` context),
-    exactly the same switch that makes the frame REALIZATION rational.  OFF by default, so the
-    orthonormal-default choice is byte-identical to the historical behaviour.  Imported lazily to
-    avoid the ``represent`` ⇄ ``choose`` import cycle.
+    The scorer's preference for a rational frame is opt-in, and the switch is the same one that
+    makes the frame's *realization* rational: ``represent(literal_frames=True)`` or the
+    :func:`~grassmann.lower.represent.literal_ffs_frames` context. It is off by default, so the
+    orthonormal default ordinarily wins unopposed. The import is deferred to the call to keep
+    :mod:`represent` and :mod:`choose` from importing each other at module load.
     """
     from .represent import _literal_ffs_frames
 
@@ -150,15 +176,19 @@ def _rational_frame_lane() -> bool:
 
 
 def _fold_preserving_alternative_exists(space: S.Space) -> bool:
-    """Whether ``space`` offers a RATIONAL, fold-preserving frame beside its orthonormal default.
+    """Report whether ``space`` has a rational frame available beside its orthonormal default.
 
-    An un-pinned ``Img(f)`` of an **injective** map is the one case: its orthonormal default
-    (``ProjectedBasis``) is the QR frame whose ``R`` is algebraic-irrational (kills the exact
-    lane), while the literal ``ImageBasis(f)`` (``f(eᵢ)`` columns) is RATIONAL and — because
-    ``f`` is injective, full column rank — a genuine basis of the SAME image.  A NON-injective
-    image's literal columns are rank-deficient (not a basis), so its SVD ``ProjectedBasis``
-    stays the honest default; ``Ker``/``CoImg``/``CoKer`` and non-FFS spaces offer no literal
-    frame at all (``candidate_bases`` adds ``ImageBasis`` only for ``Img``).
+    The image of an injective map is the one case. Its orthonormal default, the
+    ``ProjectedBasis``, is the QR frame whose ``R`` factor is algebraic-irrational and so
+    cannot be carried by the exact lane, while the literal ``ImageBasis(f)`` — the columns
+    ``f(eᵢ)`` — is rational in the inputs and, because injectivity means full column rank, is a
+    genuine basis of that same image.
+
+    Nothing else qualifies. A non-injective map's literal columns are rank-deficient and hence
+    not a basis at all, so the SVD ``ProjectedBasis`` remains the honest default there. ``Ker``,
+    ``CoImg``, ``CoKer`` and the non-subspace spaces are never offered a literal frame in the
+    first place: :func:`~grassmann.lower.space_basis.candidate_bases` adds an ``ImageBasis``
+    only for an ``Img``.
     """
     from grassmann.infer.properties import map_props
 
@@ -168,20 +198,22 @@ def _fold_preserving_alternative_exists(space: S.Space) -> bool:
     return p is not None and p.inj
 
 
-# Term nodes whose coordinates are simplest (numeric) in an ORTHONORMAL frame — the metric /
-# orthonormality-consuming ops.  Their presence in ``term`` is what makes the orthonormal
-# default's identity-metric a genuine win worth the QR/SVD radical; absent them, the rational
-# fold-preserving frame is preferred at an ``Img`` leaf.  (Trace/Det/LogDet are basis-independent
-# scalars; Project/Embed/Corestrict act in any basis — none demands orthonormality.)
+# The nodes whose coordinates are numeric only in an orthonormal frame: the ones that consume a
+# metric or an orthonormality.  Their presence in a term is what makes the orthonormal default's
+# identity metric worth the QR/SVD radical; without them the rational frame is preferred at an
+# ``Img`` leaf.  Trace, Det and LogDet are basis-independent scalars, and Project, Embed and
+# Corestrict act in any basis, so none of those demands orthonormality.
 def _demands_orthonormal(term: object | None) -> bool:
-    """Whether ``term`` pairs the value through a metric/orthonormality-consuming op.
+    """Report whether ``term`` pairs its value through an operation that consumes a metric.
 
-    Scans ``term`` (a core-IR Term) for an ``Inner``/``Dagger``/``Solve``/``Pinv``/
-    ``SolveApply``/``PinvApply``/``Flat``/``Sharp``/``Remetric`` node.  Conservative: ``None``
-    or an unrecognized shape ⇒ ``False`` (no demand), which keeps the fold-preserving frame —
-    the SAFE direction for the exact lane.  Uses the generic reflective child walk
-    (:func:`grassmann.core.term._children`), so it is a membership predicate, not a partial
-    dispatch ladder over the ``Term`` sum type.
+    It searches the term for an ``Inner``, ``Dagger``, ``Solve``, ``Pinv``, ``SolveApply``,
+    ``PinvApply``, ``Flat``, ``Sharp`` or ``Remetric`` node. The walk goes through the generic
+    reflective child enumeration :func:`grassmann.core.term._children`, so this is a membership
+    test over the term rather than a partial dispatch ladder over the ``Term`` sum type, and a
+    node kind it has never seen costs it nothing.
+
+    A missing term, or a shape it cannot walk, answers ``False``. That is the conservative
+    direction: it keeps the rational frame, which the exact lane can carry.
     """
     if term is None:
         return False
@@ -205,7 +237,9 @@ def _demands_orthonormal(term: object | None) -> bool:
 def _is_orthonormal_default(space: S.Space, candidate: B.Basis) -> bool:
     """Report whether ``candidate`` is the inner-product-orthonormal standard basis of ``space``.
 
-    Imported lazily to avoid a cycle with :mod:`space_basis`.
+    A space with no static default basis — an ``SVar`` or an unreduced ``App`` — answers
+    ``False``, since there is no standard basis for the candidate to be. The import is deferred
+    to the call to avoid a cycle with :mod:`space_basis`.
     """
     from .space_basis import default_basis
 
@@ -216,7 +250,12 @@ def _is_orthonormal_default(space: S.Space, candidate: B.Basis) -> bool:
 
 
 def _eq(a: B.Basis, b: B.Basis) -> bool:
-    """Numpy-tolerant structural basis equality (shared with represent's cob)."""
+    """Compare two bases structurally, tolerating the numpy arrays a basis may carry.
+
+    This is the same equality :mod:`~grassmann.lower.represent` uses to decide whether a cob is
+    needed, so a candidate the scorer calls equal to the input basis is exactly one that would
+    cost no change of basis.
+    """
     from .represent import _basis_eq
 
     return _basis_eq(a, b)

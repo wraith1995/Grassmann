@@ -26,11 +26,14 @@ class PropError(Exception):
 
 @dataclass(frozen=True)
 class MapProps:
-    """A bundle of asserted properties for a linear-map variable.
+    """A bundle of the properties asserted of a linear-map variable.
 
-    Boolean flags ``inj``/``surj``/``bij`` plus optional symbolic rank/dim fields.
-    All fields default to "unasserted". ``bij`` implies ``inj`` and ``surj`` and is
-    normalized as such at construction.
+    The booleans ``inj``, ``surj``, and ``bij`` record injectivity, surjectivity, and
+    bijectivity; ``rank``, ``dim_ker``, and ``dim_img`` record the dimensions, each a
+    possibly symbolic :class:`~grassmann.core.space.Dim`. Every field defaults to the
+    unasserted state, so an empty bundle claims nothing. Bijectivity implies the other
+    two and is normalized to set them at construction, and ``dim_img`` is the rank by
+    definition, so giving both requires them to be the same node.
     """
 
     inj: bool = False
@@ -112,7 +115,7 @@ def dim_ker(k: object) -> MapProps:
 
 
 def dim_img(r: object) -> MapProps:
-    """Assert the image dimension (= rank)."""
+    """Assert the image dimension, which is the rank."""
     return MapProps(dim_img=as_dim(r))
 
 
@@ -125,7 +128,7 @@ def props(
     dim_ker: object | None = None,
     dim_img: object | None = None,
 ) -> MapProps:
-    """General constructor for a property bundle."""
+    """Build a property bundle from the assertions given, coercing any int dimension."""
     return MapProps(
         inj=inj,
         surj=surj,

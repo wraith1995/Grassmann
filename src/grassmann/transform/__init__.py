@@ -1,18 +1,25 @@
-"""Term-to-term transformation passes.
+"""Passes that turn one core term into another, above the lowering boundary.
 
-Where :mod:`grassmann.infer` types a term and :mod:`grassmann.lower` lowers it to
-:mod:`polyarray`, these passes rewrite a core
-:class:`~grassmann.core.term.Term` into a new core term:
+Inference types a term and lowering turns it into array code; these passes sit between,
+rewriting a :class:`~grassmann.core.term.Term` into a different term that means the same
+thing or means the derivative of it. They never realize a basis and never mutate the IR
+they read — a pass returns a new term::
 
-- :func:`pullback` — auto-transport a value into a target space, inserting
-  projections/embeddings (and recursing structurally through ⊗/⊕/Dual).
-- :func:`pushforward` / :func:`transport_basis` — the map-driven dual of
-  ``pullback``: carry a value / basis *along* a chart map into its image
-  (domain → image), the rational "transport" primitive (see
-  :mod:`grassmann.transform.transport`).
-- :func:`diff` — total covariant differentiation w.r.t. a single value variable.
-- :func:`simplify` / :func:`sum_of_products` — β-reduction, algebraic simplification,
-  and a sum-of-products normal form (see :mod:`grassmann.transform.rewrite`).
+    Term ──▶ transform ──▶ Term          coordinate-free throughout
+                 │
+                 ├── diff        the total covariant derivative along one variable
+                 ├── rewrite     β, simplification, sum-of-products normal form
+                 ├── pullback    move a value between structurally related spaces
+                 └── transport   carry a value or basis along a map, into its image
+
+:mod:`~grassmann.transform.diff` differentiates a closed term with respect to a single
+value variable, forward-mode, building the Levi-Civita connection where the metric moves.
+:mod:`~grassmann.transform.rewrite` normalizes, from plain β-reduction up to a configurable
+sum-of-products form. :mod:`~grassmann.transform.pullback` transports a value into a target
+space using only the relations the spaces already have — subspace containment, a summand of
+a direct sum, a factor of a tensor product — while
+:mod:`~grassmann.transform.transport` does the map-driven counterpart, applying a chart map
+and landing in its image.
 """
 
 from __future__ import annotations

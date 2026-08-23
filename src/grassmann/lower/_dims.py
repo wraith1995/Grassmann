@@ -1,15 +1,22 @@
-"""Static-dimension resolution for spaces and bases.
+"""The dimension of a space or basis, when it is a number at build time.
 
-A small helper shared by :mod:`space_basis` and :mod:`cob`: turn a structural
-:class:`~grassmann.core.space.Space` (or :class:`~grassmann.core.basis.Basis`) into a
-concrete ``int`` dimension *when statically known*, raising :class:`DynamicDim` when the
-size is a runtime rank ``δ_f`` (a :class:`~grassmann.core.space.DimAtomRef`) or otherwise
-symbolic. The substrate emits polyarray :class:`~polyarray.DimAtom`-sized (dynamic) axes
-in those cases, so callers catch :class:`DynamicDim` and route to the bulk/dynamic lane.
+Lowering has to size arrays, and most spaces have a dimension it can compute outright by
+recursing over their structure. Some do not: the dimension of ``Img(f)`` is the rank of
+``f``, which is generally not known until the program runs, and a space variable has no
+dimension at all until it is instantiated. This module draws that line::
 
-This is *structural* dimension arithmetic only (the full dim-inference machinery does the
-real inference); it suffices for the substrate's static numeric tests and for sizing the
-``OutSpec``s of the FFS realizations.
+    ⊕(V₂, V₃)               ⇒  5
+    Dual(V₃) ⊗ V₄           ⇒  12
+    Img(f), f asserted inj  ⇒  |dom f|, since injectivity pins the rank
+    Img(f), rank unasserted ⇒  DynamicDim — the rank δ_f is a runtime value
+    SVar α                  ⇒  DynamicDim — no dimension until instantiated
+
+A caller catches :class:`DynamicDim` and sizes that axis with a polyarray
+:class:`~polyarray.DimAtom` instead, which resolves at run time.
+
+The arithmetic here is structural rather than inferential — the dimension inference proper
+lives in :mod:`grassmann.infer` — and it is enough to size the outputs of the
+subspace realizations and to decide the static cases the lowering substrate tests for.
 """
 
 from __future__ import annotations
@@ -21,11 +28,22 @@ from grassmann.core import space as S
 
 
 class DynamicDim(Exception):
-    """Raised when a space/basis dimension is not a static ``int`` (a runtime ``δ_f``)."""
+    """Raised when a dimension is not a build-time integer.
+
+    A caller treats this as an instruction rather than a failure: size the axis with a runtime
+    :class:`~polyarray.DimAtom` and let it resolve when the program runs.
+    """
 
 
 def dim_of(space: S.Space) -> int:
-    """Return the static integer dimension of ``space`` or raise :class:`DynamicDim`."""
+    """Give the dimension of ``space`` as an integer, or raise :class:`DynamicDim`.
+
+    The structural constructors compose as one expects: a direct sum adds, a tensor product
+    multiplies, and ``Dual`` and ``WithInner`` leave the dimension alone. A fundamental
+    subspace defers to :func:`_ffs_dim`, which can answer only when the defining map's
+    asserted properties pin its rank. A space variable and an unreduced application have no
+    dimension to give, and neither has an unsolved inference metavariable.
+    """
     match space:
         case S.Scalar():
             return 1
@@ -56,12 +74,18 @@ def dim_of(space: S.Space) -> int:
 
 
 def _ffs_dim(space: S.Img | S.Ker | S.CoImg | S.CoKer) -> int:
-    """Give the static dim of an FFS space when the map's props pin its rank, else raise.
+    """Give a fundamental subspace's dimension when the map's properties pin its rank.
 
-    Dimension laws: ``|Img| = |CoImg| = rank``, ``|Ker| = |dom| − rank``,
-    ``|CoKer| = |cod| − rank``.  The rank is static iff the defining map carries an
-    asserted ``rank``/``dim_img`` (or ``dim_ker``), or is ``inj`` (``rank = |dom|``),
-    ``surj`` (``rank = |cod|``), or ``bij`` (``rank = |dom| = |cod|``).
+    All four dimensions follow from the rank by the rank-nullity laws::
+
+        |Img| = |CoImg| = rank
+        |Ker|  = |dom| − rank
+        |CoKer| = |cod| − rank
+
+    So the question is whether the rank itself is known at build time, and it is exactly when
+    the defining map carries an asserted ``rank``, ``dim_img`` or ``dim_ker``, or is asserted
+    injective (rank ``|dom|``), surjective (rank ``|cod|``) or bijective (both, and they
+    agree). With none of those the rank is the runtime value ``δ_f`` and this raises.
     """
     dom, cod = _ffs_endpoints(space)
     rank = _static_rank(space, dom, cod)
@@ -77,10 +101,12 @@ def _ffs_dim(space: S.Img | S.Ker | S.CoImg | S.CoKer) -> int:
 
 
 def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
-    """Give the (domain, codomain) spaces of an FFS map, from ``source``/``target`` or ``f``.
+    """Give the domain and codomain of a subspace node's defining map.
 
-    Prefers the node's explicit ``source``/``target``; falls back to reading the map
-    var's space ``~dom ⊗ cod`` (the ``OProd(Dual(dom), cod)`` linear-map encoding).
+    A node that declares its endpoints explicitly is believed. Otherwise the endpoints are read
+    off the map's own space, since a linear map ``dom ⊸ cod`` is encoded as
+    ``OProd(Dual(dom), cod)`` and the two factors are the endpoints. A node offering neither
+    raises :class:`DynamicDim`.
     """
     src = getattr(space, "source", None)
     tgt = getattr(space, "target", None)
@@ -98,7 +124,12 @@ def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
 
 
 def _static_rank(space: S.Space, dom: S.Space, cod: S.Space) -> int:
-    """Give the map's static rank from its asserted props, or raise :class:`DynamicDim`."""
+    """Give the defining map's rank from its asserted properties, or raise :class:`DynamicDim`.
+
+    An explicit ``rank`` or ``dim_img`` gives it directly, ``dim_ker`` gives it by subtraction
+    from the domain, and injectivity, surjectivity or bijectivity each determine it from an
+    endpoint dimension. An unasserted map has only the runtime rank ``δ_f``.
+    """
     props = getattr(getattr(space, "f", None), "props", None)
     if props is not None:
         if props.rank is not None:
@@ -117,6 +148,12 @@ def _static_rank(space: S.Space, dom: S.Space, cod: S.Space) -> int:
 
 
 def _dim_int(d: S.Dim) -> int:
+    """Fold a symbolic dimension expression to an integer, or raise :class:`DynamicDim`.
+
+    Sums, products, negations and modulos fold when their operands do; ``DimOf`` defers to
+    :func:`dim_of` for the space it names. A dimension variable and a runtime rank atom are
+    exactly the two that cannot fold.
+    """
     match d:
         case S.DimLit(v):
             return v
@@ -145,10 +182,11 @@ def _dim_int(d: S.Dim) -> int:
 
 
 def _list_basis_ambient(vectors: tuple) -> S.Space | None:
-    """Give the (ambient) space of a ``ListBasis``.
+    """Give the ambient space a ``ListBasis``'s vectors live in, or ``None``.
 
-    Its vectors' ``synth_space``, or ``None`` when undeterminable (abstract vectors).  A ``ListBasis`` is
-    always a full basis of this space.
+    It is the space the first vector synthesizes to, since a ``ListBasis`` is always a full
+    basis of the space its vectors inhabit. Abstract vectors synthesize to nothing, and the
+    answer is then ``None``.
     """
     if not vectors:
         return None
@@ -161,7 +199,19 @@ def _list_basis_ambient(vectors: tuple) -> S.Space | None:
 
 
 def basis_dim(b: B.Basis) -> int:
-    """Return the static integer dimension of a basis or raise :class:`DynamicDim`."""
+    """Give the dimension of a basis as an integer, or raise :class:`DynamicDim`.
+
+    The structural constructors mirror the spaces they coordinatize, so a sum adds, a product
+    multiplies, and the variance and metric wrappers pass through. Two cases need more care. A
+    ``ListBasis`` is a full basis of its ambient space, so its dimension is the ambient one —
+    taken from an explicit backup basis if it has one, else from the vectors' own space — and
+    only a basis whose ambient cannot be determined falls back to the vector count, or, when it
+    is row-reduced, is sized by a runtime rank. A ``CompleteBasis`` that reduces spans the
+    ambient, so its dimension is the complement's; one that does not is the two stacked.
+
+    An image or projected basis has the dimension of the subspace it coordinatizes, which is a
+    runtime rank here, and an abstract basis has no dimension until it is reduced.
+    """
     match b:
         case B.ScalarBasis():
             return 1

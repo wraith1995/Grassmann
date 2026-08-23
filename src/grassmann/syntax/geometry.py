@@ -1,17 +1,26 @@
-"""Parameterizations and their geometry for the matrix-calculus surface notation.
+"""Differential geometry expressed with the four fundamental subspaces.
 
-A **parameterization** φ: ℝᵏ → ℝⁿ (an immersion) traces a k-manifold in ℝⁿ. Its differential
-``J = dφ : param ⊸ ambient`` is an injective map, so the **tangent space** is modeled as the
-image space ``Img(J)``, the orthogonal complement ``CoKer(J)`` as the **normal** space, and
-their duals as the **cotangent** and **conormal** spaces. Differentiating a value that lives
-on the tangent space — under the *immersion gauge* — yields the **covariant** (Levi-Civita)
-derivative ``∇v = Γ·v`` with ``Γ(h) = J⁺·(∂J·h)``, the chart Christoffel connection. The
-differentiation itself is :func:`grassmann.transform.diff.diff`; this module only supplies the
-geometry (spaces, gauge, and numeric feed) around it.
+A parameterization φ: ℝᵏ → ℝⁿ is an immersion tracing a k-manifold inside ℝⁿ. Its
+differential ``J = dφ : param ⊸ ambient`` is injective, and that single map generates the
+whole local geometry, because the subspaces grassmann already has are the geometric
+spaces::
 
-The numeric immersion is supplied at run time: ``J`` is fed the Jacobian ``dφ|_p`` and ``DJ``
-the Hessian ``d²φ|_p`` at the point. The covariant derivative then matches the analytic ground
-truth (sphere and Monge patches), wrapped as a clean surface.
+    ambient  ℝⁿ  =  Img(J)  ⊕  CoKer(J)
+                    tangent    normal
+    duals            Dual(Img(J))   Dual(CoKer(J))
+                     cotangent      conormal
+
+Nothing is bolted on: a tangent vector is a value of ``Img(J)``, a normal one a value of
+``CoKer(J)``, and the metric the tangent space inherits from the ambient is the first
+fundamental form. Differentiating a tangent-valued expression under the *immersion gauge*
+then gives the covariant derivative ``∇v = Γ·v`` with the chart Christoffel connection
+``Γ(h) = J⁺·(∂J·h)``, which is the Levi-Civita connection of that induced metric. The
+differentiation is :func:`grassmann.transform.diff.diff`; this module supplies the spaces,
+the gauge, and the numeric feed around it.
+
+Only ``φ`` itself is supplied numerically. ``J`` is fed the Jacobian ``dφ|_p`` and ``DJ``
+the Hessian ``d²φ|_p`` at the point, both of which :class:`Parameterization` will
+finite-difference from ``φ`` on request.
 """
 
 from __future__ import annotations
@@ -39,12 +48,19 @@ if TYPE_CHECKING:
 
 
 class Parameterization:
-    """A parameterization φ: ℝ^param_dim → ℝ^ambient_dim, modeled by its immersion ``J = dφ``.
+    """A parameterization φ: ℝ^param_dim → ℝ^ambient_dim, carried by its immersion ``J = dφ``.
 
-    Exposes the four geometric subspaces (``tangent``/``normal``/``cotangent``/``conormal``),
-    a ``point`` in the parameter domain, ``tangent_vector`` fields, ``embed`` into the ambient,
-    and ``covariant_diff`` (the immersion-gauge covariant derivative). Realize + evaluate with
-    ``basis_env`` + ``run`` against a numeric immersion (Jacobian ``dφ`` / Hessian ``d²φ``).
+    The object holds two variables and derives everything from them: ``J``, the chart
+    Jacobian, asserted injective; and ``DJ``, its own derivative, the Hessian of φ. Every
+    geometric space is a fundamental subspace of ``J`` — the tangent space is its image,
+    the normal space its cokernel — so the geometry needs no machinery beyond what the
+    core already has.
+
+    A term is built symbolically first: take a point in the parameter domain, make tangent
+    vector fields over it, and differentiate them with the immersion gauge in force. Only
+    then does anything become numeric, when the term is lowered against the ``ImageBasis``
+    frame of ``dφ`` columns and run on a feed of the Jacobian and Hessian at a point.
+    Supplying φ as a numeric callable lets the object finite-difference both for itself.
     """
 
     def __init__(self, name: str, param_dim: int, ambient_dim: int,
@@ -52,68 +68,93 @@ class Parameterization:
         self.name = name
         self.param_dim = param_dim
         self.ambient_dim = ambient_dim
-        # φ itself (a numeric callable ℝᵏ→ℝⁿ) — when given, J=dφ / DJ=d²φ are auto-derived
-        # (numerically) at any point, so the user supplies φ, not the Jacobian/Hessian.
+        # φ itself, a numeric callable ℝᵏ→ℝⁿ. Given one, J=dφ and DJ=d²φ are
+        # finite-differenced at any point, so a caller supplies the surface, not its
+        # derivatives.
         self.immersion = immersion
         self.fd_step = fd_step
-        self.param = _S.base(f"{name}_u", param_dim)        # ℝᵏ — the parameter domain (== X)
+        self.param = _S.base(f"{name}_u", param_dim)        # ℝᵏ — the parameter domain
         self.ambient = _S.base(f"{name}_amb", ambient_dim)  # ℝⁿ — the ambient
         dm = _S.dual(self.param)
-        # the immersion (chart Jacobian) dφ : param ⊸ ambient, injective
+        # dφ : param ⊸ ambient, the chart Jacobian. Injectivity is the immersion condition,
+        # and it is what gives Img(J) a static rank rather than a runtime one.
         self.J = _T.var(f"d{name}", _S.oprod(dm, self.ambient), props=G.inj)
-        # its derivative ∂J/∂x = d²φ : X ⊸ (param ⊸ ambient)
+        # ∂J/∂x = d²φ : param ⊸ (param ⊸ ambient), the Hessian the connection is built from
         self.DJ = _T.var(f"dd{name}", _S.oprod(dm, dm, self.ambient))
 
     # -- the four geometric subspaces ---------------------------------------
 
     @property
     def tangent(self) -> _S.Space:
-        """The tangent space = ``Img(J)`` ⊂ ambient."""
+        """Give the tangent space ``Img(J)`` — the directions the immersion reaches."""
         return _S.img(self.J)
 
     @property
     def normal(self) -> _S.Space:
-        """The normal space = ``CoKer(J)`` (orthogonal complement of the tangent in ambient)."""
+        """Give the normal space ``CoKer(J)`` — the orthogonal complement of the tangent."""
         return _S.coker(self.J)
 
     @property
     def cotangent(self) -> _S.Space:
-        """Give the cotangent space = ``Dual(Img(J))``."""
+        """Give the cotangent space ``Dual(Img(J))`` — the functionals on tangent vectors.
+
+        A differential, a gradient covector, or any one-form along the manifold lives
+        here; :func:`grassmann.embed.sharp` on the tangent space is what turns one back
+        into a tangent vector.
+        """
         return _S.dual(self.tangent)
 
     @property
     def conormal(self) -> _S.Space:
-        """Give the conormal space = ``Dual(CoKer(J))``."""
+        """Give the conormal space ``Dual(CoKer(J))`` — the functionals on normal vectors."""
         return _S.dual(self.normal)
 
     # -- values -------------------------------------------------------------
 
     def point(self, name: str = "x") -> _T.Var:
-        """Make a point ``x`` in the parameter domain (the differentiation variable)."""
+        """Make a point in the parameter domain, the variable everything differentiates by.
+
+        Derivatives are taken with respect to the chart coordinates, not the ambient ones,
+        so this is the variable :meth:`covariant_diff` expects.
+        """
         return _T.var(name, self.param)
 
     def tangent_vector(self, name: str = "v") -> tuple[_T.Var, _T.Var]:
-        """Make a tangent vector field ``v : Img(J)`` and its derivative section ``Dv``.
+        """Make a tangent vector field ``v : Img(J)`` together with its derivative section.
 
-        ``Dv`` is the directional derivative ``∂v/∂x``; it is zero for a constant coordinate
-        section.
+        A field over the manifold is two pieces of data here: the value ``v``, and the
+        section ``Dv : param* ⊗ tangent`` recording how its tangent coordinates vary with
+        the point. The two are separate variables because ``v``'s own variation and the
+        frame's variation contribute differently to the covariant derivative; feeding
+        ``Dv`` zeros expresses a field whose coordinates in the moving frame are constant,
+        and the connection term ``Γ·v`` still survives.
         """
         v = _T.var(name, self.tangent)
         dv = _T.var(f"d{name}", _S.oprod(_S.dual(self.param), self.tangent))
         return v, dv
 
     def embed(self, v: _T.Term) -> _T.Term:
-        """Embed a tangent vector into the ambient (``embed(v) = dφ·v`` in the ImageBasis)."""
+        """Embed a tangent vector into the ambient space it is a subspace of.
+
+        Realized in the ``ImageBasis``, the embed is exactly ``dφ·v``: the tangent
+        coordinates are read against the frame of ``dφ`` columns.
+        """
         return _T.embed(v, self.ambient)
 
     # -- covariant differentiation ------------------------------------------
 
     def covariant_diff(self, value: _T.Term, x: _T.Var, *, marks: dict) -> _T.Term:
-        """Differentiate ``value`` w.r.t. the point ``x`` under the **immersion gauge**.
+        """Differentiate ``value`` with respect to the point ``x`` under the immersion gauge.
 
-        This is the covariant derivative. ``marks`` maps each x-dependent value var to its
-        derivative section; ``J``/``DJ`` are marked automatically. Returns the derivative
-        ``LLam`` map.
+        The gauge is what makes this the covariant derivative rather than a componentwise
+        one: it tells :mod:`grassmann.transform.diff` that values on ``Img(J)`` are read
+        in a frame that itself moves with the point, so differentiating picks up the
+        connection term ``Γ(h) = J⁺·(∂J·h)`` alongside the coordinate derivative. On the
+        sphere the result reproduces the analytic Christoffel symbols.
+
+        ``marks`` maps each x-dependent value variable to its derivative section; ``J`` and
+        ``DJ`` are marked for you. The gauge is set only for the duration of the call. The
+        result is the derivative as an ``LLam`` map — apply it to a direction.
         """
         deps = {var.uid: dval for var, dval in marks.items()}
         deps[self.J.uid] = self.DJ
@@ -127,35 +168,49 @@ class Parameterization:
     # -- realization + numeric evaluation -----------------------------------
 
     def basis_env(self, *fields: _T.Var) -> dict:
-        """Build the basis environment realizing tangent values in ``ImageBasis(J)``.
+        """Build the basis environment that realizes tangent values in ``ImageBasis(J)``.
 
-        That is the immersion gauge's ``dφ``-column frame. Pass the tangent value vars (and
-        their ``Dv``).
+        The frame of ``dφ`` columns is the one the immersion gauge differentiates against,
+        so lowering has to use it too for the numbers to mean what the symbolic derivative
+        says. A plain tangent vector realizes in that frame; a section ``Dv``, living in
+        ``param* ⊗ tangent``, realizes in the product of the parameter cobasis with it.
+        Pass the tangent value variables and their sections.
         """
         ib = _B.ImageBasis(self.J)
         env: dict = {}
         dpb = _B.basis_prod(_B.dual_basis(default_basis(self.param)), ib)
         for f in fields:
-            # a plain tangent vector realizes in ImageBasis; a (param*→tangent) section in dφ⊗ib
+            # a plain tangent vector realizes in the ImageBasis; a param*→tangent section in
+            # the product of the parameter cobasis with it
             env[f.uid] = dpb if _is_section(f) else ib
         return env
 
     def run(self, term: _T.Term, env: dict, feed: dict) -> np.ndarray:
-        """Lower ``term`` with the ImageBasis ``env`` and run it on the numeric ``feed``.
+        """Lower ``term`` in the given basis environment and run it on the numeric ``feed``.
 
-        The feed carries the immersion Jacobian/Hessian and the value coords, keyed
-        ``f"{name}_{uid}"``.
+        The feed supplies every free variable by its program-input key — the immersion
+        Jacobian and Hessian, and the coordinates of each value — and :meth:`key` builds
+        those keys.
         """
         return represent(term, basis_env=env).run(feed)["result"]
 
     def key(self, var: _T.Var) -> str:
-        """Give the run-feed key for a variable (``f"{name}_{uid}"``)."""
+        """Give the program-input key a variable is fed under, ``f"{name}_{uid}"``."""
         return f"{var.name}_{var.uid}"
 
     # -- φ as a callable: auto-derive J=dφ / DJ=d²φ -------------------------
 
     def jacobian_at(self, u: ArrayLike) -> np.ndarray:
-        """``dφ|_u`` (grassmann ``(k, n)``: ``di[a,p]=∂iₚ/∂uₐ``) by central differences of φ."""
+        """Give the Jacobian ``dφ|_u`` by central differences of φ.
+
+        Shaped ``(k, n)`` in grassmann's convention, ``di[a, p] = ∂iₚ/∂uₐ`` — the
+        parameter index first, matching the map storage ``param* ⊗ ambient``.
+
+        Raises
+        ------
+        ValueError
+            If no immersion φ was supplied.
+        """
         import numpy as np
         if self.immersion is None:
             raise ValueError(f"parameterization {self.name!r} has no immersion φ")
@@ -169,7 +224,16 @@ class Parameterization:
         return di
 
     def hessian_at(self, u: ArrayLike) -> np.ndarray:
-        """``d²φ|_u`` (grassmann ``(k, k, n)``: ``d2i[a,b,p]=∂ₐ∂_b iₚ``) by central differences."""
+        """Give the Hessian ``d²φ|_u`` by central differences of φ.
+
+        Shaped ``(k, k, n)``, ``d2i[a, b, p] = ∂ₐ∂_b iₚ``. This is what the connection is
+        built from: the covariant derivative needs to know how the frame ``dφ`` turns.
+
+        Raises
+        ------
+        ValueError
+            If no immersion φ was supplied.
+        """
         import numpy as np
         if self.immersion is None:
             raise ValueError(f"parameterization {self.name!r} has no immersion φ")
@@ -187,18 +251,26 @@ class Parameterization:
         return d2i
 
     def feed_at(self, u: ArrayLike) -> dict:
-        """Build the auto-derived ``{J: dφ|_u, DJ: d²φ|_u}`` run-feed at point ``u``.
+        """Build the run-feed ``{J: dφ|_u, DJ: d²φ|_u}`` at the parameter point ``u``.
 
-        The user supplies φ; the immersion Jacobian and Hessian are differentiated for them.
+        Only φ is supplied; its Jacobian and Hessian are finite-differenced here, so a
+        caller writes down the surface and never the derivatives of the chart.
         """
         return {self.key(self.J): self.jacobian_at(u), self.key(self.DJ): self.hessian_at(u)}
 
     def covariant_derivative(self, u: ArrayLike, v_coords: ArrayLike) -> np.ndarray:
-        """Give the covariant derivative ``∇v`` of a constant tangent vector at ``u``.
+        """Give the covariant derivative ``∇v`` at ``u`` of the tangent field with constant coordinates.
 
-        The vector has ambient coords ``embed(v) = dφ·v_coords``; the result is in tangent
-        coordinates, ``∇v[a,c]`` for direction ``a``. φ's Jacobian/Hessian are auto-derived.
-        Returns a ``(k, k)`` array.
+        End to end: the term ``⟨w, embed(v)⟩`` is differentiated under the immersion gauge,
+        realized in the ``dφ`` frame, and evaluated column by column against the ambient
+        covector ``w`` and each seed direction. Raising the free ambient index with the
+        inverse induced metric ``(J Jᵀ)⁻¹`` leaves the answer in tangent coordinates.
+
+        The vector is given by its tangent coordinates, so its ambient value is
+        ``dφ·v_coords``, and the section ``Dv`` is fed zeros — the coordinates are constant
+        and what remains is the connection. The result is a ``(k, k)`` array, ``∇v[a, c]``
+        for direction ``a`` and tangent component ``c``. φ's Jacobian and Hessian are
+        finite-differenced.
         """
         import numpy as np
         v, dv = self.tangent_vector("v")
@@ -218,9 +290,14 @@ class Parameterization:
                                     {**base, f"w_{w.uid}": np.eye(n)[p],
                                      f"{seed.name}_{seed.uid}": np.eye(k)[a]})
         ginv = np.linalg.inv(di @ di.T)
+        # raise the ambient index p with the inverse induced metric (J Jᵀ)⁻¹
         return np.einsum("cd,dp,ap->ac", ginv, di, ad)   # ∇v[a,c] in tangent coords
 
 
 def _is_section(v: _T.Var) -> bool:
-    """Report whether ``v`` is a ``Dv`` section (``param* ⊗ tangent``), not a plain tangent vector."""
+    """Report whether ``v`` is a derivative section ``param* ⊗ tangent``.
+
+    A section has a product space and realizes in a product basis; a plain tangent vector
+    realizes in the ``ImageBasis`` alone.
+    """
     return isinstance(v.space, _S.OProd)

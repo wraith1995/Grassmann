@@ -48,11 +48,14 @@ class SpaceAsType:
 
 @dataclass(frozen=True)
 class Pi:
-    """A function type, possibly dependent: it binds ``b : σ`` in a codomain ``τ`` and has kind ``*``.
+    """A function type ``Π(b:σ). τ``, binding ``b`` in the codomain ``τ``; its kind is ``*``.
 
-    ``binder`` is the bound name; ``domain`` is a sort ``σ`` (a :class:`Sort`,
-    :class:`SpaceSort` for a value domain); ``codomain`` is a :class:`Type` that may
-    mention ``binder``. ``s₀→s₁`` (non-dependent) is ``Pi("_", SpaceSort(s0), ⟦s1⟧)``.
+    ``binder`` is the bound name and ``domain`` is its sort ``σ`` — a
+    :class:`~grassmann.core.kinds.Sort` for a space, nat, or type argument, or a
+    :class:`~grassmann.core.kinds.SpaceSort` when the argument is a value of a space.
+    ``codomain`` is a :class:`Type` that may mention ``binder``, which is what makes the
+    type dependent; when it does not, the ordinary arrow ``s₀ → s₁`` is spelled
+    ``Pi("_", SpaceSort(s0), ⟦s1⟧)``.
     """
 
     binder: str
@@ -71,7 +74,13 @@ class Pi:
 
 @dataclass(frozen=True)
 class TypeApp:
-    """The type produced by applying a type function to its arguments."""
+    """The type produced by applying a type function to its arguments.
+
+    ``g`` is a type function, a :class:`~grassmann.core.term.Lam` whose body is a
+    :class:`Type`; ``positions`` names the parameter slots being filled and ``args``
+    supplies them. The node stands for the result while the arguments are still
+    symbolic, and reduces by substitution once they are concrete.
+    """
 
     g: object  # a TypeFunction (a Lam whose body is a Type)
     positions: tuple[int, ...]
@@ -101,7 +110,8 @@ _TYPE_TYPES = (SpaceAsType, Pi, TypeApp)
 def is_type(t: object) -> bool:
     """Return True iff ``t`` is a well-formed Type node.
 
-    A bare Space is **not** a Type here; wrap it with :func:`space_as_type` (``⟦s⟧``).
+    A :class:`~grassmann.core.space.Space` becomes a Type only through the explicit
+    embedding :func:`space_as_type`, which wraps it as ``⟦s⟧``; a bare space is not one.
     """
     return isinstance(t, _TYPE_TYPES)
 
@@ -131,7 +141,7 @@ def pi(binder: str, domain: Kind, codomain: object) -> Pi:
 
 
 def fn(s0: Space, s1: Space) -> Pi:
-    """The non-dependent function type from ``s0`` to ``s1`` (that is, ``Π`` over ``s0`` into ``s1``)."""
+    """Build the non-dependent function type ``s0 → s1``, namely ``Π(_ : s0). ⟦s1⟧``."""
     if not is_space(s0):
         raise TypeError_(f"fn: domain must be a Space, got {s0!r}")
     return Pi("_", SpaceSort(s0), as_type(s1))

@@ -1,20 +1,17 @@
-"""The standard library: derived operations built on the embedding.
+"""The standard library: mathematics composed out of the core, never added to it.
 
-These are coordinate-free linear-algebra operations built entirely on the
-``G.*`` embedding surface, not as core IR nodes. Exterior algebra in particular
-is a test of the core's expressiveness: ``wedge`` and ``alt`` are composed
-functions here, never primitive nodes.
+Nothing here is a ``Space``, ``Term`` or ``Basis`` node. Every function is written with
+the same ``G.*`` builders a user writes with, which is the point: what the core cannot
+express, the stdlib cannot smuggle in.
 
-Public surface
---------------
-- :func:`alt` — the ``k``-linear antisymmetrizer ``Alt : V⊗ᵏ ⊸ V⊗ᵏ``.
-- :func:`exterior_power` — the ``k``-th exterior power ``Λᵏ(V) = Img(alt(V, k))``.
-- :func:`wedge` — the derived wedge product ``∧ : Λᵏ × Λˡ → Λ^{k+l}``.
-- :func:`tensor_power` — the ``k``-th tensor power ``V⊗ᵏ``.
-- linear-algebra conveniences: :func:`dot`, :func:`norm_sq`,
-  :func:`orthogonal_projection`, :func:`least_squares`.
-- scalar nonlinearities: :func:`sqrt`, :func:`absval`, :func:`sign`,
-  :func:`div`, :func:`reciprocal`.
+Three layers sit here. :mod:`~grassmann.stdlib.exterior` is the whole exterior algebra —
+the antisymmetrizer, the exterior powers as first-class ``Img`` spaces, the wedge and
+interior products, the Hodge star and the exterior derivative — derived from tensor
+powers and subspace movement alone. :mod:`~grassmann.stdlib.linalg` holds the short
+compositions worth a name, such as the inner product, the squared norm, the orthogonal
+projector onto an image, and the least-squares solve. :mod:`~grassmann.stdlib.scalar`
+supplies the elementwise nonlinearities a matrix-calculus front end needs, each an
+``External`` node over a numpy kernel.
 """
 
 from __future__ import annotations

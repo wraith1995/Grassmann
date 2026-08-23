@@ -59,11 +59,14 @@ _counter = itertools.count()
 
 @dataclass(frozen=True)
 class Var:
-    """A term variable, optionally carrying asserted map properties.
+    """A term variable of a space, optionally carrying asserted map properties.
 
-    Properties live ON VARS ONLY. ``space`` is the variable's space; ``uid`` is a fresh
-    identity so that two distinct binders' variables of the same name/space do not collide
-    (used by binders).
+    ``space`` is the space the variable inhabits, and ``props`` the properties a caller
+    asserts of it when it is a map — injectivity, surjectivity, or a rank. A variable is
+    the only node that carries them, so a derived map is asserted with
+    :class:`Assert` instead. ``uid`` is a fresh identity taking part in equality, so two
+    binders that bind the same name in the same space do not capture each other's
+    occurrences.
     """
 
     name: str
@@ -105,10 +108,10 @@ class External:
 class Zero:
     """The zero vector of a space.
 
-    ``space`` is **optional**: when ``None`` the space is left to inference, which
-    recovers it via first-order unification (a fresh ``SpaceMeta`` solved by the
-    surrounding context — a ``Sum`` sibling, a ``check``/``Assert`` against an expected
-    space, etc.). Supplying ``space`` explicitly works exactly as before.
+    ``space`` may be given, or left as ``None`` for inference to recover: the node then
+    synthesizes a fresh ``SpaceMeta`` that first-order unification solves from the
+    surrounding context, such as a sibling summand of a ``Sum`` or a check against the
+    space an enclosing :class:`Assert` expects.
     """
 
     space: Space | None = None
@@ -236,9 +239,12 @@ def _check_positions_args(ctx: str, positions: tuple[int, ...], args: tuple[Term
 
 @dataclass(frozen=True)
 class Eval:
-    """The **linear** application of a map, viewed as a contraction.
+    """The linear application of a map to arguments, read as a contraction.
 
-    Apply a linear map ``f`` at the selected dual slots ``positions`` with ``args``.
+    ``f`` is contracted with each of ``args`` at the dual slot named by the matching
+    entry of ``positions``, so ``Eval(f, (0,), (x,))`` is the ordinary ``f(x)``:
+    the leading dual slot of ``f`` pairs with ``x``. Feeding several slots at once is a
+    single node rather than a chain of applications.
     """
 
     f: Term
@@ -255,7 +261,12 @@ class Eval:
 
 @dataclass(frozen=True)
 class NEval:
-    """The **non-linear** application of a ``Lam`` to term, space, or nat arguments."""
+    """The non-linear application of a :class:`Lam` to term, space, or nat arguments.
+
+    ``positions`` names the binder slots being filled and ``args`` supplies them. An
+    argument may be a term, and it may equally be a space or a nat, which is how a space
+    function or a nat-indexed family is instantiated.
+    """
 
     f: Term
     positions: tuple[int, ...]
@@ -331,10 +342,11 @@ class Det:
 
 @dataclass(frozen=True)
 class LogDet:
-    """The log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``.
+    """The log-determinant ``log det f`` of a square endomorphism ``f : V ⊸ V``, a scalar.
 
-    The result is a ``Scalar``.  A dedicated node (not ``log(det f)``) because its derivative
-    is the clean ``tr(f⁻¹·df)`` with no ``det`` factor — see :mod:`grassmann.transform.diff`.
+    It is a node of its own rather than a ``Log`` around a :class:`Det` because that is
+    what makes its derivative clean: :mod:`grassmann.transform.diff` differentiates it to
+    ``tr(f⁻¹·df)``, with no determinant factor left to carry around.
     """
 
     f: Term
@@ -348,12 +360,13 @@ class LogDet:
 
 @dataclass(frozen=True)
 class OpaqueOp:
-    """An **opaque map** ``f : dom → cod`` — a declared black box with no body.
+    """An opaque map ``f : dom → cod``, declared by its endpoints and given no body.
 
-    ``fn`` is an optional numpy kernel (an ``A``-array → ``B``-array callable) used to
-    *run* the op; it is excluded from equality/hash (``compare=False``) so two ops are
-    equal iff their ``name``/``dom``/``cod`` agree.  ``OpaqueOp`` is a *payload* (the
-    function symbol), not a Term — it is applied via :class:`OpaqueApply`.
+    ``fn`` optionally supplies the numpy kernel that runs it, a callable from a ``dom``
+    array to a ``cod`` array. The kernel is excluded from equality and hashing, so two
+    ops are equal exactly when their ``name``, ``dom``, and ``cod`` agree. The op is the
+    function symbol itself and not a term; :class:`OpaqueApply` is the term that applies
+    it.
     """
 
     name: str
@@ -373,9 +386,11 @@ class OpaqueOp:
 
 @dataclass(frozen=True)
 class OpaqueApply:
-    """The application of an opaque map ``op`` to ``arg``, a term in ``op.dom``, yielding a term in ``op.cod``.
+    """The application of an opaque map ``op`` to ``arg``, a term in ``op.dom``.
 
-    Differentiated via an auto-allocated Jacobian tracer input — see :mod:`grassmann.transform.diff`.
+    The result is a term in ``op.cod``. Since the op has no body to differentiate,
+    :mod:`grassmann.transform.diff` differentiates the application against a Jacobian
+    tracer input it allocates for the purpose.
     """
 
     op: OpaqueOp
@@ -397,8 +412,12 @@ class OpaqueApply:
 
 @dataclass(frozen=True)
 class Solve:
-    """The two-sided inverse ``f⁻¹`` of a map asserted bijective. The bijectivity is
-    required (``props=bij``) and checked during type inference."""
+    """The two-sided inverse ``f⁻¹`` of a map asserted bijective.
+
+    Bijectivity is a precondition, not a discovery: ``f`` must carry ``props=bij``, which
+    type inference checks and refuses otherwise. For a map that is not invertible the
+    least-squares inverse :class:`Pinv` is the node to reach for.
+    """
 
     f: Term
 
@@ -411,9 +430,12 @@ class Solve:
 
 @dataclass(frozen=True)
 class Pinv:
-    """The Moore–Penrose pseudo-inverse ``f⁺`` of a map: the least-squares,
-    minimum-norm inverse. It is an exact one-sided inverse when the map is asserted
-    injective or surjective, and the true inverse when it is bijective."""
+    """The Moore–Penrose pseudo-inverse ``f⁺``, the least-squares minimum-norm inverse.
+
+    It is defined for every map. What it computes sharpens with the properties asserted
+    of ``f``: an exact left inverse when ``f`` is injective, an exact right inverse when
+    it is surjective, and the true inverse ``f⁻¹`` when it is bijective.
+    """
 
     f: Term
 
@@ -426,29 +448,35 @@ class Pinv:
 
 @dataclass(frozen=True)
 class Corestrict:
-    """The **corestriction** of an injective map onto its own image.
+    """The corestriction ``f~ : dom(f) ⊸ Img(f)`` of an injective map onto its own image.
 
-    It is the map ``f~ : dom(f) ⊸ Img(f)``.  This is the induced isomorphism of the **first
-    isomorphism theorem**, in its ``ker f = 0`` form: ``f`` factors as
-    ``dom(f) --f~--> Img(f) --ι--> cod(f)`` with ``f~``
-    an ISOMORPHISM and ``ι`` the inclusion.  Being an iso, :class:`Pinv` of it is its exact
-    two-sided inverse (``Pinv(f~) : Img(f) ⊸ dom(f)``), and the two compose to the identity
-    on either side — the *explicit* spelling of the identification ``dom(f) ≅ Img(f)`` that
-    the calculus otherwise has no way to write down (no implicit conversions, invariant #2).
+    It is the isomorphism the first isomorphism theorem induces, in the ``ker f = 0``
+    form, and it makes the factorization of ``f`` through its image explicit::
 
-    **INJECTIVE ONLY** (a deliberate scope decision, not an accident): ``f`` must be asserted
-    ``inj`` (``props=inj``), which is checked in :mod:`grassmann.infer.synth` and refused
-    loudly otherwise.  For a general ``f`` the domain-side iso of the theorem is
-    ``CoImg(f) ⊸ Img(f)``, a *different* node with a different domain; this one does not
-    generalize to it and must not be used as if it did.
+        dom(f) ───── f~ ─────▶ Img(f) ───── ι ─────▶ cod(f)
+          │          ≅                  inclusion      ▲
+          └──────────────────── f ─────────────────────┘
 
-    Why it must be a node and not a derived form: ``Project``/``Embed`` are VALUE-level
-    (they take a value ``v``), so nothing in the calculus could give a MAP whose endpoint is
-    ``Img(f)``.  Every consumer that checks a map endpoint strictly — ``Compose``, hence the
-    contravariant ``Dual`` arm of :func:`grassmann.transform.pullback.pullback` — rejected
-    the ``Pinv(f_B)∘f_A`` spelling of a chart-to-chart transport because it synthesizes as
-    ``dom(f_A) ⊸ dom(f_B)``, silently dropping the ``Img`` identification (and, with it, the
-    ``R``-factor scaling and the σ orientation sign that live in the image frames).
+    Because ``f~`` is an isomorphism, :class:`Pinv` of it is exact: ``Pinv(f~)`` is the
+    two-sided inverse ``Img(f) ⊸ dom(f)``, and the two compose to the identity on either
+    side. That is the written form of the identification ``dom(f) ≅ Img(f)``, which the
+    calculus has no other way to say, since there are no implicit conversions between
+    spaces.
+
+    Injectivity is required: ``f`` must be asserted ``inj``, which
+    :mod:`grassmann.infer.synth` checks and refuses loudly otherwise. For a general map
+    the domain-side isomorphism of the theorem runs out of ``CoImg(f)`` rather than
+    ``dom(f)``, which is a different map with a different domain; this node does not
+    cover it.
+
+    It has to be a node rather than a derived form because :class:`Project` and
+    :class:`Embed` act on a value, so nothing else in the calculus produces a map whose
+    endpoint is ``Img(f)``. The composite ``Pinv(f_B) ∘ f_A`` is not a substitute: it
+    synthesizes as ``dom(f_A) ⊸ dom(f_B)``, dropping the ``Img`` identification along
+    with the ``R``-factor scaling and the orientation sign carried by the image frames,
+    and every consumer that checks a map endpoint strictly — ``Compose``, and through it
+    the contravariant ``Dual`` arm of
+    :func:`grassmann.transform.pullback.pullback` — rejects it.
     """
 
     f: Term
@@ -492,10 +520,14 @@ class PinvApply:
 
 @dataclass(frozen=True)
 class Dagger:
-    """The adjoint of a map, ``f†``: the map satisfying ``⟨f x, y⟩ = ⟨x, f† y⟩`` for the
-    inner products of its domain and codomain. Over real spaces it is the metric
-    transpose, with no conjugation; which transpose that becomes is resolved during
-    lowering from the two metrics."""
+    """The adjoint ``f†`` of a map, the map satisfying ``⟨f x, y⟩ = ⟨x, f† y⟩``.
+
+    The identity is read against the inner products of the domain and codomain, so the
+    adjoint needs both of them and is not the bare index swap. Over real spaces it is
+    the metric transpose, with no conjugation, and which transpose that comes out as is
+    resolved during lowering from the two metrics: with standard metrics on both sides
+    it is the plain transpose, and otherwise it picks up their Gram factors.
+    """
 
     f: Term
 
@@ -508,12 +540,13 @@ class Dagger:
 
 @dataclass(frozen=True)
 class Sqrt:
-    """The symmetric positive-definite **operator square root** of an endomorphism ``f : V ⊸ V``.
+    """The operator square root of an endomorphism ``f : V ⊸ V``: the unique SPD ``S`` with ``S·S = f``.
 
-    It is the unique SPD ``S`` with ``S·S = f``.  Lowers via an eigendecomposition and
-    **fails loudly if ``f`` is not SPD**.  This is the metric-natural (polar) orthonormalization
-    factor: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the stretch and ``Sqrt(G)⁻¹`` the
-    whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal frame.
+    It lowers through an eigendecomposition, and it fails loudly rather than silently
+    when ``f`` is not symmetric positive definite. It is the orthonormalization factor
+    the metric itself supplies: for an immersed metric ``G = JᵀJ``, ``Sqrt(G)`` is the
+    stretch and its inverse the whitening, so ``J·Sqrt(G)⁻¹`` is the polar orthonormal
+    frame.
     """
 
     f: Term
@@ -527,8 +560,11 @@ class Sqrt:
 
 @dataclass(frozen=True)
 class Inner:
-    """The inner-product map of a space: the bilinear form ``s ⊗ s ⊸ Scalar`` read
-    from the metric of ``s``."""
+    """The inner-product map of a space, the bilinear form ``s ⊗ s ⊸ Scalar``.
+
+    It is read from the metric that ``s`` itself carries, which is the standard one
+    unless ``s`` is a :class:`~grassmann.core.space.WithInner` naming another.
+    """
 
     space: Space
 
@@ -541,8 +577,11 @@ class Inner:
 
 @dataclass(frozen=True)
 class Flat:
-    """The musical isomorphism ♭, lowering an index: the metric map ``s ⊸ s*`` that
-    sends a vector to the covector pairing with it. It reads the inner product of ``s``."""
+    """The musical isomorphism ♭, lowering an index: the metric map ``s ⊸ s*``.
+
+    It sends a vector ``v`` to the covector ``⟨v, ·⟩`` that pairs with it, so it reads
+    the inner product of ``s``. Its inverse is :class:`Sharp`.
+    """
 
     space: Space
 
@@ -555,8 +594,11 @@ class Flat:
 
 @dataclass(frozen=True)
 class Sharp:
-    """The musical isomorphism ♯, raising an index: the inverse metric map ``s* ⊸ s``,
-    the inverse of :class:`Flat`. It reads the inner product of ``s``."""
+    """The musical isomorphism ♯, raising an index: the inverse metric map ``s* ⊸ s``.
+
+    It sends a covector back to the vector representing it, inverting :class:`Flat`, so
+    it too reads the inner product of ``s``.
+    """
 
     space: Space
 
@@ -576,11 +618,11 @@ class Sharp:
 class Project:
     """The projection of ``v`` onto a subspace ``s`` (``s ⊑ space(v)``).
 
-    ``space`` (the *target subspace*) is **optional**: when ``None`` it is left to
-    inference. Because a subspace is not unique, the omitted target is recoverable only
-    when an expected space flows in from the surrounding context (the ⇐ check direction),
-    which unifies the fresh ``SpaceMeta`` and then the deferred ``s ⊑ space(v)`` obligation
-    is validated. Supplying ``space`` explicitly works exactly as before.
+    ``space`` names the target subspace, and may be left as ``None`` for inference to
+    recover. A space has many subspaces, so the omitted target is recoverable only when
+    an expected space flows in from the surrounding context along the check direction;
+    that unifies the fresh ``SpaceMeta``, and the deferred obligation ``s ⊑ space(v)`` is
+    validated afterwards.
     """
 
     vector: Term
@@ -611,12 +653,14 @@ class Embed:
 
 @dataclass(frozen=True)
 class Assert:
-    """Assert that ``v`` has space ``s`` (``space(v) ~ s``).
+    """The claim that ``v`` has space ``s``, checked as ``space(v) ~ s`` during inference.
 
-    May also carry asserted map ``props`` (``inj``/``surj``/``bij``/``rank``) that ride with the
-    value the way a ``Var``'s props do — so a *derived* map (not a ``Var``) can be asserted as,
-    e.g., ``bij`` where a rule knows it holds (``diff`` of ``det``/``logdet`` asserts its operand
-    invertible for the ``Solve`` in ``tr(f⁻¹·df)``)."""
+    It may also carry map ``props`` — ``inj``, ``surj``, ``bij``, or a rank — which ride
+    with the value the way a :class:`Var`'s properties do. That is how a derived map,
+    which is not a variable and so cannot carry properties itself, gets asserted where a
+    rule knows the property holds: differentiating a ``Det`` or a ``LogDet`` asserts its
+    operand invertible so that the ``Solve`` in ``tr(f⁻¹·df)`` is licensed.
+    """
 
     vector: Term
     space: Space
@@ -667,7 +711,11 @@ class TupleProject:
 
 @dataclass(frozen=True)
 class Remetric:
-    """A value re-metricized into the space ``WithInner(s, g)``."""
+    """The value ``vector`` moved into the metricized space ``WithInner(s, metric)``.
+
+    A metricized space is a different space from the one underneath it, so this crossing
+    is always written out; nothing attaches or drops a metric implicitly.
+    """
 
     vector: Term
     metric: Term
@@ -682,8 +730,12 @@ class Remetric:
 
 @dataclass(frozen=True)
 class Lift:
-    """A reshape that fuses the listed tensor indices of a value into one, currying its
-    factors together. The inverse is :class:`InvLift`."""
+    """A reshape fusing the listed tensor indices of a value into a single index.
+
+    The factors named by ``fused`` are curried together, so ``(A ⊗ B) ⊗ C`` read with
+    ``fused = (0, 1)`` becomes one index of size ``|A|·|B|`` beside ``C``. It changes the
+    layout, never the values, and :class:`InvLift` splits the index back apart.
+    """
 
     vector: Term
     fused: tuple[int, ...]
@@ -743,11 +795,11 @@ class Permute:
 class TuplePermute:
     """Reorder the ``⊕`` components of ``v`` — the direct-sum analogue of :class:`Permute`, which reorders ``⊗`` factors.
 
-    ``perm`` is a permutation: the result's component ``i`` is ``v``'s component ``perm[i]``,
-    so ``v : ⊕(sₖ)`` maps to ``⊕(s_{perm[i]})``. Lowers to a block (stack-slice) permutation.
-    Introduced as the clean output-correction node for canonical ``⊕`` ordering — the one
-    reordering ``TupleEmbed``/``TupleProject`` can only express as a heavy sum of inject∘project
-    maps.
+    ``perm`` is a permutation: the result's component ``i`` is ``v``'s component
+    ``perm[i]``, so ``v : ⊕(sₖ)`` maps to ``⊕(s_{perm[i]})``. It lowers to a permutation
+    of the stack slices, and it is the node that corrects an output into canonical ``⊕``
+    order — a reordering :class:`TupleEmbed` and :class:`TupleProject` can express only
+    as a heavy sum of injection-after-projection maps.
     """
 
     vector: Term
@@ -763,8 +815,11 @@ class TuplePermute:
 
 @dataclass(frozen=True)
 class Kron:
-    """The Kronecker product ``f ⊗ g`` of two maps, acting factor-wise on a tensor
-    product of spaces."""
+    """The Kronecker product ``f ⊗ g`` of two maps.
+
+    It acts factor-wise on a tensor product, sending ``x ⊗ y`` to ``f(x) ⊗ g(y)``, so its
+    domain and codomain are the products of the two maps' domains and codomains.
+    """
 
     f: Term
     g: Term
@@ -786,12 +841,13 @@ class Kron:
 class LLam:
     """The linear lambda ``⊸``, binding one or more linear variables in a body.
 
-    Result space must be **independent** of the linear vars. The
-    structural well-formedness guard enforced here: each bound var must NOT appear in a
-    position that makes the result space depend on it — i.e. it may not occur inside a
-    ``Lam`` binder *domain* annotation, nor as an explicit space/nat argument of an
-    ``NEval``/``App``. (Full linearity checking is done during type inference; this catches the structurally
-    detectable violations the spec calls out.)
+    The result space is independent of the linear variables, which is what makes the
+    lambda itself a value in ``⊗(sᵢ*) ⊗ s_e``. The guard enforced here is the structural
+    half of that rule: a bound variable may not occur inside a :class:`Lam` binder's
+    domain annotation, nor as an explicit space or nat argument of an ``NEval`` or an
+    ``App``, since either position would let the result space depend on it. Each bound
+    variable must also occur somewhere in the body. The full linearity check, which
+    counts uses rather than occurrences, runs during type inference.
     """
 
     vars: tuple[Var, ...]
@@ -812,15 +868,17 @@ class LLam:
 
 @dataclass(frozen=True)
 class Lam:
-    """The general non-linear binder, abstracting a body over a value, space, or nat variable.
+    """The general non-linear binder, abstracting a body over a value, space, or nat.
 
-    Each bound entry is a ``(name, sort)`` pair where ``sort`` is a :class:`Sort`
-    (``space``/``nat``/``*``) or a :class:`SpaceSort` (a value domain). The ``body`` may
-    be a Term, Space, Type, or Nat (``Dim``) — body-polymorphic. A Space body makes this
-    a SpaceFunction; a Type body a TypeFunction.
+    Each entry of ``binders`` is a ``(name, sort)`` pair whose sort is a
+    :class:`~grassmann.core.kinds.Sort` — ``space``, ``nat``, or ``*`` — or a
+    :class:`~grassmann.core.kinds.SpaceSort` for a value domain. The ``body`` is
+    polymorphic in the same way: it may be a term, a space, a type, or a nat, and what it
+    is decides what the lambda is. A space body makes a space function and a type body a
+    type function, each classified by an arrow kind rather than by a Π-type.
 
-    Bound names that are value-domain (a ``SpaceSort``) introduce a term ``Var``; the
-    corresponding ``Var`` objects are stored in ``term_vars`` for reference by the body.
+    A binder over a value domain introduces a term variable, and the corresponding
+    :class:`Var` objects are kept in ``term_vars`` so the body can refer to them.
     """
 
     binders: tuple[tuple[str, Kind], ...]
@@ -852,13 +910,12 @@ class Lam:
 
 @dataclass(frozen=True)
 class Frame:
-    """The value-binding lambda ``BLam``, binding a runtime value to a basis.
+    """A basis that varies with a runtime value: the binding ``x : s ↦ basis of τ(x)``.
 
-    A ``Frame`` binds a runtime value ``x:s`` to
-    a basis (``x ↦ basis of τ(x)``). The basis-producing body lives in :mod:`basis`; we
-    store the bound term ``Var`` and the basis body (a ``Basis`` forward ref, to avoid a
-    runtime basis.py import cycle).
-    The richer basis tower (``BLam``/``BApp``) is in :mod:`grassmann.core.basis`.
+    ``var`` is the bound value variable and ``basis_body`` the basis built from it,
+    annotated as a forward reference to ``Basis`` because ``basis`` imports ``term``.
+    This is the term-level spelling of a frame; the general basis-level binder and its
+    application, ``BLam`` and ``BApp``, live in :mod:`grassmann.core.basis`.
     """
 
     var: Var
@@ -940,7 +997,7 @@ def _require_space_field(s: object, ctx: str) -> None:
 
 
 def _require_space_or_none(s: object, ctx: str) -> None:
-    """Require ``s`` to be a Space, or ``None`` for an OPTIONAL space left to inference."""
+    """Require ``s`` to be a Space, or ``None`` where the space is left to inference."""
     if s is not None and not is_space(s):
         raise TermError(f"{ctx}: expected a Space or None, got {s!r}")
 
@@ -1046,7 +1103,7 @@ def _children(node: object) -> tuple[object, ...]:
 
 
 def _space_children(s: object) -> tuple[object, ...]:
-
+    """Yield the Terms and Spaces a Space node holds, for the occurrence walk."""
     out: list[object] = []
     for fname in getattr(s, "__dataclass_fields__", {}):
         val = getattr(s, fname)
@@ -1125,13 +1182,13 @@ def compose(f: Term, positions: tuple[int, ...], *gs: Term) -> Compose:
 def chain(*fs: Term, at: int = 0) -> Term:
     """Compose ``fs`` in series, ``fs[0] ∘ fs[1] ∘ … ∘ fs[-1]``, right-applied at dual slot ``at``.
 
-    A thin smart constructor — **no new core node**. It expands to nested single-arg
-    :class:`Compose` nodes: ``proj ∘ conv ∘ embed`` is ``Compose(proj, (0,),
-    (Compose(conv, (0,), (embed,)),))``. Each junction feeds
-    one map's codomain into the dual slot ``at`` of the map to its left, so
-    ``chain(f, g) == Compose(f, (at,), (g,))`` and longer chains nest right-to-left.
+    It builds no node of its own, expanding instead into nested one-argument
+    :class:`Compose` nodes: ``chain(proj, conv, embed)`` is ``Compose(proj, (0,),
+    (Compose(conv, (0,), (embed,)),))``. Each junction feeds one map's codomain into the
+    dual slot ``at`` of the map to its left, so ``chain(f, g) == Compose(f, (at,), (g,))``
+    and longer chains nest right to left.
 
-    A single map is returned unchanged; ``chain()`` with no args is an error.
+    A single map is returned unchanged, and a chain of none is an error.
     """
     if not fs:
         raise TermError("chain needs at least one map")
@@ -1174,7 +1231,7 @@ def pinv(f: Term) -> Pinv:
 
 
 def corestrict(f: Term) -> Corestrict:
-    """Build the corestriction ``f~ : dom(f) ⊸ Img(f)`` of an INJECTIVE ``f`` onto its image."""
+    """Build the corestriction ``f~ : dom(f) ⊸ Img(f)`` of an injective ``f`` onto its image."""
     return Corestrict(f)
 
 
@@ -1227,7 +1284,7 @@ def embed(vector: Term, space: Space) -> Embed:
 
 
 def assert_(vector: Term, space: Space, props: MapProps | None = None) -> Assert:
-    """Build an ``Assert`` — assert that ``vector`` has space ``space`` (and optional map ``props``)."""
+    """Build the assertion that ``vector`` has space ``space``, with optional map ``props``."""
     return Assert(vector, space, props)
 
 
@@ -1272,7 +1329,7 @@ def kron(f: Term, g: Term) -> Kron:
 
 
 def llam(*vars: Var, body: Term) -> LLam:
-    """Build the linear lambda ``⊸`` — pass the bound :class:`Var` variables positionally and ``body`` as a keyword argument."""
+    """Build the linear lambda ``⊸`` over the bound variables ``vars`` and the keyword ``body``."""
     return LLam(tuple(vars), body)
 
 

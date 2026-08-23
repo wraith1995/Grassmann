@@ -1,11 +1,14 @@
-"""``unparse`` — render a core node as round-trippable Unicode mathematical text.
+"""``unparse`` — render a core node as Unicode mathematical text that parses back.
 
-The node may be a term / space / basis (plus dim / kind / type / props).
+Any node renders: a term, a space, a basis, and the dims, kinds, types and map properties
+they are built from.
 
-The output is ``<preamble> ⊢ <body>`` when the node has free variables (each free term
-``Var`` bound to its space, each free ``SVar`` / ``BVar`` / ``DimVar`` to its sort), or
-just ``<body>`` when closed. Parenthesization is driven by the precedence table in
-:mod:`grassmann.syntax.glyphs`; the parser re-derives the same tree.
+The text is self-contained, because a body alone would not say what its free names mean.
+When a node has free variables the output is ``<preamble> ⊢ <body>``, the preamble binding
+each free term ``Var`` to its space and each free ``SVar`` / ``BVar`` / ``DimVar`` to its
+sort; a closed node renders as the body alone. Where to put parentheses comes from the
+precedence table in :mod:`grassmann.syntax.glyphs`, the same table the parser climbs, so
+the tree that comes back is the tree that went in.
 
 See :mod:`grassmann.syntax.parse` for the inverse and the grammar.
 """

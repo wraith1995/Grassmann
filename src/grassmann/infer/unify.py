@@ -1,18 +1,26 @@
-"""First-order unification on SPACE terms.
+"""First-order unification of spaces — solving the metavariables inference leaves open.
 
-This is **not** a higher-order unifier. It unifies *space* metavariables (``?α``,
-modeled by :class:`SpaceMeta`) and decomposes structurally over the Space ADT. Two
-locked decisions govern it:
+:func:`unify` decides ``a ~ b`` for two spaces and, along the way, solves the space
+metavariables either side mentions. It decomposes structurally over the closed Space sum,
+descending through ``Dual``, ``⊕``, ``⊗`` and the metricized spaces, and it solves a
+metavariable ``?α`` against whatever it meets there — subject to an occurs-check, so a
+cyclic solution is refused rather than recorded.
 
-- **Dimensions are compared (``≡``), never unified** — ``Base(n,d) ~ Base(n,d')`` checks
-  ``d ≡ d'`` via :mod:`grassmann.infer.dims`.
-- **Nats/ints stay out of unification** — int-indexed ops are primitives; an
-  ``OPlusRep`` count must match by dim-equality, a ground ``?n`` only by a ground nat.
-  We do not introduce nat metavars.
+Only spaces are unified. A dimension is compared with ``≡`` (:mod:`grassmann.infer.dims`)
+and never solved for, and nats are not unified at all: an ``OPlusRep`` count has to match
+by dimension equality, and a nat parameter has to be supplied explicitly. There are no nat
+metavariables, so an int-indexed operator is always a primitive at a known index.
 
-A :class:`SpaceMeta` is a fresh placeholder space (it is itself a ``Space`` subtype so it
-can sit inside core nodes during inference); the :class:`MetaStore` records solutions and
-performs the occurs-check.
+Beyond the structural cases, the algorithm honours the identifications the algebra really
+makes — ``X ⊗ ℝ ≅ X``, ``s** ≡ s`` in finite dimension, a metricized space against the
+space it metricizes, and two independently built fundamental subspaces whose defining maps
+are α-equivalent. It deliberately refuses one identification: two ⊗ spellings with the
+same leaves but different nesting denote one space yet lay out as different arrays, so
+they raise :class:`AssociationMismatch` rather than unify.
+
+A :class:`SpaceMeta` is a fresh placeholder that is itself a ``Space``, so it can sit
+inside core nodes during inference; a :class:`MetaStore` records the solutions and applies
+them on demand.
 """
 
 from __future__ import annotations
@@ -54,30 +62,41 @@ def _expand_rep(s: Space) -> Space:
 
 
 class UnifyError(Exception):
-    """Raised when two spaces cannot be unified."""
+    """Raised when no rule identifies the two spaces, so they are not unifiable."""
 
 
 class AssociationMismatch(UnifyError):
-    """The two spaces have the SAME ⊗-leaves in the same order but different ⊗-NESTING.
+    """Two spellings of one ⊗ space: the same leaves in order, grouped differently.
 
-    A strict subclass of :class:`UnifyError`, so every handler that expects a failure here sees
-    one: this widens nothing, it only says *which kind* of failure it is.  ⊗ is associative on the
-    underlying space, so the leaves agreeing means the two denote one space — but
-    ``lower.represent._shape_of_space`` makes each top-level ⊗ factor its own ARRAY AXIS, so the
-    two spellings are different LAYOUTS (``V*⊗V*⊗V*`` is ``(d,d,d)``; ``V*⊗(V*⊗V*)`` is
-    ``(d,d²)``).  Unifying them would let mismatched layouts meet silently, so this is still an
-    error — but an error of CONSTRUCTION, at the site that built one of the two spellings, not a
-    genuine space mismatch at the site that tried to unify them.
+    ⊗ is associative on the underlying space, so leaves that agree pairwise mean the two
+    spaces denote the same thing. They do not denote the same *array*: every top-level ⊗
+    factor becomes its own axis at lowering (``lower.represent._shape_of_space``), so
+    ``V*⊗V*⊗V*`` is ``(d,d,d)`` while ``V*⊗(V*⊗V*)`` is ``(d,d²)``. Unifying them would let
+    two layouts meet silently, so this stays a failure.
+
+    It is a strict subclass of :class:`UnifyError`, so every handler expecting a failure
+    still sees one; the subclass only names which failure it is. The bug it reports lives
+    at the site that built one of the two spellings, not at the site that tried to unify
+    them, and the message says so.
     """
 
 
 def fresh_meta(hint: str = "α") -> SpaceMeta:
-    """Allocate a fresh space metavariable ``?α`` as a :class:`SpaceMeta` (itself a core Space node)."""
+    """Allocate a fresh, unsolved space metavariable ``?α``.
+
+    The result is a :class:`SpaceMeta`, itself a core Space node, so it can stand in a
+    space position anywhere in the IR until unification solves it.
+    """
     return SpaceMeta(hint=hint)
 
 
 class MetaStore:
-    """The metavar store ``Θ``: solutions for :class:`SpaceMeta`."""
+    """The substitution ``Θ`` under construction: what each solved metavariable stands for.
+
+    Unification writes solutions here and reads them back through :meth:`walk` (one chain
+    step) and :meth:`resolve` (all the way down). A store is mutable and shared across a
+    whole inference, so a metavariable solved by one rule is already solved for the next.
+    """
 
     def __init__(self) -> None:
         self._solved: dict[int, Space] = {}
@@ -100,9 +119,9 @@ class MetaStore:
     def copy(self) -> MetaStore:
         """Give a detached copy of the solution set ``Θ``.
 
-        For TRIAL unifications whose bindings must not escape — see
-        :func:`_leaves_pairwise_unifiable`, which asks "would these unify?" purely to classify a
-        failure and must not solve a single metavar as a side effect of asking.
+        This is for a trial unification whose bindings must not escape. See
+        :func:`_leaves_pairwise_unifiable`, which asks "would these unify?" purely to
+        classify a failure and must not solve a single metavariable by asking.
 
         Returns
         -------
@@ -142,12 +161,12 @@ class MetaStore:
         return s
 
     def has_unsolved(self, s: Space) -> bool:
-        """Report whether ``resolve(s)`` still mentions an unsolved metavar.
+        """Report whether ``s`` still mentions an unsolved metavariable once resolved.
 
-        Descends into FFS defining maps / endpoints and ``App`` like
-        :func:`grassmann.infer.subst.subst_space` — a metavar hiding inside
-        ``Img(f, source=…)`` counts. ``WithInner.metric``
-        is skipped for parity with ``subst_space``; a ``Dim`` carries no metavars.
+        The descent reaches into fundamental-subspace defining maps and endpoints and into
+        an ``App``, exactly as :func:`grassmann.infer.subst.subst_space` does, so a
+        metavariable hiding inside ``Img(f, source=…)`` counts. ``WithInner.metric`` is
+        skipped, for parity with ``subst_space``; a ``Dim`` carries no metavariables.
         """
         s = self.walk(s)
         match s:
@@ -237,9 +256,14 @@ def _space_pred_in_term(term: object, pred: Callable[[Space], bool]) -> bool:
 
 
 def unify(a: Space, b: Space, store: MetaStore) -> None:
-    """Unify ``a ~ b``, mutating ``store``. Raises :class:`UnifyError`.
+    """Unify ``a ~ b``, recording the metavariable solutions it finds in ``store``.
 
-    Dimensions are compared by ``≡`` (never unified); nats are not unified.
+    Metavariable cases come first, then the structural decomposition, then the
+    identifications the algebra makes — the ⊗-unit, ``s** ≡ s``, a metricized space against
+    its underlying space, and α-equivalent fundamental subspaces. Dimensions met along the
+    way are compared with ``≡`` rather than unified. A pair no rule identifies raises
+    :class:`UnifyError`; the two-⊗-spellings case raises the more specific
+    :class:`AssociationMismatch`.
     """
     if not is_space(a) or not is_space(b):
         raise UnifyError(f"unify: both sides must be spaces, got {a!r} ~ {b!r}")
@@ -276,35 +300,33 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
                     and len(na.spaces) == len(nb.spaces)):
                 _unify_seq(na.spaces, nb.spaces, store, "⊗")
             elif na is not a or nb is not b:
-                # Dropping the tensor-unit (Scalar) changed a side ⇒ re-dispatch. Guarded on ACTUAL
-                # progress: `_drop_scalar_factors` returns its argument UNCHANGED when there is no
-                # unit to drop, so re-dispatching unconditionally would re-enter `unify` on the
-                # IDENTICAL pair and recurse until the stack blows.
+                # Dropping the tensor-unit (Scalar) changed a side, so re-dispatch. The guard is
+                # on actual progress: `_drop_scalar_factors` returns its argument unchanged when
+                # there is no unit to drop, so re-dispatching unconditionally would re-enter
+                # `unify` on the identical pair and recurse until the stack blows.
                 unify(na, nb, store)
             else:
-                # Two unit-free products of DIFFERENT arity. Mathematically these can still denote one
-                # space, because ⊗ is associative and this model encodes a map as a tensor
-                # (`A ⊸ (B ⊸ C) ≅ A*⊗B*⊗C`): `tensor_power(V, k)` builds the FLAT product while
-                # `linear_map_space(cod, dom) = oprod(dual(dom), cod)` RIGHT-NESTS as soon as the
-                # codomain is compound, so `V*⊗V*⊗V*` meets `V*⊗(V*⊗V*)`. Λ³ is the first degree at
-                # which that is observable (for k = 2 both sides are arity 2), and it is what blocks
-                # any Λ³-valued lane.
+                # Two unit-free products of different arity. These can still denote one space,
+                # because ⊗ is associative and this model encodes a map as a tensor
+                # (`A ⊸ (B ⊸ C) ≅ A*⊗B*⊗C`): `tensor_power(V, k)` builds the flat product while
+                # `linear_map_space(cod, dom) = oprod(dual(dom), cod)` right-nests as soon as the
+                # codomain is compound, so `V*⊗V*⊗V*` meets `V*⊗(V*⊗V*)`. Λ³ is the first degree
+                # at which that is observable — at k = 2 both sides have arity 2.
                 #
-                # Deciding it HERE would be wrong: `shape_of_space` makes ⊗ factors SEPARATE AXES, so
-                # the two spellings realize as `(3,3,3)` and `(3,9)`; unifying them would let
-                # mismatched layouts meet silently. Splicing at construction (in `oprod`) is likewise
-                # not a drop-in — it flattens a map space's `Dual(dom) ⊗ cod` into its component axes,
-                # so `Alt_3 : V⊗³ ⊸ V⊗³` stops being the `(27,27)` MATRIX the SVD seam expects.
-                # Resolving it needs the value-tensor / map-space distinction settled in
-                # the representation; absent that, this arm FAILS LOUDLY rather than hang.
+                # Identifying them here would be wrong: `_shape_of_space` makes each ⊗ factor a
+                # separate axis, so the two spellings realize as `(3,3,3)` and `(3,9)`, and
+                # unifying them would let mismatched layouts meet silently. Splicing at
+                # construction (in `oprod`) is no drop-in either — it flattens a map space's
+                # `Dual(dom) ⊗ cod` into its component axes, so `Alt_3 : V⊗³ ⊸ V⊗³` stops being
+                # the `(27,27)` matrix the SVD seam expects. So this arm fails, loudly.
                 #
-                # What this arm CAN do — at no cost on any success path, since both rows below
-                # raise — is say WHICH failure this is. Compare the two ⊗-LEAF sequences
-                # (`tensor_leaves`, the space-level twin of represent's `_basis_prod_leaves`): if
-                # they agree pairwise, ⊗ associativity says the two spell ONE space and the bug is
-                # at a CONSTRUCTION site, which the generic "arity mismatch" text sends the reader
-                # hunting for in the wrong place. If they differ, the spaces really are different
-                # and the generic message is the right one.
+                # What it can do, at no cost on any success path since both rows below raise, is
+                # say which failure this is. Compare the two ⊗-leaf sequences (`tensor_leaves`,
+                # the space-level twin of represent's `_basis_prod_leaves`): agreeing pairwise
+                # means associativity spells one space two ways and the bug is at a construction
+                # site, which the generic "arity mismatch" text would send the reader hunting for
+                # in the wrong place. Differing leaves mean the spaces really are different, and
+                # the generic message is the right one.
                 la, lb = _unit_free_leaves(a), _unit_free_leaves(b)
                 if _leaves_pairwise_unifiable(la, lb, store):
                     flat, nested = (a, b) if len(a.spaces) >= len(b.spaces) else (b, a)
@@ -374,10 +396,10 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             unify(a, b.space, store)
             return
         case ((Ker() | Img() | CoKer() | CoImg()), _) if type(a) is type(b):
-            # FFS unify by α-equivalence of the keying map: two independently-built
-            # FFS spaces — e.g. `Img(alt(V,k))` from two `exterior_power` sites — differ only in
-            # binder uids, yet denote the SAME subspace. Fast path is raw equality; on a raw
-            # mismatch fall back to α-canonical comparison (binders renamed to a canonical form).
+            # Two fundamental subspaces unify by α-equivalence of the keying map: spaces built
+            # independently — `Img(alt(V,k))` from two `exterior_power` sites — differ only in
+            # binder uids yet denote the same subspace. Raw equality is the fast path; a raw
+            # mismatch falls back to comparing α-canonical forms.
             if a.f != b.f and not _ffs_map_alpha_eq(a.f, b.f):  # type: ignore[attr-defined]
                 raise UnifyError(f"FFS map mismatch: {a!r} ~ {b!r}")
             return
@@ -385,13 +407,13 @@ def unify(a: Space, b: Space, store: MetaStore) -> None:
             if a.g != b.g or a.positions != b.positions or a.args != b.args:
                 raise UnifyError(f"SpaceFunction application mismatch: {a!r} ~ {b!r}")
             return
-        # Involution ``s** ≡ s``.  Tried only AFTER the structural cases (so
-        # ``Dual(Dual(V)) ~ Dual(?α)`` still solves ``?α := Dual(V)`` via the ``(Dual,
-        # Dual)`` rule above, never collapsing prematurely).  When ONE side is a bare
-        # double dual and the other is NOT a ``Dual`` (e.g. a contraction against an
-        # already-dual factor — what differentiating through a ``Dagger`` produces:
-        # ``⊕ⁿ ℝ ~ Dual(Dual(⊕ⁿ ℝ))``), peel the outer pair and retry.  For these
-        # finite-dim Euclidean spaces the double dual is an identity, not just an iso.
+        # Involution ``s** ≡ s``, tried only after the structural cases, so that
+        # ``Dual(Dual(V)) ~ Dual(?α)`` still solves ``?α := Dual(V)`` through the
+        # ``(Dual, Dual)`` rule above instead of collapsing prematurely. When one side is a
+        # bare double dual and the other is not a ``Dual`` — a contraction against an
+        # already-dual factor, which is what differentiating through a ``Dagger`` produces:
+        # ``⊕ⁿ ℝ ~ Dual(Dual(⊕ⁿ ℝ))`` — peel the outer pair and retry. In finite dimension
+        # the double dual is an identity here, not merely an isomorphism.
         case (Dual(), _) if isinstance(store.walk(a.space), Dual):
             unify(store.walk(a.space).space, b, store)
             return
@@ -426,13 +448,14 @@ def _drop_scalar_factors(s: OProd) -> Space:
 
 
 def _unit_free_leaves(s: Space) -> tuple[Space, ...]:
-    """``s``'s ⊗-leaves with the ⊗-unit dropped — the sequence to compare two spellings by.
+    """``s``'s ⊗-leaves with the ⊗-unit dropped — the sequence two spellings compare by.
 
-    :func:`grassmann.core.space.tensor_leaves` deliberately KEEPS ``Scalar()`` (it must stay in
-    step with ``_basis_prod_leaves``); ``unify`` on the other hand already treats ``X ⊗ ℝ ≅ X`` as
-    a legitimate rewrite (:func:`_drop_scalar_factors`), and it drops units only at the TOP level,
-    so a right-nested tower's inner ``… ⊗ ℝ`` tail survives to here.  Filtering the unit is
-    therefore exactly the equivalence ``unify`` itself already honours, applied all the way down.
+    :func:`grassmann.core.space.tensor_leaves` deliberately keeps ``Scalar()``, since it
+    must stay in step with ``_basis_prod_leaves``. ``unify`` on the other hand already
+    treats ``X ⊗ ℝ ≅ X`` as a legitimate rewrite (:func:`_drop_scalar_factors`), and it
+    drops units only at the top level, so a right-nested tower's inner ``… ⊗ ℝ`` tail
+    survives to here. Filtering the unit is therefore the very equivalence ``unify``
+    honours, applied all the way down.
 
     Parameters
     ----------
@@ -450,10 +473,12 @@ def _unit_free_leaves(s: Space) -> tuple[Space, ...]:
 def _leaves_pairwise_unifiable(
     la: tuple[Space, ...], lb: tuple[Space, ...], store: MetaStore
 ) -> bool:
-    """Would ``la`` and ``lb`` unify leaf-for-leaf?  Asked on a COPY of ``Θ``, so nothing binds.
+    """Report whether ``la`` and ``lb`` would unify leaf-for-leaf, binding nothing.
 
-    Classification only.  The recursion is well-founded: a leaf is never itself an ``OProd``, so a
-    re-entry into this branch can only happen strictly deeper (inside a ``Dual``/``OPlus``/… ).
+    The trial runs on a copy of ``Θ``, so asking the question solves no metavariable. It is
+    used only to classify a failure. The recursion is well-founded: a leaf is never itself
+    an ``OProd``, so re-entering this branch can only happen strictly deeper, inside a
+    ``Dual``/``OPlus``/… .
 
     Parameters
     ----------
@@ -475,23 +500,22 @@ def _leaves_pairwise_unifiable(
         for x, y in zip(la, lb, strict=True):
             unify(x, y, trial)
     except Exception:  # noqa: BLE001 — see below
-        # A DIAGNOSTIC must never change which exception the caller sees.  ``UnifyError`` is the
-        # expected "no" here, but a leaf comparison can also reach ``dims.dim_eq``/``DimError`` on
-        # a malformed dim; swallowing that too keeps the answer a plain "not classifiable" and
-        # leaves the caller's own error the one that propagates.
+        # A diagnostic must never change which exception the caller sees. ``UnifyError`` is the
+        # expected "no" here, but a leaf comparison can also reach ``dims.dim_eq``/``DimError``
+        # on a malformed dim; swallowing that too keeps the answer a plain "not classifiable"
+        # and leaves the caller's own error the one that propagates.
         return False
     return True
 
 
 def _axis_layout(s: OProd) -> str:
-    """Give ``s``'s ARRAY layout — one axis per top-level ⊗ factor.
+    """Give ``s``'s array layout — one axis per top-level ⊗ factor.
 
-    Read exactly as ``lower.represent._shape_of_space`` reads it.
-
-    This is the whole point of the message: the leaves agree, so the two spaces are one space, and
-    the ONLY thing that differs is this.  ``lower._dims.dim_of`` is the same static sizer
-    ``_shape_of_space`` goes through, imported LAZILY (``infer`` sits below ``lower``; this is a
-    diagnostic on an error path, not a lowering).
+    Read exactly as ``lower.represent._shape_of_space`` reads it. This is the whole point of
+    the association-mismatch message: the leaves agree, so the two spaces are one space, and
+    the layout is the only thing that differs. ``lower._dims.dim_of`` is the same static
+    sizer ``_shape_of_space`` goes through, imported lazily because ``infer`` sits below
+    ``lower`` and this is a diagnostic on an error path, not a lowering.
 
     Parameters
     ----------
@@ -523,10 +547,12 @@ def _axis_layout(s: OProd) -> str:
 
 
 def _ffs_map_alpha_eq(f: object, g: object) -> bool:
-    """Report whether two FFS keying maps are α-equivalent (equal up to bound renaming).
+    """Report whether two fundamental-subspace keying maps are equal up to bound renaming.
 
-    Used so independently-constructed FFS spaces (``Img(alt(V,k))`` etc.) unify.  Lazy import of
-    ``alpha_canon`` avoids an ``infer ← transform`` import cycle; only hit on a raw mismatch.
+    Two ``exterior_power`` sites build ``Img(alt(V,k))`` independently and their binders get
+    different uids, yet they denote one subspace; comparing the maps α-canonically is what
+    lets those unify. ``alpha_canon`` is imported lazily to avoid an ``infer ← transform``
+    cycle, and only on a raw mismatch.
     """
     try:
         from grassmann.transform.rewrite import alpha_canon
@@ -536,10 +562,10 @@ def _ffs_map_alpha_eq(f: object, g: object) -> bool:
 
 
 def _metric_eq(a: object, b: object) -> bool:
-    """Structural equality of two ``WithInner`` metric **Terms**.
+    """Report whether two ``WithInner`` metrics are the same term.
 
-    The metric is always a Term (enforced in ``space.WithInner``), so plain ``==`` (the frozen
-    dataclass's structural equality) is well-defined — no numpy-array fallback needed.
+    A metric is always a Term — ``space.WithInner`` enforces that — so the frozen
+    dataclass's structural ``==`` is well defined, with no numpy-array fallback needed.
     """
     return a is b or bool(a == b)
 

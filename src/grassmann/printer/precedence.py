@@ -1,19 +1,20 @@
-r"""Operator-precedence model shared by the LaTeX printer and the unparser.
+r"""The operator-precedence model, authored once for every printer that needs one.
 
-Deliberately LaTeX-agnostic at the *structure* level: an :class:`Op` carries both the
-precedence and the family of surface symbols (LaTeX now, a plaintext symbol for the
-future Unicode unparser). A printer picks the field it needs and reuses :data:`BINOPS`
-plus :func:`paren` for parenthesization, so the two back ends cannot drift apart on what
-binds tighter than what.
+Precedence is a property of the algebra, not of a notation, so an :class:`Op` carries the
+binding strength together with one surface symbol per back end — the LaTeX macro and the
+plaintext glyph — and no LaTeX string appears in the structure itself. The LaTeX printer
+is the reader today; a plaintext printer takes the other field and shares :data:`BINOPS`
+and :func:`paren` unchanged, so the two cannot disagree about what binds tighter than
+what. The Unicode surface syntax parenthesizes from its own table,
+:mod:`grassmann.syntax.glyphs`, which a parser reads as well as a printer.
 
-Precedence: **higher binds tighter**. A child rendered in a context demanding a minimum
-precedence ``min_prec`` is wrapped in parentheses iff its own precedence is below that
-minimum (:func:`paren`). Infix associative operators render their operands at the
-operator's own level (equal precedence ⇒ no parentheses, i.e. left/right associative is
-treated uniformly — every binary op here is associative or commutative). A postfix
-decoration (``^{\dagger}``, ``^{*}``, …) renders its base at :data:`Prec.POSTFIX` so a
-looser base — and crucially another postfix — is parenthesized, avoiding illegal stacked
-superscripts.
+Higher binds tighter, and :func:`paren` wraps a child whose precedence falls below what
+its slot demands. An infix operator renders its operands at its own level, so equal
+precedence never parenthesizes — every binary operator here is associative or commutative,
+which makes left and right associativity indistinguishable in the output. A postfix
+decoration (``^{\dagger}``, ``^{*}``, …) is the exception: it renders its base demanding
+one notch above :data:`Prec.POSTFIX`, so a base that is itself a postfix gets parentheses
+and the illegal stacked superscript ``x^{a}^{b}`` never appears.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from enum import IntEnum
 
 
 class Prec(IntEnum):
-    """Binding strength; higher binds tighter."""
+    """Binding strength of a form, where a higher value binds tighter."""
 
     SUM = 10        # +  (Sum)  and  ⊕ (direct sum / stack)
     PROD = 20       # ⊗ (tensor), scalar multiple, ⊙ (Hadamard), Kronecker
@@ -35,11 +36,11 @@ class Prec(IntEnum):
 
 @dataclass(frozen=True)
 class Op:
-    """A binary operator: its precedence plus the surface symbol per back end.
+    """A binary operator: one binding strength, and one surface symbol per back end.
 
-    ``latex`` is the infix LaTeX symbol; ``text`` is the plaintext/Unicode symbol the
-    plaintext unparser uses. Keeping both here means the precedence table is authored
-    once and the two printers stay in lock-step.
+    ``latex`` is the infix LaTeX macro and ``text`` the Unicode glyph the plaintext
+    unparser prints. Holding both against a single ``prec`` is what makes the precedence
+    table authored once rather than per printer.
     """
 
     name: str
@@ -48,7 +49,7 @@ class Op:
     prec: Prec
 
 
-# The binary-operator vocabulary, keyed by a back-end-neutral name.
+#: The binary-operator vocabulary, keyed by a name neither back end owns.
 BINOPS: dict[str, Op] = {
     "sum":      Op("sum",      r"+",       "+",  Prec.SUM),
     "oplus":    Op("oplus",    r"\oplus",  "⊕",  Prec.SUM),
@@ -61,7 +62,12 @@ BINOPS: dict[str, Op] = {
 
 
 def paren(s: str, prec: int, min_prec: int) -> str:
-    """Wrap ``s`` in parentheses iff its precedence ``prec`` is below ``min_prec``."""
+    """Wrap the rendered string ``s`` in parentheses when it binds too loosely for its slot.
+
+    A child rendered at precedence ``prec`` in a context demanding at least ``min_prec``
+    needs parentheses exactly when ``prec < min_prec``; equal precedence does not, since
+    every binary operator in the table is associative or commutative.
+    """
     return f"({s})" if prec < min_prec else s
 
 

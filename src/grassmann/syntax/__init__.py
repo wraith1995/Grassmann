@@ -1,16 +1,19 @@
-"""Unicode surface syntax for Grassmann — round-trippable ``parse`` / ``unparse``.
+"""Surface syntax: core nodes written as mathematical text, and read back from it.
 
-Three round-trip layers over a single glyph/precedence model
-(:mod:`grassmann.syntax.glyphs`):
+``unparse(x)`` renders any core node — a term, a space with its symbolic ``Dim`` algebra,
+or a basis — as Unicode mathematical text, prefixed with a typed-variable preamble
+(``x : V ⊗ W* ⊢ …``) so the text stands alone. ``parse(s)`` is the inverse. Both work off
+one glyph and precedence table, :mod:`grassmann.syntax.glyphs`, which is what makes the
+round trip hold rather than approximately hold.
 
-* **terms** — the core IR nodes (:mod:`grassmann.core.term`),
-* **spaces** — :mod:`grassmann.core.space` (plus the symbolic ``Dim`` algebra),
-* **bases** — :mod:`grassmann.core.basis`.
+What "the same term" means for a round trip is settled by :func:`alpha_equal`, which
+compares up to renaming of variables and flattening of associative operators, since a
+name and a nesting are exactly the information the surface does not carry. The property
+checked against is ``parse(unparse(x)) ≡ x``.
 
-``unparse(x)`` renders a core node (or an embed ``Expr``) as Unicode mathematical text
-with a typed-variable preamble (``x : V ⊗ W* ⊢ …``); ``parse(s)`` is the inverse.
-``alpha_equal`` compares two nodes up to α-renaming of bound variables and flattening of
-associative operators — the equivalence ``parse(unparse(x)) ≡ x`` is checked against.
+An ASCII front end in :mod:`grassmann.syntax.mcalc` reuses the same AST and builder over
+a matrix-calculus grammar, and :mod:`grassmann.syntax.geometry` supplies the
+parameterization objects its geometry declarations are typed against.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ except Exception:  # pragma: no cover
 __all__ = ["parse", "unparse", "alpha_equal", "ParseError", "UnparseError"]
 
 
-# Associative n-ary nodes flattened before comparison (the surface is associative).
+# Associative n-ary nodes flattened before comparison, since the surface is associative.
 _FLAT = {
     _T.Sum: "vectors", _T.OPlusV: "vectors", _T.OProdV: "vectors",
 }
@@ -60,10 +63,13 @@ def _flatten(node: object, attr: str) -> list:
 
 
 def _canon(x: object, m: dict) -> object:
-    """Give a hashable canonical form of ``x``.
+    """Give a hashable canonical form of ``x``, in which α-equivalent nodes compare equal.
 
-    Var identities → first-seen ordinals (α-equivalence), associative chains flattened, External numpy
-    callables ignored (compared by name).
+    Three normalizations do the work. Each variable's identity becomes the ordinal of its
+    first appearance, so names and uids drop out. Chains of an associative operator are
+    flattened, so a left and a right nesting agree. An ``ExternalOp`` reduces to its name
+    and basis requirement, because its numpy callable is an object identity that survives
+    no round trip.
     """
     if isinstance(x, _T.Var):
         return ("Var", m.setdefault(x.uid, len(m)), _canon(x.space, m), _canon(x.props, m))
@@ -85,10 +91,13 @@ def _canon(x: object, m: dict) -> object:
 
 
 def alpha_equal(a: object, b: object) -> bool:
-    """Report whether ``a`` and ``b`` are equal up to α-renaming.
+    """Report whether ``a`` and ``b`` are the same node up to α-renaming.
 
-    Bound *and* free term variables are renamed, and associative operators are flattened
-    before comparison.  Accepts core nodes or embed ``Expr`` handles.
+    Free variables are renamed as well as bound ones, and associative operators are
+    flattened first, so this is the equivalence a surface round trip preserves: text
+    records the shape of a term, not the identities of its variables or the order two
+    equal-precedence operands were nested in. Accepts core nodes or embed ``Expr``
+    handles.
     """
     a = getattr(a, "node", a)
     b = getattr(b, "node", b)

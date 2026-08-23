@@ -1,29 +1,42 @@
-"""Term→Term **rewriting**.
+"""Rewriting a term into an equal but simpler one, up to a sum-of-products normal form.
 
-Β-reduction, algebraic simplification, and a **sum-of-products** normal form — a pass in the
-:mod:`grassmann.transform` family, alongside :mod:`~grassmann.transform.diff` /
-:mod:`~grassmann.transform.pullback`.
+Every rule here is an equality of the coordinate-free algebra, so a rewritten term denotes
+the same value and lowers to the same numbers. What varies is how far the rewriting goes.
+Three entry points sit on a ladder of increasing strength::
 
-Three public entry points, in increasing strength:
+    beta              β-reduce applied binders and nothing else
+      │                   Eval(LLam …), NEval(Lam …), partial application included
+      ▼
+    simplify          β + the always-valid cleanups
+      │                   scalar/zero/identity laws, Sum flattening, involutions,
+      │                   η, inverse cancellation, musical collapse
+      │               strictly shrinks the term; never distributes a +
+      ▼
+    sum_of_products   simplify + distribution, collection and ordering
+                          push every linear and multilinear operator through +,
+                          pull scalars to the front, add like monomials, sort
+                      result: Zero, one monomial, or a flat Sum of c·atom with no
+                      distributable + left anywhere inside
 
-- :func:`beta` — β-reduce applied binders only: ``Eval(LLam …)`` (linear) and
-  ``NEval(Lam …)`` (non-linear, value / space binders), incl. partial application.
-- :func:`simplify` — β + the always-valid algebraic cleanups (scalar/zero/identity
-  laws, sum flattening, involutions). Strictly shrinks a term; never distributes.
-- :func:`sum_of_products` (alias :func:`normal_form`) — :func:`simplify` plus the
-  **linearity / multilinearity distribution** rules that push every linear operator
-  through ``+`` and pull scalars to the front, then collect like terms. The result is a
-  flat ``Sum`` of monomials ``c · atom`` where no ``atom`` hides a distributable ``+``.
+Above ``simplify`` the behaviour is configurable rather than fixed. A :class:`SoPConfig`
+turns each rule group on or off, from the value-exact default through ordering the ⊗
+factors and dissolving ``⊕`` into injections, and :func:`is_normalized_sop` certifies
+exactly what the enabled groups were supposed to produce. That predicate is the acceptance
+test: ``is_normalized_sop(sum_of_products(t, cfg), cfg)`` is what "normalized" means here,
+since the rule set is not assumed confluent.
 
-Everything is **semantics-preserving**: each rule is an equality of the coordinate-free
-algebra, so a rewritten term lowers to the same numbers (the test-suite checks this by
-running both forms through :func:`grassmann.run`).
+Some of the stronger rules are canonical only **up to isomorphism**. Reordering the factors
+of a ``⊗`` changes the space and the array axes, so it is not value-safe on its own; the
+rule emits a ``Permute`` that swaps the axes back, and the pair is exact. The ``⊕``
+analogue emits a ``TuplePermute``. A reordering that could not be corrected this way is not
+performed.
 
-The engine itself is a tiny innermost (bottom-up) normalizer (:func:`_normalize`): it
-rewrites children to a fixpoint first, then applies the local rules at the root until none
-fire. Rules are ``Term -> Term | None`` (``None`` = "I don't apply"). They must be
-strictly reducing under the chosen measure; a global step cap (:data:`_MAX_STEPS`) turns a
-runaway non-confluent set into a :class:`RewriteError` rather than a hang.
+The engine is a small innermost normalizer (:func:`_normalize`): it rewrites a node's
+children to a fixpoint, then applies the local rules at the root until none fire. A rule is
+a ``Term -> Term | None``, where ``None`` means it does not apply, and each is strictly
+reducing under its own measure. Confluence across a whole rule set is not assumed, so a
+global step cap (:data:`_MAX_STEPS`) turns a rule set that would loop into a
+:class:`RewriteError` rather than a hang.
 """
 
 from __future__ import annotations
@@ -85,21 +98,35 @@ Rule = Callable[[Term], Term | None]
 
 
 class RewriteError(Exception):
-    """Raised when a rewrite cannot proceed (e.g. the engine fails to terminate)."""
+    """Raised when normalization cannot finish — most often the step cap being hit.
+
+    Reaching :data:`_MAX_STEPS` local firings at one node means the enabled rules cycle
+    against each other rather than reducing, so the failure is reported instead of hung on.
+    """
 
 
-# A backstop against a non-terminating / non-confluent rule set: the number of *local*
-# rule firings allowed at a single node before we declare non-termination.
+# The backstop against a rule set that cycles instead of reducing: the number of local rule
+# firings allowed at a single node before normalization is declared non-terminating.
 _MAX_STEPS = 100_000
 
 
 @dataclass(frozen=True)
 class SoPConfig:
-    """Select how aggressively :func:`sum_of_products` normalizes.
+    """How far :func:`sum_of_products` goes — one flag per rule group.
 
-    Each flag turns a rule group on/off, and :func:`is_normalized_sop` then certifies exactly
-    what the enabled groups produce (contraction-push, ⊕-dissolve, up-to-iso ⊗/⊕ ordering, …).
-    Confluence is *not* assumed — the engine just runs the chosen rules to a fixpoint.
+    The flags form a ladder rather than a set of independent switches. The defaults are the
+    value-exact rungs: distribution, contraction-push, collection and sorting the
+    commutative ``+`` all preserve the layout exactly, so nothing has to be corrected
+    afterwards. The opt-in rungs go further and pay for it. Ordering ⊗ factors or ⊕
+    components is canonical only up to isomorphism, so those rules emit a ``Permute`` or
+    ``TuplePermute`` correction that restores the original layout; dissolving ``⊕`` removes
+    the former entirely in favour of a sum of injections; and the advanced η rule folds a
+    seed-linear lambda into the covector or map it denotes.
+
+    Whatever is enabled, :func:`is_normalized_sop` certifies exactly that: it checks the
+    additive shape and that no enabled rule still fires. The engine runs the chosen rules to
+    a fixpoint and assumes no confluence, so the certificate, not the rule set, is what
+    defines the normal form.
     """
 
     beta: bool = True            # β-reduce applied binders (Eval(LLam …) / NEval(Lam …))
@@ -107,8 +134,8 @@ class SoPConfig:
     push_contractions: bool = True  # localize Eval/Compose into the ⊗ factor (x(c)·y)
     collect: bool = True         # collect like monomials (v + v → 2·v, cancellation)
     order_sum: bool = True       # sort + summands by term_key — value-safe (commutative)
-    order_otimes: bool = False   # canonical ⊗ factor order — UP-TO-ISO (emits a Permute 𝒞)
-    order_oplus: bool = False    # canonical ⊕ component order — UP-TO-ISO (synthesized 𝒞; heavy)
+    order_otimes: bool = False   # canonical ⊗ factor order — up to iso; emits a Permute 𝒞
+    order_oplus: bool = False    # canonical ⊕ component order — up to iso; heavier 𝒞
     dissolve_oplus: bool = False  # dissolve ⊕ into a sum of injections (⊕ disappears; + outermost)
     canon_scalars: bool = False  # canonicalize scalar PRODUCTS (commutative ·); partial rational NF
     canon_binders: bool = True   # α-canonicalize bound vars (α-variant terms → identical NF)
@@ -176,9 +203,10 @@ def subst(term: Term, mapping: dict[int, Term]) -> Term:
 
     Replace every ``Var`` whose ``uid`` is a key of ``mapping`` by the mapped Term.
 
-    Capture-avoidance is automatic: binder variables carry globally fresh ``uid`` values, so an
-    inner binder never shares a ``uid`` with the (outer) variable being substituted, and a
-    substituted-in Term cannot mention a variable bound by a binder we pass under.
+    Capture-avoidance is automatic: binder variables carry globally fresh ``uid`` values, so
+    an inner binder never shares a ``uid`` with the variable being substituted, and a
+    substituted-in term cannot mention a variable bound by a binder the traversal passes
+    under.
     """
 
     def go(node: Term) -> Term:
@@ -190,22 +218,23 @@ def subst(term: Term, mapping: dict[int, Term]) -> Term:
 
 
 def map_spaces_in_term(term: Term, on_space: Callable[[Space], Space]) -> Term:
-    """Apply a :func:`~grassmann.lower.space_basis.map_space` rewrite to EVERY space the term embeds.
+    """Apply a space rewrite to every space a term embeds, however deeply annotated.
 
-    The general form of :func:`_subst_space_in_term`, which does this traversal but is hardwired to
-    ``SVar(name) := repl``. ``on_space`` is any ``Space -> Space`` rewrite (typically a
-    :func:`~grassmann.lower.space_basis.map_space` closure), so ONE rewrite can be applied to a space
-    AND to a term's embedded spaces without being written twice.
+    ``on_space`` is any ``Space -> Space`` rewrite, typically a
+    :func:`~grassmann.lower.space_basis.map_space` closure, so one rewrite can be applied to
+    a space and to a term's embedded spaces without being written twice. This is the general
+    form of :func:`_subst_space_in_term`, which performs the same traversal but is hardwired
+    to ``SVar(name) := repl``.
 
-    Why it is needed: a space rewrite reaches only the spaces you hand it, and an immersion can live in
-    a term's TYPE ANNOTATIONS rather than in its value positions. ``Λᵏ(Img J) = Img(alt)`` keeps its
-    ``Img(J)`` inside the binder ``Var('x', Dual(Img(J)))`` of ``alt``'s ``LLam`` — so
-    :func:`subst` (value ``Var`` nodes only) does not see it, and rewriting the value SPACE does not either.
-    Without this, a σ-permuted readout worked for a 1-form (immersion is a leaf of the value space) and
-    silently did nothing for a k ≥ 2 form.
+    The traversal has to reach annotations, not just value positions, because a space can
+    hide entirely inside one. ``Λᵏ(Img J) = Img(alt)`` keeps its ``Img(J)`` on the binder
+    variable ``Var('x', Dual(Img(J)))`` of ``alt``'s ``LLam``: :func:`subst` visits value
+    ``Var`` nodes and never sees it, and rewriting the value's space does not reach it
+    either. A rewrite that missed it would work on a 1-form, where the immersion is a leaf of
+    the value space, and silently do nothing for a form of degree two or more.
 
-    Structural and unconditional: it does not know what the caller is swapping. Returns ``term``
-    unchanged (identity, not a copy) when no embedded space is rewritten.
+    The rewrite is structural and unconditional — it does not know what the caller is
+    swapping — and returns ``term`` itself, not a copy, when no embedded space changes.
     """
     return _map_spaces(term, on_space)
 
@@ -769,8 +798,9 @@ def rule_scalar_product(node: Term) -> Term | None:
     symbolic factors by ``term_key``. So ``⟨c,x⟩·⟨d,y⟩`` and ``⟨d,y⟩·⟨c,x⟩`` reach the same form. Opt-in via
     ``canon_scalars``.
 
-    This is the *multiplicative* half of a scalar normal form; the full rational ``P/Q`` (sums
-    of scalar products + ``div``/``reciprocal`` with cancellation) is left as future work.
+    This is the multiplicative half of a scalar normal form. Sums of scalar products and
+    ``div``/``reciprocal`` with cancellation — the full rational ``P/Q`` — are not
+    normalized, so a folded scalar can print un-simplified while remaining value-correct.
     """
     if not isinstance(node, Scale) or not isinstance(_space(node.vector), Scalar):
         return None  # not a scalar product (a genuine vector scaling, or untypable)
@@ -1018,8 +1048,8 @@ def _factor_llam_body(node: Term, dvar: Var) -> Term | None:
 def rule_eta_advanced(node: Term) -> Term | None:
     """**Advanced η-reduction** (covector / linear-map folding) — make a derivative look like the map it *is*.
 
-    Collapse a single-seed linear lambda ``λδ. body`` whose body is a covector / linear-map expression in δ
-    into the lambda-free term it denotes:
+    Collapse a single-seed linear lambda ``λδ. body``, whose body is a covector or
+    linear-map expression in δ, into the lambda-free term it denotes:
 
         ``λδ. ⟨δ, x⟩ + ⟨x, δ⟩ → 2·x♭``,   ``λδ. ⟨A(δ), w⟩ → (A†w)♭``,   ``λδ. A(δ) → A``.
 
@@ -1203,10 +1233,10 @@ def rule_inverse_compose(node: Term) -> Term | None:
 def rule_project_embed(node: Term) -> Term | None:
     """Cancel an embed-then-project round-trip onto a value's own subspace: ``Project(Embed(v, S), s) → v``.
 
-    Embedding into a larger space and projecting straight back onto ``v``'s own subspace is the identity *on
-    that subspace*. We check via space normalization that the projection target is ``v``'s
-    space up to iso (``spaces_iso``); only then is the round-trip valid. Value-exact. Direction: cancel the
-    coercion pair toward the bare value.
+    Embedding into a larger space and projecting straight back onto ``v``'s own subspace is
+    the identity on that subspace. Space normalization decides whether the projection target
+    really is ``v``'s space up to isomorphism (``spaces_iso``); the round-trip is cancelled
+    only then. Value-exact, and it moves toward the bare value.
     """
     match node:
         case Project(vector=Embed(vector=v)):
@@ -1432,8 +1462,10 @@ def dist_oprod(node: Term) -> Term | None:
 def dist_oplus(node: Term) -> Term | None:
     """Pull a ``+`` out of one ``⊕`` (``OPlusV``) slot by **zero-padding**.
 
-    ``⊕`` is a *stack*, not additive per component, so the other slots must be ZEROED in the extra copies, not
-    duplicated: ``(a+b)⊕c → a⊕c + b⊕0`` (NOT ``a⊕c + b⊕c``, which doubles ``c``).
+    A ``⊕`` is a stack rather than an additive combination of its components, so the other
+    slots must be zeroed in the extra copies rather than duplicated:
+    ``(a+b)⊕c → a⊕c + b⊕0``. Copying the siblings instead, as ``a⊕c + b⊕c``, would double
+    ``c``.
 
     The first addend keeps the original siblings; each further addend gets a copy with that
     slot's value and ``Zero`` everywhere else. Keeps ``⊕`` as a layer whose components are
@@ -1593,10 +1625,11 @@ def dist_unary(node: Term) -> Term | None:
         case Embed():
             return _unary_linear(node, node.vector, lambda v: Embed(v, node.space))
         case Assert() if node.props is not None:
-            # a prop-carrying Assert is a claim about the WHOLE map (e.g. ``bij``), and such props
-            # are NOT distributive over + / · — ``Assert(a+b, bij)`` ≠ ``Assert(a,bij)+Assert(b,bij)``
-            # (the summands need not be bijective).  Keep it atomic so a downstream ``Solve`` keeps
-            # its license; the operand is still normalized by the traversal into ``node.vector``.
+            # A property-carrying Assert claims something about the map as a whole, and such a
+            # property does not distribute: ``Assert(a+b, bij)`` is not
+            # ``Assert(a,bij) + Assert(b,bij)``, since the summands need not be bijective.
+            # Keeping it atomic is what lets a downstream ``Solve`` keep its license; the
+            # operand is still normalized by the traversal into ``node.vector``.
             return None
         case Assert():
             return _unary_linear(node, node.vector, lambda v: Assert(v, node.space))
@@ -1669,28 +1702,29 @@ _CONTRACTION_RULES: tuple[Rule, ...] = (dist_eval_oprod, dist_compose_oprod, dis
 #   nf     ::= Zero                              -- the additive unit
 #           |  mono                              -- a single monomial
 #           |  Sum(mono₁, …, monoₖ)              -- k ≥ 2; the monomials' atoms are
-#                                                --   DISTINCT and sorted by `term_key`
+#                                                --   distinct and sorted by `term_key`
 #   mono   ::= atom                              -- coefficient 1 (implicit)
 #           |  Scale(coeff, atom)                -- coeff ∉ {0, 1}
 #   coeff  ::= r ∈ ℝ∖{0,1}                        -- a numeric scalar, or
 #           |  s                                 -- a Scalar-valued atom (no top-level +)
-#   atom   ::= a Term whose head is NOT Sum / Scale / Zero, is NOT a β-redex
-#              (Eval(LLam …) / NEval(Lam …)) nor Eval(Identity …), and ALL of whose
+#   atom   ::= a Term whose head is not Sum / Scale / Zero, is not a β-redex
+#              (Eval(LLam …) / NEval(Lam …)) nor Eval(Identity …), and all of whose
 #              subterms are themselves fully reduced — no distributable `+` and no
 #              pullable scalar sits in any linear position.
 #
-# `term_key` is the total order that makes the form canonical (α-equal terms ⇒ equal
-# key ⇒ identical sorted output). It is `repr`-based today — deterministic and total —
-# and is the single hook to swap for a structural key if needed.
+# `term_key` is the total order that makes the form canonical: α-equal terms give equal
+# keys, hence identical sorted output. It is `repr`-based, which is deterministic and total,
+# and it is the single place the ordering is decided.
 # ===========================================================================
 
 
 def term_key(t: Term) -> str:
-    """Give a total, deterministic, **α-invariant** ordering key on Terms.
+    """Give a total, deterministic ordering key on Terms, invariant under α-renaming.
 
-    Used to sort ``Sum`` summands canonically. ``repr`` is injective over these frozen
-    dataclasses; for terms that contain a binder we key on the α-canonical form so
-    α-equivalent atoms sort identically (the common no-binder case takes the fast path).
+    This is the order that makes canonical forms canonical: sorting ``Sum`` summands by it
+    puts α-equivalent terms in the same place regardless of binder uids. ``repr`` is
+    injective over these frozen dataclasses, and a term containing a binder is keyed on its
+    α-canonical form first; the common binder-free case takes the direct path.
     """
     return repr(alpha_canon(t) if _has_binder(t) else t)
 
@@ -1857,10 +1891,11 @@ def _sop_rules(cfg: SoPConfig) -> tuple[Rule, ...]:
 def _is_scalar_atom(a: Term) -> bool:
     """Report whether ``a`` is a **scalar atom** of the scalar-polynomial normal form (when ``canon_scalars`` is on).
 
-    A Scalar-valued Term that is *never* decomposed further — a scalar ``Var``, a scalar ``Eval`` contraction
-    (a dot product), or a non-linear ``External`` application. A numeric ``Lit`` is NOT an atom (it folds into
-    the coefficient); a scalar ``Sum``/``Scale``/``Zero`` is not an atom (additive/multiplicative structure
-    the outer polynomial owns).
+    A scalar atom is a ``Scalar``-valued Term that is never decomposed further: a scalar
+    ``Var``, a scalar ``Eval`` contraction such as a dot product, or a non-linear
+    ``External`` application. A numeric ``Lit`` is not one, since it folds into the
+    coefficient, and neither is a scalar ``Sum``/``Scale``/``Zero``, whose additive and
+    multiplicative structure belongs to the surrounding polynomial.
     """
     if not isinstance(_space(a), Scalar):
         return False
@@ -1875,10 +1910,10 @@ def _is_canonical_scalar_product(a: Term) -> bool:
     """Whether ``a`` is a **canonical scalar product**.
 
     The body of a scalar monomial after its numeric coefficient is peeled (the form
-    :func:`rule_scalar_product` emits): ``Scale(s₀, Scale(s₁, … sₙ₋₁))``, right-nested, with each ``sᵢ`` a
-    :func:`_is_scalar_atom` and the factors sorted by :func:`term_key` (so commuted spellings collapse). A
-    single scalar atom is the ``n = 1`` case. There is NO numeric factor inside (it is the outer coefficient)
-    and no two factors hide a ``+``.
+    :func:`rule_scalar_product` emits): ``Scale(s₀, Scale(s₁, … sₙ₋₁))``, right-nested, with
+    each ``sᵢ`` a :func:`_is_scalar_atom` and the factors sorted by :func:`term_key`, so
+    commuted spellings collapse together. A single scalar atom is the ``n = 1`` case. No
+    numeric factor sits inside — that is the outer coefficient — and no factor hides a ``+``.
     """
     factors: list[Term] = []
     node = a
@@ -1957,13 +1992,16 @@ def _fully_reduced(t: Term, rules: tuple[Rule, ...]) -> bool:
 
 
 def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
-    """Decide whether ``t`` is in **sum-of-products normal form** under ``config``.
+    """Certify that ``t`` is in sum-of-products normal form for ``config``.
 
-    The grammar above is the specification. Two independent checks: (1) the additive *shape* —
-    ``Zero``, a lone monomial, or a ``Sum`` of ≥2 monomials whose atoms are distinct (when
-    ``collect``) and sorted by :func:`term_key` (when ``order_sum``); and (2) *full
-    reduction* — no enabled rule fires anywhere. Together they make
-    ``is_normalized_sop(sum_of_products(t, c), c)`` the acceptance test for the normalizer.
+    Two independent checks have to pass. The additive *shape* must be a ``Zero``, a lone
+    monomial, or a ``Sum`` of two or more monomials whose atoms are distinct when
+    ``collect`` is on and sorted by :func:`term_key` when ``order_sum`` is. And the term
+    must be *fully reduced*: no rule the config enables fires anywhere in it.
+
+    Because the rule set is not assumed confluent, this predicate rather than the rule set
+    is what defines the normal form, and ``is_normalized_sop(sum_of_products(t, c), c)`` is
+    the normalizer's acceptance test.
     """
     if not is_term(t):
         return False
@@ -1987,7 +2025,11 @@ def is_normalized_sop(t: Term, config: SoPConfig = DEFAULT_SOP) -> bool:
 
 
 def _normalize(term: Term, rules: tuple[Rule, ...]) -> Term:
-    """Innermost (bottom-up) normalization to a fixpoint of ``rules``."""
+    """Normalize innermost: children to a fixpoint first, then the root until nothing fires.
+
+    Raises :class:`RewriteError` if a single node fires more than :data:`_MAX_STEPS` times,
+    which means the rules are cycling rather than reducing.
+    """
     node = _rebuild(term, lambda c: _normalize(c, rules))
     steps = 0
     while True:
@@ -2030,29 +2072,35 @@ def rewrite(term: Term, rules: tuple[Rule, ...]) -> Term:
 
 
 def beta(term: Term) -> Term:
-    """β-reduce applied binders to a fixpoint, with no other simplification.
+    """β-reduce every applied binder to a fixpoint, changing nothing else.
 
-    The applied binders are ``Eval(LLam …)`` and ``NEval(Lam …)``.
+    The redexes are ``Eval(LLam …)`` for the linear binder and ``NEval(Lam …)`` for the
+    general one, including partial applications, which leave a residual binder over the
+    arguments not yet supplied.
     """
     return rewrite(term, _BETA_RULES)
 
 
 def simplify(term: Term) -> Term:
-    """β-reduce and apply the always-valid algebraic cleanups.
+    """β-reduce and apply the cleanups that are valid unconditionally.
 
-    The cleanups are the scalar/zero/identity laws, sum flattening and involutions. Strictly
-    shrinks the term; never distributes ``+``.
+    Those are the scalar, zero and identity laws, ``Sum`` flattening, the involutions,
+    η-reduction, inverse cancellation and the musical collapse. Every one strictly shrinks
+    the term, and none distributes a ``+``, so the result is smaller than the input and
+    still in whatever shape the input had.
     """
     return rewrite(term, _SIMPLIFY_RULES)
 
 
 def sum_of_products(term: Term, config: SoPConfig = DEFAULT_SOP) -> Term:
-    """Rewrite to **sum-of-products normal form** under ``config``.
+    """Rewrite ``term`` into sum-of-products normal form under ``config``.
 
-    Β + the algebraic cleanups, distribute every linear/multilinear operator through ``+`` (incl. the
-    zero-padded ``⊕`` split), pull scalars to the front, collect like terms, and sort the summands
-    canonically. The result is a ``Zero``, a single monomial, or a flat, canonically ordered ``Sum`` of
-    monomials ``c · atom`` with no distributable ``+`` left inside.
+    On top of β and the cleanups, this distributes every linear and multilinear operator
+    through ``+`` — including the zero-padded ``⊕`` split, which duplicates a slot without
+    duplicating its siblings — pulls scalars to the front, adds like monomials together, and
+    sorts the summands canonically. The result is a ``Zero``, a single monomial, or a flat
+    ``Sum`` of monomials ``c · atom`` with no distributable ``+`` left anywhere inside.
+    :func:`is_normalized_sop` certifies the result against the same config.
     """
     out = rewrite(term, _sop_rules(config))
     if config.canon_binders and _has_binder(out):

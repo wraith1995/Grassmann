@@ -1,11 +1,22 @@
-"""Capture-avoiding substitution on Spaces (and a Term passthrough).
+"""Substitution of a space for a rigid space variable — what closes an open space.
 
-``s[α := s']`` replaces a rigid space variable :class:`~grassmann.core.space.SVar` ``SVar(α)``
-(or, equivalently, an ``SVar`` named ``α`` standing for a Π-bound space parameter) by a
-space throughout ``s``. This is the operation that *closes open spaces on application*.
+``s[α := s']`` replaces every occurrence of the rigid space variable
+:class:`~grassmann.core.space.SVar` ``SVar(α)`` throughout ``s``. An ``SVar`` is how a
+Π-bound space parameter appears inside the spaces under the binder, so applying a space
+argument means substituting for it, and that application is what turns an open space into
+a closed one.
 
-Only the substitutions the inference rules actually need are implemented; nats/ints are
-not substituted here (they are concrete per the locked decision).
+The traversal reaches everywhere a space can hide, including inside terms: the defining
+map of a fundamental subspace, an ``App``'s function and arguments, and the space
+annotations on binder variables. That matters because a placeholder often sits inside a
+term rather than beside it — the tangent ``SVar("T")`` in ``Λᵏ(T) = Img(alt(T, k))`` lives
+on the binder vars of the antisymmetrizer's ``LLam``, and substituting only the outer
+space would leave it open. Value binders never shadow a rigid space variable, so the
+descent needs no renaming.
+
+Dimensions are not substituted: nats are always concrete, so a nat parameter is supplied
+explicitly rather than solved for. :func:`subst_term` is the value-level counterpart and
+is the identity, since a synthesized space never depends on a value.
 """
 
 from __future__ import annotations
@@ -30,12 +41,12 @@ from grassmann.core.space import (
 
 
 def subst_space(s: Space, name: str, repl: Space) -> Space:
-    """``s[name := repl]`` over an ``SVar(name)`` rigid space variable.
+    """Give ``s[name := repl]``, replacing the rigid space variable ``SVar(name)`` throughout.
 
-    Descends into a four-fundamental-subspace defining map ``f`` (a Term) and an ``App``'s
-    SpaceFunction / args, so a placeholder threaded *inside* a term — e.g. the tangent ``SVar("T")``
-    in ``Λᵏ(T) = Img(alt(T, k))`` (the ``alt`` antisymmetrizer binds vars of space ``T``) — is closed
-    too. Safe: the value binders inside ``f`` never shadow a rigid *space* variable.
+    The recursion is structural over the Space sum and additionally enters the terms a
+    space embeds — a fundamental subspace's defining map and an ``App``'s function and
+    arguments — so a placeholder threaded inside a term is closed along with the rest.
+    Leaves that cannot mention the variable come back unchanged.
     """
     match s:
         case SVar():
@@ -75,11 +86,11 @@ def _subst_in_app_arg(a: object, name: str, repl: Space) -> object:
 
 
 def _subst_space_in_term(term: object, name: str, repl: Space) -> object:
-    """Substitute ``SVar(name) := repl`` through every Space embedded in a Term.
+    """Substitute ``SVar(name) := repl`` through every Space a Term embeds.
 
-    Covers the spaces of binder vars, asserted spaces, nested FFS maps, and so on.  Local to
-    :mod:`grassmann.infer` to avoid an ``infer → transform`` import cycle; mirrors
-    ``transform.rewrite._subst_space_in_term``.
+    That covers binder variables' spaces, asserted spaces, nested fundamental-subspace maps
+    and anything else in a Space-typed field. It lives in :mod:`grassmann.infer` to avoid an
+    ``infer → transform`` import cycle, and mirrors ``transform.rewrite._subst_space_in_term``.
     """
     from grassmann.core.term import is_term
 
@@ -117,11 +128,11 @@ def _subst_space_in_term(term: object, name: str, repl: Space) -> object:
 
 
 def space_occurs(needle: Space, haystack: Space) -> bool:
-    """Report whether the space ``needle`` occurs anywhere in ``haystack``.
+    """Report whether the space ``needle`` occurs anywhere inside ``haystack``.
 
-    Descends into FFS defining maps and ``App`` exactly as :func:`subst_space` does.  This is the
-    "does a tangent ``Img(J)`` occur in this space?" traversal — e.g. to detect whether a value
-    space still mentions the chart.
+    The descent matches :func:`subst_space`, reaching into fundamental-subspace defining
+    maps and ``App``. It answers questions of the form "does a tangent ``Img(J)`` still
+    occur here?" — whether a value's space continues to mention the chart it came from.
     """
     from grassmann.core.term import is_term
 
@@ -146,12 +157,12 @@ def space_occurs(needle: Space, haystack: Space) -> bool:
 
 
 def subst_type_space(t: object, name: str, repl: Space) -> object:
-    """``τ[name := repl]`` over a rigid space var ``SVar(name)`` *throughout a Type*.
+    """Give ``τ[name := repl]``, replacing the rigid space variable ``SVar(name)`` in a Type.
 
-    Recurses into ``Π`` domains/codomains and ``⟦s⟧`` wrappers so that applying a space
-    parameter closes every later occurrence of it in the codomain type (substitution
-    closes open spaces on apply). Capture-avoidance: a nested ``Π`` whose
-    own space binder shadows ``name`` stops the substitution under it.
+    The recursion enters ``Π`` domains and codomains and ``⟦s⟧`` wrappers, so applying a
+    space parameter closes every later occurrence of it in the codomain. A nested ``Π``
+    whose own space binder carries the same name shadows the outer one, and the
+    substitution stops under it.
     """
     from grassmann.core.kinds import SPACE, SpaceSort
     from grassmann.core.types import Pi, SpaceAsType, TypeApp
@@ -174,11 +185,11 @@ def subst_type_space(t: object, name: str, repl: Space) -> object:
 
 
 def subst_term(t: object, name: str, repl: object) -> object:
-    """Term-level substitution passthrough.
+    """Substitute a value for a term variable inside a classifier — the identity.
 
-    The examples never substitute a *value* into a synthesized Space (codomains there
-    are value-independent), so this is the identity. Kept as an entry point so the
-    synth rules read uniformly and future dependent codomains can hook in here.
+    Synthesized codomains do not depend on the values flowing through them, so there is
+    nothing for a value substitution to change. The entry point exists so the synthesis
+    rules can call it uniformly wherever the typing judgement calls for it.
     """
     return t
 

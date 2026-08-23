@@ -1,34 +1,26 @@
-"""Asserted facts that aid first-order unification / inference.
+"""What an assertion tells inference about dimensions, and how a contradiction is caught.
 
-The core :class:`~grassmann.core.term.Assert` node ``Assert(v, s)``, and the **asserted map
-properties** carried by a map's :class:`~grassmann.core.term.Var`
-(``inj``/``surj``/``bij``/``rank``), are *trusted* facts. Beyond pinning a space
-by unification, those facts carry **dimension** information that the (dim-aware, but
-dim-never-unifying) inference can exploit:
+An :class:`~grassmann.core.term.Assert` node and the map properties carried on a map's
+:class:`~grassmann.core.term.Var` — ``inj``, ``surj``, ``bij``, an explicit ``rank`` — are
+trusted facts. Unifying ``Assert``'s space with the synthesized one already does the
+obvious work of solving implicit space metavariables. The properties do something further:
+each one guarantees a dimension equality that the space must satisfy::
 
-- an asserted **bijective** map forces ``|dom| ≡ |cod|`` (an isomorphism);
-- an asserted **injective** map forces ``rank = |dom|`` so ``|dom| ≤ |cod|`` and
-  ``|Img f| ≡ |dom|``;
-- an asserted **surjective** map forces ``rank = |cod|`` so ``|Img f| ≡ |cod|``;
-- an asserted **rank ``r``** pins ``δ_f`` to the static ``r`` (resolved in
-  :mod:`grassmann.infer.dims`).
+    bij       ⇒  |dom| ≡ |cod|             the map is an isomorphism
+    inj       ⇒  rank = |dom|,  so  |Img f| ≡ |dom|
+    surj      ⇒  rank = |cod|,  so  |Img f| ≡ |cod|
+    rank r    ⇒  δ_f is the static r       (resolved in grassmann.infer.dims)
 
-This module turns those facts into:
+Dimensions are compared and never unified, so these equalities cannot be *solved* — they
+can only be *checked*. :func:`assert_property_dims` collects the ones a map's properties
+guarantee, and :func:`check_assert_property_consistency` tests them against the space once
+unification has resolved it. A map asserted bijective between spaces of demonstrably
+unequal dimension is therefore rejected at the assertion, rather than accepted and left to
+fail somewhere downstream.
 
-1. :func:`assert_property_dims` — given a map term and its decoded ``(dom, cod)``, the
-   list of dimension equalities the asserted properties *guarantee*. Sound: it only reads
-   user-asserted props (never invents).
-2. :func:`check_assert_property_consistency` — the consistency check the ``Assert`` /
-   inverse rules in :mod:`grassmann.infer.synth` apply. After the synthesized space is
-   unified with the asserted ``s`` (recovering implicit metavars — this is the unification
-   *aid*), it verifies that every property-implied dimension equality holds for the
-   now-resolved space, rejecting an assertion that contradicts an asserted property.
-
-Because dimensions are *compared, never unified*, the contribution of an
-assertion to unification is two-fold: (a) the ordinary structural unification of
-``Assert``'s space solves implicit space metavars; (b) the property-implied dim equalities
-are *checked* against the resolved space, so an asserted-``bij`` map whose asserted
-``dom``/``cod`` have unequal dimension is rejected up front rather than silently accepted.
+Everything here is sound in one direction only: it reads what the user asserted and never
+invents a property. A dimension that cannot be evaluated yet — one still mentioning an
+unsolved metavariable — is not a demonstrable contradiction and is skipped.
 """
 
 from __future__ import annotations
@@ -44,7 +36,11 @@ from .synth import InferError
 
 @dataclass(frozen=True)
 class DimFact:
-    """A guaranteed dimension equality ``lhs ≡ rhs`` with a human-readable ``why``."""
+    """One dimension equality an asserted property guarantees, with the reason it holds.
+
+    ``why`` is prose naming the property the equality came from, so a violation can report
+    which assertion it contradicts rather than only which dimensions disagreed.
+    """
 
     lhs: Dim
     rhs: Dim
@@ -52,11 +48,11 @@ class DimFact:
 
 
 def assert_property_dims(f: object, dom: Space, cod: Space) -> list[DimFact]:
-    """Dimension equalities *guaranteed* by ``f``'s asserted properties (sound).
+    """Collect the dimension equalities ``f``'s asserted properties guarantee.
 
-    ``f`` is a map term with decoded ``dom``/``cod``. Returns the dim facts that the
-    asserted ``inj``/``surj``/``bij``/``rank`` impose. Returns ``[]`` when ``f`` carries
-    no usable assertion (the runtime-rank case — nothing static to add).
+    ``f`` is a map term whose domain and codomain have already been decoded. A map with no
+    usable assertion gives the empty list, which is the runtime-rank case: nothing static
+    is known, so nothing static is claimed.
     """
     props = map_props(f)
     if props is None:
@@ -75,8 +71,9 @@ def assert_property_dims(f: object, dom: Space, cod: Space) -> list[DimFact]:
             facts.append(
                 DimFact(dim_of(cod), dim_of(cod), "asserted surj ⇒ |Img f| ≡ |cod|")
             )
-    # An explicit rank r constrains both ker/coker; if a map is asserted bij/inj/surj AND
-    # given a numeric rank we cross-check the implied identities below.
+    # An explicit rank constrains both the kernel and the cokernel. When a map is asserted
+    # bij/inj/surj and also given a rank, the two must agree, so the implied identities are
+    # cross-checked here.
     if props.rank is not None:
         if props.bij:
             facts.append(
@@ -97,11 +94,12 @@ def assert_property_dims(f: object, dom: Space, cod: Space) -> list[DimFact]:
 
 
 def consistent_dim_facts(facts: list[DimFact]) -> list[DimFact]:
-    """Return the facts whose ``lhs`` and ``rhs`` are *not* dim-equal (the violations).
+    """Give the facts that fail — those whose two sides are not dimension-equal.
 
-    A non-empty result means an assertion contradicts a property and must be rejected.
-    Facts whose dims cannot be computed (e.g. they mention an unsolved metavar) are
-    skipped — we only reject a *demonstrable* contradiction (sound: never invent).
+    A non-empty result means an assertion contradicts a property and must be rejected. A
+    fact whose dimensions cannot be evaluated, because one side still mentions an unsolved
+    metavariable, is skipped rather than counted: only a demonstrable contradiction is a
+    violation.
     """
     bad: list[DimFact] = []
     for fact in facts:
@@ -115,10 +113,11 @@ def consistent_dim_facts(facts: list[DimFact]) -> list[DimFact]:
 
 
 def check_assert_property_consistency(f: object, dom: Space, cod: Space) -> None:
-    """Raise if ``f``'s asserted properties contradict its (resolved) ``dom``/``cod``.
+    """Raise when ``f``'s asserted properties contradict its resolved domain and codomain.
 
-    Used by the ``Assert``/inverse rules to reject e.g. an asserted-``bij`` map whose
-    asserted domain and codomain have unequal (computable) dimension.
+    The ``Assert`` and inverse rules apply this once unification has pinned the space down,
+    so that a map asserted bijective between spaces of unequal computable dimension is
+    refused at the assertion.
     """
     bad = consistent_dim_facts(assert_property_dims(f, dom, cod))
     if bad:
@@ -130,19 +129,20 @@ def check_assert_property_consistency(f: object, dom: Space, cod: Space) -> None
 
 
 class AssertFactError(InferError):
-    """Raised when an asserted property contradicts the resolved space.
+    """Raised when an asserted map property contradicts the space it was asserted against.
 
-    A subclass of :class:`grassmann.infer.synth.InferError` so it is caught by the same
-    generic inference-failure handling as the other rules.
+    It subclasses :class:`grassmann.infer.synth.InferError`, so a caller handling inference
+    failures generically catches this one too, while a caller that cares can distinguish a
+    contradicted assertion from an ordinary mismatch.
     """
 
 
 def map_facts_for_unify(f: object) -> list[DimFact]:
-    """Property-implied dim facts for a map term ``f`` (decoding its own ``dom``/``cod``).
+    """Collect ``f``'s property-implied dimension facts, decoding its endpoints first.
 
-    Convenience wrapper: decodes ``f``'s map space, then defers to
-    :func:`assert_property_dims`. Returns ``[]`` if ``f`` is not a decodable map or has no
-    usable assertion.
+    This is :func:`assert_property_dims` for a caller that holds only the map term: it
+    synthesizes and decodes ``f``'s map space to find the domain and codomain. A term that
+    is not a decodable map, or that carries no usable assertion, gives the empty list.
     """
     from .synth import map_domain_codomain
 

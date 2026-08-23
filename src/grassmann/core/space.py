@@ -14,12 +14,25 @@ node kinds, and every space in the language is built from them::
     WithInner(s, g)            s re-metricized by an inner product g : s* ⊗ s*
     App(g, positions, args…)   the space produced by applying a space function g
 
-The four fundamental subspaces are first-class spaces, not a flag on a map, so
-one builds further maps against ``img(f)`` or ``ker(f)`` directly. A metricized
-space ``WithInner(s, g)`` is a genuinely different space from ``s``; crossing
-between them is the explicit :class:`~grassmann.core.term.Remetric`, never a
-silent identification. A dimension :class:`Dim` is a symbolic natural-number
-expression — a literal, a variable, the dimension of a space, or a sum or product
+The four fundamental subspaces of a map are spaces in their own right, so a
+further map can be built against ``img(f)`` or ``ker(f)`` directly::
+
+        dom(f)                                        cod(f)
+    ┌────────────┐                                ┌────────────┐
+    │  CoImg(f)  │────────── f, an iso ──────────▶│   Img(f)   │
+    ├────────────┤                                ├────────────┤
+    │   Ker(f)   │──────────── f = 0 ────────────▶│  CoKer(f)  │
+    └────────────┘                                └────────────┘
+
+Restricted to ``CoImg(f)`` the map is an isomorphism onto ``Img(f)``, ``Ker(f)``
+is what it sends to zero, and ``CoKer(f)`` is the part of the codomain it never
+reaches.
+
+A metricized space ``WithInner(s, g)`` is a genuinely different space from ``s``;
+crossing between them is the explicit :class:`~grassmann.core.term.Remetric`,
+never a silent identification. A dimension :class:`Dim` is a symbolic
+natural-number expression — a literal, a variable, the dimension of a space, a
+rank the lowering resolves at run time, or a sum, product, negation, or remainder
 of these — so a space can have a size that is known only symbolically.
 
 Well-formedness enforced here is structural only: every child is itself a
@@ -103,10 +116,13 @@ class DimOf:
 
 @dataclass(frozen=True)
 class DimAtomRef:
-    """A runtime rank/dimension atom ``δ_f`` keyed by a term ``f``.
+    """A runtime rank atom ``δ_f``, the dimension a map ``f`` only reveals at lowering.
 
-    Opaque Nat the SVD deduces at lowering; ``f`` is the keying term (a forward
-    ref to ``Term`` to avoid a runtime term.py import cycle).
+    It stands for a natural number no static rule can pin down: the rank of ``f``,
+    which the singular-value decomposition computes when the term is lowered. Until
+    then the atom is opaque and propagates through the ``Dim`` algebra like any other
+    symbol. ``key`` is the map it belongs to, annotated as a forward reference to
+    ``Term`` because ``term`` imports ``space`` and not the other way round.
     """
 
     key: Term
@@ -146,11 +162,12 @@ class DimProd:
 
 @dataclass(frozen=True)
 class DimNeg:
-    """A negated dimension.
+    """A negated dimension, the way the ``Dim`` algebra spells subtraction.
 
-    Appears only inside a ``DimSum``, where it expresses subtraction — for example
-    ``|Ker f| = |dom| + (-rank)``. Keeps the ``Dim`` algebra closed under the differences the FFS
-    dimension laws require.
+    It appears only inside a :class:`DimSum`, where it turns the sum into a
+    difference: the rank-nullity law reads ``|Ker f| = |dom| + (-rank)``. Carrying
+    negation as a node is what keeps the algebra closed under the differences the
+    dimensions of the four fundamental subspaces require.
     """
 
     term: Dim
@@ -164,12 +181,13 @@ class DimNeg:
 
 @dataclass(frozen=True)
 class DimMod:
-    """A dimension reduced modulo another.
+    """A dimension reduced modulo another, ``term mod modulus``.
 
-    Closes the ``Dim`` algebra under the cyclic/periodic dimensions that e.g. circulant or torus constructions
-    need. Convention: Python-style non-negative remainder, so ``0 ≤ a mod b < b`` and ``a mod 0`` is
-    undefined (rejected at construction). Mirrors :class:`DimNeg`'s style: a thin frozen node;
-    constant-folding happens in :mod:`grassmann.infer.dims`, kept symbolic otherwise.
+    It closes the ``Dim`` algebra under the periodic dimensions that cyclic
+    constructions such as a circulant or a torus need. The remainder is the
+    Python-style non-negative one, so ``0 ≤ a mod b < b``; a zero modulus has no
+    remainder and is rejected at construction. The node stays symbolic, and
+    :mod:`grassmann.infer.dims` folds it when both operands are literal.
     """
 
     term: Dim
@@ -322,14 +340,17 @@ class OPlusRep:
         return f"OPlusRep({self.count!r}, {self.space!r})"
 
 
-# --- The four explicit FFS (no `co` flag); source/target optional. ----------
+# --- The four fundamental subspaces, each its own space node. --------------
 
 
 @dataclass(frozen=True)
 class Ker:
-    """The kernel of a map: the subspace of its domain that ``f`` sends to zero, a
-    first-class space. ``source`` and ``target`` record the bases of ``f``'s domain
-    and codomain."""
+    """The kernel of a map ``f``: the subspace of its domain that ``f`` sends to zero.
+
+    It is a space like any other, so a further map may be built against it directly.
+    ``source`` and ``target`` optionally pin the domain and codomain spaces of ``f``;
+    left as ``None`` they are recovered from the space ``f`` synthesizes.
+    """
 
     f: Term  # a linear map; forward ref to avoid a runtime term.py import cycle
     source: Space | None = None
@@ -344,8 +365,12 @@ class Ker:
 
 @dataclass(frozen=True)
 class Img:
-    """The image of a map: the subspace of its codomain that ``f`` reaches, a
-    first-class space."""
+    """The image of a map ``f``: the subspace of its codomain that ``f`` reaches.
+
+    It is the span of the pushforward of the domain, and a space in its own right, so
+    ``Corestrict(f) : dom(f) ⊸ Img(f)`` and any further map can land in it.
+    ``source`` and ``target`` behave as they do on :class:`Ker`.
+    """
 
     f: Term
     source: Space | None = None
@@ -360,8 +385,12 @@ class Img:
 
 @dataclass(frozen=True)
 class CoKer:
-    """The cokernel of a map: its codomain modulo the image, equivalently the kernel of
-    the adjoint. A first-class space."""
+    """The cokernel of a map ``f``: its codomain modulo the image ``cod(f)/Img(f)``.
+
+    Equivalently it is the kernel of the adjoint ``f†``, the directions of the
+    codomain that ``f`` never reaches. ``source`` and ``target`` behave as they do on
+    :class:`Ker`.
+    """
 
     f: Term
     source: Space | None = None
@@ -376,8 +405,12 @@ class CoKer:
 
 @dataclass(frozen=True)
 class CoImg:
-    """The coimage of a map: its domain modulo the kernel, equivalently the orthogonal
-    complement of the kernel. A first-class space."""
+    """The coimage of a map ``f``: its domain modulo the kernel ``dom(f)/Ker(f)``.
+
+    Equivalently it is the orthogonal complement of ``Ker(f)`` in the domain, and it is
+    the domain on which ``f`` is an isomorphism onto :class:`Img`. ``source`` and
+    ``target`` behave as they do on :class:`Ker`.
+    """
 
     f: Term
     source: Space | None = None
@@ -392,12 +425,15 @@ class CoImg:
 
 @dataclass(frozen=True)
 class WithInner:
-    """The space ``s`` re-metricized by an inner product ``g`` — a genuinely different space from ``s``.
+    """The space ``s`` carrying the inner product ``g``, a different space from ``s``.
 
-    Written ``WithInner(s, g)``, with ``g`` a metric of type ``s*⊗s*``. ``g`` is a metric **Term** (a forward ref to ``Term`` to avoid a runtime cycle): the metric
-    is part of the language, NOT a raw numeric array.  A concrete numeric metric is supplied as a
-    ``Var`` fed at run time (or any symbolic term), never embedded as an array — that keeps the
-    space hashable and the lowering uniform (a single ``_rep(metric)`` path).
+    ``g`` is a metric of type ``s* ⊗ s*``, and it is a :class:`~grassmann.core.term.Term`
+    (a forward reference here, since ``term`` imports ``space``): the metric belongs to
+    the language rather than to the numbers. A concrete numeric metric therefore arrives
+    as a ``Var`` fed at run time, or as any other symbolic term, and is never embedded as
+    an array — that is what keeps the space hashable and gives lowering a single
+    ``_rep(metric)`` path. Because the metricized space is a distinct space, moving a
+    value into or out of it is the explicit :class:`~grassmann.core.term.Remetric`.
     """
 
     space: Space
@@ -415,10 +451,13 @@ class WithInner:
 class App:
     """The space produced by applying a space function to its arguments.
 
-    Written ``App(g, positions, args…)``: ``g`` is a SpaceFunction (a ``Lam`` whose
-    body is a Space); ``positions`` selects the slots filled; ``args`` are the supplied
-    arguments (spaces, nats, or values). Forward refs (``Term``) avoid a runtime cycle —
-    kind-level checking of the application is done during type inference.
+    ``g`` is a space function, a :class:`~grassmann.core.term.Lam` whose body is a
+    space; ``positions`` selects the parameter slots being filled and ``args`` supplies
+    them, each argument being a space, a nat, or a value. The node stands for the
+    result while the arguments are still symbolic. Only the structural facts are
+    checked here — that the two tuples have equal length and each argument is one of
+    the three admissible sorts; whether the application respects ``g``'s arrow kind is
+    settled during type inference.
     """
 
     g: Term
@@ -449,11 +488,13 @@ _meta_counter = itertools.count()
 
 @dataclass(frozen=True)
 class SpaceMeta:
-    """A space metavariable ``?α`` — an unsolved space hole used during elaboration.
+    """A space metavariable ``?α``: the hole standing for a space inference has yet to solve.
 
-    A first-class Space node so it can sit inside ``Dual``/``OProd``/… while inference resolves it; the
-    resolution store ``Θ`` lives in :mod:`grassmann.infer.unify`. ``uid`` is identity; ``hint`` a name for
-    messages.
+    It is a space node like the rest, so it can sit inside a ``Dual``, an ``OProd``, or
+    any other constructor while unification works out what it is; the store ``Θ`` that
+    records the solution lives in :mod:`grassmann.infer.unify`. ``uid`` carries the
+    identity — two metavariables are the same one only if their uids agree — and
+    ``hint`` is the name used when a message has to print it.
     """
 
     uid: int = field(default_factory=lambda: next(_meta_counter))
@@ -553,8 +594,9 @@ def bot() -> OPlus:
 def base(name: str, dim: object) -> OPlusRep:
     """Build a primitive ``ℝⁿ``, grounded on ``Scalar`` as ``⊕ⁿ ℝ``.
 
-    ``name`` is accepted for call-site compatibility but carries no identity: two
-    equal-dimension primitives are the SAME space.
+    ``name`` carries no identity and does not enter the node, so two primitives of
+    the same dimension are the same space. Use :func:`svar` for a base space whose
+    name distinguishes it.
     """
     return OPlusRep(as_dim(dim), Scalar())
 
@@ -582,38 +624,45 @@ def oprod(*spaces: Space) -> OProd:
 
 
 def spliced_oprod(*parts: Space) -> OProd:
-    """Build the flat tensor product of ``parts``, splicing in any operand that is itself a product — ``X ⊗ (Y ⊗ Z) ↦ X ⊗ Y ⊗ Z``.
+    """Build the flat tensor product of ``parts``, splicing any operand that is itself a product.
 
-    ⊗ is associative, so a nested and a flat product denote ONE space; but they are different
-    NODES, each top-level factor is a separate ARRAY AXIS (``lower.represent._shape_of_space``),
-    and :func:`grassmann.infer.unify.unify` compares ``OProd`` arities.  The two spellings are
-    therefore two LAYOUTS that do not meet: from three leaves up they raise
-    ``AssociationMismatch``.  This builder is the FLAT spelling, and the ⊗-towers that want one
-    axis per leaf are built with it (``stdlib.exterior.tensor_power``,
-    ``infer.synth._spliced_oprod`` for ``Kron``'s endpoints, ``transform.diff``'s derivative
-    tower).
+    A nested operand is opened out one level, so ``X ⊗ (Y ⊗ Z)`` becomes ``X ⊗ Y ⊗ Z``::
+
+        oprod(X, oprod(Y, Z))           spliced_oprod(X, oprod(Y, Z))
+            OProd(X, OProd(Y, Z))           OProd(X, Y, Z)
+            2 axes: (|X|, |Y|·|Z|)          3 axes: (|X|, |Y|, |Z|)
+
+    ⊗ is associative, so the two denote one space, but they are different nodes and
+    different layouts: each top-level factor is a separate array axis
+    (``lower.represent._shape_of_space``), and :func:`grassmann.infer.unify.unify`
+    compares ``OProd`` arities, so from three leaves up the two spellings meet with an
+    ``AssociationMismatch``. This builder is the flat spelling, and it is what the
+    ⊗-towers that want one axis per leaf are built with —
+    ``stdlib.exterior.tensor_power``, ``infer.synth._spliced_oprod`` for ``Kron``'s
+    endpoints, and the derivative tower in ``transform.diff``.
 
     Parameters
     ----------
     *parts
-        The factors.  A part that is itself a multi-factor ``OProd`` is spliced in; anything else
-        contributes one factor.
+        The factors. A part that is itself a multi-factor ``OProd`` is spliced in;
+        anything else contributes a single factor.
 
     Returns
     -------
     OProd
-        The flat product.  Leaf ORDER is preserved exactly —
-        ``tensor_leaves(spliced_oprod(*parts))`` is the concatenation of the parts' leaves — and
-        only one nesting level is removed per operand, which is all any producer here builds.
+        The flat product. Leaf order is preserved exactly, so
+        ``tensor_leaves(spliced_oprod(*parts))`` is the concatenation of the parts'
+        leaves, and exactly one nesting level is removed per operand.
 
     Notes
     -----
-    ⚠ **Not a canonicalizer, and NOT what** :func:`oprod` **should do.**  A map space
-    ``linear_map_space(dom, cod) = Dual(dom) ⊗ cod`` is deliberately TWO factors — an
-    ``(|dom|, |cod|)`` MATRIX — however compound ``cod`` is; splicing it hands the FFS/SVD seam a
-    rank-``2k`` array where it expects the ``(nᵏ, nᵏ)`` matrix (``Alt₃ : V⊗³ ⊸ V⊗³`` would stop
-    being ``(27, 27)``).  Use this ONLY where the flat, one-axis-per-leaf layout is the intended
-    one; use :func:`linear_map_space` where a matrix is.
+    This is not a canonicalizer, and it is not what :func:`oprod` should do. A map
+    space ``linear_map_space(dom, cod) = Dual(dom) ⊗ cod`` is deliberately two
+    factors — an ``(|dom|, |cod|)`` matrix — however compound ``cod`` is. Splicing it
+    hands the image and singular-value seam a rank-``2k`` array where it expects the
+    ``(nᵏ, nᵏ)`` matrix, and ``Alt₃ : V⊗³ ⊸ V⊗³`` stops being ``(27, 27)``. Reach for
+    this only where the flat, one-axis-per-leaf layout is the intended one, and for
+    :func:`linear_map_space` where a matrix is.
     """
     flat: list[Space] = []
     for p in parts:
@@ -625,26 +674,29 @@ def spliced_oprod(*parts: Space) -> OProd:
 
 
 def drop_unit_factors(s: Space) -> Space:
-    """Apply the tensor-unit law ``𝟙 ⊗ λ ≅ λ`` — an explicit, opt-in canonicalizer.
+    """Apply the tensor-unit law ``𝟙 ⊗ λ ≅ λ``, dropping the ``Scalar`` factors of a product.
 
-    Drops the ⊗-unit ``Scalar`` factors of an ``OProd`` (``𝟙`` is the monoidal unit of ⊗,
-    ``|𝟙| = 1``), returning the canonical space they multiply to:
+    ``Scalar`` is the monoidal unit ``𝟙`` of ⊗, of dimension one, so removing it from a
+    product leaves the space the remaining factors multiply to::
 
-    - ``OProd((𝟙, λ)) → λ``          — a single non-unit survivor is UNWRAPPED (``𝟙⊗λ ≅ λ``);
-    - ``OProd((𝟙, λ, μ)) → OProd((λ, μ))``   — units dropped, ≥2 survivors stay a product;
-    - ``OProd((𝟙, 𝟙)) → 𝟙``          — an all-unit product ``≅`` the unit itself;
-    - a unit-free ``OProd`` is returned UNCHANGED (identity), **including** the deliberate
-      1-ary ``OProd((V,))`` that ``tensor_power(V, 1)`` keeps for ``Λ¹`` codomain agreement —
-      it has no unit factor, so nothing is dropped;
-    - any non-``OProd`` space is returned unchanged.
+        OProd((𝟙, λ))       →  λ                  the lone survivor is unwrapped
+        OProd((𝟙, λ, μ))    →  OProd((λ, μ))      two or more stay a product
+        OProd((𝟙, 𝟙))       →  𝟙                  an all-unit product is the unit
+        OProd((λ, μ))       →  OProd((λ, μ))      unit-free, returned unchanged
+        λ                   →  λ                  a non-product is returned unchanged
 
-    Only the literal ⊗-unit ``Scalar()`` is eliminated: a *coincidental* dimension-1 factor
-    (a rank-1 ``Img``, an ``SVar`` of dim 1, …) is NOT the unit object, so ``V ⊗ W`` with
-    ``|W| = 1`` is left intact (there is no canonical ``V ⊗ W ≅ V`` unless ``W = 𝟙``).
+    The unit-free case is returned as the identical node, which includes the deliberate
+    one-factor ``OProd((V,))`` that ``tensor_power(V, 1)`` keeps so a ``Λ¹`` codomain
+    agrees: it has no unit factor, so nothing is dropped.
 
-    This is a PURE space operator, applied by the consumer that wants the reduced form (grassmann
-    does not fold it silently anywhere): e.g. a transported top-form whose codomain is built as
-    ``OProd((𝟙, Img(alt∘J)))`` applies it to expose a plain ``Λⁿ = Img`` codomain.
+    Only the literal ``Scalar()`` is eliminated. A factor that merely happens to have
+    dimension one — a rank-one ``Img``, an ``SVar`` of dimension one — is not the unit
+    object, so ``V ⊗ W`` with ``|W| = 1`` is left intact; there is no canonical
+    ``V ⊗ W ≅ V`` unless ``W`` is ``𝟙``.
+
+    The canonicalization is opt-in: nothing folds it silently, and the consumer that
+    wants the reduced form applies it. A transported top-form whose codomain is built as
+    ``OProd((𝟙, Img(alt ∘ J)))`` calls it to expose the plain ``Λⁿ = Img`` codomain.
     """
     match s:
         case OProd(spaces=spaces):
@@ -661,41 +713,42 @@ def drop_unit_factors(s: Space) -> Space:
 
 
 def tensor_leaves(s: Space) -> list[Space]:
-    """Give the ordered ⊗-leaves of a (possibly nested) ``OProd``.
+    """Give the ordered ⊗-leaves of a possibly nested ``OProd``.
 
-    The SPACE-level twin of ``lower.represent._basis_prod_leaves``.  ⊗ is associative on the
-    underlying space, so ``a⊗(b⊗c)``, ``(a⊗b)⊗c`` and ``a⊗b⊗c`` all have THIS leaf sequence; what
-    differs between them is only the NESTING — how the leaves are grouped into array axes, which
-    is what ``lower.represent._shape_of_space`` reads.  This is therefore the reader that says
-    "same leaves?" while leaving "same layout?" to the caller; the two questions are genuinely
-    different, and a caller that conflates them lets mismatched layouts meet silently.
+    ⊗ is associative on the underlying space, so ``a⊗(b⊗c)``, ``(a⊗b)⊗c`` and ``a⊗b⊗c``
+    all have the same leaf sequence; what differs is the nesting, which is how the
+    leaves are grouped into array axes and is what ``lower.represent._shape_of_space``
+    reads. This reader therefore answers "the same leaves?" and leaves "the same
+    layout?" to the caller. The two questions are genuinely different, and a caller
+    that conflates them lets mismatched layouts meet in silence. At the basis level
+    ``lower.represent._basis_prod_leaves`` is the same reader.
 
     Parameters
     ----------
     s
-        Any space.  Only ``OProd`` is descended through.
+        Any space. Only ``OProd`` is descended through.
 
     Returns
     -------
     list[Space]
-        The leaves in ⊗ order.  A non-product space is its own single leaf, so
+        The leaves in ⊗ order. A non-product space is its own single leaf, so
         ``tensor_leaves(V) == [V]``.
 
     Notes
     -----
-    ⚠ **``Dual`` is a LEAF, not a distribution point.**  ``Dual(A⊗B)`` is one axis of size
-    ``|A|·|B|`` (``_shape_of_space``'s single-axis default) while ``Dual(A)⊗Dual(B)`` is two axes;
-    they are different layouts and this reader must not identify them.  ``_basis_prod_leaves``
-    makes the same call — ``default_basis(Dual(A⊗B))`` is a ``DualBasis``, not a ``BasisProd``, so
-    it stops there too.
+    A ``Dual`` is a leaf, not a point at which the dual distributes. ``Dual(A⊗B)`` is
+    one axis of size ``|A|·|B|`` — the single-axis default of ``_shape_of_space`` —
+    while ``Dual(A) ⊗ Dual(B)`` is two axes, so the two are different layouts and this
+    reader must not identify them. ``_basis_prod_leaves`` stops at the same place,
+    since ``default_basis(Dual(A⊗B))`` is a ``DualBasis`` rather than a ``BasisProd``.
 
-    ⚠ The ⊗-unit ``Scalar()`` is KEPT as a leaf: it occupies no array axis but it does occupy a
-    factor position, and dropping it here would put this reader out of step with
-    ``_basis_prod_leaves`` (whose ``BasisProd((…, ScalarBasis()))`` tails are leaves).  A caller
-    that wants the unit-free sequence filters it itself — ``drop_unit_factors`` is the
-    canonicalizer and it, too, is opt-in.
+    The ⊗-unit ``Scalar()`` is kept as a leaf. It occupies no array axis but it does
+    occupy a factor position, and dropping it would put this reader out of step with
+    ``_basis_prod_leaves``, whose ``BasisProd((…, ScalarBasis()))`` tails are leaves. A
+    caller that wants the unit-free sequence filters it itself; :func:`drop_unit_factors`
+    is the canonicalizer, and it is opt-in too.
 
-    Pure and total: no error paths, no normalization, no interning.
+    The function is pure and total: no error paths, no normalization, no interning.
     """
     match s:
         case OProd(spaces=spaces):
@@ -736,7 +789,7 @@ def coimg(f: Term, source: Space | None = None, target: Space | None = None) -> 
 
 
 def with_inner(s: Space, metric: Term) -> WithInner:
-    """Build ``WithInner(s, metric)`` — ``s`` re-metricized, a DIFFERENT space."""
+    """Build ``WithInner(s, metric)``, the space ``s`` carrying ``metric`` — a different space."""
     return WithInner(s, metric)
 
 

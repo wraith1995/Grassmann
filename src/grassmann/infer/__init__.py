@@ -1,21 +1,27 @@
-"""The inference engine: bidirectional type synthesis and checking.
+"""The inference engine: what space a term lives in, and whether it is well typed.
 
-This engine types a term. It works bidirectionally — synthesizing a type where
-one can be read off, checking against an expected type elsewhere — with
-first-order unification over space terms, symbolic reasoning about dimensions
-(static, or the runtime rank atom ``δ_f`` when a rank is unknown), the subspace
-relation ``⊑``, and propagation of asserted map properties and the four
-fundamental subspace dimensions. It reads the core IR
-(:mod:`grassmann.core`) and does not modify it.
+Inference reads the core IR (:mod:`grassmann.core`) and never modifies it. It is
+bidirectional: :func:`synth` reads a classifier off a term where one can be read off
+(``Γ ⊢ e ⇒ s``), and :func:`check` pushes an expected classifier in where the term alone
+does not determine it (``Γ ⊢ e ⇐ s``). The two directions call each other, and the
+expected space flowing inward is what recovers implicit parameters — the target of an
+unannotated projection, the space of a bare ``Zero``.
 
-Public entry points
--------------------
-- :func:`synth` / :func:`synth_space` — ``Γ ⊢ e ⇒ s`` (synthesize a Space/Type/Kind).
-- :func:`check` — ``Γ ⊢ e ⇐ s`` (check against an expected Space/Type).
-- :func:`unify` — first-order unification on space terms (mutates a :class:`MetaStore`).
-- :func:`dim_of` / :func:`dim_eq` / :func:`rank_of` — symbolic dimensions + ``δ_f``.
-- :func:`is_subspace` — the ``⊑`` relation.
-- :func:`ffs_dims` — FFS dimensions from asserted props / runtime rank.
+Five kinds of reasoning meet in the middle::
+
+    synth ⇒ / check ⇐        the two directions, over the closed Term sum
+        │
+        ├── unify            first-order unification of space metavariables ?α
+        ├── dims             |s| and rank(f) — static, or the runtime atom δ_f
+        ├── subspace         the ⊑ relation Project and Embed rest on
+        ├── properties       asserted inj/surj/bij/rank ⇒ the four FFS dimensions
+        └── linearity        exactly-once resource accounting for the ⊸ binder
+
+Only spaces are unified. Dimensions are compared and never solved for, so a map asserted
+bijective between spaces of unequal dimension is a contradiction rather than a constraint,
+and a rank nobody asserted stays the opaque atom ``δ_f`` all the way to lowering rather
+than being guessed. Asserted map properties are trusted facts throughout: they set the
+dimensions of the four fundamental subspaces, license ``Solve``, and sharpen ``Pinv``.
 """
 
 from __future__ import annotations

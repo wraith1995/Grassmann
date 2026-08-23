@@ -1,11 +1,13 @@
-"""Single source of truth for the Unicode surface syntax — glyphs + precedence.
+"""The one table the Unicode surface syntax is defined by — its glyphs and their precedence.
 
-The parser (:mod:`grassmann.syntax.parse`) and unparser (:mod:`grassmann.syntax.unparse`)
-both read this table so the two stay in lock-step. The LaTeX printer
-(:mod:`grassmann.printer.latex`) consumes the same operator/precedence model — it only
-swaps the glyph strings for LaTeX macros.
+The parser (:mod:`grassmann.syntax.parse`) and the unparser
+(:mod:`grassmann.syntax.unparse`) both read it, which is what keeps a round trip exact:
+neither side can invent a glyph or a binding power the other does not know. The LaTeX
+printer parenthesizes on the same principles but from its own table,
+:mod:`grassmann.printer.precedence`, since a printer with no parser to match has no
+reason to be constrained by this one.
 
-Design (the operator allocation):
+How the operators are allocated:
 
 - **Infix** binary operators carry a *binding power* (higher binds tighter). All are
   left-associative. They are deliberately **sort-polymorphic**: ``⊗`` is ``OProd`` on
@@ -23,7 +25,8 @@ precedence is below the slot it sits in; the parser then re-derives the same tre
 from __future__ import annotations
 
 # ===========================================================================
-# Headline glyphs (the source of truth shared with the LaTeX printer).
+# The glyphs themselves — one name per surface symbol, so lexer, parser and
+# unparser all spell it the same way.
 # ===========================================================================
 
 # structure
@@ -84,8 +87,9 @@ APP_BP = 90
 #: precedence of an atom (never needs wrapping)
 ATOM_BP = 100
 
-# Output-precedence each *node family* prints at — used by the unparser to decide
-# parenthesization. Mirrors the binding powers above.
+# The precedence each node family prints at, which is what the unparser compares against
+# its slot to decide on parentheses. Mirrors the binding powers above, so what the parser
+# binds tightly the unparser also prints tightly.
 P_OPLUS = 10
 P_SUM = 20
 P_SCALE = 30
@@ -100,9 +104,10 @@ P_ATOM = 100
 
 
 # ===========================================================================
-# Reserved call-form heads (a NAME immediately interpreted as a constructor,
-# not a variable).  The resolver dispatches on these; the lexer treats them as
-# ordinary identifiers, so they are reserved only in *head* position.
+# Call-form heads: names the resolver reads as constructors rather than as
+# variables. The lexer treats them as ordinary identifiers, so a name is
+# reserved only in head position — `Img` heading `Img(f)` is the constructor,
+# while `Img` alone is just a variable name.
 # ===========================================================================
 
 # term constructors
@@ -127,9 +132,10 @@ DIM_HEADS = frozenset({"dim", "delta", "mod"})
 # type constructors
 TYPE_HEADS = frozenset({"Pi", "TypeApp"})
 
-#: nonlinear / pointwise stdlib External ops, by surface head.  Maps the surface
-#: name to the ``grassmann.stdlib.scalar`` builder used to reconstruct the SAME
-#: ``External(ExternalOp(name, fn), ...)`` node (identical fn object ⇒ ``==``).
+#: The nonlinear and pointwise stdlib ops, keyed by their surface head. Each maps to the
+#: :mod:`grassmann.stdlib.scalar` builder that rebuilds it, so parsing reconstructs the
+#: identical ``External(ExternalOp(name, fn), …)`` node — same ``fn`` object, hence equal
+#: under ``==`` — rather than a look-alike that would break the round trip.
 EXTERNAL_OPS: dict[str, str] = {
     "sqrt": "sqrt", "abs": "absval", "sign": "sign", "div": "div",
     "reciprocal": "reciprocal", "exp": "exp", "log": "log", "square": "square",
@@ -138,7 +144,8 @@ EXTERNAL_OPS: dict[str, str] = {
     "sigmoid": "sigmoid", "softplus": "softplus", "hadamard": "hadamard",
     "ones": "ones",  # the diff unit-constant (1±g(u)); reconstructs via stdlib.scalar.ones
 }
-#: reverse: ExternalOp.name -> surface head (mostly identity; "abs" stays "abs").
+#: The reverse map, from an ``ExternalOp.name`` back to its surface head. Almost the
+#: identity, since an op is usually named after the head that builds it.
 EXTERNAL_NAME_TO_HEAD: dict[str, str] = {k: k for k in EXTERNAL_OPS}
 
 ALL_HEADS = (
@@ -146,5 +153,5 @@ ALL_HEADS = (
     | frozenset(EXTERNAL_OPS)
 )
 
-# sort keywords usable as a Lam/BLam binder annotation or a Kind.
+# The sort keywords, usable as a Lam/BLam binder annotation or as a Kind.
 SORT_KEYWORDS = frozenset({"Space", "Nat", "Type", "Basis"})

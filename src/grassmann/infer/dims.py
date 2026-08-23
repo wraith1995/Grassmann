@@ -1,17 +1,31 @@
-"""Symbolic dimension reasoning.
+"""Symbolic dimension arithmetic, and the line between a static size and a runtime rank.
 
-A ``Dim`` (from :mod:`grassmann.core.space`) is a Nat-expression over
+A ``Dim`` (from :mod:`grassmann.core.space`) is a Nat-expression, and this module answers
+three questions about one: what is ``|s|``, the dimension of a space; what is ``rank(f)``
+for a map; and do two dimensions denote the same number.
 
-- static params (``DimLit``, ``DimVar``) and ``DimOf`` of opaque spaces, and
-- **runtime dimension atoms** ``δ_f`` (``DimAtomRef``) — opaque Nats the SVD deduces
-  at lowering, keyed by a term ``f``.
+The interesting part is the second. Grassmann never guesses a rank. A rank is either
+something the user asserted, in which case it is a static expression that arithmetic can
+work with, or it is genuinely unknown until numbers exist, in which case it becomes an
+opaque **runtime rank atom** ``δ_f`` — a :class:`~grassmann.core.space.DimAtomRef` keyed
+by the map ``f``, which lowering materializes as the numeric rank an SVD reports::
 
-This module computes ``|s|`` for a Space, resolves ``rank(f)`` (asserted ⇒ static;
-otherwise a runtime atom ``δ_f``), and decides dim equality ``d ≡ d'`` by normalizing
-to a canonical polynomial over the opaque generators (``DimVar``/``DimOf``/``DimAtomRef``
-treated as atoms; ``δ_f ≡ δ_g`` iff ``f ≈ g`` structurally).
+    rank(f)
+      ├── f asserted bij/inj/surj, or given an explicit rank
+      │       ⇒ static:  |dom f|, |cod f|, or the asserted r
+      └── nothing asserted
+              ⇒ δ_f  — opaque here, an SVD-sized dynamic axis at lowering
 
-Dims are **compared, never unified**.
+Both flow through the same arithmetic. ``|Ker f| = |dom f| − rank(f)`` is written the same
+way whichever branch supplied the rank; only when a value must be laid out does the
+difference bite, because a ``δ_f`` sizes a dynamic array axis while a static dimension
+sizes a fixed one. :func:`is_runtime_dim` is how a caller asks which it has.
+
+Equality is decided by normalizing both sides to a canonical polynomial over the opaque
+generators — ``DimVar``, ``DimOf`` and ``DimAtomRef`` are the indeterminates, with
+``δ_f ≡ δ_g`` exactly when ``f`` and ``g`` are structurally the same term. Dimensions are
+compared this way and never unified: unification solves space metavariables, and a
+dimension mismatch is a mismatch rather than something to solve for.
 """
 
 from __future__ import annotations
@@ -52,7 +66,7 @@ from grassmann.core.space import (
 
 
 class DimError(Exception):
-    """Raised when a dimension cannot be computed (e.g. an unsupported Space)."""
+    """Raised when a dimension cannot be computed — an unresolved metavariable, say."""
 
 
 # ===========================================================================
@@ -61,18 +75,23 @@ class DimError(Exception):
 
 
 def dim_of(s: Space) -> Dim:
-    """Compute ``|s|``, the dimension of a space, as a symbolic ``Dim`` (see :mod:`grassmann.core.space`).
+    """Compute ``|s|``, the dimension of a space, as a symbolic ``Dim``.
 
-    Fundamental-subspace dims (:class:`~grassmann.core.space.Ker` /
-    :class:`~grassmann.core.space.Img` / :class:`~grassmann.core.space.CoKer` /
-    :class:`~grassmann.core.space.CoImg`) require knowing the source/target spaces and the
-    map's rank; the rank is resolved via :func:`rank_of`.
+    Structural spaces reduce by the obvious arithmetic: a direct sum adds its components,
+    a tensor product multiplies them, a dual and a metricized space keep the dimension of
+    what they wrap. The four fundamental subspaces
+    (:class:`~grassmann.core.space.Ker` / :class:`~grassmann.core.space.Img` /
+    :class:`~grassmann.core.space.CoKer` / :class:`~grassmann.core.space.CoImg`) instead
+    need the defining map's rank and its endpoints: :func:`rank_of` supplies the rank —
+    static or the runtime atom ``δ_f`` — and the endpoints come from the node when it
+    carries them, otherwise from synthesizing the map's space.
     """
     match s:
         case Scalar():
             return DimLit(1)
         case SVar():
-            # |SVar α| = δα = dim(α) — an opaque static Nat keyed by the space var.
+            # |SVar α| is an opaque but static Nat keyed by the space var — a dimension the
+            # caller has not named, not one that waits for the numbers.
             return DimOf(s)
         case Dual():
             return dim_of(s.space)
@@ -122,15 +141,19 @@ def _ffs_target(node: Ker | Img | CoKer | CoImg) -> Space:
 
 
 # ===========================================================================
-# rank(f) — asserted (static) OR a runtime atom δ_f.
+# rank(f) — a static dimension when asserted, else the runtime atom δ_f.
 # ===========================================================================
 
 
 def rank_of(f: object) -> Dim:
-    """Resolve ``rank(f)`` to a static rank when asserted, else a runtime atom.
+    """Resolve ``rank(f)`` — a static dimension when asserted, otherwise the atom ``δ_f``.
 
-    - asserted props on ``f`` (a ``Var``): ``bij``/``inj``/``surj``/explicit ``rank``;
-    - otherwise a runtime rank atom ``δ_f`` (:class:`DimAtomRef` keyed by ``f``).
+    An explicit ``rank`` or ``dim_img`` on the map's ``Var`` wins outright. Failing that,
+    ``bij`` and ``inj`` both give ``|dom f|``, ``surj`` gives ``|cod f|``, and an asserted
+    kernel dimension gives ``|dom f| − dim_ker``. With nothing asserted the rank is not
+    knowable before the numbers are, so the result is the runtime atom
+    :class:`~grassmann.core.space.DimAtomRef` keyed by ``f`` — opaque to every caller here,
+    and materialized by an SVD at lowering.
     """
     from grassmann.core.props import MapProps
     from grassmann.core.term import Var
@@ -176,22 +199,25 @@ def _map_dom_cod(f: object) -> tuple[Space, Space]:
 def dim_diff(a: Dim, b: Dim) -> Dim:
     """Compute the symbolic difference ``a − b``.
 
-    Represented internally via the normalized polynomial; if the result has only
-    non-negative integer monomials it stays as a sum, otherwise it carries negative
-    coefficients (legal as an intermediate, e.g. ``|dom| − rank``). The core ``Dim``
-    algebra has no subtraction node, so we encode ``a − b`` as a normalized poly and
-    reconstruct a ``Dim`` from it; this round-trips through :func:`dim_eq`.
+    The core ``Dim`` algebra has no subtraction node, so the difference is taken on the
+    normalized polynomial and a ``Dim`` is reconstructed from the result. Monomials with a
+    negative coefficient come back wrapped in ``DimNeg``, which is legal as an
+    intermediate: ``|Ker f| = |dom f| − rank(f)`` is written this way and is non-negative
+    only once the rank is known. The surface form is not load-bearing, since
+    :func:`dim_eq` re-normalizes both sides before comparing.
     """
     poly = _poly_sub(_to_poly(a), _to_poly(b))
     return _from_poly(poly)
 
 
 def dim_eq(a: object, b: object) -> bool:
-    """Report whether ``a`` and ``b`` normalize to the same Nat polynomial.
+    """Decide ``a ≡ b`` by normalizing both to the same canonical Nat polynomial.
 
-    Opaque generators (``DimVar``, ``DimOf``, ``DimAtomRef``) are treated as
-    indeterminates; ``δ_f ≡ δ_g`` iff ``f ≈ g`` (structural term equality, captured by
-    frozen-dataclass ``==`` on the keying term).
+    ``DimVar``, ``DimOf`` and ``DimAtomRef`` are the indeterminates of that polynomial, so
+    ``2·n`` and ``n + n`` are equal while ``n`` and ``m`` are not. Two runtime rank atoms
+    are the same indeterminate exactly when their keying terms are structurally equal —
+    frozen-dataclass ``==`` on the term — so ``δ_f ≡ δ_g`` iff ``f`` and ``g`` are the same
+    map.
     """
     if not _is_dimlike(a) or not _is_dimlike(b):
         raise DimError(f"dim_eq: expected two Dims, got {a!r} and {b!r}")
@@ -215,7 +241,11 @@ _Poly = dict[_Monomial, int]
 
 
 def _gen_key(d: DimVar | DimOf | DimAtomRef) -> Hashable:
-    """Give a hashable key identifying an opaque generator (so δ_f ≡ δ_g iff f≈g)."""
+    """Give the hashable key identifying one indeterminate of the polynomial form.
+
+    Two generators share a key exactly when they are the same indeterminate, which for a
+    runtime rank atom means their keying maps are structurally equal.
+    """
     match d:
         case DimVar():
             return ("var", d.name)
@@ -369,7 +399,11 @@ def _gen_to_dim(gen: Hashable) -> Dim:
 
 
 def is_runtime_dim(d: object) -> bool:
-    """Report whether ``d`` mentions a runtime rank atom ``δ_f``."""
+    """Report whether ``d`` mentions a runtime rank atom, so its value is unknown here.
+
+    A dimension that mentions a ``δ_f`` sizes a dynamic array axis at lowering rather than
+    a fixed one, so callers that need a concrete extent ask this first.
+    """
     if not is_dim(d):
         return False
     match d:
@@ -390,7 +424,11 @@ def is_runtime_dim(d: object) -> bool:
 
 
 def space_mentions_runtime_dim(s: object) -> bool:
-    """Report whether ``|s|`` would mention a runtime atom."""
+    """Report whether ``|s|`` mentions a runtime rank atom.
+
+    A space whose dimension cannot be computed at all answers ``False``: the question is
+    whether the size is runtime-determined, not whether it is presently known.
+    """
     if not is_space(s):
         return False
     try:

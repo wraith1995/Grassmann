@@ -1,30 +1,42 @@
-"""``represent`` — the per-node ``representDown`` lowering.
+"""The per-node lowering rules: a typed term becomes coordinates in a chosen basis.
 
-Turn an **already-typed** Grassmann core :class:`~grassmann.core.term.Term` into a
-:class:`polyarray.Program`. This is the heart of the lowering: recurse
-over the core Term ADT, emitting polyarray ``Stmt``s, using the substrate
-(:mod:`grassmann.lower.space_basis` / the cob section below /
-:mod:`~grassmann.lower.choose`) for bases / change-of-basis, :class:`~polyarray.AssertOp`
-for the D-scope checks, and finishing with the build-then-simplify
-post-pass (``analyze`` → ``partial_eval``).
+Representation is the boundary at which a coordinate-free core
+:class:`~grassmann.core.term.Term` meets an actual basis. It recurses over the term,
+chooses a basis for every space it meets, and emits the :class:`polyarray.Stmt` objects computing
+that term's coordinates in those bases; the result is a :class:`polyarray.Program` with a
+single output ``"result"``::
 
-Contract (locked decisions):
+    Term            coordinate-free — no basis exists above this line
+      │
+      │  synth_space          recovers each subterm's space
+      │  space_basis+choose   picks the basis to represent it in
+      ▼
+    Rep = (array, basis, space)     coordinates, plus the basis they are actually in
+      │
+      │  cob                  re-expresses a Rep when a consumer wants another basis
+      ▼
+    polyarray.Program         Stmts over SymArrays, one output "result"
 
-* **(b)** consumes ALREADY-TYPED terms — :func:`grassmann.infer.synth` is run internally
-  to recover each subterm's space; ``represent`` does NOT do ``Eval``-vs-``NEval``
-  dispatch (that is embed/infer's job), it lowers whatever node it is handed.
-* **(c) provenance** — every emitted ``Stmt`` carries an algebra-centric ``note``
-  (``node + basis-choice + why``, e.g. ``eval:contract@[0]``,
-  ``ffs-basis:ImageBasis(f):inj=>QrOp``, ``cob:V->std``).
-* **symbolic minimization** — basis selection is driven through
-  :func:`grassmann.lower.choose`; the emitted ``Stmt``s run under polyarray's
-  ``force_stmts`` budget; the post-pass runs at the end.
+The top dispatch :func:`_rep_node` is an exhaustive ``match`` over ``Term``; each arm
+returns a :class:`Rep`. An arm exploits whatever structure its node offers and otherwise
+bails to the standard basis plus a conversion cob, which is always correct — specialization
+is optimization, never a correctness condition. The basis a ``Rep`` reports is the basis its
+coordinates are genuinely in, so a consumer that needs a different one cobs; tagging a basis
+the coordinates are not in is silently wrong rather than an error.
 
-Each recursive step returns a :class:`Rep`: the cell array (a
-:class:`~polyarray.SymArray`), the :class:`~grassmann.core.basis.Basis` it is expressed
-in, and the :class:`~grassmann.core.space.Space` it inhabits. A subterm is represented in
-the **natural** basis of its space; ``cob`` happens at the boundary when a consumer needs
-a different basis.
+Three contracts hold throughout. The term arrives already typed, and
+:func:`grassmann.infer.synth_space` is re-run internally per subterm to recover its space,
+so representation never decides ``Eval`` against ``NEval`` — it lowers the node it is
+handed. Every emitted ``Stmt`` carries an algebra-centric ``note`` naming the node, the
+basis choice and the reason for it (``eval:contract@[0]``,
+``ffs-basis:ImageBasis(f):inj=>QrOp``, ``cob:V->std``), which
+:mod:`grassmann.lower.provenance` turns into a structured record. And basis selection runs
+through :func:`grassmann.lower.choose`, which prefers the basis leaving the fewest symbolic
+cells in the result.
+
+Statements are emitted under polyarray's ``force_stmts`` budget and the finished program
+goes through a build-then-simplify post-pass (``fold_numeric``, then ``partial_eval``)
+before it is returned.
 """
 
 from __future__ import annotations
@@ -65,38 +77,40 @@ __all__ = ["represent", "Rep", "RepresentError", "ExternalOp", "BasisReq"]
 
 
 class BasisReq(Enum):
-    """The basis an :class:`ExternalOp` kernel is mathematically defined in — its equivariance class.
+    """The equivariance class of an :class:`ExternalOp` kernel: which basis it is defined in.
 
-    A componentwise foreign op ``φ`` is basis-invariant only if ``φ(M x) = M φ(x)`` for
-    every admissible change-of-basis ``M``. ``sqrt``/``abs``/``sign``/``reciprocal``/``div``
-    are **not** equivariant under a general orthonormal/SVD rotation, so they must be
-    applied in fixed (standard) coordinates.
+    A componentwise foreign operator ``φ`` means the same thing in every basis only when
+    ``φ(M x) = M φ(x)`` for each admissible change of basis ``M``. The scalar
+    nonlinearities — ``sqrt``, ``abs``, ``sign``, ``reciprocal``, ``div`` — act on
+    coordinates one at a time and so fail that identity under a rotation, which is why
+    lowering has to know where each kernel is allowed to run.
     """
 
     STANDARD = "standard"
-    """Kernel is meaningful ONLY in the orthonormal standard basis ⇒ operands MUST be
-    cob'd to ``default_basis`` before the kernel runs. This is the SAFE default."""
+    """The kernel is meaningful only in the orthonormal standard basis, so lowering cobs
+    every operand to ``default_basis`` before applying it. This is the safe default."""
 
     EQUIVARIANT = "equivariant"
-    """Kernel commutes with change-of-basis (e.g. a global linear scale) ⇒ apply in
-    whatever basis arrives, and carry that basis through honestly."""
+    """The kernel commutes with change of basis — a global linear scale, say — so it is
+    applied in whatever basis its operand arrives in, and the result carries that basis."""
 
 
 @dataclass(frozen=True)
 class ExternalOp:
-    r"""Carry the ``data`` payload of a nonlinear-scalar ``External`` node.
+    r"""The payload of a nonlinear-scalar :class:`~grassmann.core.term.External` node.
 
-    Names the op (``sqrt``/``abs``/``sign``/``div``/``reciprocal``/…) and carries the
-    numpy callable applied elementwise to the lowered operand array(s). Stored on the core
-    :class:`~grassmann.core.term.External`'s ``data`` field so the node ``repr`` and the
-    lowering provenance (``external:<name>``) are meaningful. Frozen + hashable (the ``fn``
-    is hashed by identity, which is fine for the module-level numpy ufuncs used here).
+    It names the operator (``sqrt``, ``abs``, ``sign``, ``div``, ``reciprocal``, …) and
+    carries the numpy callable that lowering applies elementwise to the operand arrays. It
+    rides on the core node's ``data`` field, so the node's ``repr`` and its lowering
+    provenance (``external:<name>``) both read as the operator they denote. The dataclass is
+    frozen and hashable; ``fn`` hashes by identity, which suffices for the module-level numpy
+    ufuncs used here.
 
-    ``basis_req`` records the **basis contract** of the kernel: with the default
-    :attr:`BasisReq.STANDARD` the op is meaningful only in standard coordinates, so
-    lowering ``cob``s every operand to ``default_basis`` first (identity — and thus
-    byte-identical to before — for the scalar stdlib ops); :attr:`BasisReq.EQUIVARIANT`
-    opts into applying in the arriving basis.
+    ``basis_req`` is the kernel's basis contract. Under the default
+    :attr:`BasisReq.STANDARD` the operator is defined only in standard coordinates, so every
+    operand is cob'd to ``default_basis`` before it runs — an identity cob for the scalar
+    stdlib operators, whose operands are already standard. :attr:`BasisReq.EQUIVARIANT` opts
+    out of that and applies the kernel in the basis the operand arrives in.
     """
 
     name: str
@@ -108,27 +122,41 @@ class ExternalOp:
 
 
 class RepresentError(Exception):
-    """Raised when a term cannot be lowered to a polyarray ``Program``."""
+    """Raised when a term cannot be lowered to a polyarray ``Program``.
+
+    It covers every way representation runs out of road: a basis it cannot realize, a cob
+    between bases of different spaces, a shape it cannot resolve, a node whose lowering is
+    not wired for the dimension-generic lane.
+    """
 
 
 class ShapeInvariantError(RepresentError):
-    """The canonical-shape hook found a node realizing its space to a non-canonical shape.
+    """A node realized a value of its space to a shape that is not that space's canonical one.
 
-    A *subclass* of :class:`RepresentError` (it is a lowering-invariant violation), but a distinct
-    type so a debug/fuzz harness can tell a genuine defect from a clean "not-yet-wired" bail.  Only
-    raised when the hook is armed (:func:`set_shape_check`), which is off by default.
+    Every space has exactly one canonical numeric shape, ``_shape_of_space(space)``, and a
+    node that produces a value of that space owes an array whose space axes match it. This is
+    a :class:`RepresentError` because it is a violated lowering invariant, but a distinct type
+    so a debug or fuzz harness can separate a genuine defect from an honest bail on a case the
+    lowering does not handle. It is raised only while the check is armed by
+    :func:`set_shape_check`, which is off by default.
     """
 
 
 @dataclass
 class Rep:
-    """The lowering of one subterm: its coordinate array + the basis/space it lives in.
+    """The lowering of one subterm: its coordinates, and the basis and space they live in.
 
-    ``free_labels`` carries the einsum labels of any *free* (basis-index) axes a value
-    holds beyond its space's own axes — used by the ``LLam`` → coordinate-tensor rule,
-    where each linear var is bound to its full standard basis (an identity
-    matrix) so the body's single pass yields the whole map tensor. Empty for ordinary
-    values.
+    A ``Rep`` is what every ``_rep_X`` arm returns. ``array`` holds the coordinates,
+    ``space`` is the space the value inhabits, and ``basis`` is the basis those coordinates
+    are *actually* expressed in — not the basis anyone wanted, but the one the arm realized,
+    so that a consumer knows whether it must cob. The array's leading axes are the space
+    axes, one per factor of ``_shape_of_space(space)``.
+
+    ``free_labels`` names the einsum labels of any further axes the array carries beyond its
+    space's own. The ``LLam`` coordinate-tensor rule binds each linear variable to its whole
+    standard basis at once — an identity matrix rather than a single vector — so one pass over
+    the body yields the entire map tensor, with the bound basis index riding along as a free
+    axis. It is empty for an ordinary value.
     """
 
     array: pa.SymArray
@@ -140,12 +168,11 @@ class Rep:
 # ===========================================================================
 # Budget override (mask lane)
 # ===========================================================================
-# `represent` builds under `force_stmts` (every op → an imperative Stmt; the
-# build-then-simplify default). A caller can instead request the RATIONAL lane —
-# every op run inline as a closed-form `RationalFunction` over the program inputs,
-# no residual Stmts — so the result is a polynomial in those inputs. oracle uses
-# this to inline a derivative-DOF contraction over the cell vertices and detect
-# structural zeros symbolically (its sparsity mask), instead of probing.
+# `represent` builds under `force_stmts`: every op becomes an imperative Stmt, and the
+# build-then-simplify post-pass collapses what it can afterwards. A caller can instead ask
+# for the rational lane, where every op runs inline as a closed-form `RationalFunction` over
+# the program inputs and no Stmt remains, so the result is a polynomial in those inputs whose
+# structural zeros can be read off symbolically instead of probed for numerically.
 _REPRESENT_BUDGET: contextvars.ContextVar = contextvars.ContextVar(
     "_gr_represent_budget", default=None
 )
@@ -153,9 +180,12 @@ _REPRESENT_BUDGET: contextvars.ContextVar = contextvars.ContextVar(
 
 @contextlib.contextmanager
 def rational_lane() -> Iterator[None]:
-    """Build ``represent`` programs in the closed-form RATIONAL lane inside this context.
+    """Build ``represent`` programs in the closed-form rational lane inside this context.
 
-    Statement-free RF over the inputs, instead of the default ``force_stmts`` lane.
+    Every op runs inline as a :class:`~polyarray.RationalFunction` over the program inputs
+    rather than becoming a ``Stmt``, so the result is a statement-free polynomial in those
+    inputs and a consumer can read its structure — which monomials are identically zero, say
+    — without evaluating anything.
     """
     tok = _REPRESENT_BUDGET.set(pa.SymbolicBudget.build_big_symbols(retain_covariant=True))
     try:
@@ -165,39 +195,43 @@ def rational_lane() -> Iterator[None]:
 
 
 def _lowering_budget() -> pa.SymbolicBudget:
-    """Give the budget for a ``represent``-built program: the mask-lane override, else ``force_stmts``."""
+    """Give the symbolic budget a ``represent`` build runs under.
+
+    It is the :func:`rational_lane` override when that context is active, and polyarray's
+    ``force_stmts`` — one imperative ``Stmt`` per op, the build-then-simplify default —
+    otherwise.
+    """
     return _REPRESENT_BUDGET.get() or pa.SymbolicBudget.force_stmts()
 
 
 def _rational_lane() -> bool:
-    """Report whether the statement-free closed-form RF lane (``rational_lane()``) is active."""
+    """Report whether the statement-free closed-form rational lane is active.
+
+    See :func:`rational_lane`, which turns it on.
+    """
     return _REPRESENT_BUDGET.get() is not None
 
 
 # ===========================================================================
 # FFS frame realization lane ("two realizations of the same ffs basis is fine")
 # ===========================================================================
-# The injective-image FFS basis has TWO admissible realizations of the SAME subspace:
+# The image basis of an injective map has two admissible realizations of the same subspace,
+# and they trade conditioning against exactness:
 #
-#   * the ORTHONORMAL `Q` (`space_basis._realize_via_qr`) — the NUMERIC DEFAULT.  Coordinates
-#     come from `Qᵀ` (no solve), and the frame is well-conditioned: `κ(Q) = 1`.  Its cost is
-#     that `Q` is ALGEBRAIC-IRRATIONAL in the program inputs (QR normalizes by `√(…)`), so
-#     polyarray's exact lane cannot execute it and every certificate downstream degrades to
-#     probe-and-freeze.
-#   * the LITERAL columns `J` (`space_basis._realize_via_gram`) — RATIONAL in the inputs, so
-#     the exact lane certifies through it.  Its cost is conditioning: coordinates come from
-#     the Gram `G = JᵀJ`, and `κ(G) = κ(J)²` (a recorded sliver case measures κ = 2.4e16, which
-#     the squaring would destroy).
+#   * the orthonormal `Q` (`space_basis._realize_via_qr`) is the numeric default. Coordinates
+#     come from `Qᵀ` with no solve, and `κ(Q) = 1`. Its cost is that QR normalizes by `√(…)`,
+#     so `Q` is algebraic-irrational in the program inputs and polyarray's exact lane cannot
+#     execute it — every downstream certificate falls back to probing.
+#   * the literal columns `J` (`space_basis._realize_via_gram`) are rational in the inputs, so
+#     the exact lane runs through them. Its cost is conditioning: coordinates come from the
+#     Gram `G = JᵀJ`, and `κ(G) = κ(J)²`, which a sliver-shaped `J` (κ = 2.4e16 measured) does
+#     not survive.
 #
-# Hence: the SYMBOLIC/CERTIFICATE consumer may opt in; the numeric default must not move.
-#
-# NOTE on the gate — reusing the `_REPRESENT_BUDGET` rational-lane distinction is NOT usable:
-# the affine-invariance certificate does not build under `rational_lane()`.  `pointwise.sampling.pti`
-# builds its symbolic `W` through the ordinary `force_stmts` lane over a symbolic geometry;
-# `rational_lane()` has exactly one caller in the stack (`oracle.debug`, the sparsity mask).
-# Gating on `_REPRESENT_BUDGET` would therefore leave the certificate on `Q` and switch
-# oracle's mask lane instead — the opposite of the intent.  So the lane is its own EXPLICIT
-# opt-in, default OFF.
+# So the lane is an explicit opt-in, off by default: a consumer that needs exactness asks for
+# it, and the numeric default keeps the well-conditioned frame. The `_REPRESENT_BUDGET`
+# rational lane cannot double as the gate, because the two distinctions cut across each other
+# — the exactness-seeking consumer builds through the ordinary `force_stmts` lane over a
+# symbolic geometry, while the sole `rational_lane()` caller wants the orthonormal frame.
 _LITERAL_FFS_FRAMES: contextvars.ContextVar = contextvars.ContextVar(
     "_gr_literal_ffs_frames", default=None
 )
@@ -205,15 +239,15 @@ _LITERAL_FFS_FRAMES: contextvars.ContextVar = contextvars.ContextVar(
 
 @contextlib.contextmanager
 def literal_ffs_frames(enabled: bool = True) -> Iterator[None]:
-    """Realize an INJECTIVE image FFS basis as its LITERAL columns inside this context.
+    """Realize the image basis of an injective map as its literal columns inside this context.
 
-    The literal columns are rational in the inputs, unlike the orthonormal QR frame — the
-    exact/certificate realization (``space_basis._realize_via_gram``).
-
-    Same subspace, a different frame: every consumer that needs coordinates IN the frame
-    branches on :func:`~grassmann.lower.space_basis.ffs_cols_orthonormal`, so the matched dual
-    ``pinv(J)`` is used in place of ``Jᵀ``.  OFF by default — see the module note above for why the
-    numeric lane must keep the orthonormal frame.
+    The literal columns are ``f``'s own columns ``f(eᵢ)``, which are rational in the program
+    inputs where the orthonormal QR frame is not, so polyarray's exact lane can carry them
+    (:func:`~grassmann.lower.space_basis._realize_via_gram`). The two frames span the same
+    subspace but are not the same frame, so a consumer that needs coordinates *in* the frame
+    branches on :func:`~grassmann.lower.space_basis.ffs_cols_orthonormal` and uses the matched
+    dual ``pinv(J) = (JᵀJ)⁻¹Jᵀ`` in place of ``Jᵀ``. Off by default; the note above gives the
+    conditioning reason the numeric lane keeps the orthonormal frame.
     """
     tok = _LITERAL_FFS_FRAMES.set(bool(enabled))
     try:
@@ -223,11 +257,11 @@ def literal_ffs_frames(enabled: bool = True) -> Iterator[None]:
 
 
 def _literal_ffs_frames() -> bool:
-    """Report whether the LITERAL (Gram) FFS image frame is requested.
+    """Report whether the literal (Gram) image frame is requested for this lowering.
 
-    The :func:`literal_ffs_frames` context, else the ``GRASSMANN_FFS_FRAME=literal`` process
-    default (the escape hatch for a consumer that cannot yet wrap the call site, mirroring
-    ``GRASSMANN_LLAM_INDEX``).
+    The :func:`literal_ffs_frames` context decides when it is active; otherwise the answer
+    comes from the process-wide ``GRASSMANN_FFS_FRAME=literal`` environment variable, which
+    lets a consumer select the lane without wrapping its call site.
     """
     ctx = _LITERAL_FFS_FRAMES.get()
     if ctx is not None:
@@ -250,45 +284,47 @@ def represent(
 ) -> pa.Program:
     """Lower a typed core ``term`` to a :class:`polyarray.Program`.
 
-    ``basis_env`` (optional) pins the result basis for selected term ``Var``s (keyed by
-    ``Var.uid``); absent a pin, bases are chosen via :func:`grassmann.lower.choose`. The
-    returned program has a single output ``"result"``;
-    its free term variables (and any binder-bound variables) are the program inputs.
+    This is the lowering pass itself; :func:`grassmann.compile` and
+    :func:`grassmann.compile_in` are thin wrappers over it. The returned program has one
+    output, ``"result"``, and its inputs are the term's free term variables together with any
+    variables a binder introduced.
 
-    ``target`` selects the basis the ``result`` is expressed in (a per-call policy passed to
-    the top ``_rep``):
+    ``basis_env`` pins the basis of selected term variables, keyed by ``Var.uid``. A variable
+    with no pin — and every space that is not a variable — gets the basis
+    :func:`grassmann.lower.choose` scores highest among the candidates
+    :func:`~grassmann.lower.space_basis.space_basis` offers.
 
-    * :data:`~grassmann.core.basis.AUTO` (default) — free choice by the system: the result
-      keeps its natural basis (``basis_env`` pin, else ``choose``).  Byte-identical
-      to the historical lowering.
-    * :data:`~grassmann.core.basis.STD` — the standard orthonormal basis of the result's space.
-    * a concrete :class:`~grassmann.core.basis.Basis` — pin the result to it (must be a basis
-      of the result's space).
+    ``target`` says which basis the ``result`` is expressed in. It is a per-call policy handed
+    to the top :func:`_rep`, and it takes three forms:
 
-    ``supplied_frames`` (optional) is a caller-supplied FFS-frame table
-    ``(which, id(f)) -> (input_name, n_rows, n_cols)`` (``which`` ∈ ``img/ker/coimg/coker``,
-    ``"image"`` normalized to ``"img"``).  For each keyed ``(which, id(f))``, the orthonormal
-    frame of that fundamental subspace of map ``f`` is realized as a DECLARED Program INPUT
-    named ``input_name`` (of shape ``(n_rows, n_cols)``) instead of factorizing ``f`` (the
-    SvdOp/QrOp/GSvdOp seam) — the consumer half of the "frame becomes a kernel argument"
-    design (an external caller who already computed the frame supplies it, collapsing every
-    re-factorization to an input reference).  ``None`` (the default) ⇒ no supplied frames ⇒
-    byte-identical to the historical lowering.
+    * :data:`~grassmann.core.basis.AUTO` (the default) leaves the choice to the system, so the
+      result keeps its natural basis and no cob is emitted for it.
+    * :data:`~grassmann.core.basis.STD` re-expresses the result in the standard orthonormal
+      basis of its space.
+    * a concrete :class:`~grassmann.core.basis.Basis` pins the result to that basis, which must
+      be a basis of the result's space.
 
-    ``literal_frames`` (optional) PROPAGATES the exact/rational FFS-frame lane for the whole
-    lowering — the argument form of the :func:`literal_ffs_frames` context (and the
-    ``GRASSMANN_FFS_FRAME=literal`` env escape hatch it subsumes).  When ``True``: (i) an
-    un-pinned injective ``Img(f)`` leaf is chosen (:mod:`grassmann.lower.choose`) in the literal,
-    RATIONAL ``ImageBasis(f)`` rather than the orthonormalizing ``ProjectedBasis`` — so the
-    algebraic-irrational QR ``R`` never enters and polyarray's exact/certificate lane carries the
-    program; (ii) any injective image FRAME that must be REALIZED uses its literal columns (the
-    Gram solve, :func:`~grassmann.lower.space_basis._realize_via_gram`) instead of the QR ``Q``.
-    Same subspace, a RATIONAL frame; the price is conditioning (``κ(J)²`` through the Gram) — so
-    this is the SYMBOLIC/CERTIFICATE consumer's opt-in and ``False`` (the default) keeps the
-    well-conditioned orthonormal numeric lane byte-identical to the historical lowering.
+    ``supplied_frames`` lets a caller hand in fundamental-subspace frames it has already
+    computed, as a table ``(which, id(f)) -> (input_name, n_rows, n_cols)`` with ``which`` one
+    of ``img``/``ker``/``coimg``/``coker`` (``"image"`` is normalized to ``"img"``). Where a
+    key is present, the orthonormal frame of that subspace of ``f`` becomes a declared program
+    input of the given name and shape instead of an SVD, QR or GSVD of ``f``. This is the
+    consumer half of treating a frame as a kernel argument: every re-factorization of the same
+    map collapses to an input reference. :func:`frame_cols_program` is the producer half.
 
-    The program is built under polyarray's ``force_stmts`` budget and the
-    post-pass (``partial_eval``) is applied before returning.
+    ``literal_frames`` propagates the rational frame lane over the whole lowering — the
+    argument form of the :func:`literal_ffs_frames` context. With it on, an un-pinned injective
+    ``Img(f)`` leaf is represented in the literal ``ImageBasis(f)`` rather than the
+    orthonormalizing ``ProjectedBasis``, and any injective image frame that has to be realized
+    uses ``f``'s own columns and a Gram solve instead of the QR ``Q``. The two frames span the
+    same subspace; the literal one is rational in the program inputs, so polyarray's exact lane
+    can carry it, where the QR ``Q`` is algebraic-irrational and cannot be carried exactly. The
+    price is conditioning: coordinates then come from ``G = JᵀJ``, whose condition number is
+    ``κ(J)²``. Off by default, which keeps the well-conditioned orthonormal frame for the
+    numeric lane.
+
+    The program is built under polyarray's ``force_stmts`` budget and goes through
+    :func:`_post_pass` before it is returned.
     """
     if literal_frames:
         with literal_ffs_frames(True):
@@ -329,32 +365,39 @@ def frame_cols_program(
     target: B.Basis | None = None,
     output_name: str | None = None,
 ) -> tuple[pa.Program, str]:
-    """Build a standalone "frame-prep" :class:`~polyarray.Program` for map ``f``'s frame.
+    """Build a standalone program that computes one fundamental-subspace frame of map ``f``.
 
-    The producer half of the "frame becomes a kernel argument" design (the
-    consumer half is ``represent(..., supplied_frames=...)``).  Returns a program whose
-    INPUTS are ``f``'s own free term variables (e.g. the Jacobian ``J`` var's input array)
-    and whose single OUTPUT — its name returned as the tuple's 2nd element — is the
-    orthonormal frame columns ``Q``: **exactly** the ``FfsRealization.cols`` that
-    :func:`_realize_ffs_by_which` produces for the fundamental subspace ``which`` of ``f``
-    inside a full :func:`represent`.  Pointwise runs this once per cell to obtain the
-    numeric ``Q`` and feeds it to the ``supplied_frames`` short-circuit, collapsing
-    the per-integrand re-factorization of ``f`` to an input reference.
+    This is the producer half of treating a frame as a kernel argument, whose consumer half is
+    ``represent(..., supplied_frames=...)``. The returned program takes ``f``'s own free term
+    variables as inputs — the Jacobian variable's array, say — and yields a single output, the
+    frame columns, under the name returned alongside it::
 
-    ``which`` ∈ ``img/image/ker/coimg/coker`` (``"image"`` normalized to ``"img"``); the
-    optional ``source``/``target`` (bases of ``f``'s domain/codomain) select the metric
-    (GSVD / covariant) realization exactly as in :func:`_realize_ffs_by_which` — both
-    ``None`` (the default) is the plain SVD/QR seam.  ``output_name`` overrides the default
-    output name ``f"frame_{which}"``.
+        f's input vars ──► [ SvdOp / QrOp / GSvdOp ] ──► frame columns
+                                                            │
+        represent(..., supplied_frames={(which, id(f)): (name, r, c)})
+                                                            ▼
+                                        the frame is read as a program input,
+                                        not refactorized per use
 
-    This is a minimal :func:`represent`-like driver: it builds a fresh :class:`_Ctx` on a
-    new program, pre-realizes any ``DimVar``-carrying free input of ``f`` (mirroring
-    :func:`represent`, so an n-generic frame sizes its ℝⁿ shapes off the input), then reuses
-    the EXISTING realization machinery — :func:`_realize_ffs_by_which` (which itself lowers
-    ``f`` via :func:`_rep`, declaring ``f``'s input vars as program inputs, and emits the
-    single SvdOp/QrOp/GSvdOp factorization) — and adds its ``cols`` as the program output,
-    finishing with the same :func:`_post_pass` fold + provenance attach as
-    :func:`represent`.  No QR/SVD is re-implemented.
+    Those columns are exactly the :attr:`~grassmann.lower.space_basis.FfsRealization.cols`
+    that :func:`_realize_ffs_by_which` produces for subspace ``which`` of ``f`` inside a full
+    :func:`represent`, so a caller can evaluate this program once and feed the result back
+    through ``supplied_frames``, collapsing every re-factorization of ``f`` to an input
+    reference.
+
+    ``which`` is one of ``img``, ``image``, ``ker``, ``coimg`` or ``coker``, with ``"image"``
+    normalized to ``"img"``. The optional ``source`` and ``target`` are bases of ``f``'s domain
+    and codomain and select the metric (GSVD or covariant) realization exactly as they do
+    inside :func:`_realize_ffs_by_which`; leaving both ``None`` takes the plain SVD/QR seam.
+    ``output_name`` overrides the default output name ``f"frame_{which}"``.
+
+    The body is a minimal :func:`represent` driver rather than a second implementation: it
+    builds a fresh :class:`_Ctx` over a new program, pre-realizes any ``DimVar``-carrying free
+    input of ``f`` so a dimension-generic frame sizes its ℝⁿ shapes off that input, calls
+    :func:`_realize_ffs_by_which` — which lowers ``f`` through :func:`_rep`, declaring its
+    variables as program inputs, and emits the one factorization — adds the resulting columns
+    as the output, and finishes with the same :func:`_post_pass` and provenance attach that
+    :func:`represent` does.
     """
     norm = "img" if which == "image" else which
     prog = pa.Program("frame_cols", budget=_lowering_budget())
@@ -382,38 +425,33 @@ def frame_cols_program(
 
 
 def _post_pass(prog: pa.Program) -> pa.Program:
-    """Run the build-then-simplify post-pass over ``prog``.
+    """Run the build-then-simplify post-pass over a freshly built ``prog``.
 
-    ``analyze`` (report), the uniform numeric constant-fold (BOTH lanes), then (non-rational lane only)
-    aggressive ``partial_eval`` (collapse).
+    Three steps run in order: ``analyze`` produces the structural cost report and keeps that
+    seam explicit, ``fold_numeric`` folds constants in both lanes, and ``partial_eval``
+    collapses residual cells in the numeric lane only.
 
-    ``pa.fold_numeric`` is the ONE uniform, general constant-fold that folds any value-invariant
-    (dataflow-numeric) Stmt — crucially a CONSTANT SVD/GSVD/QR/pinv (e.g. the metric-free
-    exterior-power ``alt`` readout, whose operator matrix is a numeric antisymmetrizer, and the
-    euclidean Hodge ``pinv(pairing)``) — AND resolves the runtime dimension δ (``DimAtom``) that
-    Stmt created to its concrete rank, substituting it across every downstream shape so no
-    dynamic δ lingers.  It is the general replacement for the old narrow ``fold_constant`` opt-in
-    (dropped from ``space_basis.realize_ffs_basis`` / ``_realize_ffs_by_which``): in the RATIONAL
-    lane it folds the constant ``alt`` SVD to a single consistent build-time constant and keeps
-    the symbolic ``W`` statement-free — this is what speeds up the symbolic ``P(T)`` build, by a
-    large constant factor at high degree.  A FEED-invariant but dataflow-SYMBOLIC map (the covariant
-    ``A₀`` antisymmetrizer) is still folded separately by ``try_constant_ffs`` (probe-based), which
-    ``fold_numeric`` cannot reach.
+    ``fold_numeric`` is the one general constant-fold. It folds any ``Stmt`` whose value is
+    invariant under the program inputs — including a constant SVD, GSVD, QR or pseudo-inverse,
+    such as the metric-free exterior-power ``alt`` readout whose operator matrix is a numeric
+    antisymmetrizer, or the euclidean Hodge ``pinv`` of a pairing — and it resolves the runtime
+    dimension ``δ`` that such a ``Stmt`` minted as a :class:`~polyarray.DimAtom` to its concrete
+    rank, substituting it across every downstream shape so no dynamic axis survives the fold.
+    In the rational lane that keeps a symbolic result statement-free, which is what makes a
+    high-degree symbolic build tractable. A map that is invariant across feeds but still
+    symbolic in the dataflow — the covariant antisymmetrizer, whose vertex atoms cancel — is
+    beyond ``fold_numeric``'s reach and is folded instead by the probe-based
+    :func:`~grassmann.lower.space_basis.try_constant_ffs`.
 
-    UNIFORM ACROSS LANES (both).  The fold now runs in the NON-rational (numeric /
-    ``GrassmannBackend``) lane too.  The earlier κ-Koszul corruption (the reference drop-
-    Vandermonde coming out rank-deficient → a non-square element Vandermonde → ``LinAlgError``) was
-    NOT a fold miscomputation: ``fold_numeric`` is value-exact per ``Program.run``.  It was a
-    STRUCTURAL read downstream — pointwise's post-represent quadrature-degree walker
-    (``estimate_degree`` → ``polyarray.program_degree``) links a Stmt's producer to its consumer by
-    ``id(cell-array)`` and, on a miss, scores cells by generator NAME (a fallback that knows field
-    degrees but NOT the geometry/position generators).  ``fold_numeric`` used to rebuild every
-    non-bulk cell ref with a FRESH array even when it substituted nothing, breaking that identity
-    link for the position-carrying refs (the Koszul ``κ = x·`` factor), so the walker lost the
-    position's degree-1, under-estimated the quadrature order, and under-integrated the moment
-    DOFs (drop rows → 0).  Fixed at the source: ``polyarray.simplify._fold_cells`` is now
-    identity-transparent on a no-op fold (returns the SAME array object when no folded generator is
-    touched), so the degree walk is unperturbed and the drop-Vandermonde keeps full rank.
+    The fold runs in both lanes. That is safe for a downstream structural reader only because
+    ``polyarray.simplify._fold_cells`` is identity-transparent on a no-op fold: it hands back
+    the same array object when it substitutes nothing. A consumer that links a ``Stmt``'s
+    producer to its consumer by cell-array identity — a quadrature-degree walker, for instance
+    — would otherwise lose the link on every ref the fold rebuilt but did not change, and
+    silently mis-score the generators those refs carry.
+
+    Only the numeric lane then runs ``partial_eval``. The rational lane returns the folded
+    program as it stands, since its whole point is closed-form, inlinable cells.
     """
     pa.analyze(prog)  # structural cost report (side-effect-free; keeps the seam explicit)
     folded = pa.fold_numeric(prog)  # BOTH lanes: fold constant SVD/GSVD/pinv + resolve δ.
@@ -514,66 +552,70 @@ _MAX_CELL_SIZE = 8
 
 @dataclass
 class _Ctx:
-    """Threaded lowering state: the program, basis pins, and the input-var registry."""
+    """The state one lowering threads through every ``_rep_X`` arm.
+
+    It carries the program being built, the caller's basis pins, and the registries that keep
+    one lowering self-consistent: which variable already has an input array, which FFS
+    factorization has already been emitted, and which runtime dimension atom stands for a given
+    subspace dimension. Sharing those registries is what makes two occurrences of the same
+    subspace agree at run time — two values of the same ``Img(f)`` carry literally the same
+    :class:`~polyarray.DimAtom`, so their einsums unify instead of colliding on two nominally
+    distinct dynamic axes.
+    """
 
     prog: pa.Program
     basis_env: dict[int, B.Basis]
     # Var.uid -> the Rep allocated for it (a Program input, or a binder-bound input).
     inputs: dict[int, Rep]
-    # next free-index einsum label POOL INDEX for LLam coordinate-tensor binding.
+    # Next einsum label to hand out from the free-index pool for LLam coordinate-tensor binding.
     _free_label_next: int = 0
-    # Bare FFS-typed inputs (e.g. ``a : Λᵏ``) lowered to dynamic bulk
-    # inputs.  Keyed by the defining FFS map's structural key (see ``_ffs_sibling_key``) so
-    # two inputs that must share a runtime δ (e.g. ``a, b : Λᵏ``, even when their binder
-    # uids differ) get a sibling-agreement ``shape_eq`` AssertOp.  Each entry is the
-    # SymArray of the first dynamic input registered for that FFS.
+    # Bare FFS-typed inputs (``a : Λᵏ``) lowered to dynamic bulk inputs, keyed by the defining
+    # map's structural key (see ``_ffs_sibling_key``).  Two inputs that must share a runtime δ —
+    # ``a, b : Λᵏ``, whose binder uids differ — hash to the same key and get a sibling-agreement
+    # ``shape_eq`` AssertOp against the SymArray recorded here, which is the first dynamic input
+    # registered for that subspace.
     ffs_input_siblings: dict[tuple, pa.SymArray] = field(default_factory=dict)
-    # Lam→sub-Program: a body lowered once into its own sub-Program, keyed by
-    # (id(Lam), sub-input uids) so a *reused* dependent function is lowered once + called.
+    # A Lam body lowered once into its own sub-Program, keyed by (id(Lam), sub-input uids), so a
+    # dependent function used several times is lowered once and called at each use.
     lam_subprograms: dict[tuple, tuple[pa.Program, list[B.Basis], B.Basis]] = field(
         default_factory=dict
     )
-    # Per-Program-build memo of FFS factorizations (the SvdOp/QrOp/GSvdOp seam).
-    # An FFS basis of a map ``f`` may be requested many times in one lowering (a Var's
-    # dynamic-δ shape, the rank-consistency AssertOp, and every Project/Embed of that
-    # FFS space all trigger ``_realize_ffs_for_space``).  Without memoization each request
-    # re-emits ``_rep(f)`` + the (cod,dom) transpose + a fresh SvdOp/QrOp/GSvdOp — the same
-    # factorization computed N times at run time.  Keyed by ``(which, id(f))`` (the map's
-    # domain/codomain metric is a pure function of ``f``, so it needs no separate key term;
-    # ``id(f)`` never collapses two genuinely-distinct map nodes), the first realization is
-    # cached and its :class:`FfsRealization` outputs (cols, rank, δ DimAtom) are reused by
-    # every later consumer — so each distinct factorization is emitted exactly once.
-    # (The concrete key is a heterogeneous tuple — ``(norm, id(f), id(own_metric_basis))``
-    # for the direct seam, ``("img-cov", id(f), id(source), id(target))`` for the covariant
-    # one — so the annotation is the widened ``tuple[str | int, ...]``.)
+    # Memo of the FFS factorizations (the SvdOp/QrOp/GSvdOp seam) emitted by this build.
+    # One FFS basis of a map ``f`` is asked for many times in a single lowering: a Var's
+    # dynamic-δ shape needs it, so does the rank-consistency AssertOp, and so does every
+    # Project/Embed of that subspace.  Unmemoized, each request re-lowers ``f``, re-emits the
+    # (cod,dom) transpose and factorizes again, so the same decomposition runs N times at run
+    # time.  The first realization is cached and its cols, rank and δ atom are reused, which is
+    # what makes each distinct factorization appear exactly once in the program.  The key is
+    # heterogeneous — ``(norm, id(f), id(own_metric_basis))`` for the direct seam,
+    # ``("img-cov", id(f), id(source), id(target))`` for the covariant one — hence the widened
+    # annotation; ``id(f)`` is sound as a key because it never conflates two distinct map nodes,
+    # and the domain/codomain metrics are a function of ``f`` and so need no key term of their own.
     ffs_realizations: dict[tuple[str | int, ...], FfsRealization] = field(default_factory=dict)
-    # A caller-supplied frame table: ``(which, id(f)) -> (input_name, n_rows, n_cols)``.
-    # When a key is present, ``_realize_ffs_by_which`` realizes that FFS frame of ``f`` as a
-    # DECLARED Program INPUT named ``input_name`` (shape ``(n_rows, n_cols)``) instead of
-    # factorizing ``f`` (the SvdOp/QrOp/GSvdOp seam) — this is the consumer half of the
-    # "frame becomes a kernel argument" design: an external caller who has already computed
-    # the orthonormal frame supplies it once, collapsing every re-factorization to an input
-    # reference.  A pure read-only lookup table: shared by reference across every sub-``_Ctx``
-    # (like ``basis_env``), keyed on the SAME ``(which, id(f))`` normalization the memo uses
-    # (``"image"`` → ``"img"``).  Empty by default ⇒ the lowering is byte-identical.
+    # Frames the caller computed elsewhere: ``(which, id(f)) -> (input_name, n_rows, n_cols)``.
+    # Where a key is present, ``_realize_ffs_by_which`` declares that frame of ``f`` as a program
+    # input of the given name and shape instead of factorizing ``f`` — the consumer half of
+    # treating a frame as a kernel argument, so every re-factorization becomes an input
+    # reference.  It is read-only and shared by reference across each sub-``_Ctx``, like
+    # ``basis_env``, and keyed on the same ``(which, id(f))`` normalization the memo uses
+    # (``"image"`` folded to ``"img"``).
     supplied_frames: dict[tuple[str, int], tuple[str, int, int]] = field(default_factory=dict)
-    # Canonical per-``(which, id(f))`` subspace-dimension ``DimAtom``.
-    # The dynamic FFS dimension of a map ``f`` is metric-INDEPENDENT (the rank, or its
-    # complement for ker/coker), so the metric-free SVD and the metric GSVD of one
-    # ``(f, which)`` — and every FFS-typed Var of that space — must share ONE atom.  The
-    # space-basis seam mints the column-axis ``DimAtom`` once (on the first realization,
-    # sourced from that realization's rank/comp output) and records it here; subsequent
-    # realizations of the same ``(which, id(f))`` reuse it.  Because two Vars of the same
-    # FFS then literally carry the same atom, ``_stack_term_cols`` accepts their stack and
-    # einsums/InvOp unify — no per-input ``from_input`` δ atoms.  ``None`` for the SUBSPACE
-    # axis means "not yet minted".  For ker/coker the recorded atom IS the complement
-    # axis (``ambient − rank``), since that is the real subspace dimension there.
+    # The canonical subspace-dimension ``DimAtom`` for each ``(which, id(f))``.
+    # A map's FFS dimension is metric-independent — it is the rank, or the ambient dimension
+    # less the rank for ker/coker — so the metric-free SVD, the metric GSVD and every
+    # FFS-typed Var of that space must all size their dynamic axis by ONE atom.  The
+    # space-basis seam mints it on the first realization, sourced from that realization's rank
+    # or complement output, and records it here for the rest to reuse.  Because two Vars of the
+    # same subspace then carry the identical atom, their stack is accepted and their einsums
+    # and InvOps unify, rather than each input minting a δ of its own.  An absent key means the
+    # atom is not minted yet.  For ker and coker the atom recorded is the complement axis
+    # ``ambient − rank``, which is the subspace dimension there.
     ffs_dim_atoms: dict[tuple[str, int], pa.DimAtom] = field(default_factory=dict)
-    # n-generic codegen. A symbolic ``DimVar('n')`` (an mcalc dimension-polymorphic size)
-    # lowers as a RUNTIME dimension — a canonical input-sourced ``DimAtom`` minted from the first
-    # Var that carries that dim (source ``("in", var, axis)``) and reused by every later occurrence,
-    # so ``x, A : ℝⁿ`` share one atom (einsums/eyes unify) and the emitted numpy sizes off the input
-    # shapes (``np.eye(n)``) instead of a hardcoded literal. Keyed by the DimVar name.
+    # The runtime atom standing for each symbolic ``DimVar``, keyed by its name.
+    # A dimension-polymorphic size lowers as a runtime dimension: the first Var carrying that
+    # dim mints an input-sourced ``DimAtom`` (source ``("in", var, axis)``) and every later
+    # occurrence reuses it, so ``x, A : ℝⁿ`` share one atom, their einsums and identities unify,
+    # and the emitted numpy reads the size off an input shape rather than a literal.
     dimvar_atoms: dict[str, pa.DimAtom] = field(default_factory=dict)
 
 
@@ -583,33 +625,38 @@ class _Ctx:
 
 
 # ---------------------------------------------------------------------------
-# Canonical-shape invariant hook (debug/fuzz — OFF by default, zero cost when off).
+# Canonical-shape invariant hook, for debugging and fuzzing.  Off by default and free when off.
 #
-# The invariant: a grassmann Space has exactly ONE canonical numeric shape,
-# ``_shape_of_space(space)``, and every node that realizes a value of that space MUST produce
-# an array whose (space) axes equal it.  When enabled, this fires at the PRODUCING node —
-# catching a shape divergence there rather than downstream at a Sum/Concat.  Toggle via
-# ``GRASSMANN_REP_SHAPE_CHECK=1`` or :func:`set_shape_check`.
+# The invariant: a Space has exactly one canonical numeric shape, ``_shape_of_space(space)``,
+# and every node realizing a value of that space owes an array whose space axes equal it.
+# Armed, the check fires at the node that produced the array, so a divergence is reported
+# where it originated rather than downstream where a Sum or a Concat first trips over it.
+# Arm it with ``GRASSMANN_REP_SHAPE_CHECK=1`` or :func:`set_shape_check`.
 # ---------------------------------------------------------------------------
 
 _SHAPE_CHECK: bool = os.environ.get("GRASSMANN_REP_SHAPE_CHECK", "") not in ("", "0", "false", "no")
 
 
 def set_shape_check(on: bool) -> bool:
-    """Enable/disable the canonical-shape invariant hook at runtime; returns the previous value."""
+    """Arm or disarm the canonical-shape invariant hook, returning its previous setting.
+
+    While armed, every ``Rep`` a node produces is checked against the canonical shape of its
+    space and a mismatch raises :class:`ShapeInvariantError`.
+    """
     global _SHAPE_CHECK
     prev, _SHAPE_CHECK = _SHAPE_CHECK, bool(on)
     return prev
 
 
 def _assert_canonical_shape(rep: Rep, e: T.Term) -> None:
-    """Assert ``rep``'s realized space-axes match the canonical shape of ``rep.space``.
+    """Check that ``rep``'s realized space axes match the canonical shape of its space.
 
-    Static case (all axes concrete): the exact shape must equal ``_shape_of_space``.  Dynamic case
-    (a symbolic/``DimAtom`` axis, from the ``DimVar`` n-generic lane): the concrete sizes are not
-    known at compile time, so the check falls back to the **rank** (axis count), which must equal
-    the space's canonical axis count.  Rank is computed with ``_space_axes`` — pure structure, so
-    no FFS realization is triggered (the hook must not mutate the program).
+    When every axis is a concrete integer the shape must equal ``_shape_of_space`` exactly.
+    When a symbolic or :class:`~polyarray.DimAtom` axis is present — the dimension-generic lane
+    — the sizes are unknown until run time, so the check falls back to the rank, which must
+    still equal the space's canonical axis count. That rank comes from ``_space_axes``, which
+    is pure structure and realizes no FFS basis, because a diagnostic hook must not add
+    statements to the program it is inspecting.
     """
     shape = _shape_of(rep.array)
     n_space = len(shape) - len(rep.free_labels)
@@ -642,18 +689,20 @@ def _assert_canonical_shape(rep: Rep, e: T.Term) -> None:
 
 
 def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
-    """``⟦e⟧ ⇒ Rep`` — represent ``e``, then re-express it in the ``target`` basis.
+    """Represent ``e``, then make sure the result is in the ``target`` basis.
 
-    ``target`` (default :data:`~grassmann.core.basis.AUTO`) is a **per-call** policy — it is not
-    threaded through ``ctx``, so each ``_rep`` call chooses independently and a sub-call may
-    target a different basis than its parent (recursive calls default to ``AUTO``, so a targeted
-    call re-expresses only that node, not its operands):
+    ``target`` is a per-call policy rather than threaded state: it is not carried on ``ctx``, so
+    each ``_rep`` call decides for itself and a recursive call defaults back to ``AUTO``. A
+    targeted call therefore re-expresses that one node, not the operands beneath it.
 
-    * ``AUTO`` — keep the node's natural basis (a ``basis_env`` pin, else ``choose``).
-      No cob is emitted, so this is byte-identical to the historical lowering.
-    * ``STD`` — re-express the node in ``default_basis(space)`` (the standard orthonormal basis).
-    * a concrete :class:`~grassmann.core.basis.Basis` — re-express into it when it is a basis of
-      this node's space (else keep natural); used to pin a chosen result.
+    * :data:`~grassmann.core.basis.AUTO` keeps the node's natural basis — a ``basis_env`` pin
+      if it has one, otherwise :func:`~grassmann.lower.choose.choose` — and emits no cob.
+    * :data:`~grassmann.core.basis.STD` re-expresses the node in ``default_basis(space)``.
+    * a concrete :class:`~grassmann.core.basis.Basis` re-expresses into that basis when it is a
+      basis of this node's space, and is ignored otherwise.
+
+    The node itself sees ``target`` and realizes directly in it wherever that is cheap, so the
+    cob below is usually a no-op; it exists as the safety net that makes the policy total.
     """
     # The node sees ``target`` and realizes directly in it where it cheaply can (a Var declares
     # its input in that basis; a Sum/Scale builds its operands in it) — so no cob is needed.
@@ -671,7 +720,12 @@ def _rep(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
 def _resolve_target(
     ctx: _Ctx, space: S.Space, policy: B.TargetBasis | B.Basis,
 ) -> B.Basis | None:
-    """Give the concrete basis ``policy`` asks for in ``space`` (``None`` ⇒ keep the natural basis)."""
+    """Resolve a target-basis policy against one space, or ``None`` to keep the natural basis.
+
+    :data:`~grassmann.core.basis.AUTO` resolves to ``None``, and so does a policy that cannot
+    apply here: a :data:`~grassmann.core.basis.STD` request against a space with no static
+    default, or a concrete basis that belongs to some other space than this one.
+    """
     if policy is B.AUTO:
         return None
     if policy is B.STD:
@@ -687,10 +741,21 @@ def _resolve_target(
 
 
 def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> Rep:
-    """Re-express ``rep`` in ``target``, cob'ing each space axis (FFS-aware).
+    """Re-express ``rep`` in ``target``, changing basis on each space axis in turn.
 
-    Handles a value (one space axis) and an operator/tensor (a ``BasisProd`` of per-axis
-    bases) alike; the free (basis-index) axes ride along untouched.
+    A value with a single space axis takes one cob matrix on that axis. An operator or tensor
+    whose basis is a ``BasisProd`` is walked factor by factor, each factor cob'd over the array
+    axes it actually spans::
+
+        basis   BasisProd( b₀ ,   b₁    ,      b₂      )
+        axes        │       │   ┌──┴──┐         │
+        array    [  0   ,   1 , 2  ,  3    ,    4  , …free… ]
+                    └ w=1 ┘   └─ w=2 ─┘      └ w=1 ┘
+
+    A factor is not always one axis wide: an ``LLam`` tags its result with a nested product
+    whose last factor is the body's own basis, and :func:`_factor_axis_widths` is what maps
+    factors to the axes they cover. The free basis-index axes ride along untouched throughout,
+    and the walk realizes an FFS basis through the SVD/QR seam where one is involved.
     """
     # A scalar rep (no space axes — ``Scalar`` space, possibly with only free axes) has
     # basis-invariant coordinates: ℝ has a single basis, so any cob is the identity.  Guard it
@@ -725,16 +790,26 @@ def _coerce_rep_to_target(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) ->
 def _factor_axis_widths(
     ctx: _Ctx, bases: tuple[B.Basis, ...], n_axes: int,
 ) -> list[int]:
-    """Give how many array axes each basis factor spans, for an array of ``n_axes`` space axes.
+    """Give how many array axes each basis factor spans, over an array of ``n_axes`` space axes.
 
-    A factor's natural width is the axis count of the space it is a basis of (so it agrees with
-    :func:`_shape_of_space`, the same space→shape map the reps are built against).  A *nested*
-    product factor therefore spans several axes — which is how an ``LLam`` tags its body.
+    A factor's natural width is the axis count of the space it is a basis of, computed by
+    :func:`_shape_of_space` — the same space-to-shape map the reps themselves are built
+    against. A nested product factor is therefore several axes wide, which is exactly how an
+    ``LLam`` tags its body.
 
-    But an operand is not always stored one-axis-per-leaf: a map over ⊗-spaces arrives FUSED,
-    ``(|dom|, |cod|)``, two axes for two factors whose natural widths are larger.  So the
-    natural widths are used only when they account for exactly the axes present; otherwise the
-    array is fused and each factor owns one axis (the assumption this walker always made).
+    A basis factor and an array axis are not the same thing, though, because an operand is not
+    always stored one axis per leaf. A map over ⊗-spaces arrives fused as ``(|dom|, |cod|)``:
+    two axes for two factors whose natural widths are larger than one::
+
+        basis   BasisProd( dual(A⊗B) ,  C⊗D )      natural widths 2, 2
+        array   [   |dom|      ,    |cod|   ]      but only 2 axes exist
+
+    So the natural widths are trusted only when they account for exactly the axes present;
+    otherwise the array is fused and each factor owns one axis.
+
+    A dimension-generic operand has no static shape at all — :func:`_shape_of_space` refuses a
+    symbolic or runtime dimension — and there the one-axis-per-factor reading is the only one
+    available, which is also the reading this walker used before widths were computed.
     """
     natural = []
     for b in bases:
@@ -749,12 +824,13 @@ def _cob_basis_block(
     ctx: _Ctx, arr: pa.SymArray, sb: B.Basis, tb: B.Basis, axis: int, width: int,
     free_labels: str, *, note: str,
 ) -> pa.SymArray:
-    """Cob the ``width`` array axes starting at ``axis`` that the factor pair ``(sb, tb)`` covers.
+    """Change basis on the ``width`` array axes starting at ``axis``, which ``(sb, tb)`` covers.
 
-    One axis is the ordinary :func:`_apply_cob_on_axis` case.  A factor spanning several axes is
-    cob'd factor-by-factor when both sides are ``BasisProd``s of equal length — which is the
-    shape an ``LLam`` body tag actually has — so no reshape is needed and each sub-factor still
-    rides on its own axis.
+    A one-axis factor is the ordinary :func:`_apply_cob_on_axis` case. A factor spanning several
+    axes is descended into and cob'd factor by factor, which works whenever both sides are
+    products of equal length — the shape an ``LLam`` body tag has — so each sub-factor
+    still rides on its own axis and no reshape is needed. A multi-axis factor that is not a
+    product on both sides has no per-axis decomposition to apply a cob through, and raises.
     """
     if _basis_eq(sb, tb):
         return arr
@@ -782,16 +858,20 @@ def _cob_basis_block(
 # ---------------------------------------------------------------------------
 # The output-basis structure every ``_rep_X`` shares.
 #
-# Each node builds its *natural* Rep, then routes it through the three target cases below.  Today
-# the STD/concrete branches just cob the finished Rep (the generic, always-correct realization);
-# the structure exists so a node can later realize **directly** in the requested basis at minimal
-# complexity (as ``_rep_var``/``_rep_sum``/``_rep_scale`` already do for their inputs/operands).
-# A node may instead special-case these branches inline — see ``_rep_var`` for the visible idiom.
+# A node builds its natural Rep and routes it through the three target cases below.  The STD and
+# concrete branches cob the finished Rep, which is the generic realization and always correct; a
+# node that can reach the requested basis more cheaply overrides that by realizing directly in it
+# — ``_rep_var`` declares its input there, ``_rep_sum`` and ``_rep_scale`` build their operands
+# there — and ``_rep_var`` is the readable example of the idiom.
 # ---------------------------------------------------------------------------
 
 
 def _std_result(ctx: _Ctx, rep: Rep) -> Rep:
-    """(1) STD — re-express ``rep`` in the standard orthonormal basis of its space (no-op if there)."""
+    """Re-express ``rep`` in the standard orthonormal basis of its space.
+
+    A no-op when it is already there, and equally when its space has no static default basis,
+    in which case the natural basis stands.
+    """
     try:
         want = default_basis(rep.space)
     except S.SpaceError:
@@ -802,10 +882,11 @@ def _std_result(ctx: _Ctx, rep: Rep) -> Rep:
 
 
 def _match_result(ctx: _Ctx, rep: Rep, target: B.TargetBasis | B.Basis) -> Rep:
-    """(3) concrete — realize ``rep`` in a concrete ``target`` basis at minimal complexity.
+    """Realize ``rep`` in a concrete ``target`` basis, by a cob if nothing cheaper applies.
 
-    Generic fallback: cob into ``target`` when it is a basis of ``rep``'s space (a no-op when
-    already there), else keep the natural basis.  Per-node minimal-complexity matches refine this.
+    The generic route: change basis into ``target`` when it is a basis of ``rep``'s space, and
+    keep the natural basis otherwise. A node that can land in ``target`` directly overrides this
+    rather than paying for the conversion.
     """
     want = _resolve_target(ctx, rep.space, target)
     if want is None or _basis_eq(rep.basis, want):
@@ -814,15 +895,15 @@ def _match_result(ctx: _Ctx, rep: Rep, target: B.TargetBasis | B.Basis) -> Rep:
 
 
 def _split_target_components(want: B.Basis | None, n: int) -> list[B.Basis] | None:
-    """Split a *structured* ``want`` into its ``n`` per-component sub-bases (else ``None``).
+    """Split a structured target basis into the ``n`` sub-bases its components want.
 
-    The (B) arm of the match decomposition (mirrors ``_cob_from_sum``/``_prod``/``_rep``'s arity
-    logic).
+    A ``BasisProd`` or ``BasisSum`` of arity ``n`` yields its component bases, and a
+    ``BasisRep(c, inner)`` whose count folds statically to ``n`` yields ``inner`` repeated. Any
+    other shape yields ``None``, and the caller falls back to building naturally and cob'ing.
 
-    ``BasisProd``/``BasisSum`` of arity ``n`` ⇒ their component bases; ``BasisRep(c, inner)`` whose
-    count statically folds to ``n`` ⇒ ``[inner]·n``.  A node that decomposes per component (``OProdV``
-    splits a ``BasisProd`` target, ``OPlusV`` a ``BasisSum``/``BasisRep``) builds each operand in its
-    sub-target directly, so the assembled result lands in ``want`` with NO conversion cob.
+    This is what lets a node honour a target without a conversion afterwards: ``OProdV`` splits
+    a ``BasisProd`` target and ``OPlusV`` a ``BasisSum`` or ``BasisRep``, each operand is then
+    built in its own sub-target, and the assembled result already sits in the wanted basis.
     """
     match want:  # audit: ok EX-FALLTHROUGH — returns None by design; caller bails via standard (verified) [approved 2026-07-03]
         case B.BasisProd(bs) | B.BasisSum(bs) if len(bs) == n:
@@ -837,12 +918,15 @@ def _split_target_components(want: B.Basis | None, n: int) -> list[B.Basis] | No
 
 
 def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
-    """``⟦e⟧ ⇒ Rep`` — represent ``e``, given the desired output ``target`` basis.
+    """Dispatch one term node to its representation rule, passing the wanted output basis.
 
-    ``target`` is threaded in so each node can realize *directly* in the requested basis the
-    simplest way (a Var declares its input there; a ``Sum``/``Scale`` builds its operands there)
-    instead of producing a natural basis that ``_rep`` then cobs.  Nodes that cannot cheaply
-    honor it produce their natural basis and rely on ``_rep``'s safety-net cob.
+    The ``match`` here is exhaustive over ``Term`` and ends in ``assert_never``, so every node
+    kind has an arm and a new one cannot be added silently.
+
+    ``target`` is passed down rather than applied afterwards so that a node can realize
+    directly in the requested basis the cheap way — a Var declares its input in it, a ``Sum``
+    or ``Scale`` builds its operands in it. A node that cannot do that returns its natural
+    basis and leaves the conversion to :func:`_rep`'s safety-net cob.
     """
     match e:
         case T.Var():
@@ -938,21 +1022,27 @@ def _rep_node(e: T.Term, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) ->
 
 
 def _rep_var(e: T.Var, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> Rep:
-    """``Var x`` — the Program input for ``x``, in its natural basis.
+    """Lower a term variable to the program input that supplies its coordinates.
 
-    A Var whose space is FFS-dimensioned (``Img``/``Ker``/…) is sized via the SVD/QR
-    rank of the FFS's defining map: an *injective* image realizes via ``QrOp``
-    with a **static** ``rank = |dom|`` (the recovered ``IsoSpace``), so the input is a
-    plain static array.
+    A variable is realized once and then cached, so every occurrence of it shares one input
+    array and one basis. Which basis that is depends on the caller: a variable the caller
+    pinned in ``basis_env`` is declared in that basis, and an unpinned one is declared directly
+    in whatever ``target`` asks for, since declaring an input in a basis costs nothing where
+    cob'ing it afterwards would not.
 
-    A **generic FFS rank is a runtime δ** — only known at run time.  Such a bare FFS-typed
-    Var is lowered to a **dynamic bulk Program input** whose δ axis is an
-    input-sourced :class:`~polyarray.DimAtom` (read from the supplied array's shape at run
-    time), removing the old ``project(ambient, Λᵏ)`` workaround.  Two runtime
-    ``AssertOp``s guard it: (i) **rank-consistency** — the bound input δ must
-    equal the FFS map's computed ``svd_rank`` (when that map is realized in the program);
-    (ii) **sibling agreement** — inputs sharing a δ (e.g. ``a, b : Λᵏ``) get a ``shape_eq``
-    assert against the first sibling.
+    Sizing the input is the harder half, because a variable typed by a fundamental subspace has
+    a dimension that may not exist until the program runs::
+
+        Img(f), f injective   ⇒  QR gives a static rank |dom f|, so a plain static input
+        Img(f), f constant    ⇒  the frame folds at build, so a static-rank input, its axis
+                                 guarded by a static-dimension assert
+        Img(f), otherwise     ⇒  the rank δ is a runtime value, so a dynamic bulk input whose
+                                 subspace axis is a DimAtom read off the fed array's shape
+
+    The dynamic case is guarded at run time by two assertions. The bound input's subspace axis
+    must equal the rank the program computes for the defining map, wherever that map is realized
+    in the program. And two variables of the same subspace — ``a, b : Λᵏ`` — must agree with
+    each other, which a shape equality against the first of them enforces.
     """
     cached = ctx.inputs.get(e.uid)
     if cached is not None:
@@ -2112,13 +2202,14 @@ def _src_or_std(ctx: _Ctx, source: B.Basis | None, f: object) -> B.Basis:
 
 
 def _basis_cob_matrix(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """Change-of-basis matrix ``M`` (from-coords → to-coords) — **total** over bases.
+    """Give the change-of-basis matrix ``M`` taking ``frm`` coordinates to ``to`` coordinates.
 
-    A cob relates two bases of the **same space** — and there are **NO implicit conversions,
-    not even canonical ones** (``ℝ ≅ ℝ*`` must be written explicitly).  So the space guard leads:
-    determine each basis's space and require them equal (:func:`_space_of_basis` /
-    :func:`_same_space`) *before* any dispatch; a different-space pair is an error, never a
-    silent musical/canonical iso.  Same-space pairs go to the exhaustive :func:`_basis_cob_rec`.
+    A cob relates two bases of the *same* space, and grassmann has no implicit conversions —
+    not even canonical ones, so ``ℝ ≅ ℝ*`` has to be written as a term. The space guard
+    therefore leads: each basis's space is determined and the two are required to agree before
+    any dispatch happens, and a pair of bases over different spaces is an error rather than a
+    silently inserted musical isomorphism. A same-space pair goes on to
+    :func:`_basis_cob_rec`, which is total over the basis sum type.
     """
     if not _same_space(ctx, frm, to):
         raise RepresentError(
@@ -2130,15 +2221,15 @@ def _basis_cob_matrix(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _contains_abstract(b: B.Basis) -> bool:
-    """Whether ``b`` is.
+    """Report whether ``b`` is, or anywhere contains, an abstract basis leaf.
 
-    Or structurally CONTAINS — an abstract basis leaf (``BVar``/``BLam``/ ``BApp``), recursing every
-    basis-valued child.
-
-    An abstract leaf has no concrete cob until reduced; a TOP-node-only check (the old
-    ``isinstance``) lets a wrapped/structured pair (``BasisSum(BVar,BVar)``, ``DualBasis(BVar)``,
-    ``OrthonormalBasis(BVar)``, ``BasisRep(2, BasisSum(BVar))``, …) that is ``_basis_eq``-equal
-    slip past to the identity short-circuit, which then fails confusingly in ``realize_basis_cols``.
+    The abstract leaves are ``BVar``, ``BLam`` and ``BApp``: a basis that is still a variable or
+    an unreduced application, and so has no concrete columns and no cob until it is reduced.
+    The search recurses through every basis-valued child, because an abstract leaf is just as
+    unrealizable when it is wrapped — ``DualBasis(BVar)``, ``BasisSum(BVar, BVar)``,
+    ``BasisRep(2, BasisSum(BVar))``. Two such wrapped bases can be ``_basis_eq``-equal, so a
+    check that looked only at the top node would let them reach the identity short-circuit and
+    fail later, obscurely, at the point where columns are realized.
     """
     match b:
         case B.BVar() | B.BLam() | B.BApp():
@@ -2166,14 +2257,19 @@ def _contains_abstract(b: B.Basis) -> bool:
 
 
 def _basis_cob_rec(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """Change-of-basis dispatch.
+    """Dispatch a change of basis on the source basis, then on the destination.
 
-    **match on ``frm``, then dispatch to a per-from-basis handler** (``_cob_from_*``) which matches on ``to``.
-    Each handler has the specialized rule for its (from, to) cases and bottoms out on the standard-basis
-    fallback (:func:`_cob_via_standard`).
+    The ``match`` is over ``frm`` and hands off to a per-source handler, ``_cob_from_*``, which
+    matches in turn on ``to``. Each handler carries the specialized rules for the pairs it can
+    exploit and bottoms out on :func:`_cob_via_standard`, which routes both sides through the
+    standard basis and is always correct.
 
-    Universal pre-steps first: the pure-matrix fast path (succeeds-or-raises), the abstract-basis
-    rejection, the identity short-circuit, and double-dual peeling on either side.
+    Four steps run before that dispatch, in order and for every pair: the pure-matrix fast path,
+    which succeeds outright when both bases realize to static columns; rejection of an abstract
+    basis, which must come before the identity check, since two equal abstract bases satisfy
+    ``_basis_eq`` yet cannot be sized into a concrete identity; the identity short-circuit for
+    genuinely equal bases; and the peeling of a ``PrimalBasis(DualBasis(x))`` double wrap on
+    either side, which denotes ``x`` itself.
     """
     try:
         return cob(ctx.prog, frm, to)                                  # pure-realizable ⇒ static cob
@@ -2774,7 +2870,13 @@ def _strip_variance(basis: B.Basis) -> B.Basis:
 def _apply_cob_on_axis(
     ctx: _Ctx, m: pa.SymArray, arr: pa.SymArray, axis: int, free_labels: str, *, note: str,
 ) -> pa.SymArray:
-    """Apply a cob matrix ``m`` (new←old) on ``arr``'s ``axis`` (an einsum), free axes ride."""
+    """Apply a cob matrix ``m`` to one axis of ``arr``, leaving every other axis alone.
+
+    ``m`` maps old coordinates to new ones, so the contraction is ``m[new, old]`` against
+    ``arr``'s ``axis``, emitted as a single einsum. The remaining space axes and the free
+    basis-index axes named by ``free_labels`` ride through unchanged, and the output axis takes
+    ``m``'s row count as its new width.
+    """
     shape = _shape_of(arr)
     n_free = len(free_labels)
     n_space = len(shape) - n_free
@@ -2962,10 +3064,20 @@ def _rep_eval(
 
 
 def _slot_covers_arg(slot_space: S.Space | None, arg_space: S.Space) -> bool:
-    """Does ``f``'s dual slot span the arg's WHOLE space (a fused map-operator slot, e.g. a
-    ``Kron``/``Lift`` domain ``dual(A⊗B)``) rather than a single sub-factor (a partial
-    contraction, ``dual(A)`` against a value in ``A⊗B``)?  Structural — works for symbolic dims,
-    where the static ``slot == ∏(arg axes)`` dim test cannot decide."""
+    """Report whether ``f``'s dual slot spans the argument's whole space rather than one factor.
+
+    A fused map-operator slot — the domain ``dual(A⊗B)`` of a ``Kron`` or a ``Lift`` — consumes
+    the argument entire, so the argument's axes must be fused into the one axis the slot
+    contracts. A slot of ``dual(A)`` facing a value in ``A⊗B`` is instead a partial contraction
+    and must be left alone::
+
+        slot dual(A⊗B)  vs  arg in A⊗B    ⇒  covers:  fuse the arg's axes into one
+        slot dual(A)    vs  arg in A⊗B    ⇒  partial: contract A, leave B standing
+
+    The test is structural, comparing the slot's primal space with the argument's space, so it
+    still decides when the dimensions are symbolic and the arithmetic test
+    ``slot == ∏(arg axes)`` cannot.
+    """
     if slot_space is None:
         return False
     primal = slot_space.space if isinstance(slot_space, S.Dual) else slot_space
@@ -3058,12 +3170,17 @@ def _fuse_arg_to_slot(
 
 
 def _dyn_reshape(ctx: _Ctx, arr: pa.SymArray, target: tuple[object, ...], *, note: str) -> pa.SymArray | None:
-    """Reshape ``arr`` to ``target`` with a :class:`polyarray.DynReshapeOp`.
+    """Reshape ``arr`` to a target shape whose axes may only be known at run time.
 
-    Each target axis becomes a ``spec`` entry: a static ``int`` (kind 0), an input-sourced
-    ``DimAtom`` read from its source input (kind 1), or numpy ``-1`` (kind 2, *infer*) for a
-    computed/product atom that is not a single input axis.  ``None`` if more than one axis would
-    need inferring (numpy allows a single ``-1``), so the caller leaves the array unreshaped."""
+    Each target axis becomes one entry of the :class:`polyarray.DynReshapeOp` spec: a static
+    integer, an input-sourced :class:`~polyarray.DimAtom` whose size is read off that input's
+    shape at run time, or numpy's ``-1`` for a computed atom — a product of two dimensions, say
+    — that is not a single input axis and so must be inferred.
+
+    Since numpy admits only one inferred axis, this gives ``None`` when a second axis would need
+    inferring, and the caller then leaves the array unreshaped rather than emitting something
+    ambiguous.
+    """
     spec: list[tuple[int, int]] = []
     refs: list[pa.SymArray] = [arr]
     infer_used = False
@@ -3089,13 +3206,18 @@ def _dyn_reshape(ctx: _Ctx, arr: pa.SymArray, target: tuple[object, ...], *, not
 
 
 def _dyn_unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
-    """Un-fuse a symbolic-dim ``Eval`` result whose surviving map-operator slot came back as one
-    fused axis (the ``DimVar`` mirror of :func:`_unfuse_eval_result`).
+    """Split a fused ``Eval`` result axis back into its factors, with dimensions known at run time.
 
-    The result space's per-factor dynamic axes are sized from their source inputs at run via a
-    :class:`polyarray.DynReshapeOp`.  Bails (leaves the fused array) on any FFS factor (avoid an
-    SVD realization here), a static/non-input-sourced axis, or a trailing free (basis) axis — those
-    stay the documented n-generic gaps rather than a wrong reshape."""
+    This is the dimension-generic counterpart of :func:`_unfuse_eval_result`: the surviving slot
+    of the contraction is itself a map space, so it comes back as one axis while the result's
+    space and basis carry it as several factors. Each factor's dynamic size is read off its
+    source input at run time through a :class:`polyarray.DynReshapeOp`.
+
+    Three cases are left fused rather than reshaped, because a wrong reshape is worse than an
+    unsplit axis: a factor that is a fundamental subspace, since sizing it would realize an SVD
+    here and that is not this pass's work; an axis that is static or not sourced from an input;
+    and a trailing free basis axis, which a space-only reshape would drop.
+    """
     if rep.free_labels:
         return rep  # a trailing free axis would be dropped by the space-only reshape
     axes_spaces = _space_axes(rep.space)
@@ -3744,12 +3866,12 @@ def _rep_corestrict(
     coerced its operand, the arm may honestly tag ``default_basis(space)`` — whose codomain
     factor IS ``img_basis``.
 
-    STRUCTURE (docs/auditing.md §0 — known, NOT exploited; the bail is what runs): in the
-    LITERAL image frame :class:`~grassmann.core.basis.ImageBasis` ``(f)``, whose columns *are*
-    the ``f(eᵢ)``, ``f~`` is by definition the IDENTITY matrix.  A concrete-target request for
-    that basis currently goes through the generic ``_match_result`` cob
-    (``ProjectedBasis → ImageBasis``, i.e. the ``R`` factor of ``J = U·R``) — always correct,
-    but a direct ``eye`` would be minimal.
+    One piece of structure this arm knows about but does not exploit: in the literal
+    :class:`~grassmann.core.basis.ImageBasis` of ``f``, whose columns *are* the ``f(eᵢ)``, the
+    corestriction is by definition the identity matrix. A request targeting that basis instead
+    takes the generic cob through :func:`_match_result`, from the projected basis to the image
+    basis, which is the ``R`` factor of ``J = U·R``. That is correct, as every bail is; an
+    identity would merely be cheaper.
     """
     space = _synth(e)
     img = S.Img(f)
@@ -5103,22 +5225,23 @@ def _rep_llam(
     e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    """``LLam([xᵢ:sᵢ]. e)`` — the map's coordinate tensor.
+    """Lower a linear lambda to the coordinate tensor of the map it denotes.
 
-    Two lowering strategies, selected by ``GRASSMANN_LLAM_INDEX``:
+    A map is a tensor, and its coordinates are what the body evaluates to as each bound variable
+    runs over its basis. Two strategies build that tensor, and ``GRASSMANN_LLAM_INDEX`` selects
+    between them.
 
-    * ``"vmap"`` (Path B, DEFAULT) — lower the body once as a sub-Program with each bound var a
-      RANK-1 input (its basis-index a real input, NOT a free axis), then ``vmap`` the sub-Program
-      over the binding basis (feed ``eye``; each slice is the j-th basis vector ``eⱼ``).  Each
-      slice is an honest rank-1 ``eval`` (no free-axis, no entanglement), so a non-default body
-      basis is tagged honestly instead of raising.  The correct path — default for now.
-    * ``"eye"`` — bind each linear var to a materialized ``eye`` on an untyped FREE axis and lower
-      the body ONCE (a single einsum); faster, and byte-identical to the historical lowering, but a
-      non-default/non-orthonormal body entangles a Gram onto the free axis so it RAISES loudly.
+    The default, ``"vmap"``, lowers the body once as a sub-program in which each bound variable
+    is a rank-1 input — its basis index a genuine input rather than a free axis — and then maps
+    that sub-program over the binding basis, feeding an identity whose ``j``-th slice is the
+    basis vector ``eⱼ``. Every slice is an honest rank-1 evaluation, with no free axis and no
+    entanglement between the index and the body, so a body that lands in a non-default basis is
+    tagged with the basis it is genuinely in.
 
-    TODO: Path A — a typed/one-pass index that flows its basis through ``eval``'s
-    reconciliation — would be both fast (one einsum) AND correct, superseding both modes as the
-    default.  Until then ``vmap`` is the correct default (a runtime vmap loop, slower than ``eye``).
+    The alternative, ``"eye"``, binds each linear variable to a materialized identity on an
+    untyped free axis and lowers the body once as a single einsum. It is faster, but the free
+    axis carries no basis, so a non-default or non-orthonormal body entangles a Gram factor onto
+    it; that case raises rather than returning coordinates it cannot honestly label.
     """
     mode = os.environ.get("GRASSMANN_LLAM_INDEX", "vmap")
     if mode == "vmap":
@@ -5589,7 +5712,15 @@ def _rep_lam(
 
 
 def _natural_basis(space: S.Space, term: T.Term, ctx: _Ctx) -> B.Basis:
-    """Choose the basis to represent ``space`` in: a pin (``basis_env``), else the symbolic-minimizing choice."""
+    """Choose the basis to represent ``space`` in while lowering ``term``.
+
+    A term variable the caller pinned in ``basis_env`` is represented in that basis. Otherwise
+    :func:`~grassmann.lower.choose.choose` scores the candidates
+    :func:`~grassmann.lower.space_basis.space_basis` offers for the space, against the term, and
+    the winner is the one expected to leave the fewest symbolic cells. A space with no static
+    default — an ``SVar`` or an unreduced ``App`` — falls back to
+    :func:`~grassmann.lower.space_basis.default_basis`.
+    """
     if isinstance(term, T.Var) and term.uid in ctx.basis_env:
         return ctx.basis_env[term.uid]
     try:
@@ -5601,10 +5732,18 @@ def _natural_basis(space: S.Space, term: T.Term, ctx: _Ctx) -> B.Basis:
 
 
 def _coerce_basis(ctx: _Ctx, rep: Rep, target: B.Basis, *, note: str) -> pa.SymArray:
-    """Change ``rep`` into ``target`` basis (a numeric cob matmul).
+    """Give ``rep``'s coordinates re-expressed in ``target``, as a numeric contraction.
 
-    FFS-total: routes through :func:`_basis_cob_matrix`, which realizes an FFS basis through
-    the SVD/QR seam when the pure-matrix ``cob`` refuses it — so any valid basis is accepted.
+    The cob matrix comes from :func:`_basis_cob_matrix`, which realizes a fundamental-subspace
+    basis through the SVD/QR seam when the pure-matrix route refuses it, so every valid basis of
+    the space is accepted here.
+
+    Two shapes are special. A multi-axis operand — any ⊗-space value, an operator, a tensor —
+    cannot take a single matrix on a single axis, so it is routed to
+    :func:`_coerce_rep_to_target`, which cobs each space axis against its own basis factor. A
+    ``Scalar``-space value is stored 0-dimensional while its basis is one-dimensional, so the
+    empty-product law applies: the value is reshaped to the coordinate vector ``[x]``, the 1×1
+    cob is applied, and the scalar is handed back.
     """
     if _basis_eq(rep.basis, target):
         return rep.array
@@ -8042,7 +8181,12 @@ class _OpaqueOp:  # audit: ok LOWER-PYAB-HOLE,LOWER-NUMPY-HOLE — foreign escap
 
 
 class CobError(Exception):
-    """Raised when two bases cannot be related by a (pure-matrix) change of basis."""
+    """Raised when two bases cannot be related by a pure-matrix change of basis.
+
+    It is a signal rather than a failure at most call sites: a basis of a fundamental
+    subspace has no static columns, so the caller catches this and goes to
+    :func:`_basis_cob_matrix`, which realizes the frame through the SVD/QR seam first.
+    """
 
 
 def _numeric_dim(metric: object) -> int | None:
@@ -8057,11 +8201,19 @@ def _numeric_dim(metric: object) -> int | None:
 
 
 def cob(program: pa.Program, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymArray:
-    """Give the change-of-basis matrix ``M`` taking from_basis coordinates to to_basis coordinates.
+    """Give the change-of-basis matrix taking ``from_basis`` coordinates to ``to_basis`` ones.
 
-    Emits the matrix-building ``Stmt``s into ``program`` and returns the resulting
-    :class:`~polyarray.SymArray`. Identical bases short-circuit to the identity. Raises
-    :class:`CobError` for FFS / term bases (use :func:`_basis_cob_matrix` for those).
+    The statements that build the matrix are emitted into ``program`` and the matrix itself is
+    returned. Equal bases short-circuit to the identity, and the structured constructors are
+    related componentwise where they match in shape: products compose by Kronecker product, sums
+    block-diagonally, replications by repeating a block, and duals by inverse transpose. A
+    metric wrapper is stripped, since it attaches a metric to a basis without changing its
+    vectors, and so contributes no coordinate change of its own.
+
+    Anything with no componentwise rule left goes through the standard basis: both sides are
+    realized as columns there and composed. A basis with no static columns at all — a
+    fundamental subspace, or one defined by terms — raises :class:`CobError`, and the caller
+    routes it through :func:`_basis_cob_matrix` instead.
     """
     if _basis_eq(from_basis, to_basis):
         return _identity(program, basis_dim(from_basis), "cob:id")
@@ -8098,12 +8250,16 @@ def cob(program: pa.Program, from_basis: B.Basis, to_basis: B.Basis) -> pa.SymAr
 
 
 def realize_basis(program: pa.Program, b: B.Basis) -> pa.SymArray:
-    """Give the matrix whose columns are ``b``'s vectors in the ambient standard coordinates.
+    """Give the matrix whose columns are ``b``'s vectors, written in standard coordinates.
 
-    The static-matrix realization: identity for the orthonormal ``ScalarBasis``, ``(·)⁻ᵀ`` for
-    a ``DualBasis``, Kron/block-diag/block-repeat for the structured bases, ``[ sub | comp ]``
-    for a ``CompleteBasis``. FFS bases (ImageBasis/ProjectedBasis) raise :class:`CobError` —
-    they are realized through the seam by :func:`realize_basis_cols`.
+    This is the realization that needs no factorization. A ``ScalarBasis`` is the identity, a
+    dual basis is the inverse transpose of its primal, the structured constructors compose by
+    Kronecker product, block diagonal or block repetition as their spaces do, and a
+    ``CompleteBasis`` is its sub-basis and complement side by side.
+
+    A basis of a fundamental subspace has no such matrix — its columns come out of a
+    decomposition of the defining map — so it raises :class:`CobError` here and is realized
+    through the seam by :func:`realize_basis_cols`.
     """
     match b:
         case B.ScalarBasis():
@@ -8303,23 +8459,20 @@ def _basis_eq(a: B.Basis, b: B.Basis) -> bool:
 
 
 def numpy_op_renderers() -> dict:
-    """Give the ``to_numpy_source`` ``op_renderers`` map for grassmann's front-end data/shape ops (currently empty).
+    """Give the renderer map for grassmann's front-end data and shape ops, which is empty.
 
-    A grassmann body lowered into a folded pointwise assembly ``Program`` can carry ops that
-    :mod:`polyarray` does not know how to render itself, and this is where grassmann would
-    supply their renderers, keyed by op *class name*.  Pass via
-    ``op_renderers=grassmann.lower.numpy_op_renderers()`` — pointwise merges it in
-    ``fold_op_renderers``.  Mirrors :func:`chartlib.covariant.numpy_op_renderers`.
+    A lowered grassmann body folded into a consumer's assembly program can carry ops
+    :mod:`polyarray` cannot render on its own, and this is grassmann's half of the seam where
+    their renderers would be supplied, keyed by op class name and passed as
+    ``op_renderers=grassmann.lower.numpy_op_renderers()``.
 
-    It used to carry three: ``_ConstOp``, ``_AxisLenOp`` and ``_ReshapeOp``.  Those ops were
-    RELOCATED into polyarray (as ``ConstOp`` / ``AxisLenOp`` / ``ReshapeOp``) and given built-in
-    renderers there, which made these entries unreachable **twice over**: the keys named classes
-    that no longer exist under those names, and ``_render_op`` consults its type-keyed built-in
-    table BEFORE the caller-supplied name table, so even the corrected spelling could not fire.
-    Deleting them is therefore behaviour-preserving by construction — the built-ins were already
-    doing the work, which is exactly why nothing ever looked wrong.
+    Every op this once carried is now a polyarray builtin with a builtin renderer, and
+    ``_render_op`` consults the type-keyed builtin table before any caller-supplied name table,
+    so an entry here for one of them could not fire in any case. The empty mapping is therefore
+    the honest answer, and the seam stays open for a front-end op that needs it.
 
-    Keep the function: it is grassmann's half of a public seam, and a real front-end op will want
-    it again.  An empty mapping is the honest answer today.
+    The ops grassmann does still render — the foreign scalar operators and the frame realization
+    ops — live in :mod:`grassmann.lower.numpy_renderers` and are supplied by
+    :func:`~grassmann.lower.numpy_renderers.op_renderers` instead.
     """
     return {}

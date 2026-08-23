@@ -1,13 +1,25 @@
-"""Bidirectional type synthesis ``Γ ⊢ e ⇒ s``.
+"""The synthesize direction of inference, ``Γ ⊢ e ⇒ s`` — reading a classifier off a term.
 
-Synthesizes the Space (for vectors / linear maps) or Type (for ``Lam`` over a Term, i.e.
-a ``Π``; or an arrow Kind for Space/Type Functions) of a core ``Term``. Application
-(``Eval``/``NEval``), composition, trace, inverses, movement and the binders are typed
-per the contraction-view rules.
+Synthesis walks a core ``Term`` and produces its classifier: a Space for a value or a
+linear map, a Type — a ``Π`` — for a ``Lam`` over a term, or an arrow Kind for a space or
+type function. The dispatch is an exhaustive ``match`` over the closed Term sum, so every
+node has a rule and ``assert_never`` proves none was forgotten.
 
-The companion :mod:`grassmann.infer.check` runs the ``⇐`` direction. Unification of
-implicit space metavars and dimension equality live in :mod:`grassmann.infer.unify` /
-:mod:`grassmann.infer.dims`.
+The rules are written in the contraction view: a linear map ``dom ⊸ cod`` is stored as the
+tensor ``Dual(dom) ⊗ cod``, so applying it contracts a dual factor away and composing
+substitutes one dual factor for another. Trace contracts a primal factor against a dual
+one, the binders build the product of their duals against the body's space, and the
+movement and reshape nodes rearrange factors without changing what they contract to.
+Whatever a rule cannot read off the term it leaves as a fresh metavariable for unification
+to solve, either from a sibling or from the expected space that :mod:`grassmann.infer.check`
+pushes in.
+
+Two obligations outlive a single rule. A ``Project`` with no stated target cannot be solved
+in this direction — a space has many subspaces — so it returns a metavariable and defers the
+``target ⊑ parent`` check until the top level, by which point the check direction should
+have pinned it down. And an asserted map property implies dimension equalities that are
+verified against the resolved space rather than unified into it, since dimensions are only
+ever compared.
 """
 
 from __future__ import annotations
@@ -83,7 +95,12 @@ from .unify import MetaStore, UnifyError, fresh_meta, unify
 
 
 class InferError(Exception):
-    """Raised on an inference failure that is not a raw unification mismatch."""
+    """Raised when a term cannot be typed for a reason other than a space mismatch.
+
+    A structural failure — a slot index out of range, a node used where its rule does not
+    apply, an unlicensed inverse — as opposed to the two-spaces-disagree case, which is
+    :class:`~grassmann.infer.unify.UnifyError`.
+    """
 
 
 # Result of synthesizing a Term: either a Space (value / linear map), a Type (a Π for a
@@ -93,17 +110,19 @@ SynthResult = Space | Type | Kind
 
 @dataclass
 class Ctx:
-    """Inference context ``Γ``: metavar store + type-var scope.
+    """The inference context ``Γ`` threaded through every rule.
 
-    ``space_vars`` records in-scope rigid space vars introduced by ``Lam`` over
-    ``space`` (used only for completeness; the core already carries them as ``SVar``).
+    It carries the metavariable store where unification records its solutions, the rigid
+    space variables a ``Lam`` over ``space`` has brought into scope, and the subspace
+    obligations an unannotated ``Project`` has deferred to the top level. The scope set is
+    informational: the core already names those variables as ``SVar`` nodes.
     """
 
     store: MetaStore = field(default_factory=MetaStore)
     space_vars: set[str] = field(default_factory=set)
-    # Deferred ``s ⊑ parent`` obligations for ``Project(v, None)`` whose target
-    # subspace metavar must be resolved (by the ⇐ check direction) before the subspace
-    # relation can be validated. Each entry is (target_meta, parent_space, vector).
+    # Deferred ``target ⊑ parent`` obligations from a ``Project(v, None)``. The target is a
+    # metavariable the ⇐ direction must solve before the subspace relation can be decided, so
+    # each entry — (target_meta, parent_space, vector) — waits until the top level.
     subspace_obligations: list[tuple[Space, Space, Term]] = field(default_factory=list)
 
 
@@ -144,10 +163,12 @@ def synth(term: Term, ctx: Ctx | None = None) -> SynthResult:
 
 
 def synth_space(term: Term, ctx: Ctx | None = None) -> Space:
-    """Synthesize ``term`` and require the result to be a Space.
+    """Synthesize ``term`` and insist the result is a Space, fully resolved.
 
-    Like :func:`synth`, but rejects a term that classifies as a Type or Kind, and returns
-    the Space fully resolved against the metastore. Raises :class:`InferError` otherwise.
+    This is :func:`synth` for a caller that needs a value or a linear map: a term
+    classifying as a Type or a Kind is a function rather than a value and raises
+    :class:`InferError`. The Space that comes back has the current substitution applied all
+    the way down, so it mentions no solved metavariable.
     """
     top = ctx is None
     if ctx is None:
@@ -161,12 +182,13 @@ def synth_space(term: Term, ctx: Ctx | None = None) -> Space:
 
 
 def _check_subspace_obligations(ctx: Ctx) -> None:
-    """Validate any deferred ``Project(v, None)`` target obligations.
+    """Discharge the subspace obligations an unannotated ``Project`` deferred.
 
-    Once the surrounding context has run, each deferred target metavar should be solved
-    (by the ⇐ check direction). A solved target must be a subspace of its parent; an
-    *unsolved* target means the omitted projection target was never pinned down — an
-    ambiguity the caller must resolve by annotating it or supplying an expected space.
+    By the time the whole surrounding term has been typed, the ⇐ direction should have
+    solved each deferred target metavariable, and a solved target must be a subspace of the
+    space it was projected from. A target still unsolved means nothing ever determined
+    which subspace was meant, which is a genuine ambiguity: the caller has to name the
+    target or supply an expected space.
     """
     from .subspace import is_subspace
 
@@ -295,11 +317,12 @@ def _synth_value(v: Term, ctx: Ctx) -> Space:
 
 
 def _external_requires_standard(data: object) -> bool:
-    """Read the basis contract off an ``External``'s ``data`` payload.
+    """Report whether an ``External``'s payload declares that it needs standard coordinates.
 
-    Done without importing the lowering layer: an op carrying ``basis_req`` whose value is
-    ``"standard"`` (the default :class:`~grassmann.lower.represent.BasisReq.STANDARD`) is
-    meaningful only in standard coordinates; one marked ``"equivariant"`` is basis-free.
+    The payload is read structurally, without importing the lowering layer: an operator
+    carrying a ``basis_req`` of ``"standard"`` is meaningful only in standard coordinates,
+    while ``"equivariant"`` is basis-free. A payload with no such field imposes no
+    constraint.
     """
     req = getattr(data, "basis_req", None)
     if req is None:
@@ -308,14 +331,14 @@ def _external_requires_standard(data: object) -> bool:
 
 
 def _synth_external(e: External, ctx: Ctx) -> Space:
-    """``External(s, data, args…)`` — a foreign elementwise op.
+    """Type a foreign elementwise operator, and surface its basis contract.
 
-    The result space is ``e.space`` (the source of truth, unchanged). On top of that we
-    **surface the kernel's basis contract**: a ``STANDARD`` op's operands must
-    be standardizable to ``default_basis`` before the componentwise kernel runs, so an
-    operand whose space is a still-unresolved, basis-polymorphic metavar/``SVar`` (no known
-    realization ⇒ no standard basis) is rejected here — precisely the case that would
-    silently miscompute under a non-standard basis at lowering time.
+    The result space is the one the node declares. What this rule adds is enforcement of
+    the kernel's basis requirement: a ``STANDARD`` operator is only meaningful in standard
+    coordinates, so its operands have to be standardizable before the componentwise kernel
+    runs. An operand whose space is still a basis-polymorphic metavariable or ``SVar`` has
+    no known realization and hence no standard basis, and is rejected here — the case that
+    would otherwise miscompute silently under a non-standard basis at lowering.
     """
     if _external_requires_standard(e.data):
         for a in e.args:
@@ -355,10 +378,13 @@ def _as_factors(s: Space) -> tuple[Space, ...]:
 
 
 def _synth_eval(e: Eval, ctx: Ctx) -> Space:
-    """``Eval(f, pos, args)`` — linear application.
+    """Type linear application: contract the selected dual factors away.
 
-    ``f ⇒ ⊗(t…)``; for each j, ``t_{pos[j]} ~ Dual(s_j)`` with ``args[j] ⇐ s_j``
-    (``s_j`` may be a fresh ``?α`` recovered from the arg); result = remaining factors.
+    ``f`` synthesizes to a product of factors, and each selected slot must be a ``Dual``
+    input of some space ``s_j``. The corresponding argument is checked against ``s_j``,
+    which recovers it when it was only a fresh metavariable. What is left over after the
+    selected factors are removed is the result: no factors at all means the map was fully
+    contracted, so the result is ``Scalar``.
     """
     fs = _synth_value(e.f, ctx)
     fs = ctx.store.resolve(fs)
@@ -384,19 +410,21 @@ def _synth_eval(e: Eval, ctx: Ctx) -> Space:
 
 
 def _synth_neval(e: NEval, ctx: Ctx) -> Space:
-    """``NEval(f, pos, args)`` — non-linear application of a ``Lam``.
+    """Type non-linear application by walking the ``Π`` chain one slot at a time.
 
-    ``f ⇒ Π(b:σ).τ`` (curried per slot). A value arg is checked against σ; an implicit
-    space param (σ=space) gets a fresh ``?α`` recovered from the arg/result; an explicit
-    space/nat arg substitutes directly.
+    ``f`` synthesizes to a curried ``Π``, one binder per slot. A value argument is checked
+    against its domain space; an explicit space or nat argument is substituted into the
+    codomain directly. A space slot with no supplied argument is an *implicit* parameter: it
+    gets a fresh metavariable, which later value arguments or the expected type will solve.
+    Running out of supplied arguments at a value or nat slot leaves a partial application.
     """
     fty = _synth(e.f, ctx)
     supplied = dict(zip(e.positions, e.args, strict=True))
     result: object = fty
     slot = 0
-    # Walk the Π chain by absolute slot index. A SPACE slot not explicitly supplied is
-    # an IMPLICIT space param: instantiate a fresh ?α (recovered by unification as later
-    # value args / the expected type flow in).
+    # Walk the Π chain by absolute slot index. A space slot with no supplied argument is an
+    # implicit parameter, so instantiate a fresh ?α; unification recovers it as later value
+    # arguments and the expected type flow in.
     while isinstance(result, Pi):
         if slot in supplied:
             result = _apply_pi(result, supplied[slot], ctx)
@@ -458,8 +486,8 @@ def _subst_type_space(t: Type, name: str, sp: Space, ctx: Ctx) -> Type:
 
 
 def _subst_type_term(t: Type, name: str, val: object, ctx: Ctx) -> Type:
-    # Value substitution only affects embedded terms inside spaces (rare in these
-    # examples). For ⟦s⟧ codomains independent of the value, this is the identity.
+    # A codomain does not depend on the value bound at its slot, so substituting a value
+    # into a classifier changes nothing.
     return t
 
 
@@ -540,11 +568,13 @@ def _synth_opaque(e: OpaqueApply, ctx: Ctx) -> Space:
 
 
 def map_domain_codomain(f: object) -> tuple[Space, Space]:
-    """Decode a map term ``f`` into ``(dom, cod)`` where ``f : dom ⊸ cod``.
+    """Give the endpoints of a map term — the ``dom`` and ``cod`` of ``f : dom ⊸ cod``.
 
-    A map space is ``~dom * cod`` (an ``OProd`` of one ``Dual`` input factor and a
-    primal tail), or any single-input/single-output linear-map space. Used by FFS
-    source/target recovery (:mod:`grassmann.infer.dims`) and the inverse rules.
+    The term is synthesized and its map space decoded: a map is stored as the tensor
+    ``Dual(dom) ⊗ cod``, so the dual factors give the domain and the primal ones the
+    codomain. This is how a fundamental subspace recovers the ambient it sits in when its
+    node does not name one, and how the inverse rules learn which way round to build the
+    inverse's space.
     """
     ctx = Ctx()
     return _map_dom_cod_resolved(f, ctx)
@@ -558,7 +588,15 @@ def _map_dom_cod_resolved(f: object, ctx: Ctx) -> tuple[Space, Space]:
 
 
 def _decode_map_space(s: Space) -> tuple[Space, Space]:
-    """``~dom * cod`` ⇒ ``(dom, cod)``. Leading ``Dual`` factors are inputs."""
+    """Split a map space into ``(dom, cod)``, reading ``Dual`` factors as the inputs.
+
+    A map is stored as ``Dual(dom) ⊗ cod``, so the dual factors are the domain and the
+    primal ones the codomain, however many there are of each. A space that is all dual —
+    a map into a dual codomain, ``M ⊸ M*`` being ``Dual(M) ⊗ Dual(M)`` — is ambiguous on
+    that reading, and is resolved by the positional convention
+    :func:`~grassmann.core.space.linear_map_space` builds with: factor 0 is the domain and
+    the rest are the codomain.
+    """
     factors = list(_as_factors(s))
     duals = [f for f in factors if isinstance(f, Dual)]
     prims = [f for f in factors if not isinstance(f, Dual)]
@@ -569,9 +607,8 @@ def _decode_map_space(s: Space) -> tuple[Space, Space]:
     if len(duals) >= 1 and len(prims) == 1:
         dom = oprod(*(d.space for d in duals)) if len(duals) > 1 else duals[0].space
         return dom, prims[0]
-    # A map into a *dual* codomain (e.g. ``M ⊸ M*`` = ``~M ⊗ ~M``) is all-dual and otherwise
-    # ambiguous; resolve it by the positional convention ``linear_map_space`` builds —
-    # factor 0 is ``dual(dom)``, the remaining factors are the codomain.
+    # An all-dual space is ambiguous under the dual-means-input reading, so fall back to the
+    # positional convention ``linear_map_space`` builds with.
     if len(prims) == 0 and len(factors) >= 2 and isinstance(factors[0], Dual):
         cod = factors[1] if len(factors) == 2 else oprod(*factors[1:])
         return factors[0].space, cod
@@ -603,17 +640,16 @@ def _synth_pinv(e: Pinv, ctx: Ctx) -> Space:
 
 
 def _synth_corestrict(e: Corestrict, ctx: Ctx) -> Space:
-    """``Corestrict(f) ⇒ dom(f) ⊸ Img(f)`` — the first-isomorphism-theorem iso.
+    """Type the corestriction ``f~ : dom(f) ⊸ Img(f)`` — the first-isomorphism-theorem iso.
 
-    **Injective-only.**  ``f~`` is an isomorphism exactly when ``ker f = 0``; without that
-    it is only well defined out of ``CoImg(f)``, a different (and out-of-scope) domain.  So a
-    map that is not asserted ``inj`` is REFUSED here rather than silently typed — the
-    corestriction's whole purpose is to make the identification ``dom(f) ≅ Img(f)`` explicit,
-    and that identification is simply false for a non-injective ``f``.
+    The corestriction exists to make the identification ``dom(f) ≅ Img(f)`` explicit, and
+    that identification holds exactly when ``ker f = 0``. A map not asserted ``inj`` is
+    therefore refused rather than typed: for a general map the induced isomorphism runs out
+    of ``CoImg(f)``, a different domain, which this node does not cover.
 
-    The codomain is the *bare* ``Img(f)`` (endpoints left unset): that is the space
-    ``G.img(f)`` builds, and FFS unification keys on the defining map alone, so an
-    ``Img(f, source=…, target=…)`` written by a caller still unifies with it.
+    The codomain is the bare ``Img(f)``, with endpoints left unset. That is the space
+    ``G.img(f)`` builds, and fundamental subspaces unify on the defining map alone, so a
+    caller's ``Img(f, source=…, target=…)`` still unifies with it.
     """
     from grassmann.core.space import Img
 
@@ -687,17 +723,14 @@ def _synth_embed(e: Embed, ctx: Ctx) -> Space:
 
 
 def _synth_assert(e: Assert, ctx: Ctx) -> Space:
-    """``Assert(v, s)``.
+    """Type an assertion: unify the asserted space in, then check it against the properties.
 
-    Unify ``v``'s space with ``s`` (recovering implicit metavars), then let any **asserted map properties** of
-    ``v`` *aid* inference.
-
-    Structural unification of ``s`` solves the implicit space metavars in ``v``'s space
-    (the basic unification aid). On top of that, if ``v`` is a property-bearing map
-    (``inj``/``surj``/``bij``/``rank``), the property-implied dimension equalities are
-    checked against the now-resolved space: an assertion contradicting a property (e.g. a
-    ``bij`` map asserted between spaces of unequal dimension) is rejected here rather than
-    silently accepted.
+    Unifying ``v``'s synthesized space with the asserted one solves the implicit space
+    metavariables ``v`` still carries, which is what makes an assertion useful to inference
+    beyond documentation. When ``v`` is a property-bearing map, the dimension equalities its
+    ``inj``/``surj``/``bij``/``rank`` guarantee are then checked against the resolved space,
+    so a bijection asserted between spaces of unequal dimension is rejected here rather than
+    accepted.
     """
     from .assertions import check_assert_property_consistency
     from .properties import map_props
@@ -705,8 +738,8 @@ def _synth_assert(e: Assert, ctx: Ctx) -> Space:
     s = _synth_value(e.vector, ctx)
     unify(s, e.space, ctx.store)
     resolved = ctx.store.resolve(e.space)
-    # If the asserted value is a property-bearing map, use its asserted facts to validate
-    # the resolved map space (dom/cod dimension relations the property guarantees).
+    # A property-bearing map validates its own resolved space: the dimension relations its
+    # properties guarantee must hold of the decoded domain and codomain.
     if map_props(e.vector) is not None:
         try:
             dom, cod = _decode_map_space(resolved)
@@ -776,11 +809,14 @@ def _synth_kron(e: Kron, ctx: Ctx) -> Space:
 
 
 def _synth_lift(e: Lift | InvLift, ctx: Ctx) -> Space:
-    """``Lift``/``InvLift`` — fuse the listed tensor factors of the vector's space.
+    """Fuse the listed tensor factors of the vector's space into one block.
 
-    ``Lift`` fuses the listed (input/``Dual``) factors into one ``Dual`` of their
-    ⊗; ``InvLift`` is the inverse reshape. The non-fused factors are kept in order, with
-    the fused block inserted at ``k`` (default: in place of the first fused index).
+    ``Lift`` fuses input factors, taking the ``Dual`` of their product so that ``n``
+    separate arguments become one tupled argument — currying, in the contraction view.
+    ``InvLift`` is the inverse reshape and fuses primally, flattening a factor that is
+    itself a product so that ``(V⊗ᵏ)⊗(V⊗ˡ)`` reassociates to ``V⊗ᵏ⁺ˡ`` rather than staying
+    nested. Either way the untouched factors keep their order and the fused block is
+    inserted at ``k``, or at the first fused index when ``k`` is not given.
     """
     s = ctx.store.resolve(_synth_value(e.vector, ctx))
     factors = list(_as_factors(s))
@@ -860,12 +896,13 @@ def _synth_tuple_permute(e: TuplePermute, ctx: Ctx) -> Space:
 
 
 def _synth_llam(e: LLam, ctx: Ctx) -> Space:
-    """``LLam([xᵢ:sᵢ]. e) ⇒ ⊗(Dual sᵢ) * s_e`` (the linear-map space).
+    """Type a linear binder as the map space ``⊗(Dual sᵢ) ⊗ s_body``, and check its resources.
 
-    Beyond the space, enforce the **resource / usage** discipline: each linear
-    var must be consumed exactly once along every path of the body. ``x ↦ x ⊕ 0`` counts
-    as a single use of ``x`` (the ``Zero`` summand consumes nothing) — see
-    :mod:`grassmann.infer.linearity`.
+    The space is the obvious one: one dual factor per bound variable, tensored against the
+    space of the body. The rule also enforces the discipline that makes the binder *linear*
+    — each bound variable must be consumed exactly once along every path of the body, as
+    counted by :mod:`grassmann.infer.linearity`. That is why ``x ↦ x ⊕ 0`` is well formed:
+    the ``Zero`` slot consumes nothing, so ``x`` is used once.
     """
     from .linearity import check_llam_resources
 
@@ -876,11 +913,11 @@ def _synth_llam(e: LLam, ctx: Ctx) -> Space:
 
 
 def _synth_lam(e: Lam, ctx: Ctx) -> SynthResult:
-    """Synthesize the classifier of a ``Lam``.
+    """Type a general binder by what its body is: a term gives a ``Π``, a space a Kind.
 
-    - Term body ⇒ a curried ``Π(bᵢ:σᵢ). Xbody``.
-    - Space body ⇒ an arrow Kind ``σ → space``.
-    - Type body ⇒ an arrow Kind ``σ → *``.
+    A term body makes the binder a function between values, classified by a curried ``Π``
+    over the binders' sorts. A space, type or dimension body makes it a space, type or nat
+    function instead, classified by the corresponding arrow Kind.
     """
     body = e.body
     if is_term(body):

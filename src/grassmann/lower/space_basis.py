@@ -1,27 +1,40 @@
-"""``space_basis`` — default (inner-product-orthonormal) basis + candidates.
+"""What basis a space gets, and how a subspace basis becomes actual columns.
 
-``space_basis(space) -> (default_basis, candidates)``.
+Two things live here. The first is the map from a space to its bases: its default basis,
+and the alternatives :mod:`grassmann.lower.choose` scores against it. The second is the
+realization of a fundamental-subspace basis — the point at which ``Img(f)`` stops being a
+space and becomes a concrete matrix of columns, produced by a factorization of ``f``.
 
-The **default** is the *standard basis*: orthonormal w.r.t. the space's inner
-product, so the metric is the identity in coordinates (``Inner``/``Dagger``/pinv become
-numeric — the major symbolic-minimizing win). It mirrors the Space tower onto the
-Basis tower per this table:
+The default is the standard basis, orthonormal with respect to the space's own inner
+product, so that the metric is the identity in coordinates and ``Inner``, ``Dagger`` and
+the solves all lower to numeric operations. It is built by mirroring the space tower onto
+the basis tower, one constructor at a time::
 
-```
-Scalar      ⇒ ScalarBasis                ⊕(sᵢ) ⇒ BasisSum(default sᵢ)
-                                         ⊗(sᵢ) ⇒ BasisProd(default sᵢ)
-Dual s      ⇒ DualBasis(default s)       ⊕ⁿ s  ⇒ BasisRep(n, default s)
-WithInner s g ⇒ default = g-orthonormal WithInnerBasis  (candidate: reuse default s)
-Img f       ⇒ ProjectedBasis(f, "image") Ker/CoImg/CoKer f ⇒ ProjectedBasis(f, which, …)
-SVar α      ⇒ BVar(β)                    (basis supplied at instantiation)
-```
+    Scalar          ⇒  ScalarBasis
+    Dual s          ⇒  DualBasis(default s)
+    ⊕(sᵢ)           ⇒  BasisSum(default sᵢ)
+    ⊗(sᵢ)           ⇒  BasisProd(default sᵢ)
+    ⊕ⁿ s            ⇒  BasisRep(n, default s)
+    WithInner s g   ⇒  WithInnerBasis(default s, g), g-orthonormal
+    Img/Ker/
+    CoImg/CoKer f   ⇒  ProjectedBasis(f, which)
+    SVar α          ⇒  BVar(β), the basis supplied at instantiation
 
-The **candidates** feed the symbolic-aware choice in :mod:`grassmann.lower.choose`:
-the operator's SVD/structure-aligned basis, the FFS ``src``/``tgt`` bases,
-and the g-orthonormal basis. Realizing an FFS basis is the SVD/QR seam:
-:class:`SvdOp` (+ runtime rank ``δ_f`` as a :class:`~polyarray.DimAtom`) for
-the generic case, :class:`QrOp` for the injective / ``IsoSpace`` case, :class:`GSvdOp`
-for the metric (``WithInner``) case — realized by :func:`realize_ffs_basis`.
+The candidates add the alternatives worth scoring: the literal ``ImageBasis(f)`` of an
+image, the endpoint bases of a subspace's defining map, and for a metric space the plain
+reuse of the underlying space's basis.
+
+Realizing a subspace basis is the seam where grassmann meets a matrix factorization, and
+which factorization runs depends on what is known about the map::
+
+    injective, no metric  ⇒  QrOp    Q is the orthonormal range basis; rank is static
+    a metric is present   ⇒  GSvdOp  orthonormal in the metrics rather than the standard
+                                     inner product
+    otherwise             ⇒  SvdOp   the rank δ_f is a runtime value, so the subspace
+                                     axis is a dynamic polyarray.DimAtom
+
+:func:`realize_ffs_basis` is that seam, and an operator whose value is a build-time
+constant is folded to constant columns before any of it is emitted.
 """
 
 from __future__ import annotations
@@ -56,7 +69,14 @@ __all__ = [
 
 
 def default_basis(space: S.Space) -> B.Basis:
-    """Give the default inner-product-orthonormal "standard" basis for ``space``."""
+    """Give the standard basis of ``space``: the one orthonormal in its own inner product.
+
+    The construction mirrors the space tower onto the basis tower, recursing through the
+    structural constructors and bottoming out at ``Scalar``, at a fundamental subspace, or at a
+    space variable. It is total over ``Space`` except for the two nodes that have no basis to
+    give: an unreduced ``App`` and an unsolved inference metavariable both raise
+    :class:`~grassmann.core.space.SpaceError`.
+    """
     match space:
         case S.Scalar():
             return B.scalar_basis()
@@ -96,13 +116,22 @@ def default_basis(space: S.Space) -> B.Basis:
 
 
 def map_basis(space: S.Space, choice: Callable[[S.Space], B.Basis | None]) -> B.Basis:
-    """Structure-mirroring basis functor.
+    """Build a basis for ``space`` from a caller's leaf policy, mirroring the space tower.
 
-    A general basis CHOICE for ``space`` that mirrors the basis tower — ``choice(space) -> Basis | None`` is
-    consulted at EVERY node first (``None`` = no override there); un-overridden structural wrappers
-    (``Dual``/``OPlus``/``OProd``/``OPlusRep``/``WithInner``) mirror and recurse; every other un-overridden
-    node falls to :func:`default_basis`. Consumers supply ONLY their leaf policy (e.g. pointwise's
-    immersed-tangent ``ImageBasis`` pin) instead of hand-rolling the tower walk.
+    ``choice`` is consulted at every node on the way down, and returning a basis there overrides
+    the whole subtree; returning ``None`` declines and lets the walk continue. An un-overridden
+    structural wrapper — ``Dual``, ``⊕``, ``⊗``, ``⊕ⁿ``, ``WithInner`` — mirrors into the
+    corresponding basis constructor and recurses, and every other un-overridden node takes
+    :func:`default_basis`::
+
+        choice(V ⊗ Dual(Img f)) → None      recurse
+          choice(V)             → None      default_basis(V)
+          choice(Dual(Img f))   → None      recurse
+            choice(Img f)       → a pin     the caller's basis, used as given
+
+    A consumer that wants a particular frame at one kind of leaf — a pinned image basis for an
+    immersed tangent space, say — supplies only that rule and gets the standard basis
+    everywhere else, rather than writing the tower walk again.
     """
     picked = choice(space)
     if picked is not None:
@@ -132,22 +161,24 @@ def map_space(
     *,
     map_choice: Callable[[T.Term], T.Term | None] | None = None,
 ) -> S.Space:
-    """Structure-mirroring SPACE functor — the ``Space -> Space`` sibling of :func:`map_basis`.
+    """Rewrite ``space`` from a caller's leaf policy, mirroring the space tower.
 
-    ``choice(space) -> Space | None`` is consulted at EVERY node first (``None`` = no override
-    there); un-overridden structural wrappers (``Dual``/``OPlus``/``OProd``/``OPlusRep``/
-    ``WithInner``) mirror and recurse; every other un-overridden node is returned unchanged.
-    Consumers supply ONLY their leaf policy instead of hand-rolling the tower walk — the same
-    argument that produced ``map_basis``.
+    This is the ``Space -> Space`` sibling of :func:`map_basis` and it works the same way:
+    ``choice`` is consulted at every node, a returned space overrides that subtree, and ``None``
+    declines. An un-overridden structural wrapper mirrors and recurses; every other
+    un-overridden node comes back unchanged.
 
-    ``map_choice(f) -> Term | None`` (optional) is applied to an FFS node's DEFINING MAP, so a consumer
-    can rewrite ``Img(f)`` by rewriting ``f`` itself — without matching over ``Space`` in its own code
-    (which would be a partial ladder over a closed sum type). ``None`` = leave the map alone.
+    ``map_choice`` applies to the *defining map* of a fundamental subspace, so a consumer can
+    rewrite ``Img(f)`` by rewriting ``f``. That matters because it keeps the consumer from
+    matching over ``Space`` itself, which would be a partial ladder over a closed sum type, and
+    because a subspace often hides another one inside its map: ``Λᵏ(Img J)`` is ``Img(alt)``,
+    and the ``Img(J)`` it is built over sits in ``alt``'s endpoints rather than anywhere in the
+    outer space.
 
-    Written for swapping ONE immersion for another inside a value space: a form-valued DOF read
-    against a σ-PERMUTED chart is the same space with ``Img(J_canon)`` replaced by ``Img(J_perm)``
-    everywhere it occurs, however deep it sits under ``Dual``/``⊗``/``⊕`` — or inside the map that
-    DEFINES an FFS node, which is where ``Λᵏ(Img J) = Img(alt)`` keeps it.
+    Swapping one immersion for another inside a value space is what this is for. Reading a
+    form-valued degree of freedom against a permuted chart is the same space with ``Img(J)``
+    replaced by ``Img(J')`` wherever it occurs, however deep it sits under ``Dual``, ``⊗`` or
+    ``⊕``, and inside the maps that define its subspaces.
     """
     picked = choice(space)
     if picked is not None:
@@ -183,7 +214,10 @@ def map_space(
 
 
 def _map_f(f: T.Term, map_choice: Callable[[T.Term], T.Term | None] | None) -> T.Term:
-    """Give an FFS node's defining map under the optional ``map_choice``; unchanged when it declines."""
+    """Give a subspace's defining map after ``map_choice``, or unchanged when it declines.
+
+    An absent ``map_choice``, or one returning ``None``, leaves the map as it stands.
+    """
     if map_choice is None:
         return f
     out = map_choice(f)
@@ -195,19 +229,25 @@ def _map_opt(
     choice: Callable[[S.Space], S.Space | None],
     map_choice: Callable[[T.Term], T.Term | None] | None = None,
 ) -> S.Space | None:
-    """Run :func:`map_space` on an FFS node's optional ENDPOINT space.
+    """Run :func:`map_space` on a subspace node's optional endpoint space.
 
-    An FFS node is not a leaf of the walk: a buried immersion reaches the tower only through the
-    ``source``/``target`` of the map that defines it. ``Λᵏ(Img J) = Img(alt)`` keeps its ``Img(J)``
-    in ``alt``'s endpoints, so treating ``Img`` as a leaf made a σ readout on a FACE (a 2-form
-    moment) find nothing to substitute — ``tgt == src``, no transport, and every ``O_σ`` came back
-    ``I``. ``_immersed_basis``/``_immersed_endpoints`` already recurse this way on the BASIS side;
-    this is the Space-side match.
+    A fundamental subspace is not a leaf of the walk, because an immersion buried inside one
+    reaches the tower only through the ``source`` and ``target`` of the map that defines it.
+    ``Λᵏ(Img J)`` is ``Img(alt)``, and its ``Img(J)`` lives in ``alt``'s endpoints; a walk that
+    stopped at ``Img`` would find nothing to substitute there and return the space unchanged,
+    so a rewrite meant to transport a value between two charts would silently become the
+    identity. ``_immersed_basis`` and ``_immersed_endpoints`` recurse the same way on the basis
+    side; this is its counterpart over spaces.
     """
     return None if s is None else map_space(s, choice, map_choice=map_choice)
 
 
 def _maybe(s: S.Space | None) -> B.Basis | None:
+    """Give the default basis of an optional endpoint space, or ``None`` when it is absent.
+
+    A subspace node may or may not declare the endpoints of its defining map, and an undeclared
+    endpoint contributes no basis to the ``ProjectedBasis`` built over it.
+    """
     return None if s is None else default_basis(s)
 
 
@@ -217,11 +257,13 @@ def _maybe(s: S.Space | None) -> B.Basis | None:
 
 
 def candidate_bases(space: S.Space) -> tuple[B.Basis, ...]:
-    """Alternative bases to score against the term.
+    """Give the bases of ``space`` worth scoring against a term, the default among them.
 
-    Always includes the default; adds the operator's SVD/structure-aligned basis, the
-    FFS ``src``/``tgt`` bases, and (for a metric space) both the g-orthonormal default
-    and the plain reuse of the underlying space's basis.
+    The default basis is always first, so a caller that scores these can never come away with
+    nothing. What is added to it depends on the space: the image of a map offers the literal
+    ``ImageBasis(f)`` and, when the map declares one, the codomain's standard basis; a kernel or
+    coimage offers the domain's; a cokernel the codomain's; and a metric space offers the plain
+    basis of the space underneath, which leaves the metric symbolic but needs no whitening cob.
     """
     out: list[B.Basis] = [default_basis(space)]
 
@@ -249,15 +291,19 @@ def candidate_bases(space: S.Space) -> tuple[B.Basis, ...]:
 
 
 def _add(acc: list[B.Basis], b: B.Basis) -> None:
+    """Append ``b`` to the candidate list unless an equal basis is already there.
+
+    Offering the same basis twice would only make the scorer weigh it twice.
+    """
     if b not in acc:
         acc.append(b)
 
 
 def space_basis(space: S.Space) -> tuple[B.Basis, tuple[B.Basis, ...]]:
-    """Return ``(default_basis, candidates)`` for ``space``.
+    """Give ``space``'s default basis together with the candidates worth scoring against it.
 
-    ``default_basis`` is the inner-product-orthonormal standard basis; ``candidates``
-    are the alternatives (including the default) that the choice heuristic scores.
+    The default is the standard basis, orthonormal in the space's inner product. The candidates
+    include it, so :func:`~grassmann.lower.choose.choose` always has something to return.
     """
     return default_basis(space), candidate_bases(space)
 
@@ -269,72 +315,87 @@ def space_basis(space: S.Space) -> tuple[B.Basis, tuple[B.Basis, ...]]:
 
 @dataclass(frozen=True)
 class FfsRealization:
-    """The polyarray realization of one FFS basis.
+    """One fundamental-subspace basis, realized: its columns and how they were produced.
 
-    ``cols`` is the SymArray whose columns are the (numeric, orthonormal) basis vectors
-    in the ambient (src/tgt standard) coordinates. ``rank`` is the SymArray carrying the
-    numerical rank δ_f (a 0-d output, ``None`` when static). ``rank_dim`` is the
-    :class:`~polyarray.DimAtom` sizing the dynamic column axis (``None`` when the rank is
-    static, e.g. the injective ``QrOp`` case). ``op`` names which op produced it
-    (``"SvdOp"`` / ``"QrOp"`` / ``"GSvdOp"``) for provenance.
+    ``cols`` holds the basis vectors as the columns of a matrix, written in the ambient
+    coordinates — the standard basis of the defining map's source or target, whichever side the
+    subspace lives on::
+
+        cols :  ambient × subspace      each column one basis vector of the subspace
+        rank :  the numerical rank δ_f, a 0-d output, absent when the rank is static
+        rank_dim : the DimAtom sizing the subspace axis, absent when that axis is static
+
+    ``rank`` and ``rank_dim`` are both absent for the injective QR route, where the rank is
+    known from the map's asserted properties and the column count is an ordinary integer.
+    ``op`` names the operation that produced the columns, which provenance records and which
+    :func:`ffs_cols_orthonormal` reads to decide whether the columns are orthonormal.
     """
 
     cols: pa.SymArray
     rank: pa.SymArray | None
     rank_dim: pa.DimAtom | None
     op: str
-    """Which op produced ``cols``.  Read by :func:`ffs_cols_orthonormal` — the frame's
-    ORTHONORMALITY is a property of the producing op, and consumers that need the
-    coordinate map INTO the frame must branch on it (``Pᵀ`` only when orthonormal)."""
-    # The upper-triangular ``R`` of the injective QR (``J = Q·R``), captured so a change of
-    # basis between the literal ``ImageBasis`` and the orthonormal ``ProjectedBasis`` of the
-    # SAME map is ``R`` directly — no realize-both-and-pseudo-invert.  ``None``
-    # for the SVD/GSVD seams.
+    """The operation that produced ``cols``, which is what settles whether they are orthonormal.
+
+    Orthonormality is a property of the factorization, not of the subspace, so a consumer that
+    needs the coordinate map *into* the frame branches on :func:`ffs_cols_orthonormal`: the
+    transpose ``Pᵀ`` reads coordinates only for an orthonormal frame, and the general case needs
+    the matched dual ``pinv(P)``.
+    """
+    # The upper-triangular ``R`` of the injective QR, ``J = Q·R``, kept because it IS the change
+    # of basis between the two frames of the same image: the literal ``ImageBasis`` columns are
+    # ``J`` and the orthonormal ``ProjectedBasis`` columns are ``Q``, so converting between them
+    # costs one matrix already in hand rather than realizing both and pseudo-inverting.  Absent
+    # on the SVD and GSVD routes, which produce no such factor.
     r: pa.SymArray | None = None
-    # The SAME subspace frame expressed in the DECLARED ENDPOINT basis instead of the ambient
-    # canonical one — i.e. the covariant realization's ``Q₀``, before the ``cols = T·Q₀`` that
-    # exists only to satisfy this dataclass's "ambient standard coordinates" contract.  Set only by
-    # :func:`~grassmann.lower.represent._realize_image_covariant`; ``None`` everywhere else.
+    # The same subspace frame written in the declared endpoint basis rather than the ambient
+    # canonical one: the covariant realization's ``Q₀``, before the ``cols = T·Q₀`` that exists
+    # only to satisfy this dataclass's promise that ``cols`` is in ambient standard coordinates.
+    # Only ``represent._realize_image_covariant`` sets it.
     #
-    # Why it is worth carrying: for a NATURAL ``f`` (the exterior ``alt`` under the transported
-    # ⊗ᵏ frames — certified mechanically by ``try_constant_ffs`` folding ``A₀`` to a build-time
-    # constant) ``Q₀`` is CONSTANT, while ``T`` carries all the cell dependence AND, for an
-    # ``Img(J)`` endpoint, the QR radical ``R``.  A consumer whose operand already lives in
-    # ``endpoint_basis`` can use ``endpoint_cols`` directly and skip ``T``, ``InvOp(T)`` and its own
-    # operand cob entirely.  The two frames span the SAME subspace and yield the SAME subspace
-    # coordinates — the ambient change of basis is applied consistently to frame and operand — but
-    # ONLY when the projection is EXACT: with a residual, ``pinv`` projects along the ambient
-    # orthogonal complement, which differs between the two ambient bases.  Consumers must therefore
-    # guard on exactness (measured: for the Λᵏ trace the residual is identically zero because a
-    # diagonal pullback of an antisymmetric tensor stays antisymmetric for ANY ι; for a general
-    # operand it is 100%).
+    # It is worth carrying because the two factors differ sharply in what they depend on.  For a
+    # natural ``f`` — the exterior antisymmetrizer under transported ⊗ᵏ frames, which
+    # ``try_constant_ffs`` certifies by folding it to a build-time constant — ``Q₀`` is constant,
+    # while ``T`` carries every cell dependence and, at an ``Img(J)`` endpoint, the QR radical
+    # ``R`` as well.  A consumer whose operand already lives in ``endpoint_basis`` can use
+    # ``endpoint_cols`` directly and skip ``T``, its inverse, and its own operand cob.
+    #
+    # The two frames span the same subspace and give the same subspace coordinates, because the
+    # ambient change of basis is applied consistently to frame and operand alike — but only where
+    # the projection is exact.  With a residual, ``pinv`` projects along the ambient orthogonal
+    # complement, and that complement differs between the two ambient bases.  A consumer must
+    # therefore guard on exactness.  For a Λᵏ trace the residual is identically zero, since a
+    # diagonal pullback of an antisymmetric tensor stays antisymmetric under any immersion; for a
+    # general operand it is not.
     endpoint_cols: pa.SymArray | None = None
     endpoint_basis: object | None = None      # the `B.Basis` `endpoint_cols` is expressed in
 
 
-# The realization ops whose ``cols`` are STANDARD-orthonormal (``PᵀP = I`` exactly), so the
-# adjoint ``Pᵀ`` IS the matched dual ``pinv(P) = (PᵀP)⁻¹Pᵀ`` and a consumer may read
-# coordinates with a transpose.  POSITIVE whitelist — anything absent needs the general
-# ``pinv``: ``"GSvdOp"`` is *g*-orthonormal (``UᵀGU = I``, not ``UᵀU = I``), ``"MapApply"`` /
-# ``"Gram"`` are the LITERAL map columns, and any ``"…+cov"`` frame is ``T·Q₀`` (orthonormal in
-# the target basis's inner product, not the standard one).
+# The realizations whose ``cols`` are orthonormal in the standard inner product, ``PᵀP = I``
+# exactly, so that ``Pᵀ`` already is the matched dual ``pinv(P) = (PᵀP)⁻¹Pᵀ`` and a consumer can
+# read coordinates with a transpose.  This is a positive list, and anything not on it needs the
+# general ``pinv``: ``GSvdOp`` is orthonormal in a metric instead (``UᵀGU = I``), ``MapApply`` and
+# ``Gram`` are the literal map columns, and a covariant frame is ``T·Q₀``, orthonormal in the
+# target basis's inner product rather than the standard one.
 _STD_ORTHONORMAL_FFS_OPS = frozenset({"QrOp", "SvdOp", "const", "const-svd", "supplied"})
 
 
 def ffs_cols_orthonormal(real: FfsRealization) -> bool:
-    """Whether ``real.cols`` is provably STANDARD-orthonormal (``PᵀP = I``).
+    """Report whether ``real.cols`` is provably orthonormal in the standard inner product.
 
-    Conservative in the SAFE direction: ``False`` only costs a consumer the general
-    ``pinv``/Gram solve, it is never wrong; ``True`` on a non-orthonormal frame would be
-    silently wrong, so this is a positive whitelist of the operations that provably
-    orthonormalize.
+    The two answers are not symmetric in their consequences, which is why this is a positive
+    list of the operations that provably orthonormalize rather than a test. A ``False`` on an
+    orthonormal frame costs a consumer the general ``pinv`` or Gram solve and nothing else; a
+    ``True`` on a frame that is not orthonormal makes every coordinate read through it silently
+    wrong.
     """
     return real.op in _STD_ORTHONORMAL_FFS_OPS
 
 
-# block index of each SvdOp/GSvdOp output that carries the named subspace.
-# SvdOp outputs: (U, S, Vh, rank); GSvdOp outputs: (U, UI, V, VI, S, rank).
-_SVD_WHICH_TAKES_RIGHT = ("ker", "coimg")  # built from V (right factor)
+# Which subspaces are read off the right factor of a decomposition rather than the left.
+# An SvdOp yields (U, S, Vh, rank) and a GSvdOp (U, UI, V, VI, S, rank); the image and cokernel
+# come from the left factor U, the kernel and coimage from the right factor V.
+_SVD_WHICH_TAKES_RIGHT = ("ker", "coimg")
 
 
 def realize_ffs_basis(
@@ -351,32 +412,35 @@ def realize_ffs_basis(
     dim_atom: pa.DimAtom | None = None,
     literal_frame: bool = False,
 ) -> FfsRealization:
-    """Realize an FFS basis (``which`` ∈ ``"img"|"image"|"coker"|"coimg"|"ker"``).
+    """Realize one fundamental subspace of a map as concrete basis columns.
 
-    ``"image"`` (the :class:`~grassmann.core.basis.ProjectedBasis` spelling) is accepted as
-    an alias of ``"img"`` — both name the **orthonormal range** (Q/SVD-U) basis.
+    ``which`` names the subspace and is one of ``img``, ``coker``, ``coimg`` or ``ker``, with
+    ``image`` — the spelling :class:`~grassmann.core.basis.ProjectedBasis` uses — accepted as
+    an alias of ``img``. The statements that compute the columns are emitted into ``program``
+    and the result is an :class:`FfsRealization`.
 
-    Emits the SVD/QR/GSVD ``Stmt``(s) into ``program`` and returns an
-    :class:`FfsRealization`. Selection:
+    Which factorization runs depends on what is known about the map::
 
-    * **injective + image** ⇒ :class:`QrOp` — ``Q`` is the orthonormal range basis with a
-      *static* ``rank = dom_dim`` (recovers the dropped ``IsoSpace``);
-    * **metric present** ⇒ :class:`GSvdOp` (orthonormal in the metrics);
-    * otherwise ⇒ :class:`SvdOp`, with the runtime rank ``δ_f`` sizing a dynamic axis.
+        injective, image, no metric  ⇒  QrOp    Q is the orthonormal range basis, and the
+                                                rank is static at dom_dim
+        a metric on either endpoint  ⇒  GSvdOp  orthonormal in those metrics
+        otherwise                    ⇒  SvdOp   the rank δ_f is only known at run time and
+                                                sizes a dynamic axis
 
-    ``dim_atom`` — a caller-supplied **canonical subspace-dimension** atom
-    for the dynamic column axis.  The FFS dimension is metric-independent (the rank, or its
-    complement for ker/coker), so a single atom is shared across the metric-free SVD and the
-    metric GSVD of one ``(f, which)`` and across every FFS-typed Var of that space.  ``None``
-    ⇒ the seam mints a fresh atom (the legacy behaviour) and reports it in
-    :attr:`FfsRealization.rank_dim` (and, for ker/coker, the complement atom is the subspace
-    axis of ``cols``) so the caller can record it and pass it back next time.
+    Before the general SVD route, an operator whose value is a provable build-time constant is
+    folded to constant columns outright, so a program never carries a factorization of a matrix
+    it already knows.
 
-    ``literal_frame`` ("two realizations of the same ffs basis is fine") — on
-    the injective-image route ONLY, realize the LITERAL columns (:func:`_realize_via_gram`)
-    instead of the orthonormal ``Q``.  Same subspace, a different frame; see that function for
-    the precondition and the conditioning price.  Default ``False`` = the orthonormal frame
-    (byte-identical to the historical behaviour on every route).
+    ``dim_atom`` lets a caller supply the canonical dimension atom for the subspace axis. A
+    map's subspace dimension does not depend on the metric — it is the rank, or the ambient
+    dimension less the rank for a kernel or cokernel — so the metric-free SVD, the metric GSVD
+    and every value typed by that subspace must size their dynamic axis by the same atom, or
+    their einsums will not unify. Left ``None``, the seam mints a fresh atom and reports it in
+    :attr:`FfsRealization.rank_dim` for the caller to record and pass back.
+
+    ``literal_frame`` applies to the injective-image route alone, where it realizes the map's
+    literal columns instead of the orthonormal ``Q``. That is the same subspace in a different
+    frame; :func:`_realize_via_gram` gives the precondition and the price in conditioning.
     """
     if which == "image":
         which = "img"
@@ -395,19 +459,20 @@ def realize_ffs_basis(
             program, which, f_matrix, dom_dim, cod_dim,
             metric_dom, metric_cod, label, dim_atom=dim_atom,
         )
-    # SOUND STRUCTURAL constant-fold (dependency, NOT sampling): if `f_matrix`'s dependency
-    # cone is a closed constant subprogram (no live input ref, only `stmt_out` generators — see
-    # `_cone_is_structurally_constant`), its plain-SVD frame is a PROVABLE build-time constant.
-    # Fold it once here — emitting the constant `cols` directly — instead of deferring an SvdOp
-    # whose downstream `fold_numeric` chokes on the dynamic rank-δ axis (the high-degree `∫u·v`
-    # blow-up: ~480 realizations of 2 structurally-constant operators, the 2×2 reference
-    # tangent-frame identity and the 4×4 Λ² `alt` antisymmetrizer, OOM-ing codegen).  Only the
-    # PLAIN-SVD path is folded (the metric GSVD and the sign-fixed injective QR produce a
-    # DIFFERENT orthonormalization — a Euclidean-SVD constant would be the wrong frame there),
-    # so the folded `cols` is byte-identical to what `_realize_via_svd` would produce for this
-    # `M`.  `try_constant_ffs` (sampling) stays as-is for the covariant `A₀` seam, where
-    # `f_matrix` is feed-invariant but dataflow-symbolic (vertex atoms cancel) — a case this
-    # dependency check deliberately reports NON-constant (its cone reads vertex generators).
+    # A constant fold argued from dependency rather than sampling: when `f_matrix`'s cone is a
+    # closed constant subprogram — no live input ref, only `stmt_out` generators, see
+    # `_cone_is_structurally_constant` — its plain-SVD frame is a provable build-time constant,
+    # so the columns are emitted directly instead of deferring an SvdOp.  Deferring is what hurts:
+    # the downstream `fold_numeric` has to work through a dynamic rank-δ axis, and a high-degree
+    # integrand repeats that hundreds of times over a handful of distinct constant operators (a
+    # reference tangent-frame identity, a Λᵏ antisymmetrizer) until codegen runs out of memory.
+    #
+    # Only the plain-SVD route folds.  The metric GSVD and the sign-fixed injective QR
+    # orthonormalize differently, so a euclidean-SVD constant would be the wrong frame for them.
+    # The folded columns are what `_realize_via_svd` would produce for this same `M`.  The
+    # sampling `try_constant_ffs` covers the case this check deliberately calls non-constant: an
+    # operator whose cone does read live generators but whose value is invariant because they
+    # cancel.
     if _cone_is_structurally_constant(program, f_matrix):
         return _fold_constant_ffs(program, which, f_matrix)
     return _realize_via_svd(
@@ -419,20 +484,25 @@ def try_constant_ffs(
     program: pa.Program, which: str, f_matrix: pa.SymArray,
     dom_dim: int, cod_dim: int, *, probes: int = 3, atol: float = 1e-7,
 ) -> FfsRealization | None:
-    """Give the FFS ``which`` basis as a BUILD-TIME CONSTANT, or ``None``.
+    """Give the ``which`` subspace basis as build-time constant columns, or ``None``.
 
-    Applies when ``f_matrix`` is value-INVARIANT under the program's inputs.  Invariance is
-    verified by evaluating ONLY
-    ``f_matrix``'s dependency cone (``polyarray.evaluate_cone`` — safe on a big/partially-built
-    shared program: only the cone runs, so an unrelated singular op / a dynamic input OUTSIDE
-    the cone is never touched) at ``probes`` generic feeds and checking the value is identical;
-    then the range/complement basis is the SVD of that constant, taken once at build.
+    This applies where ``f_matrix``'s value does not depend on the program's inputs at all, and
+    it establishes that by probing: the dependency cone of ``f_matrix`` is evaluated at
+    ``probes`` generic feeds and the results compared. Only the cone runs, so this stays safe on
+    a large, partially built, shared program — an unrelated singular operation or a dynamic
+    input outside the cone is never touched. When the value holds still, its SVD is taken once
+    at build and the range or complement basis read off it as constants.
 
-    A DYNAMIC (``DimAtom``-sized) input is bound with a size-1 placeholder along its dynamic
-    axes: ``build_runtime_bindings`` requires a value for every declared input, but one outside
-    the cone is never read — the placeholder just satisfies the binder (an FFS-typed value
-    input, sized by a runtime rank, sits OUTSIDE the ``f_matrix`` cone of a geometry-only
-    factorisation).
+    An input sized by a runtime dimension is bound with a size-1 placeholder along its dynamic
+    axes. Every declared input needs a value for the binder to accept the feed, but one outside
+    the cone is never read, so the placeholder only has to exist — and a value typed by a
+    subspace, sized by a runtime rank, does sit outside the cone of a purely geometric
+    factorization.
+
+    Invariance under probing is weaker evidence than
+    :func:`_cone_is_structurally_constant`'s dependency argument, and it reaches a case that one
+    cannot: an operator invariant by cancellation, whose cone genuinely reads live generators
+    that cancel out.
     """
     import numpy as np
 
@@ -457,49 +527,48 @@ def try_constant_ffs(
 
 
 # ---------------------------------------------------------------------------
-# Constant-fold of a structurally-constant FFS realization (dependency-based,
-# NOT sampling).  Shared "given a numeric matrix's SVD, emit the constant frame
-# for ``which``" core is :func:`_const_ffs_from_svd` (reused by the sampling
-# ``try_constant_ffs`` above and the structural fold below).
+# Folding a structurally-constant realization to constant columns, by dependency rather than by
+# sampling.  Both constant routes — the sampling ``try_constant_ffs`` above and the structural
+# fold below — go through one shared core, :func:`_const_ffs_from_svd`, which turns a numeric
+# matrix's SVD into the constant frame for a given subspace, so the two agree column for column.
 # ---------------------------------------------------------------------------
 
 
 def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
-    """Build a CANONICAL orthonormal basis of ``span(q)``.
+    """Build the canonical orthonormal basis of ``span(q)``.
 
-    A function of the SUBSPACE (and the ambient index order) alone, not of the factorization that produced
-    ``q``.
+    The result is a function of the subspace and the ambient index order alone, and not of the
+    factorization that produced ``q``. That distinction is the whole point of this function.
 
-    Why this exists. ``U[:,:r]`` is only determined up to a
-    rotation *inside* each degenerate singular subspace, so it is a **discontinuous** function of
-    the operator: the Λᵏ antisymmetrizer's nonzero singular values are degenerate (measured
-    ``σ = 1, 1, 1, 0…`` for the 3-dim ``Λ²`` case) and the operator we factor is invariant only
-    BY CANCELLATION (~1e-15, not bitwise), so 1e-15 of rounding rotated the realized frame by
-    O(1).  Two ``Space`` nodes naming the same subspace — ``Img(alt_canonical)`` and
-    ``Img(alt_permuted)`` for a reoriented facet — then got unrelated frames, and the change of
-    basis composed across them came out a rotation instead of the signed permutation a σ-oriented
-    DOF owes.  No memo can tie those two: their keys are legitimately different (measured: 564 FFS
-    realizations, 140 id-keys vs 137 structural keys — keying structurally buys ~3 duplicate
-    factorizations and nothing else), and the memo cannot span compilations anyway.
+    A slice ``U[:, :r]`` of an SVD determines the subspace but not a frame within it: inside a
+    degenerate singular subspace the columns are fixed only up to a rotation, which makes them a
+    discontinuous function of the operator. The exterior antisymmetrizer is exactly such an
+    operator — its nonzero singular values are all equal (``σ = 1, 1, 1, 0…`` for a 3-dimensional
+    ``Λ²``) and it is invariant only by cancellation, to about 1e-15 rather than bitwise. So a
+    rounding difference of 1e-15 rotates the realized frame by O(1), and two ``Space`` nodes
+    naming the same subspace by different maps — the images of a canonical and a permuted
+    antisymmetrizer for a reoriented facet — end up with unrelated frames. The change of basis
+    composed across them is then a rotation where an oriented degree of freedom owes a signed
+    permutation. No memo can tie those two together: their keys are legitimately different, and
+    a memo cannot span compilations in any case.
 
-    The fix is to stop asking the factorization for the frame.  The orthogonal **projector**
-    ``P = q·qᵀ`` is unique for a given subspace and CONTINUOUS in it (unlike ``q`` itself), so a
-    basis read off ``P`` in a fixed ambient order is stable at ~1e-15 where the SVD basis was
-    stable at O(1).  This is pivoted Cholesky of a projector in index order: greedily orthogonalize
-    ``P``'s columns ``P·e_j``, ``j = 0…n-1``, keeping those with a non-negligible residual.
+    So the frame is not asked of the factorization. The orthogonal projector ``P = q·qᵀ`` is
+    unique to the subspace and continuous in it, where ``q`` is neither, and a basis read off
+    ``P`` in a fixed ambient order inherits that stability. The construction is a pivoted
+    Cholesky of the projector in index order: orthogonalize the columns ``P·eⱼ`` for
+    ``j = 0…n−1`` in turn and keep those with a non-negligible residual.
 
-    It is SELF-SIGN-FIXING, which is why no ad-hoc sign convention appears here: after
-    orthogonalizing against the accepted columns, ``w = P'·e_j`` with ``P'`` still an orthogonal
-    projector, so ``w[j] = e_jᵀP'ᵀP'e_j = ‖w‖² ≥ 0`` — the accepted column's own coordinate is
-    positive by construction, and ``‖w‖² = w[j]`` exactly (used as the acceptance test).
+    It fixes its own signs, which is why no sign convention appears here. After orthogonalizing
+    against the accepted columns, ``w = P'·eⱼ`` with ``P'`` still an orthogonal projector, so
+    ``w[j] = eⱼᵀP'ᵀP'eⱼ = ‖w‖² ≥ 0``: an accepted column's own coordinate is positive by
+    construction, and ``‖w‖² = w[j]`` exactly, which is what the acceptance test uses.
 
-    NOTE this deliberately does NOT carry orientation, and must not: a 3-cycle and a transposition
-    of a facet's vertices span the SAME plane, so ``Λᵏ`` of it is the same subspace and any
-    subspace-keyed rule returns the same vector for both.  The σ sign rides on the ambient
-    chart-to-chart ``convert`` in the middle of ``_pb_ffs`` (``Project ∘ convert ∘ Embed``), where
-    it belongs and where it was measured correct (single-factor convert, ``det = −1``): with
-    ``P_S = P_T = p`` the composite is ``pᵀ(det M · p) = det M = ±1``.  Making the two endpoints
-    agree is exactly what turns that into a clean sign.
+    It carries no orientation, and must not. A 3-cycle and a transposition of a facet's vertices
+    span the same plane, so ``Λᵏ`` of it is the same subspace, and any rule keyed on the subspace
+    owes both the same vector. The orientation sign belongs instead to the ambient chart-to-chart
+    conversion in the middle of ``Project ∘ convert ∘ Embed``, where with the two endpoint frames
+    equal to ``p`` the composite is ``pᵀ(det M · p) = det M = ±1``. Making the two endpoints agree
+    is precisely what turns that into a clean sign.
     """
     n, r = q.shape
     if r <= 0:
@@ -528,21 +597,24 @@ def _canonical_subspace_basis(q: np.ndarray) -> np.ndarray:
 def _const_ffs_from_svd(
     u: np.ndarray, vh: np.ndarray, r: int, which: str, *, op: str,
 ) -> FfsRealization:
-    """Emit the BUILD-TIME-CONSTANT :class:`FfsRealization` for ``which`` from a full SVD.
+    """Read the constant columns of subspace ``which`` off a numeric matrix's full SVD.
 
-    Takes a numeric matrix ``M``'s full SVD ``M = U·diag(S)·Vh`` and its rank ``r``, and uses
-    the SAME range/complement column convention :func:`_realize_via_svd` slices from the
-    runtime SVD factors:
+    Given ``M = U·diag(S)·Vh`` and the numeric rank ``r``, the four subspaces are the same
+    slices of the same factors that :func:`_realize_via_svd` takes from the runtime SVD::
 
-    * ``img``   = first ``r`` columns of ``U``   (the orthonormal range basis);
-    * ``coker`` = last  ``cod−r`` columns of ``U`` (its orthogonal complement);
-    * ``coimg`` = first ``r`` columns of ``V = Vhᵀ`` (the right factor);
-    * ``ker``   = last  ``dom−r`` columns of ``V``.
+        img    first r columns of U            the orthonormal range basis
+        coker  last  cod−r columns of U        its orthogonal complement
+        coimg  first r columns of V = Vhᵀ
+        ker    last  dom−r columns of V
 
-    ``cols`` is a build-time-constant numeric SymArray; ``rank``/``rank_dim`` are ``None``
-    (the axis is static — the numeric rank is known at build).  Shared by the sampling
-    (:func:`try_constant_ffs`) and structural (:func:`realize_ffs_basis`) constant paths so
-    both produce an IDENTICAL frame for the same numeric ``M``.
+    The slice fixes the subspace but not a frame inside it, so the columns are re-derived
+    canonically by :func:`_canonical_subspace_basis` before they are returned; that is what
+    makes one subspace have one frame wherever it is realized.
+
+    The resulting columns are constant, and both ``rank`` and ``rank_dim`` are absent because
+    the rank is known at build and the axis is an ordinary integer. Both constant routes — the
+    sampling :func:`try_constant_ffs` and the structural fold in :func:`realize_ffs_basis` —
+    come through here, so they cannot disagree about the frame for a given ``M``.
     """
     if which in ("img", "coker"):
         cols = u[:, :r] if which == "img" else u[:, r:]
@@ -558,22 +630,20 @@ def _const_ffs_from_svd(
 
 
 def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -> bool:
-    """Report whether ``f_matrix``'s value is a PROVABLE build-time constant.
+    """Report whether ``f_matrix``'s value is a provable build-time constant.
 
-    Sound, by DEPENDENCY — not by sampling.
+    The argument is from dependency rather than from sampling: ``f_matrix``'s cone is a closed
+    constant subprogram exactly when no statement in it reads a live feed
+    (:class:`~polyarray.ir.InputRef` or :class:`~polyarray.ir.IntAtomRef`) and no cell generator
+    anywhere in the cone, or in ``f_matrix`` itself, has a provenance kind other than
+    ``"stmt_out"``. This delegates to :func:`polyarray.is_structurally_constant`, which is where
+    the check belongs, since it uses only polyarray's own dependency cone, ref types and
+    environment provenance.
 
-    Thin delegate to :func:`polyarray.is_structurally_constant` (the check moved to
-    polyarray, since it uses ONLY polyarray machinery — ``dependency_cone``, the ref
-    types, and ``program.env`` provenance).  Returns ``True`` iff ``f_matrix``'s
-    dependency cone is a *closed constant subprogram*: no Stmt input is a live feed
-    (:class:`~polyarray.ir.InputRef` / :class:`~polyarray.ir.IntAtomRef`) and no cell
-    generator anywhere in the cone (nor in ``f_matrix`` itself) has provenance ``kind``
-    other than ``"stmt_out"``.
-
-    EXACT, not heuristic: never mistakes a feed-varying operator for a constant.
-    Conservative: any ref/generator that cannot be positively classified constant-safe —
-    or a cone that fails to enumerate — forces ``False``, so a frame with any live input
-    dependency is left to the SVD/QR/GSVD seam.
+    It is exact in one direction and conservative in the other: it never mistakes an operator
+    that varies with the feed for a constant, and any ref or generator it cannot positively
+    classify as constant-safe — or a cone it cannot enumerate — makes it answer ``False``,
+    leaving the frame to the SVD, QR or GSVD seam.
     """
     return pa.is_structurally_constant(program, f_matrix)
 
@@ -581,15 +651,16 @@ def _cone_is_structurally_constant(program: pa.Program, f_matrix: pa.SymArray) -
 def _fold_constant_ffs(
     program: pa.Program, which: str, f_matrix: pa.SymArray,
 ) -> FfsRealization:
-    """Fold a PROVABLY-constant ``f_matrix`` to its build-time-constant FFS ``which`` frame.
+    """Fold a provably constant ``f_matrix`` to constant columns for subspace ``which``.
 
-    See :func:`_cone_is_structurally_constant`.  Evaluates ``f_matrix``'s cone ONCE at build
-    (:func:`polyarray.evaluate_cone` — the cone has no live inputs, so any binding gives the
-    same matrix; a zero binding is used) → the numeric operator ``M``, then emits the constant
-    range/complement basis via the SHARED :func:`_const_ffs_from_svd` core using ``M``'s SVD.
-    The result is byte-for-byte the frame :func:`_realize_via_svd` would produce for this ``M``
-    (same full SVD, same ``matrix_rank`` tolerance as :class:`~polyarray.SvdOp`, same column
-    convention) — but as a constant, with NO SvdOp/rank Stmt emitted.
+    :func:`_cone_is_structurally_constant` is the precondition. Since the cone reads no live
+    input, any binding evaluates it to the same matrix, so it is evaluated once at build under a
+    zero binding and the numeric operator ``M`` handed to :func:`_const_ffs_from_svd`.
+
+    The frame this produces is the one :func:`_realize_via_svd` would produce for the same
+    ``M``: the same full SVD, the same numeric-rank tolerance as :class:`~polyarray.SvdOp`, the
+    same column convention. The difference is that it is a constant, and no SVD or rank
+    statement enters the program at all.
     """
     from polyarray import evaluate_cone
     binding: dict[str, np.ndarray] = {}
@@ -610,13 +681,15 @@ def realize_image_application(
     program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, cod_dim: int, *,
     label: str = "f",
 ) -> FfsRealization:
-    """Realize :class:`~grassmann.core.basis.ImageBasis` — the LITERAL map-application.
+    """Realize an :class:`~grassmann.core.basis.ImageBasis`: the literal pushforward columns.
 
-    Columns are ``f`` applied to the source basis (``f(eᵢ)``), i.e. the ``(cod, dom)``
-    operator matrix itself — **not** orthonormalized (the R/fwd side).  No
-    QR/SVD is emitted; the columns ARE ``f_matrix`` (passed in ``(cod, dom)`` orientation).
-    The column axis is the static source dimension ``dom_dim`` (the ``f(eᵢ)`` per source
-    basis vector); ``rank``/``rank_dim`` are ``None`` (no SVD δ).
+    The columns are ``f`` applied to each source basis vector, ``f(eᵢ)``, which is to say the
+    operator matrix itself in its canonical ``(cod, dom)`` orientation. Nothing is factorized
+    and nothing is orthonormalized — the columns *are* ``f_matrix``, and this is the frame a
+    consumer transports along ``f`` rather than an orthonormal frame for the same subspace.
+
+    The column axis is the static source dimension, one column per source basis vector, and
+    neither a rank nor a dimension atom arises since no decomposition is taken.
     """
     [cols] = program.emit_stmt(
         pa.IdentityOp(), [f_matrix],
@@ -627,10 +700,11 @@ def realize_image_application(
 
 
 def _sb_signs_zero_to_one(low: object, signs: object) -> object:
-    """``where(signs == 0, 1.0, signs)``.
+    """Build the pyab expression ``where(signs == 0, 1.0, signs)``.
 
-    The +diagonal-R sign convention (0 ⇒ +1) as a pyab expr (space_basis-local twin of the numeric ``s[s == 0]
-    = 1.0``).
+    This is the positive-diagonal sign convention's treatment of a zero, mapping it to ``+1``,
+    written as an expression rather than as the numpy assignment ``s[s == 0] = 1.0`` that
+    :meth:`_QrSignConventionOp.__call__` uses on concrete arrays.
     """
     c = low.core
     zero = c.ArrayExpr(obj=c.FloatLit(value=0.0), dtype=low._dtype_f64())
@@ -641,6 +715,13 @@ def _sb_signs_zero_to_one(low: object, signs: object) -> object:
 def _realize_via_qr(
     program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, label: str,
 ) -> FfsRealization:
+    """Realize an injective map's image as the orthonormal ``Q`` of its QR factorization.
+
+    Injectivity is what makes this route available: full column rank means ``Q`` has exactly
+    ``dom_dim`` orthonormal columns spanning the image, so the rank is static and no runtime
+    dimension is needed. The ``R`` factor is kept on the realization, since it is the change of
+    basis between this frame and the literal ``ImageBasis`` of the same map.
+    """
     # f : (cod, dom); injective ⇒ Q has dom orthonormal columns (the range basis).
     Q, R = program.emit_stmt(
         pa.QrOp(mode="reduced"),
@@ -649,8 +730,9 @@ def _realize_via_qr(
          pa.OutSpec("R_" + label, (dom_dim, dom_dim))],
         note=f"ffs-basis:ImageBasis({label}):inj=>QrOp",
     )
-    # Positive-diagonal-R sign convention (numpy's qr does not fix the sign): with s=sign(diag R),
-    # Q·diag(s) and diag(s)·R is the unique QR whose Q keeps the orientation of f's columns.
+    # numpy's qr leaves the column signs free, so fix them: with s = sign(diag R), the pair
+    # (Q·diag(s), diag(s)·R) is the unique QR whose R has a positive diagonal, and whose Q
+    # therefore keeps the orientation of f's own columns.
     Q, R = program.emit_stmt(
         _QrSignConventionOp(),
         [Q, R],
@@ -664,27 +746,27 @@ def _realize_via_qr(
 def _realize_via_gram(
     program: pa.Program, f_matrix: pa.SymArray, dom_dim: int, label: str,
 ) -> FfsRealization:
-    """Build the LITERAL-COLUMN (Gram) realization of an injective map's image.
+    """Realize an injective map's image as its own literal columns, read through a Gram solve.
 
-    The SECOND realization of the SAME FFS basis ("two realizations of the
-    same ffs basis is fine"): ``cols = J`` itself — the map's own columns — with ``r = None``
-    (``J = cols·I``).  Same subspace ``Img(f)``, same ``FfsRealization`` contract, a
-    DIFFERENT (non-orthonormal) frame, tagged ``op="Gram"`` so
-    :func:`ffs_cols_orthonormal` reports ``False`` and every consumer that needs coordinates
-    IN the frame takes its general route — the matched dual ``pinv(J) = (JᵀJ)⁻¹Jᵀ = G⁻¹Jᵀ``
-    (the Gram solve this realization is named for) instead of ``Jᵀ``.
+    The columns are ``J`` itself, so this is a second realization of the same subspace the QR
+    route realizes, in a different frame. It satisfies the same :class:`FfsRealization`
+    contract, carries no ``R`` — ``J = cols·I`` — and is tagged so that
+    :func:`ffs_cols_orthonormal` reports ``False``. A consumer needing coordinates *in* the
+    frame therefore takes its general route, the matched dual ``pinv(J) = (JᵀJ)⁻¹Jᵀ = G⁻¹Jᵀ``,
+    which is the Gram solve this realization is named for, rather than a transpose.
 
-    WHY it exists: :func:`_realize_via_qr`'s ``Q`` is ALGEBRAIC-IRRATIONAL in the inputs (QR
-    normalizes by ``√(…)``), so polyarray's exact rational lane cannot carry it and every
-    certificate downstream of it degrades to probe-and-freeze.  ``J`` is RATIONAL in them, so
-    the exact lane certifies through it.  The price is conditioning — coordinates come from
-    ``G = JᵀJ`` whose condition number is ``κ(J)²`` — which is why this realization is OPT-IN
-    (``literal_frame``) and never the numeric default.
+    It exists because the frames differ in exactness, not in the subspace they span. QR
+    normalizes by ``√(…)``, so :func:`_realize_via_qr`'s ``Q`` is algebraic-irrational in the
+    program inputs and polyarray's exact rational lane cannot carry it; anything downstream that
+    wanted an exact answer falls back to probing. ``J`` is rational in those same inputs, so the
+    exact lane runs through it. The price is conditioning, since coordinates now come from
+    ``G = JᵀJ`` and ``κ(G) = κ(J)²`` — which is why the route is opt-in and never the numeric
+    default.
 
-    PRECONDITION: ``f`` INJECTIVE — the same precondition :func:`_realize_via_qr` already
-    requires, and the reason no new assumption enters: injective ⇒ the columns are a basis of
-    the image (full column rank) ⇒ ``G`` is invertible and ``pinv(J)·J = I`` identically.
-    Callers select this route only under that guard (:func:`realize_ffs_basis`).
+    It requires ``f`` injective, the same precondition :func:`_realize_via_qr` already carries,
+    so no new assumption enters. Injectivity means full column rank, hence that the columns are
+    a basis of the image, hence that ``G`` is invertible and ``pinv(J)·J = I`` identically.
+    :func:`realize_ffs_basis` selects this route only under that guard.
     """
     [cols] = program.emit_stmt(
         pa.IdentityOp(), [f_matrix],
@@ -696,9 +778,15 @@ def _realize_via_gram(
 
 @dataclass(frozen=True)
 class _QrSignConventionOp:
-    """Apply the +diagonal-R sign convention to a ``(Q, R)`` factorization.
+    """Fix the free column signs of a ``(Q, R)`` factorization by the sign of ``R``'s diagonal.
 
-    ``Q·diag(s)``, ``diag(s)·R`` with ``s = sign(diag R)`` (zeros ⇒ +1) ⇒ ``R`` has a positive diagonal.
+    With ``s = sign(diag R)`` and a zero read as ``+1``, the pair ``(Q·diag(s), diag(s)·R)`` is
+    the factorization of the same matrix whose ``R`` has a positive diagonal — the unique one,
+    which is what makes a QR frame reproducible from one realization to the next.
+
+    The same convention is written three times over, for the three ways a program is executed:
+    :meth:`__call__` on numpy arrays, :meth:`__numpy_source__` for emitted numpy source, and
+    :meth:`__pyab_lower__` for the pyab lowering.
     """
 
     def __call__(self, Q: np.ndarray, R: np.ndarray) -> tuple[np.ndarray, np.ndarray]:  # noqa: N803
@@ -709,11 +797,11 @@ class _QrSignConventionOp:
         return Q * s, s[:, None] * R
 
     def __numpy_source__(self, args: list[str]) -> str:
-        """``to_numpy_source`` op-carried emit hook, discovered by ``numpy_source._render_op``.
+        """Render this op as numpy source, for ``to_numpy_source`` to find on the op itself.
 
-        Renders the +diagonal-R sign convention so ANY :class:`polyarray.Program` carrying this
-        op emits standalone numpy without the caller threading ``op_renderers=`` — the emit twin
-        of :meth:`__pyab_lower__`, and the same value body as :meth:`__call__`.
+        Carrying the hook here means any :class:`polyarray.Program` containing this op emits
+        standalone numpy without its caller having to thread ``op_renderers=`` through, since
+        ``numpy_source._render_op`` discovers it unaided.
 
         Parameters
         ----------
@@ -731,11 +819,11 @@ class _QrSignConventionOp:
                 f"(np.asarray({args[0]}, dtype=float), np.asarray({args[1]}, dtype=float))")
 
     def __pyab_lower__(self, builder: object, args: list, low: object) -> list:
-        """Pyab op-carried lowering.
+        """Lower this op into pyab expressions, computing ``(Q·s, s[:, None]·R)``.
 
-        The +diagonal-R sign convention ``(Q·s, s[:,None]·R)`` with ``s = sign(diag R)`` (0 ⇒ +1) (twin of the
-        ``_qr_sign_convention`` numpy renderer / :meth:`__call__`; same math as chartlib's ``QrSignFixOp`` but
-        on given ``(Q, R)``).
+        The sign vector is ``s = sign(diag R)`` with a zero read as ``+1``, exactly as in
+        :meth:`__call__`. It differs from chartlib's own sign fix only in taking ``(Q, R)`` as
+        given rather than factorizing.
         """
         c = low.core
         q, r = args
@@ -748,6 +836,11 @@ class _QrSignConventionOp:
 
 
 def _qr_q_shape(f_matrix: pa.SymArray, dom_dim: int) -> tuple[int, ...]:
+    """Give the shape of a reduced QR's ``Q``: the map's row count by its column count.
+
+    The map is stored ``(cod, dom)``, and a reduced ``Q`` keeps one orthonormal column per
+    source dimension.
+    """
     shp = _shape_of(f_matrix)
     return (shp[0], dom_dim)
 
@@ -757,6 +850,14 @@ def _realize_via_svd(
     dom_dim: int, cod_dim: int, label: str,
     *, dim_atom: pa.DimAtom | None = None,
 ) -> FfsRealization:
+    """Realize a subspace from the full SVD of the map, with the rank known only at run time.
+
+    This is the general route, taken when nothing about the map licenses a cheaper one. The
+    numerical rank ``δ`` is an output of the decomposition, so the subspace axis is dynamic and
+    sized by a :class:`~polyarray.DimAtom` — either the caller's canonical atom, which is what
+    makes the metric-free and metric realizations of one subspace agree, or a fresh one minted
+    from this decomposition's own rank output.
+    """
     U, S, Vh, rank = program.emit_stmt(
         pa.SvdOp(full_matrices=True),
         [f_matrix],
@@ -767,10 +868,11 @@ def _realize_via_svd(
         note=f"ffs-basis:SvdOp({label})",
     )
     svd_idx = len(program.statements) - 1
-    # For img/coimg the canonical subspace atom IS the rank atom δ; reuse a caller-supplied
-    # one (so the metric-free SVD and the metric GSVD share it), else mint from this rank
-    # output.  For ker/coker the rank atom is internal and the SUBSPACE atom is the
-    # complement; ``dim_atom`` (when given) flows to ``_take_ffs_block`` as the comp atom.
+    # For the image and coimage the subspace dimension IS the rank, so the canonical atom is the
+    # rank atom: reuse the caller's if one was given, which is what makes the metric-free SVD and
+    # the metric GSVD of this map share one axis, and otherwise mint it from this rank output.
+    # For the kernel and cokernel the rank atom is internal and the subspace dimension is the
+    # complement, so a supplied atom is passed on as the complement atom instead.
     if which in ("img", "coimg") and dim_atom is not None:
         delta = dim_atom
     else:
@@ -789,13 +891,20 @@ def _realize_via_gsvd(
     metric_dom: pa.SymArray | None, metric_cod: pa.SymArray | None, label: str,
     *, dim_atom: pa.DimAtom | None = None,
 ) -> FfsRealization:
+    """Realize a subspace whose frame must be orthonormal in the endpoint metrics.
+
+    The generalized decomposition takes the map together with a metric on each endpoint, an
+    identity standing in wherever one is absent, and produces factors orthonormal in those
+    metrics rather than in the standard inner product. Its frame is therefore not standard-
+    orthonormal, and :func:`ffs_cols_orthonormal` reports as much.
+    """
     m_v = metric_dom if metric_dom is not None else _eye(program, dom_dim, label + "_Mv")
     m_w = metric_cod if metric_cod is not None else _eye(program, cod_dim, label + "_Mw")
-    # GSvdOp's block widths are runtime (δ_f / its complement) and cannot be self-sized
-    # by GSvdOp's own rank output (a DimAtom must reference a *prior* Stmt's output).  So
-    # emit GSvdOp with STATIC full-width factors [U|UI] (cod×cod) and [V|VI] (dom×dom)
-    # via a thin wrapper, then SLICE the runtime-δ block in a second Stmt that consumes
-    # the now-prior rank output.
+    # The block widths here are runtime values — δ and its complement — and a DimAtom must
+    # reference a *prior* Stmt's output, so the decomposition cannot size its own blocks.  Hence
+    # two statements: the first emits the full-width factors [U|UI] (cod×cod) and [V|VI]
+    # (dom×dom) at static sizes, and the second slices the runtime-δ block out of them, by which
+    # point the rank output it needs is prior.
     Ufull, Vfull, _S, rank = program.emit_stmt(
         pa.GSvdFullOp(),
         [f_matrix, m_v, m_w],
@@ -806,14 +915,15 @@ def _realize_via_gsvd(
         note=f"ffs-basis:GSvdOp({label})",
     )
     gsvd_idx = len(program.statements) - 1
-    # img/coimg: canonical subspace atom IS δ (shared with the metric-free SVD); ker/coker:
-    # the subspace atom is the complement.
+    # Image and coimage size their axis by δ itself, the same atom the metric-free SVD of this
+    # map uses; kernel and cokernel size theirs by the complement.
     if which in ("img", "coimg") and dim_atom is not None:
         delta = dim_atom
     else:
         delta = pa.DimAtom(name=f"rank:{label}", source=(gsvd_idx, 3))
-    # Block↔FFS: image = first δ of Ufull, coker = last (cod−δ) of Ufull;
-    #            coimg = first δ of Vfull, ker = last (dom−δ) of Vfull.
+    # The subspace is the leading block of a factor and its complement the trailing one: image =
+    # first δ of Ufull, coker = last (cod−δ) of Ufull; coimg = first δ of Vfull, ker = last
+    # (dom−δ) of Vfull.
     factor, ambient = (Ufull, cod_dim) if which in ("img", "coker") else (Vfull, dom_dim)
     if which in ("img", "coimg"):
         [block] = program.emit_stmt(
@@ -836,10 +946,17 @@ def _take_ffs_block(
     rank: pa.SymArray, delta: pa.DimAtom, cod_dim: int, dom_dim: int, label: str,
     *, comp_atom: pa.DimAtom | None = None,
 ) -> pa.SymArray:
-    """Slice the rank-δ FFS block from the full SVD factors.
+    """Slice the columns of one subspace out of the full SVD factors.
 
-    img  = first δ cols of U;   coker = last cod-δ cols of U;
-    coimg= first δ cols of V;   ker   = last dom-δ cols of V   (V = Vhᵀ).
+    The image and cokernel come from the left factor and the kernel and coimage from the right,
+    with the subspace itself the leading block and its orthogonal complement the trailing one::
+
+        img    first δ columns of U        coker  last cod−δ columns of U
+        coimg  first δ columns of V        ker    last dom−δ columns of V
+
+    ``V`` is materialized as a transpose of ``Vh`` when a right-factor subspace is asked for.
+    Both block widths are runtime values, so ``δ`` sizes the leading slice and a complement atom
+    — supplied by the caller or computed here — sizes the trailing one.
     """
     if which in ("img", "coker"):
         factor, ambient = U, cod_dim
@@ -874,18 +991,26 @@ def _take_ffs_block(
 
 
 def factor_rows(factor: pa.SymArray, ambient: int) -> int:
-    """Give the ambient row count of an FFS factor's column block (its embedding dimension)."""
+    """Give the ambient row count of a subspace column block: the dimension it embeds into.
+
+    Both SVD factors are square in their own ambient dimension, so this is that dimension
+    whichever factor the block was sliced from.
+    """
     return ambient
 
 
-# A complement dimension n−δ is itself a runtime axis.  A ``DimAtom`` resolves from its
-# ``source``'s run-time binding, so it must reference a Stmt that *actually produces n−δ*,
-# not the SVD ``rank`` output (which produces δ).  We therefore emit a tiny ``_CompRankOp``
-# Stmt computing ``ambient − rank`` as a fresh 0-d int output and source the complement
-# ``DimAtom`` from THAT, so the dynamic axis resolves to ``ambient − δ`` at run time.
+# A complement dimension ``n − δ`` is a runtime axis of its own.  A ``DimAtom`` resolves through
+# its source's runtime binding, so it has to reference a Stmt that actually produces ``n − δ``,
+# and the SVD's rank output produces ``δ``.  Hence a small ``CompRankOp`` Stmt computing
+# ``ambient − rank`` as a fresh 0-d integer output, with the complement atom sourced from that.
 def _comp_dim(
     program: pa.Program, rank: pa.SymArray, ambient: int, label: str,
 ) -> pa.DimAtom:
+    """Mint the runtime dimension atom for a complement axis, ``ambient − rank``.
+
+    See the note above for why this needs a statement of its own rather than referring to the
+    decomposition's rank output.
+    """
     [comp_rank] = program.emit_stmt(
         pa.CompRankOp(ambient), [rank],
         [pa.OutSpec(f"comp_rank_{label}", ())],
@@ -901,6 +1026,7 @@ def _comp_dim(
 
 
 def _eye(program: pa.Program, n: int, name: str) -> pa.SymArray:
+    """Emit an ``n``-dimensional identity matrix, which stands in for an absent metric."""
     [eye] = program.emit_stmt(
         pa.EyeOp(n), [], [pa.OutSpec(name, (n, n))], note=f"metric:identity({n})",
     )
@@ -908,6 +1034,7 @@ def _eye(program: pa.Program, n: int, name: str) -> pa.SymArray:
 
 
 def _shape_of(sa: pa.SymArray) -> tuple[int, ...]:
+    """Give a ``SymArray``'s shape, from its bulk array when it has one and its cells otherwise."""
     if getattr(sa, "_bulk", None) is not None:
         return tuple(sa._bulk.shape)
     return tuple(np.asarray(sa.cells).shape)

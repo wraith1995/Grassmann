@@ -1,20 +1,21 @@
-"""Structured lowering provenance — the algebra-centric vocabulary.
+"""The vocabulary lowering uses to say what produced each statement it emits.
 
-Provenance is a HARD requirement: every emitted polyarray ``Stmt`` must carry provenance
-recording *what produced it* — the **core-IR node kind**, the **basis choice**, and **why**
-that choice was made — so the generated ``Program`` is fully traceable ("which coordinate
-choice produced this code?").
+Every ``Stmt`` a lowering emits must record what produced it, and grassmann answers that in
+three parts: the core node kind behind it, the basis choice in play, and why that choice was
+made. Together they make a generated ``Program`` traceable back to the coordinate decision
+that shaped it — the question "which basis choice produced this code?" has an answer for
+every line.
 
-polyarray already ships :class:`polyarray.Provenance` (``kind``/``origin``/``index``/
-``label``) and an additive ``Stmt.provenance`` slot.  This module is the **algebra-centric
-home** for *building* those objects: it owns the lowering vocabulary (``"eval"``/
-``"ffs-basis"``/``"cob"``/``"metric"``/``"assert"``/…) — distinct from polyarray's FEM
-sampler ``ProvenanceKind`` literals — and derives a human-readable ``note`` from each
-structured record so the two never drift.
+polyarray supplies the carrier, :class:`polyarray.Provenance` and the ``Stmt.provenance``
+slot it fills. This module supplies the algebra side: the vocabulary of lowering kinds
+(``eval``, ``ffs-basis``, ``cob``, ``metric``, ``assert``, and the rest), which is distinct
+from the sampler vocabulary polyarray uses for its own purposes, and the derivation of a
+human-readable note from each structured record, so that the free text and the structure
+cannot drift apart.
 
-``Provenance.kind`` is a plain (un-validated-at-runtime) field, so the algebra vocabulary
-rides through verbatim; the polyarray ``ProvenanceKind`` ``Literal`` is only a checker hint
-for its own sampler-side callers.
+The two vocabularies coexist because ``Provenance.kind`` is a plain field rather than a
+validated one, so the algebra kinds ride through verbatim; polyarray's own ``Literal`` is a
+checker hint for its sampler-side callers, not a runtime constraint on this one.
 """
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ import polyarray as pa
 __all__ = ["LowerProv", "PROV_KINDS"]
 
 
-# The algebra-centric provenance vocabulary — the core-IR node *families* a
-# Stmt can be attributed to.  NOT the FEM sampler vocabulary.
+# The families of core node a Stmt can be attributed to.  Every emitted Stmt names one of
+# these, and :class:`LowerProv` rejects anything else.
 PROV_KINDS: frozenset[str] = frozenset(
     {
         "value",      # Lit / Zero / Identity / Var input / const
@@ -53,20 +54,20 @@ PROV_KINDS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class LowerProv:
-    """A structured lowering-provenance record.
+    """What one emitted statement records about where it came from.
 
-    Captures the three mandated facts per emitted ``Stmt``:
+    It holds the four facts a traceable statement owes, from the coarsest to the most
+    specific::
 
-    * ``kind``  — the algebra-centric node family (a member of :data:`PROV_KINDS`);
-    * ``node``  — the core-IR node kind that produced the Stmt (e.g. ``"Eval"``);
-    * ``basis`` — the basis choice in play (e.g. ``"ImageBasis(Alt)"`` or ``"std"``);
-    * ``why``   — *why* that choice / op was emitted (e.g. ``"numeric-result-wins"``,
-      ``"contract@[0]"``, ``"inj=>QrOp"``).
+        kind    the node family, one of PROV_KINDS      "ffs-basis"
+        node    the core node that produced the Stmt    "Img"
+        basis   the basis choice in play                "ImageBasis(Alt)", "std"
+        why     the reason for that choice or op        "inj=>QrOp", "contract@[0]"
 
-    :meth:`to_polyarray` materializes the polyarray :class:`~polyarray.Provenance`
-    (algebra ``kind`` in ``kind``, the node in ``origin``, the basis+why in ``label``);
-    :meth:`note` derives the human-readable Stmt note so the free-text and structured
-    provenance never drift.
+    An unrecognized ``kind`` is rejected at construction, so the vocabulary cannot quietly
+    grow a synonym. :meth:`to_polyarray` materializes the polyarray record the ``Stmt``
+    carries, and :meth:`note` derives the human-readable note from the same fields, which is
+    what keeps the free text and the structured record saying the same thing.
     """
 
     kind: str
@@ -82,19 +83,22 @@ class LowerProv:
             )
 
     def note(self) -> str:
-        """Give the algebra-centric human-readable Stmt ``note``.
+        """Give the human-readable note this record writes onto a ``Stmt``.
 
-        Shape: ``"<kind>:<why>"`` — e.g. ``"eval:contract@[0]"``, ``"cob:V->std"``,
-        ``"ffs-basis:ImageBasis(f):inj=>QrOp"`` — matching the historical free-text
-        notes byte-for-byte where one already existed (so existing note assertions hold).
+        It reads ``"<kind>:<why>"`` — ``"eval:contract@[0]"``, ``"cob:V->std"``,
+        ``"ffs-basis:ImageBasis(f):inj=>QrOp"`` — or the bare kind when there is no reason to
+        add. :func:`~grassmann.lower.represent._prov_from_note` reads that shape back, so the
+        note is both a label for a reader and the record a later pass recovers the structure
+        from.
         """
         return f"{self.kind}:{self.why}" if self.why else self.kind
 
     def to_polyarray(self) -> pa.Provenance:
-        """Build the polyarray :class:`~polyarray.Provenance` to attach to a ``Stmt``.
+        """Build the polyarray :class:`~polyarray.Provenance` this record attaches to a ``Stmt``.
 
-        ``kind`` carries the algebra vocabulary; ``origin`` the core-IR node kind; ``label``
-        the basis choice and why (a traceable "which coordinate choice produced this?").
+        The algebra kind goes in ``kind``, the core node in ``origin``, and the basis choice
+        and its reason are composed into ``label`` as ``"<node> @ <basis> (<why>)"``, omitting
+        whichever parts are empty.
         """
         label = self.node
         if self.basis:

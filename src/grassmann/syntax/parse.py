@@ -112,6 +112,13 @@ def tokenize(src: str) -> list[Tok]:
 
 # ===========================================================================
 # Generic AST.
+#
+# Deliberately sort-agnostic: a node records the shape it was written in and
+# nothing about what it denotes, because `f(x)` may be an application, a space
+# constructor or a basis head, and only the resolver — running against the typed
+# preamble — can tell which. Keeping the two stages apart is also what lets the
+# ASCII front end in `syntax/mcalc.py` reuse these node types under a different
+# lexer and precedence table.
 # ===========================================================================
 
 
@@ -125,7 +132,7 @@ class Name:
 
 @dataclass
 class Num:
-    """A numeric literal, kept as text until the resolver knows its sort."""
+    """A numeric literal, held as text until the resolver knows whether it is a scalar or a dimension."""
 
     text: str
     pos: int = 0
@@ -133,7 +140,7 @@ class Num:
 
 @dataclass
 class ListN:
-    """A bracketed list, e.g. the position list of an application."""
+    """A bracketed list, such as the slot positions an application contracts at."""
 
     items: list
     pos: int = 0
@@ -169,7 +176,11 @@ class Pre:
 
 @dataclass
 class App:
-    """An application ``fn(args, kwargs)`` (round) or ``fn[args]`` (square)."""
+    """An application, written ``fn(args, kwargs)`` with round brackets or ``fn[args]`` with square ones.
+
+    ``kind`` keeps the bracket that was used, because round is value application and
+    square is application at the type level.
+    """
 
     fn: object
     args: list
@@ -198,7 +209,11 @@ class BracketN:
 
 @dataclass
 class LamN:
-    """A binder node — λ / Λ / frame / basisfn / Π — with its binder list and body."""
+    """A binder — λ, Λ, ``frame``, ``basisfn`` or Π — with the variables it binds and its body.
+
+    Which core binder this becomes follows from the glyph together with the sorts of the
+    annotations, so the node keeps both and leaves the choice to the resolver.
+    """
 
     glyph: str  # "λ" | "Λ" | "frame" | "Π"
     binders: list  # list[(name, annot_node|None)]
@@ -385,7 +400,12 @@ def parse_ast(src: str) -> object:
 
 @dataclass
 class _Env:
-    """A lexical environment mapping names to resolved ``(tag, value)`` bindings, with a parent scope."""
+    """A lexical scope binding names to resolved ``(tag, value)`` pairs, nested inside a parent.
+
+    The tag records which tower a name was bound in, which is how the resolver decides
+    what a bare identifier denotes. Binders push a child scope so a bound name shadows an
+    outer one without disturbing it.
+    """
 
     m: dict = field(default_factory=dict)
     parent: object = None
@@ -416,7 +436,14 @@ _REDUCE = {r.value: r for r in B.Reduce}
 
 
 class _Resolver:
-    """Interprets the generic AST into core nodes against a typed environment."""
+    """Interprets the generic AST into core nodes, using the typed environment to pick the sort.
+
+    The AST records only surface shape, so every construct is ambiguous across the four
+    towers until a name is looked up: the environment built from the ``⊢`` preamble binds
+    each free variable to its sort and space, and the ``resolve_*`` methods each demand
+    one particular sort of a node. Where a position accepts several, they are tried in
+    order and the first that parses wins.
+    """
 
     def __init__(self, src: str) -> None:
         self.src = src

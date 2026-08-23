@@ -1,38 +1,37 @@
-"""Transport along a map — pushforward, the map-driven dual of :mod:`~grassmann.transform.pullback`.
+"""Carrying a value or a basis along a map, into the map's own image space.
 
-``pullback(v, target)`` (see :mod:`grassmann.transform.pullback`) transports a value
-into a *target space* using only **static structural / subspace** relations — it never
-applies a map.  Carrying a value or basis **along a chart map** ``f : dom → cod`` is a
-*different* operation: it must **apply ``f``** and corestrict to its image ``Img(f)``.
-This is the "coordinate convert" ``Rᵗ → Img(J)`` that ``pullback`` must **not** be used
-for: ``dom(f)`` and ``Img(f)`` are dim-equal but structurally unrelated, so ``pullback``
-would silently fall to a dim-equal ``Assert`` *relabel* instead of applying ``f``.
+Transport applies a map. Given ``f : dom → cod`` and a value in ``dom(f)``, it pushes the
+value through ``f`` and corestricts the result to ``Img(f)``, so the answer lives in the
+image as a space in its own right rather than somewhere in the ambient codomain. The four
+entry points are that operation and its variants::
 
-This module names that missing primitive — the **restriction of a map to produce values
-in its image space** (domain → image), as opposed to the within-ambient inclusion /
-restriction that ``embed`` / ``project`` model:
+    pushforward(v, f)        dom(f) ⤳ Img(f)    Project(Eval(f, ·, v), Img(f))
+    pull_along(v, f)         cod(f) ⤳ dom(f)    Eval(Pinv(f), ·, v)
+    transport_basis(b, f)    a basis of dom(f) carried to Img(f)
+                                                ImageBasis(f, source=b)
+    transport_cobasis(b, f)  the dual side, f^{-⋆}
+                                                DualBasis(ImageBasis(f, source=b))
 
-============================  ===========================================================
-``pushforward(v, f)``         value  ``v : dom(f) ⤳ Img(f)``  ==  ``Project(Eval(f,·,v), Img(f))``
-``pull_along(v, f)``          inverse  ``cod ⤳ dom``  via ``f†``  ==  ``Eval(Pinv(f),·,v)``
-``transport_basis(b, f)``     the fixed reference basis ``b`` of ``dom(f)`` carried to
-                              ``Img(f)``  ==  ``ImageBasis(f, source=b)``  (raw pushforward)
-``transport_cobasis(b, f)``   the ``T^{-⋆}`` dual / functional side  ==
-                              ``DualBasis(ImageBasis(f, source=b))``
-============================  ===========================================================
+This is a different operation from :func:`~grassmann.transform.pullback.pullback`, which
+moves a value between spaces that are already related structurally — a summand of a direct
+sum, a factor of a tensor product, a subspace of its ambient — and never applies a map.
+The distinction matters because it is invisible to dimension: ``dom(f)`` and ``Img(f)``
+have the same dimension but no structural relation, so asking ``pullback`` for the
+coordinate convert ``Rᵗ → Img(J)`` would get a dimension-equal relabel where applying ``f``
+was meant.
 
-Rationality.  Everything here is assembled from ``Eval`` / ``Project`` / ``Img`` /
-``ImageBasis`` / ``Pinv`` only — never an orthonormalizing node
-(:class:`~grassmann.core.basis.ProjectedBasis` / :class:`~grassmann.core.basis.OrthonormalBasis`)
-and never :class:`~grassmann.core.term.Sqrt`.  So for an affine / injective ``f`` the
-transport stays a **rational** function of ``f``.  The metric rides free via
-``WithInner`` / ``Inner`` over ``Img(f)`` (identity-in-frame) and is never materialized
-here.  :func:`assert_rational` is the litmus that distinguishes this (rational) transport
-from per-cell L²-orthonormalization (irrational).
+Everything here is built from ``Eval``, ``Project``, ``Img``, ``ImageBasis`` and ``Pinv``,
+and from nothing that orthonormalizes: no :class:`~grassmann.core.basis.ProjectedBasis` or
+:class:`~grassmann.core.basis.OrthonormalBasis`, and no
+:class:`~grassmann.core.term.Sqrt`. That is what keeps a transport along an affine or
+injective ``f`` a **rational** function of ``f``, since orthonormalization is where a
+``√det`` would enter. The metric rides along through ``WithInner``/``Inner`` over ``Img(f)``
+and is never materialized. :func:`assert_rational` checks the property directly, which is
+what separates this transport from a per-cell L²-orthonormalization.
 
-This is the grassmann-algebra frame for chartLib's ``sample(..., mode="transport")``: the
-transported reference basis sampled there is exactly ``transport_basis`` of the reference
-basis along the chart immersion, and chartLib is its numeric / symbolic realization.
+The transported reference basis is the grassmann-side object behind chartlib's
+``sample(..., mode="transport")``: it is :func:`transport_basis` of the reference basis
+along the chart immersion, and chartlib realizes it numerically.
 """
 from __future__ import annotations
 
@@ -59,7 +58,12 @@ from grassmann.core.term import (
 
 
 class TransportError(Exception):
-    """Raised when a transport-along-a-map cannot be built (or would be irrational)."""
+    """Raised when a transport cannot be built, or when one would introduce an irrational atom.
+
+    The second case is what :func:`assert_rational` reports: an orthonormalizing basis node
+    or a ``Sqrt`` on the transported object means it is no longer a rational function of the
+    map.
+    """
 
 
 def _require_map(f: Term, ctx: str) -> None:
@@ -74,10 +78,12 @@ def _require_map(f: Term, ctx: str) -> None:
 
 
 def pushforward(v: Term, f: Term, *, target: Space | None = None) -> Term:
-    """Carry the value ``v : dom(f)`` along the map ``f`` into ``Img(f)``.
+    """Carry the value ``v : dom(f)`` along ``f`` and land it in ``Img(f)``.
 
-    Returns ``Project(Eval(f, (0,), (v,)), Img(f))`` — apply ``f`` then corestrict to its
-    image.  ``target`` optionally pins the codomain endpoint on the ``Img`` node.
+    The construction applies ``f`` and then corestricts, giving
+    ``Project(Eval(f, (0,), (v,)), Img(f))``, so the result is expressed in the image's own
+    coordinates rather than the ambient codomain's. ``target`` pins the codomain endpoint on
+    the ``Img`` node when the caller knows it.
     """
     _require_map(f, "pushforward")
     if not is_term(v):
@@ -87,10 +93,11 @@ def pushforward(v: Term, f: Term, *, target: Space | None = None) -> Term:
 
 
 def pull_along(v: Term, f: Term) -> Term:
-    """Carry the value ``v : cod(f)`` back along ``f`` to ``dom(f)`` via the pseudo-inverse.
+    """Carry the value ``v : cod(f)`` back to ``dom(f)`` through the pseudo-inverse of ``f``.
 
-    Returns ``Eval(Pinv(f), (0,), (v,))`` — for an injective ``f`` this is the exact
-    left inverse (``f† f = id``), the ``Rᵗ`` side of the coordinate convert.
+    The construction is ``Eval(Pinv(f), (0,), (v,))``. For an injective ``f`` the
+    pseudo-inverse is the exact left inverse, ``f⁺f = id``, so this genuinely undoes
+    :func:`pushforward`.
     """
     _require_map(f, "pull_along")
     if not is_term(v):
@@ -101,12 +108,12 @@ def pull_along(v: Term, f: Term) -> Term:
 def transport_basis(
     b: Basis | None, f: Term, *, target: Basis | None = None
 ) -> ImageBasis:
-    """Transport the reference basis ``b`` of ``dom(f)`` along ``f`` into ``Img(f)``.
+    """Carry the basis ``b`` of ``dom(f)`` along ``f`` to coordinatize ``Img(f)``.
 
-    Returns ``ImageBasis(f, source=b, target=target)`` — the **literal pushforward**
-    columns ``f(bᵢ)``, *not* orthonormalized, so it stays rational.  ``b=None`` uses the
-    standard basis of ``dom(f)``.  This is the grassmann-native object for "the fixed
-    reference basis carried into the chart".
+    The result is an ``ImageBasis``: the literal pushforward columns ``f(b₁), …, f(bₙ)``,
+    left as they are rather than orthonormalized, which is what keeps the transport
+    rational. Passing ``b=None`` transports the standard basis of ``dom(f)``. This is the
+    fixed reference frame carried into a chart.
     """
     _require_map(f, "transport_basis")
     if b is not None and not is_basis(b):
@@ -117,23 +124,26 @@ def transport_basis(
 def transport_cobasis(
     b: Basis | None, f: Term, *, target: Basis | None = None
 ) -> DualBasis:
-    """Transport the cobasis — the ``T^{-⋆}`` dual side of :func:`transport_basis`.
+    """Carry the cobasis along ``f`` — the dual side of :func:`transport_basis`.
 
-    Returns ``DualBasis(ImageBasis(f, source=b, target=target))`` — the dual of the
-    transported reference basis, i.e. the covector / DOF-functional pullback ``f^{-⋆}``.
+    The result is the dual of the transported reference basis, which is how a covector or a
+    degree-of-freedom functional moves: by ``f^{-⋆}``, contravariantly to the vectors.
     """
     return DualBasis(transport_basis(b, f, target=target))
 
 
 # ----------------------------------------------------------------------
-# Rationality guard — the litmus that transport ≠ L²-orthonormalization.
+# The rationality guard — what distinguishes transport from L²-orthonormalization.
 # ----------------------------------------------------------------------
 
 _IRRATIONAL_NODES = (Sqrt, ProjectedBasis, OrthonormalBasis)
 
 
 def _walk(obj: object, seen: set[int]) -> Iterator[object]:
-    """Yield ``obj`` and every nested Term / Basis / Space dataclass field."""
+    """Yield ``obj`` and every Term, Basis or Space nested in its dataclass fields.
+
+    Nodes already visited are skipped, so a shared subterm is yielded once.
+    """
     if id(obj) in seen:
         return
     if isinstance(obj, (Term, Basis, Space)) or dataclasses.is_dataclass(obj):
@@ -148,14 +158,13 @@ def _walk(obj: object, seen: set[int]) -> Iterator[object]:
 
 
 def assert_rational(obj: object, *, ctx: str = "transport") -> None:
-    """Assert a transported term/basis introduces no irrational atom (the litmus test).
+    """Check that a transported term or basis stays a rational function of the map.
 
-    Scans for an orthonormalizing basis node
-    (:class:`~grassmann.core.basis.ProjectedBasis` /
-    :class:`~grassmann.core.basis.OrthonormalBasis`) or a
-    :class:`~grassmann.core.term.Sqrt` — the only ways a ``√det`` / measure factor can
-    enter.  Raises :class:`TransportError` if one is found.  A clean pass means the object
-    stays a rational function of the map (the property the symbolic Vandermonde needs).
+    The scan looks for the only nodes that can introduce a ``√det`` or measure factor: an
+    orthonormalizing basis (:class:`~grassmann.core.basis.ProjectedBasis` or
+    :class:`~grassmann.core.basis.OrthonormalBasis`) and
+    :class:`~grassmann.core.term.Sqrt`. Finding one raises :class:`TransportError`. A clean
+    pass is the property a symbolic Vandermonde construction depends on.
     """
     for node in _walk(obj, set()):
         if isinstance(node, _IRRATIONAL_NODES):

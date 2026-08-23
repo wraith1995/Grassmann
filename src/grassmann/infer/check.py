@@ -1,15 +1,16 @@
-"""Bidirectional checking ``Γ ⊢ e ⇐ s`` — the *check* direction of inference.
+"""The check direction of inference, ``Γ ⊢ e ⇐ s`` — pushing an expected classifier in.
 
-Where :func:`~grassmann.infer.synth.synth` reads a type off a term (synthesize, ``⇒``),
-this checks a term against an expected classifier (``⇐``). The default rule synthesizes
-``e ⇒ s'`` and then unifies ``s' ~ s`` (:func:`~grassmann.infer.unify.unify`). Propagation
-rules:
+Checking asks whether a term fits a classifier that the context already knows, which is
+the direction that recovers information the term alone does not carry. The default rule
+synthesizes ``e ⇒ s'`` and unifies ``s' ~ s``, and the unification is the point: an
+implicit parameter appearing only in the result of an application is solved by meeting the
+expected space there. A ``Lam`` checked against a ``Π(b:σ).τ`` instead pushes the domain
+inward and checks the body against the codomain.
 
-- a ``Lam`` checked against ``Π(b:σ).τ`` pushes ``σ`` in and checks ``body ⇐ τ``;
-- an application checked against an expected ``s`` synthesizes and unifies the result
-  with ``s`` to **recover implicit params that appear only in the result**.
-
-``check_against`` accepts either a Space or a Type as the expected classifier.
+:func:`~grassmann.infer.synth.synth` runs the opposite direction. The two call each other,
+so a term is typed by whichever direction has the information at each node. Both a Space
+and a Type are accepted as the expected classifier; a Type is compared structurally, with
+spaces unified at its leaves.
 """
 
 from __future__ import annotations
@@ -23,7 +24,11 @@ from .unify import unify
 
 
 def check(term: Term, expected: Space | Type, ctx: Ctx | None = None) -> None:
-    """Check ``term`` against the expected classifier.
+    """Check ``term`` against the expected classifier, discharging deferred obligations.
+
+    At the top level this also validates the subspace obligations that an unannotated
+    ``Project`` deferred, now that the expected space has flowed in and solved their target
+    metavariables.
 
     Parameters
     ----------
@@ -50,7 +55,11 @@ def check(term: Term, expected: Space | Type, ctx: Ctx | None = None) -> None:
 
 
 def check_against(term: object, expected: Space | Type, ctx: Ctx) -> None:
-    """Check ``term`` against ``expected`` in ``ctx``, without the top-level obligations.
+    """Check ``term`` against ``expected`` in ``ctx``, leaving obligations for the caller.
+
+    This is the rule the inference calls recursively: it applies the propagation rule for a
+    ``Lam`` against a ``Π`` and otherwise synthesizes and unifies, but it does not discharge
+    the deferred subspace obligations — :func:`check` does that once, at the top.
 
     Parameters
     ----------
@@ -97,10 +106,10 @@ def check_against(term: object, expected: Space | Type, ctx: Ctx) -> None:
 
 
 def _check_lam_against_pi(term: Lam, expected: Pi, ctx: Ctx) -> None:
-    # The binders' domains must structurally agree with the Π's; then check body.
-    # We synthesize the Lam and unify against the full Π (handles the common nested case
-    # for these examples). A deeper push-in is unnecessary while codomains are
-    # value-independent.
+    # The binder domains must agree structurally with the Π's, and then the body must check
+    # against the codomain. Synthesizing the Lam and comparing against the whole Π achieves
+    # both, including for nested binders; pushing the domain in one binder at a time buys
+    # nothing while codomains do not depend on the values bound.
     got = synth(term, ctx)
     _check_type_eq(got, expected, ctx)
 

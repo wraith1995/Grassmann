@@ -1,10 +1,10 @@
-"""Small linear-algebra conveniences: derived ops built on the embed surface, not core IR.
+"""The short linear-algebra compositions worth a name of their own.
 
-Thin wrappers over the :mod:`grassmann.embed` surface for the most common derived
-linear-algebra idioms. Like :mod:`grassmann.stdlib.exterior`, nothing here is a core
-node — each function composes existing core ops (:class:`~grassmann.core.term.Inner` /
-:class:`~grassmann.core.term.Eval`, :class:`~grassmann.core.term.Pinv`,
-:class:`~grassmann.core.term.Compose`). Real-valued.
+Each function here is one or two core operations put together —
+:class:`~grassmann.core.term.Inner` applied through an
+:class:`~grassmann.core.term.Eval`, a :class:`~grassmann.core.term.Pinv` composed with
+its map — spelled out once so callers write the idiom rather than the composition. Like
+the rest of the stdlib, none of it is a core node, and all of it is real-valued.
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ __all__ = ["dot", "norm_sq", "orthogonal_projection", "least_squares"]
 def dot(x: Expr, y: Expr, space: Expr | None = None) -> Expr:
     """Take the inner product ``⟨x, y⟩`` of two vectors, contracting to a ``Scalar``.
 
-    :class:`~grassmann.core.term.Inner` on ``s`` is the metric bilinear form — an element
-    of ``s* ⊗ s*`` with two covariant slots — so it is applied to the two vectors directly
-    (an :class:`~grassmann.core.term.Eval` at slots ``[0, 1]``), fully contracting to a
-    ``Scalar``.
+    :class:`~grassmann.core.term.Inner` on ``s`` is the metric as a value: a bilinear form
+    in ``s* ⊗ s*``, with two covariant slots. Pairing two vectors is therefore just
+    applying it to both at once — an :class:`~grassmann.core.term.Eval` at slots
+    ``[0, 1]`` — which contracts both slots and leaves a ``Scalar``.
 
     Parameters
     ----------
@@ -37,22 +37,32 @@ def dot(x: Expr, y: Expr, space: Expr | None = None) -> Expr:
 
 
 def norm_sq(x: Expr, space: Expr | None = None) -> Expr:
-    """``‖x‖² = ⟨x, x⟩`` — a ``Scalar``."""
+    """Give the squared norm ``‖x‖² = ⟨x, x⟩`` of ``x``, a ``Scalar``.
+
+    Squared, so it stays polynomial in the coordinates and the lowering keeps exact
+    rational cells; take :func:`grassmann.stdlib.scalar.sqrt` of it for the norm itself.
+    """
     return dot(x, x, space=space)
 
 
 def orthogonal_projection(f: Expr) -> Expr:
-    """Build the orthogonal projector ``P_{img f} = f ∘ f† : W ⊸ W`` onto ``img f``.
+    """Build the orthogonal projector ``P = f ∘ f⁺ : W ⊸ W`` onto the image of ``f``.
 
-    ``f†`` is the Moore–Penrose pseudo-inverse (:func:`grassmann.embed.pinv`); ``f ∘ f†``
-    is the orthogonal projection onto the image :func:`grassmann.embed.img` of ``f``
-    (idempotent, self-adjoint in the metric).
+    Composing ``f`` with its pseudo-inverse (:func:`grassmann.embed.pinv`) sends a vector
+    of the codomain to the closest vector that ``f`` can reach. The result is idempotent
+    and self-adjoint in the metric, which is what makes it the orthogonal projection onto
+    :func:`grassmann.embed.img` of ``f`` rather than some other projection along it.
     """
     return f @ f.pinv
 
 
 def least_squares(f: Expr, v: Expr) -> Expr:
-    """``f† v`` — the minimum-norm least-squares solution of ``f x = v``."""
+    """Solve ``f x = v`` in the least-squares sense, returning ``f⁺ v``.
+
+    When ``f`` is not invertible this is the minimum-norm vector among those minimizing
+    ``‖f x − v‖``, so it answers for an overdetermined and an underdetermined system
+    alike.
+    """
     return f.pinv(v)
 
 

@@ -1,23 +1,32 @@
-"""``mcalc`` — a matrixcalculus.org-style **ASCII** surface for Grassmann.
+"""``mcalc`` — an ASCII matrix-calculus surface that compiles to coordinate-free terms.
 
-It is a strict
-superset of matrixcalculus.org's grammar — their examples (``0.5*x'*A*x``,
-``norm2(A*x-y)^2``, ``tr(A*X'*B*X*C)``, ``log(det(inv(X)))``) parse verbatim — plus
-coordinate-free extensions (``@`` compose, ``(+)`` direct sum, ``[a;b]`` stack,
-``ker``/``img`` FFS, ``'`` = dual/flat).
+The grammar is a strict superset of matrixcalculus.org's, so their examples parse
+verbatim — ``0.5*x'*A*x``, ``norm2(A*x-y)^2``, ``tr(A*X'*B*X*C)``,
+``log(det(inv(X)))`` — and it adds what the core can say and matrix notation cannot:
+``@`` for composition, ``(+)`` for the direct sum, ``[a;b]`` for a stack, ``ker`` and
+``img`` for the fundamental subspaces, ``'`` for the dual or the metric lower.
 
-Pipeline (mirrors :mod:`grassmann.syntax.parse`):
+The route from text to term is::
 
-    text  ──tokenize──▶  tokens  ──Pratt──▶  generic AST  ──type-directed──▶  core IR
+    text ──tokenize──▶ tokens ──Pratt──▶ generic AST ──type-directed──▶ core IR
 
-The AST nodes are the ones shared with the Unicode parser (:mod:`grassmann.syntax.parse`):
-``Name / Num / Bin / Post / Pre / App / ListN``. Only the *lexer* (ASCII glyphs) and the
-*precedence table* (matrixcalculus order) differ here; the type-directed builder that turns
-the AST into core :class:`~grassmann.core.term.Term` nodes (resolving the overloaded ``*`` /
-``'`` against scalar/vector/matrix declarations) lives alongside.
+The AST node types are shared with the Unicode parser (:mod:`grassmann.syntax.parse`) —
+``Name / Num / Bin / Post / Pre / App / ListN``. Only the lexer, over ASCII glyphs, and
+the precedence table, in matrixcalculus order, differ. The interesting stage is the last:
+matrix notation overloads ``*`` and ``'`` heavily, so a builder walks the AST carrying the
+variable declarations, unifies the space slots of every operand as it goes, and only then
+decides whether a given ``*`` is a scalar multiple, a matrix product, or an application.
 
-The public entry points are :func:`build_problem` (primal + optional derivative +
-variable/dimension metadata), :func:`mcbuild`, and :func:`mcdiff`; derivatives are taken by
+Declarations do more than name shapes. Beside ``scalar`` / ``vector(n)`` /
+``matrix(m, n)``, a variable may be declared on a space expression such as ``R^n`` or
+``V -> W``, which keeps the dimension symbolic and lets one problem compile for every
+``n``; or on a geometry space such as ``tangent(phi)``, which types it against a
+:class:`grassmann.syntax.geometry.Parameterization` and makes the derivative the covariant
+one along that manifold.
+
+The public entry points are :func:`build_problem`, which returns the primal, the optional
+derivative, and the variable and dimension metadata around them, plus the shorthands
+:func:`mcbuild` and :func:`mcdiff`. Differentiation itself is
 :mod:`grassmann.transform.diff`.
 """
 
@@ -371,10 +380,18 @@ def _space_tokens(s: str) -> list[str]:
 
 
 class _SpaceParser:
-    """ASCII space grammar (low→high precedence).
+    """Recursive-descent parser for the ASCII space algebra used in declarations.
 
-    ``A -> B`` (linear-map space, right-assoc) · ``A (+) B`` (⊕) · ``A (x) B`` (⊗) · ``S*`` (postfix dual) ·
-    atoms ``R^n`` / named / ``(…)`` / ``T(phi)`` / ``CT(phi)``.
+    One method per precedence level, loosest first, each calling the next::
+
+        arrow    A -> B        the linear-map space, right-associative
+        osum     A (+) B       the direct sum
+        tensor   A (x) B       the tensor product
+        dual     S*            the postfix dual
+        atom     R^n, a declared name, (…), T(phi)/CT(phi), Lambda(V,k), Omega(V,k)
+
+    ``R^n`` with a non-numeric exponent yields a symbolic dimension, which is what makes a
+    declaration dimension-generic.
     """
 
     def __init__(self, toks: list[str], src: str, env: dict, params: dict) -> None:
@@ -449,10 +466,16 @@ class _SpaceParser:
 
 
 def _resolve_space(s: str, env: dict, params: dict | None = None) -> Expr:
-    """Resolve an ASCII space expression to a grassmann space ``Expr`` — the full algebra.
+    """Resolve an ASCII space expression to a grassmann space ``Expr``.
 
-    Named refs, ``R^n``, ``A -> B``, ``A (x) B``, ``A (+) B``, ``S*`` (dual), ``T(phi)``/ ``CT(phi)``, and
-    parentheses.
+    Accepts the whole algebra :class:`_SpaceParser` covers — a declared name, ``R^n``,
+    ``A -> B``, ``A (x) B``, ``A (+) B``, ``S*``, the geometry forms ``T(phi)`` and
+    ``CT(phi)``, and parentheses. A bare name already in ``env`` short-circuits.
+
+    Raises
+    ------
+    McalcBuildError
+        If the expression is malformed or leaves trailing input.
     """
     s = s.strip()
     if s in env:
@@ -493,9 +516,11 @@ def _collect_dim_vars(node: object, seen: set[str] | None = None) -> set[str]:
 
 
 def _split_top_arrow(s: str) -> tuple[str, str] | None:
-    """Split a space string on a TOP-LEVEL ``->`` (depth-0, outside parens) → ``(dom, cod)`` for a map space.
+    """Split a space string at its top-level ``->`` into a domain and a codomain.
 
-    ``None`` if there is no top-level arrow.
+    Only an arrow outside every parenthesis counts, so ``(A -> B) (x) C`` is not a map
+    space and ``None`` comes back. A declared type that does split this way types its
+    variable as a linear map between the two resolved spaces.
     """
     depth = 0
     i = 0
@@ -512,10 +537,13 @@ def _split_top_arrow(s: str) -> tuple[str, str] | None:
 
 
 def _maybe_space(ty: str, builder: _Builder) -> bool:
-    """Report whether ``ty`` is a (non-geometry) space expression.
+    """Report whether the declared type ``ty`` is a space expression rather than a shape.
 
-    That means a named space, ``R^n``, or ``A -> B``. Geometry types (``tangent(...)``
-    and friends) keep their dedicated path and are rejected here.
+    A space expression is a declared space name, ``R^n``, or any algebra over them —
+    ``A -> B``, ``A (x) B``, ``A (+) B``, ``S*``. Answering yes routes the variable
+    through :func:`_resolve_space`, which is what makes a declaration such as ``R^n``
+    dimension-generic. Geometry types such as ``tangent(phi)`` are rejected here on
+    purpose: they have their own path through :func:`_parse_type`.
     """
     import re
     if re.match(r"(tangent|cotangent|normal|conormal|T|CT|Img|Ker)\(", ty):
@@ -528,12 +556,23 @@ def _maybe_space(ty: str, builder: _Builder) -> bool:
 
 
 def _parse_type(ty: str, var: str) -> tuple[str, list[str]]:
-    """Parse a declared type into ``(head, dim_names)``.
+    """Parse a declared type into its head and its parenthesized argument names.
 
-    Forms (suffix tier — user-named, shared dims; the advanced ``R^n``/``R^n->R^m`` space-expression tier is
-    future work):
+    This is the suffix tier of the declaration grammar, where the head names a shape and
+    the arguments name dimensions that other declarations may share::
 
         scalar | vector | matrix | vector(n) | matrix(m, n)
+        tangent(phi) | cotangent(phi) | normal(phi) | conormal(phi)
+
+    A dimension name is a slot two declarations can agree on, so ``vector(n)`` and
+    ``matrix(m, n)`` line up without stating any size. The space-expression tier —
+    ``R^n``, ``V``, ``V -> W`` — is a different form entirely and is recognized by
+    :func:`_maybe_space` before this is reached.
+
+    Raises
+    ------
+    McalcBuildError
+        If the head is given the wrong number of dimension arguments.
     """
     ty = ty.strip()
     if "(" not in ty:
@@ -552,9 +591,11 @@ def _parse_type(ty: str, var: str) -> tuple[str, list[str]]:
 
 
 def default_type(name: str) -> str:
-    """Give the default declared type of ``name`` under the matrixcalculus convention.
+    """Give the type an undeclared variable takes, by the matrixcalculus naming convention.
 
-    ``a–g`` scalar, ``h–z`` vector, ``A–Z`` matrix, ``eye`` the identity matrix.
+    The convention reads the shape off the identifier so short expressions need no
+    declarations at all: ``a``–``g`` are scalars, ``h``–``z`` vectors, any capital a
+    matrix, and ``eye`` the identity matrix.
     """
     if name == "eye":
         return "matrix"
@@ -567,10 +608,14 @@ def default_type(name: str) -> str:
 
 
 class _UF:
-    """Union-find over integer space slots, carrying optional **dimension names**.
+    """Union-find over the space slots, so operands that must agree end up sharing a space.
 
-    The name is per class, so a user-named dim like ``n`` survives unification and stays
-    shared across every variable that declares it.
+    Matrix notation states no spaces, only that ``A*x`` requires ``A``'s domain and ``x``'s
+    space to be the same thing. Each operand therefore starts with a fresh integer slot,
+    and every operation merges the slots it forces equal; the class that survives is one
+    space. A class may carry a user dimension name — the ``n`` in ``vector(n)`` — or be
+    pinned to a fixed declared or geometry space, and both are reconciled on merge, so a
+    contradiction is reported against the names the user wrote.
     """
 
     def __init__(self) -> None:
@@ -627,17 +672,18 @@ class _UF:
 
 @dataclass
 class _TN:
-    """A typed node.
+    """One node of the build in progress: what kind of thing it is, and how to emit it.
 
-    A kind tag, its space slots, and a thunk that emits the core Expr once slots have been materialized to
-    concrete spaces.
+    A node cannot be built as it is met, because its space is still an unresolved slot,
+    so it carries a kind tag, the slots it occupies, and a thunk that emits the core
+    ``Expr`` once the slots have settled on concrete spaces.
 
-    A **covector** ``x' (A B …)`` is carried structurally as a *Riesz vector* ``u`` plus a
-    *pending map* ``P``, denoting the functional ``w ↦ ⟨u, P(w)⟩``. This keeps the canonical
-    bilinear form ``x'*A*x = ⟨x, A x⟩`` free of any ``Dagger`` node (so it differentiates
-    cleanly): ``x'`` is ``(u=x, P=id)``; ``· A`` becomes ``P ↦ P∘A``; ``· w`` contracts to
-    ``⟨u, P(w)⟩``. ``emit`` produces the Riesz vector ``u``; ``pmap`` (or ``None`` = identity)
-    produces ``P``; ``usp`` is ``u``'s slot, ``sp`` the covector's current domain slot.
+    A covector is the one non-obvious case. ``x' A B …`` is carried structurally, as a
+    Riesz vector ``u`` together with a pending map ``P``, standing for the functional
+    ``w ↦ ⟨u, P(w)⟩``. Building ``x'`` gives ``(u=x, P=id)``; multiplying on the right by
+    ``A`` composes into ``P ↦ P∘A``; applying to ``w`` finally contracts to ``⟨u, P(w)⟩``.
+    Deferring this way keeps the bilinear form ``x'*A*x = ⟨x, A x⟩`` free of any ``Dagger``
+    node, which is what makes it differentiate cleanly.
     """
 
     kind: str                       # "scalar" | "vec" | "cov" | "mat"
@@ -655,11 +701,19 @@ class _TN:
 
 
 class _Builder:
-    """Type-directed builder resolving an overloaded matrixcalculus AST into core terms.
+    """Turns an overloaded matrixcalculus AST into core terms, resolving the overloads by type.
 
-    Unifies each variable's (initially fresh) space as the expression constrains it, and
-    emits core :class:`~grassmann.core.term.Term` nodes once the slots have materialized to
-    concrete spaces.
+    Matrix notation reuses a handful of glyphs for many operations: ``*`` is a scalar
+    multiple, a matrix product, a matrix-vector application or an inner product depending
+    on its operands, and ``'`` is a transpose, a dual or a metric lower. Which one is
+    meant follows from the operands' types, so the builder walks the AST bottom-up
+    producing :class:`_TN` nodes, unifying space slots as each operation constrains them,
+    and emits core :class:`~grassmann.core.term.Term` nodes only once the slots have
+    settled on concrete spaces.
+
+    Alongside the variables it holds the declared environments: named spaces, opaque
+    functions with their kernels, declared bases, and the parameterizations that geometry
+    declarations are typed against.
     """
 
     def __init__(self, decls: dict[str, str], src: str, params: dict | None = None,
@@ -1316,11 +1370,19 @@ def _wrap_lit(val: float) -> Expr:
 
 @dataclass
 class McalcResult:
-    """The compiled result of a matrixcalculus-style problem.
+    """Everything a compiled matrixcalculus problem consists of, and the ways to run it.
 
-    Carries the primal :class:`~grassmann.core.term.Term`, the shared variable ``Expr``
-    handles with their program-input keys, the symbolic dimension names, and the optional
-    derivative, plus helpers to instantiate the symbolic dims to concrete sizes and run.
+    The primal term is the answer to the expression; the derivative, when a ``wrt`` was
+    given, is the coordinate-free derivative map beside it. Around them sits the metadata
+    a caller needs to actually feed the thing: the shared variable handles, the program
+    input key each is fed under, and the symbolic dimension names still open.
+
+    Nothing here is bound to a size. A problem stays dimension-generic until
+    :meth:`instantiate` substitutes concrete sizes, which is what the run helpers do
+    first. Those helpers come in three flavours — :meth:`value` and :meth:`grad` for the
+    plain numeric route in the matrixcalculus array convention, :meth:`realize_run` for
+    lowering chosen values in declared bases, and :meth:`run_geometry` /
+    :meth:`covariant_run` for a problem whose variables live on a parameterization.
     """
 
     builder: _Builder
@@ -1333,19 +1395,25 @@ class McalcResult:
 
     @property
     def vars(self) -> dict[str, object]:
-        """Name -> the shared variable ``Expr`` (same object/uid wherever it occurs)."""
+        """Give each declared variable's ``Expr`` by name.
+
+        One handle per name, shared by every occurrence in the expression, so a variable
+        appearing twice is the same core ``Var`` with the same uid both times.
+        """
         return {n: tn.emit() for n, tn in self.builder.var_meta.items()}
 
     def input_key(self, name: str) -> str:
-        """Give the ``G.run`` input key (``f"{name}_{uid}"``) for a declared variable."""
+        """Give the ``G.run`` input key a declared variable is fed under, ``f"{name}_{uid}"``."""
         return f"{name}_{self.vars[name].node.uid}"
 
     @property
     def dim_names(self) -> list[str]:
-        """Every symbolic Nat dimension this problem is polymorphic over.
+        """List the symbolic dimensions this problem is still polymorphic over.
 
-        Collected from the built term, so it includes both auto names (``"n0"``) and user-named dims from
-        symbolic spaces (``R^n`` → ``"n"``). Set these to concrete sizes to run / generate Python.
+        Collected from the built term itself, so the list covers both the names allocated
+        for undeclared shapes (``"n0"``) and the ones the user wrote in a symbolic space
+        (``R^n`` gives ``"n"``). Supplying a size for each is what makes the problem
+        runnable or renderable as Python.
         """
         names = _collect_dim_vars(_node(self.primal))
         if self.derivative is not None:
@@ -1353,30 +1421,34 @@ class McalcResult:
         return sorted(names)
 
     def instantiate(self, node: object, dims: dict[str, int]) -> object:
-        """Substitute concrete integer sizes for the symbolic Nat dims in ``node``.
+        """Substitute concrete sizes for the symbolic dimensions in ``node``.
 
-        ``node`` is a term ``Expr`` and ``dims`` maps dim-name -> int; the result can be
-        lowered and run.
+        ``node`` is a term ``Expr`` of this problem and ``dims`` maps each name from
+        :attr:`dim_names` to an integer. The result is a term with no symbolic dimension
+        left, which is what lowering needs.
         """
         return instantiate(node, dims)
 
     @property
     def bases(self) -> dict[str, object]:
-        """The declared bases resolved to core ``Basis`` nodes (raises per-basis on bad refs).
+        """Resolve every declared basis expression to a core ``Basis`` node.
 
-        Used to validate the Bases section and to realize values (``realize_run``).
+        Resolution is deferred until here because a basis may refer to variables that only
+        exist once the expression is built. Reading the property is therefore also how a
+        Bases section is validated: a bad reference raises for the basis that names it.
         """
         return {nm: self.builder.resolve_basis(nm) for nm in self.builder.bases_src}
 
     def realize_run(self, node: object, values: dict, dims: dict | None = None,
                     realize: dict | None = None,
                     raw_feed: dict | None = None) -> np.ndarray:
-        """Run ``node``, realizing chosen values in declared bases.
+        """Run ``node`` with chosen values lowered in declared bases rather than the standard one.
 
-        ``realize`` maps a variable name -> a declared basis name; that value lowers in
-        that basis. ``values`` are keyed by variable name; ``raw_feed`` supplies extra
-        program inputs by their raw key (e.g. a parameterization immersion ``J``). This
-        generalizes the geometry realization to declared bases.
+        ``realize`` maps a variable name to a declared basis name, and that variable is
+        then realized in that frame — the general form of what the geometry run does with
+        ``ImageBasis(J)``. Naming the standard or Euclidean basis is the default and costs
+        nothing. ``values`` are keyed by variable name; ``raw_feed`` adds program inputs
+        by their raw key, which is how an immersion ``J`` is supplied.
         """
         import numpy as np
 
@@ -1392,12 +1464,15 @@ class McalcResult:
         return np.asarray(represent(_node(term), basis_env=env).run(feed)["result"])
 
     def numeric(self, dims: dict, values: dict, realize: dict | None = None) -> dict:
-        """Run the full end-to-end numeric evaluation.
+        """Evaluate the problem end to end, from symbolic dims to numbers.
 
-        Instantiate symbolic dims, feed variable values (matrixcalculus numpy
-        convention), **finite-difference each opaque ∂f from its kernel**, realize chosen
-        bases, and return ``{"value", "gradient"}`` — the gradient being present for a
-        scalar primal differentiated w.r.t. a vector/matrix ``wrt``.
+        The one call does the whole sequence: instantiate the symbolic dimensions to the
+        sizes in ``dims``, feed the variable values in the matrixcalculus array
+        convention, finite-difference each required opaque Jacobian from its own kernel at
+        the argument's value, realize whichever values ``realize`` assigns a declared
+        basis, and run. The result maps ``"value"`` to the primal's value and
+        ``"gradient"`` to the derivative's, the latter present when a scalar primal was
+        differentiated with respect to a vector or matrix variable.
         """
         import numpy as np
 
@@ -1459,10 +1534,13 @@ class McalcResult:
 
     @property
     def required_derivatives(self) -> list[dict]:
-        """The opaque-function derivatives the engine requires to evaluate the derivative.
+        """List the opaque-function derivatives that must be supplied numerically.
 
-        One per opaque ``f`` used, with its source name and order. The user supplies these
-        numerically (a provided Jacobian or finite difference) plus a frame.
+        An opaque function has no body, so its Jacobian cannot be built symbolically and
+        becomes a program input instead. One entry appears per opaque function the
+        derivative reaches, naming it, its input key and its order; the caller fills each
+        with a known Jacobian or a finite difference of the kernel, as :meth:`numeric`
+        does automatically.
         """
         if self.derivative is None:
             return []
@@ -1477,18 +1555,22 @@ class McalcResult:
 
     @property
     def var_kinds(self) -> dict[str, str]:
-        """Name -> ``"scalar" | "vector" | "matrix"``."""
+        """Give each variable's shape kind by name — ``"scalar"``, ``"vector"`` or ``"matrix"``.
+
+        This is what decides whether a value is transposed at the numpy boundary.
+        """
         m = {"scalar": "scalar", "vec": "vector", "mat": "matrix"}
         return {n: m[tn.kind] for n, tn in self.builder.var_meta.items()}
 
     # -- numpy I/O convention (matrixcalculus-native) ------------------------
     #
-    # The engine stores a map V⊸W as V*⊗W, i.e. numpy shape (input, output) — the transpose
-    # of matrixcalculus/numpy's (rows=output, cols=input) with `A*x == A@x`. So at the user
-    # boundary we **feed matrix variables transposed** and **transpose any 2-D result back**.
-    # This makes `A*x` act as `A@x`, gradients w.r.t. a matrix come out (output, input), and a
-    # vector-valued map's derivative is its true Jacobian (output, input) — all matching
-    # matrixcalculus + the downloadable numpy code, with no manual transposes by the caller.
+    # The engine stores a map V⊸W as V*⊗W, so its numpy shape is (input, output) — the
+    # transpose of the (rows=output, cols=input) that matrixcalculus and numpy use, where
+    # `A*x == A@x`. The boundary therefore feeds matrix variables transposed and transposes
+    # any 2-D result back. That makes `A*x` behave as `A@x`, brings a gradient with respect
+    # to a matrix out as (output, input), and makes a vector-valued map's derivative its
+    # true Jacobian — matching matrixcalculus and the downloadable numpy code, with no
+    # manual transposes by the caller.
 
     def _inputs(self, values: dict[str, object]) -> dict[str, object]:
         import numpy as np
@@ -1503,11 +1585,12 @@ class McalcResult:
 
     def run_node(self, node: object, values: dict[str, object],
                  dims: dict[str, int]) -> np.ndarray:
-        """Run a built node (primal or derivative) in the matrixcalculus numpy convention.
+        """Run a built node — the primal or the derivative — in the matrixcalculus array convention.
 
-        Matrix inputs go in transposed and 2-D results come back transposed. ``values``
-        maps variable name -> numpy array (matrices as rows=output × cols=input);
-        ``dims`` maps dim-name -> size.
+        Matrix inputs go in transposed and two-dimensional results come back transposed,
+        so the caller works in ``rows=output × cols=input`` throughout and never sees the
+        engine's storage order. ``values`` maps variable name to a numpy array and
+        ``dims`` maps each symbolic dimension to a size.
         """
         import numpy as np
         res = _G.run(self.instantiate(node, dims), self._inputs(values))["result"]
@@ -1515,7 +1598,7 @@ class McalcResult:
         return res.swapaxes(-1, -2) if res.ndim == 2 else res
 
     def value(self, values: dict[str, object], dims: dict[str, int]) -> np.ndarray:
-        """Give the numeric value of the primal at ``values`` (matrixcalculus convention)."""
+        """Give the numeric value of the primal at ``values``, in the matrixcalculus convention."""
         return self.run_node(self.primal, values, dims)
 
     def _slot_dim(self, slot: int, dims: dict[str, int]) -> int:
@@ -1524,10 +1607,16 @@ class McalcResult:
 
     def _geom_env_feed(self, points: dict[str, object],
                        coords: dict[str, object]) -> tuple[dict, dict]:
-        """Build the ``(basis_env, feed)`` pair for the geometry vars.
+        """Build the basis environment and numeric feed for the geometry variables.
 
-        Each tangent value is realized in ``ImageBasis(J)`` and the immersion
-        ``dφ``/``d²φ`` is auto-fed at its point.
+        Each tangent value is realized in ``ImageBasis(J)`` — the frame of ``dφ`` columns
+        the immersion gauge differentiates against — and each parameterization's Jacobian
+        and Hessian are finite-differenced from φ at its point and added to the feed once.
+
+        Raises
+        ------
+        McalcBuildError
+            If a geometry variable is declared on a space other than ``tangent(...)``.
         """
         import numpy as np
 
@@ -1549,10 +1638,13 @@ class McalcResult:
 
     def run_geometry(self, points: dict[str, object],
                      coords: dict[str, object]) -> np.ndarray:
-        """Run a primal holding **geometry** variables (declared on ``tangent(phi)`` etc.).
+        """Run a primal whose variables live on a parameterization's geometry spaces.
 
-        ``points`` maps parameterization name -> the point ``u`` (ℝᵏ); ``coords`` maps
-        geometry-var name -> its coordinate array in the tangent frame.
+        The values are given in the tangent frame, not the ambient one, so a caller says
+        where on the manifold to evaluate and what the coordinates are there: ``points``
+        maps each parameterization name to its parameter point ``u ∈ ℝᵏ``, and ``coords``
+        maps each geometry variable to its coordinate array in that point's tangent frame.
+        The immersion's Jacobian and Hessian are derived from φ.
         """
         import numpy as np
 
@@ -1563,12 +1655,18 @@ class McalcResult:
     def covariant_run(self, points: dict[str, object], coords: dict[str, object],
                       direction: object,
                       sections: dict | None = None) -> np.ndarray:
-        """Evaluate the **covariant derivative** along a given ``direction``.
+        """Evaluate the covariant derivative in one tangent ``direction``.
 
-        The derivative must have been built with ``wrt`` = a parameterization.
-        ``direction`` is an ℝᵏ tangent direction at the point, and ``sections`` maps a
-        tangent-var name -> its derivative-section coords (default the zero/constant
-        section). The returned array is the directional covariant derivative.
+        The derivative map is applied to a direction rather than realized in full, so
+        ``direction`` is a tangent direction in ℝᵏ at the point. ``sections`` gives each
+        tangent variable's derivative-section coordinates; omitting one means the zero
+        section, a field whose frame coordinates are constant, and the connection term is
+        what remains. Requires a problem built with ``wrt`` naming a parameterization.
+
+        Raises
+        ------
+        McalcBuildError
+            If the problem was not built against a parameterization.
         """
         import numpy as np
 
@@ -1589,10 +1687,11 @@ class McalcResult:
         return np.asarray(represent(self.derivative.node.body, basis_env=env).run(feed)["result"])
 
     def _geom_basis_env(self) -> dict:
-        """Build the symbolic basis env realizing geometry values in ``ImageBasis(J)``.
+        """Build the basis environment alone, without any numeric feed.
 
-        The derivative sections are realized in ``dφ⊗ImageBasis``. Used for both running
-        and codegen.
+        Geometry values realize in ``ImageBasis(J)`` and derivative sections in the
+        product of the parameter cobasis with it — the same frames :meth:`_geom_env_feed`
+        picks, but symbolic, so this serves code generation as well as running.
         """
         from grassmann.core import basis as _B
         from grassmann.lower.represent import default_basis
@@ -1607,11 +1706,13 @@ class McalcResult:
         return env
 
     def geometry_source(self) -> dict:
-        """Standalone numpy source for a geometry/parameterization problem.
+        """Emit standalone numpy source for a problem whose variables live on a parameterization.
 
-        The primal and (if present) the derivative, realized via ``ImageBasis(J)``. The emitted functions take
-        the immersion ``dφ`` (and ``d²φ`` / sections / direction for the derivative) + tangent coordinates.
-        Returns ``{"primal_py": ..., "derivative_py": ...}`` (raw source).
+        The primal, and the derivative when one was built, are lowered in the
+        ``ImageBasis(J)`` frame and rendered as plain Python — no grassmann needed at run
+        time. The emitted functions take the immersion ``dφ`` and the tangent coordinates,
+        with ``d²φ``, the sections and the direction added for the derivative. The result
+        maps ``"primal_py"`` and ``"derivative_py"`` to raw source text.
         """
         import polyarray as pa
 
@@ -1628,11 +1729,17 @@ class McalcResult:
         return out
 
     def grad(self, values: dict[str, object], dims: dict[str, int]) -> np.ndarray:
-        """Give the numeric derivative of the primal w.r.t. ``wrt``.
+        """Give the numeric derivative of the primal with respect to ``wrt``.
 
-        Uses the matrixcalculus numpy convention: scalar-f → gradient (a vector, or a
-        matrix when ``wrt`` is a matrix); vector-f → Jacobian. Matrix-shaped results come
-        out (output, input) like numpy.
+        The shape follows the matrixcalculus convention rather than the engine's: a scalar
+        primal gives a gradient, shaped like ``wrt`` itself, and a vector-valued one gives
+        a Jacobian. Any two-dimensional result comes back as ``(output, input)``, the
+        numpy orientation.
+
+        Raises
+        ------
+        McalcBuildError
+            If the problem was built without a ``wrt``.
         """
         import numpy as np
         if self.derivative is None:

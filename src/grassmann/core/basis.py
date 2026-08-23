@@ -43,12 +43,13 @@ from .term import Term, Var, is_term
 
 
 class Reduce(Enum):
-    """How a list/completed basis combines its vectors into a basis.
+    """How a listed or completed basis combines its columns into a basis.
 
-    * ``NONE`` — use the vectors as given (assumed linearly independent and complete);
-    * ``RREF`` — greedy RREF pivot: keep the linearly-independent columns (and complete from a
-      ``backup`` basis when rank-deficient);
-    * ``ORTHONORMALIZE`` — orthonormalize the columns (QR / Gram–Schmidt).
+    ``NONE`` takes the columns as given, which assumes they are linearly independent and
+    already span. ``RREF`` pivots greedily, keeping the linearly independent columns and
+    completing from a backup basis when they fall short. ``ORTHONORMALIZE`` runs a QR or
+    Gram–Schmidt over them, which is the only way orthonormalization ever happens: it is
+    never implicit in a change of basis.
     """
 
     NONE = "none"
@@ -57,17 +58,17 @@ class Reduce(Enum):
 
 
 class TargetBasis(Enum):
-    """A *policy* for the basis ``represent``/``_rep`` lower a node into (not a basis node).
+    """A policy naming the basis :func:`grassmann.lower.represent` should lower a node into.
 
-    Used as the ``target`` of :func:`grassmann.lower.represent` (and ``_rep``) alongside a
-    concrete :class:`Basis`:
+    It is the ``target`` argument of ``represent`` and of the ``_rep`` arms beneath it.
+    ``AUTO``, the default, leaves the choice to the system: each space keeps its natural
+    basis, meaning a pin from the ``basis_env`` where there is one and otherwise the
+    least symbolic candidate that ``choose`` scores highest. ``STD`` asks for the
+    standard orthonormal basis of each space, ``default_basis(space)``, and propagates
+    that request through the whole recursion so every node is expressed in it.
 
-    * ``AUTO`` — free choice by the underlying system: each space keeps its natural basis
-      (a ``basis_env`` pin, else the min-symbolic ``choose``).  The default.
-    * ``STD`` — the standard orthonormal basis of each space (``default_basis(space)``),
-      propagated through the whole recursion so every node is expressed in it.
-
-    A concrete :class:`Basis` target (not this enum) names the *result*'s basis directly.
+    The ``target`` also accepts a concrete :class:`Basis`, which is a different thing
+    from this policy: it names the basis of the result directly.
     """
 
     AUTO = "auto"
@@ -84,13 +85,13 @@ class BasisError(Exception):
     """Raised when a Basis is structurally malformed."""
 
 
-# Valid `which` selectors for ProjectedBasis (the projection-built FFS).
+# The `which` selectors a ProjectedBasis accepts, one per fundamental subspace.
 #
-# ``"image"`` is the **Q / orthonormal range** (the immersed side): the ``Q`` of ``QrOp``
-# when ``f`` is asserted injective (static rank ``=|dom|``), else ``U[:, :δ_f]`` of
-# ``SvdOp`` in general.  It is the
-# **orthonormalized** counterpart of :class:`ImageBasis` (the raw map-application basis);
-# the two are related by ``QrOp.R`` / ``QrOp.Q`` (injective) or the SVD factors (general).
+# "image" is the orthonormal range of f: the Q factor of QrOp when f is asserted
+# injective, so the rank is static and equals |dom|, and U[:, :δ_f] of SvdOp otherwise.
+# It is the orthonormalized counterpart of ImageBasis, whose columns are the raw map
+# applications; a change of basis relates the two, built from QrOp's R and Q in the
+# injective case and from the SVD factors in general.
 PROJECTED_WHICH = ("image", "ker", "coimg", "coker")
 
 
@@ -192,18 +193,18 @@ class BasisRep:
 
 @dataclass(frozen=True)
 class ProjectedBasis:
-    """The orthonormalized basis of one of ``f``'s four fundamental subspaces, built by projection.
+    """The orthonormalized basis of one of ``f``'s four fundamental subspaces.
 
-    The subspace is chosen by ``which`` — ``Image`` / ``Ker`` / ``CoImg`` / ``CoKer``
-    (``which`` ∈ :data:`PROJECTED_WHICH`).
-    ``source`` / ``target`` are the bases of ``f``'s domain / codomain (default the
-    standard basis, represented as ``None`` here).
+    ``which`` selects the subspace, one of the strings in :data:`PROJECTED_WHICH`, and
+    ``source`` and ``target`` are the bases of ``f``'s domain and codomain, each
+    defaulting to the standard basis when left as ``None``.
 
-    ``which == "image"`` is the **Q / orthonormal range** of ``f`` (the immersed side):
-    realized as the ``Q`` factor of ``QrOp`` when ``f`` is injective (static rank), else
-    ``U[:, :δ_f]`` of ``SvdOp``. It is the orthonormalized counterpart of
-    the literal :class:`ImageBasis` (the raw map-application columns); the two are related
-    by the ``QrOp.R``/``Q`` (injective) or SVD factors (general) change of basis.
+    For ``which == "image"`` the columns are the orthonormal range of ``f``: the ``Q``
+    factor of ``QrOp`` when ``f`` is injective and the rank is therefore static, and the
+    leading ``δ_f`` columns of the SVD's ``U`` in general. That is the orthonormalized
+    counterpart of :class:`ImageBasis`, which keeps the raw pushforward columns instead;
+    a change of basis built from ``QrOp``'s ``R`` and ``Q``, or from the SVD factors,
+    carries one to the other.
     """
 
     f: Term  # a linear-map Term
@@ -235,15 +236,18 @@ class ProjectedBasis:
 
 @dataclass(frozen=True)
 class ImageBasis:
-    """The literal map-application basis of ``f``'s range — the raw, non-orthonormalized pushforward frame.
+    """The basis of literal pushforward columns ``f(sᵢ)`` of a map's image.
 
-    Its columns are ``f`` applied to the **source** basis of ``f``'s domain — ``f(sᵢ)``,
-    the R/fwd side — **not** orthonormalized, read in the codomain ``target`` basis.  ``source``
-    (a basis of ``dom f``) defaults to the standard basis (``None``), giving the literal columns
-    ``f(eᵢ)``; ``target`` (a basis of ``cod f``) likewise defaults to standard.  The
-    *orthonormalized* range basis (the ``Q`` of QR / first ``δ_f`` columns of the SVD ``U``) is
-    :class:`ProjectedBasis` with ``which == "image"``; the two are connected by a change of basis
-    (``QrOp.R``/``Q`` or the SVD factors).
+    Given a map ``f`` and a basis ``s`` of its domain, this coordinatizes ``Img(f)`` by
+    the vectors ``f(s₁), …, f(sₙ)`` themselves, read in the codomain basis ``target`` —
+    the frame chartlib transports along ``f``. ``source`` defaults to the standard basis
+    of ``dom f`` when left as ``None``, giving the literal columns ``f(eᵢ)``, and
+    ``target`` likewise defaults to the standard basis of ``cod f``.
+
+    It is not orthonormalized. When an orthonormal frame for the image is wanted,
+    :class:`ProjectedBasis` with ``which == "image"`` supplies it instead — the ``Q`` of
+    the QR factorization, or the leading ``δ_f`` columns of the SVD's ``U`` — and a
+    change of basis built from those same factors carries one frame to the other.
     """
 
     f: Term
@@ -270,24 +274,24 @@ class ImageBasis:
 
 @dataclass(frozen=True)
 class ListBasis:
-    """A basis given as an explicit list of term vectors, always a full basis of its ambient.
+    """A basis given as an explicit list of term vectors, always full for its ambient space.
 
-    A ``ListBasis`` is **ALWAYS a full basis of its ambient** (the vectors' space).  Each entry
-    is a :class:`~grassmann.core.term.Term` vector (all of the same space); the listed vectors
-    are stacked into the basis matrix at lowering, and a **short** frame (fewer vectors than the
-    ambient dim) is completed to the full ambient from the ``backup``.  The *term-level*
-    successor of the old ``BaseBasis`` frame:
+    Each entry is a :class:`~grassmann.core.term.Term` vector, and all of them share one
+    space, the ambient. At lowering the vectors are stacked into the basis matrix, and a
+    short frame — fewer vectors than the ambient dimension — is completed from
+    ``backup``, so the node always realizes to a full basis of the ambient rather than to
+    a basis of the span of its vectors.
 
-    * ``reduce`` (:class:`Reduce`) — how to combine the vectors: ``NONE`` (assume independent),
-      ``RREF`` (keep the linearly-independent columns then complete), ``ORTHONORMALIZE`` (QR,
-      then complete from the orthonormalized backup);
-    * ``backup`` — the :class:`Basis` that **completes** a short/rank-deficient frame to the full
-      ambient basis (default, when ``None``: the ambient's *standard* basis).  So a short ℝⁿ
-      ``ListBasis`` realizes to a full ``n×n`` ambient basis (the explicit vectors plus a
-      standard completion), and a full-rank ``n``-vector frame is used unchanged.
+    ``reduce`` says how the columns are combined: ``NONE`` takes them as independent,
+    ``RREF`` keeps the independent ones and then completes, and ``ORTHONORMALIZE`` runs a
+    QR and completes from the orthonormalized backup. ``backup`` is the basis supplying
+    the completing directions, the ambient's standard basis when left as ``None``. A
+    short ℝⁿ frame therefore realizes as an ``n × n`` ambient basis, the explicit vectors
+    followed by a standard completion, while a full-rank frame of ``n`` vectors is used
+    unchanged.
 
-    To build a basis of a genuine *subspace* (not its ambient), use a subspace basis directly
-    (e.g. a :class:`ProjectedBasis`) and :class:`CompleteBasis` to lift it to the ambient.
+    A basis of a genuine subspace is a different thing: build it directly, for instance
+    as a :class:`ProjectedBasis`, and lift it to the ambient with :class:`CompleteBasis`.
     """
 
     vectors: tuple[Term, ...]
@@ -315,12 +319,13 @@ class ListBasis:
 
 @dataclass(frozen=True)
 class WithInnerBasis:
-    """The basis ``b`` living in the metricized space ``WithInner(V, g)``, carrying the metric raw.
+    """The basis ``b`` read in the metricized space ``WithInner(V, g)``, carrying ``g`` raw.
 
-    Carries the metric ``g`` as metadata; it is **not** assumed ``g``-orthonormal — it is just
-    ``b`` living in the metricized space.  To get the ``g``-orthonormal basis, wrap it in
-    :class:`OrthonormalBasis` (the explicit dual of ``remetric`` — orthonormalization is never
-    implicit in a change of basis).
+    The metric rides along as metadata and nothing is done to the columns: they are
+    exactly ``b``'s, now living in the metricized space, and they are not assumed
+    ``g``-orthonormal. Wrapping the result in :class:`OrthonormalBasis` is what produces
+    the ``g``-orthonormal frame, and that step is always written out, never folded into a
+    change of basis.
     """
 
     basis: Basis
@@ -336,11 +341,14 @@ class WithInnerBasis:
 
 @dataclass(frozen=True)
 class OrthonormalBasis:
-    """The explicit orthonormalization of a basis.
+    """The orthonormalization of a basis, written as a node of its own.
 
-    An **explicit** basis node (the dual of ``remetric``): orthonormalizes ``b`` w.r.t. its
-    metric when ``b`` is a :class:`WithInnerBasis` (g-orthonormal), else w.r.t. the standard
-    inner product.  Makes orthonormalization a written step, never an implicit cob.
+    The inner product it orthonormalizes against is the one ``b`` carries: the metric
+    ``g`` when ``b`` is a :class:`WithInnerBasis`, giving a ``g``-orthonormal frame, and
+    the standard inner product otherwise. Having the node is what keeps
+    orthonormalization a step in the term rather than something a change of basis does on
+    its own, mirroring the way :class:`~grassmann.core.term.Remetric` spells out a change
+    of metric.
     """
 
     basis: Basis
@@ -356,20 +364,21 @@ class OrthonormalBasis:
 class CompleteBasis:
     """The completion of a subspace basis to a full basis of its ambient space.
 
-    Completes a basis of an EXPLICIT subspace to its ambient, by filling the missing directions from
-    ``complement``.
+    The directions ``sub_basis`` does not cover are filled in from ``complement``, which
+    is any basis of the ambient and is usually its standard one. ``reduce`` says how the
+    stack ``[ sub | complement ]`` is combined: ``RREF`` keeps the sub columns and then
+    greedily adds the independent complement columns, ``ORTHONORMALIZE`` orthonormalizes
+    the whole stack, and ``NONE`` stacks them as they are.
 
-    ``complement`` is a :class:`Basis` (e.g. the ambient standard basis) — the source of the
-    completing directions.  ``reduce`` (:class:`Reduce`) selects how ``[sub | complement]`` is
-    combined: ``RREF`` keeps the sub columns then greedily adds independent complement columns;
-    ``ORTHONORMALIZE`` orthonormalizes the stack; ``NONE`` stacks as-is.  embed = pad-zeros,
-    project = drop-complement (realized FROM this; no Embed/ProjectBasis).
+    The subspace moves are realized from this node, so there is no separate embedding or
+    projecting basis: an :class:`~grassmann.core.term.Embed` pads the missing coordinates
+    with zeros and a :class:`~grassmann.core.term.Project` drops the complement block.
 
-    ``sub_basis`` is intended to be a basis of a **genuine subspace** of the ambient (e.g. a
-    :class:`ProjectedBasis` of ``Img(f)``), realized via its AMBIENT immersion when completed.
-    To make a full ambient basis from an explicit short term frame, prefer a
-    :class:`ListBasis`-with-backup (``ListBasis(*vecs, backup=…, reduce=RREF)``) — a
-    ``ListBasis`` is always a full basis of its ambient — rather than wrapping the frame here.
+    ``sub_basis`` is meant to be a basis of a genuine subspace of the ambient, such as a
+    :class:`ProjectedBasis` of ``Img(f)``, and completion realizes it through its ambient
+    immersion. An explicit short frame of term vectors is a different case: a
+    :class:`ListBasis` is already full for its ambient, so give it a backup —
+    ``ListBasis(*vecs, backup=…, reduce=RREF)`` — rather than wrapping it here.
     """
 
     sub_basis: Basis
@@ -377,8 +386,9 @@ class CompleteBasis:
     reduce: Reduce = Reduce.NONE
 
     def __post_init__(self) -> None:
-        # NB: ``sub_basis`` should be a genuine-subspace basis (not a bare short ``ListBasis``,
-        # which is always full-ambient); not hard-rejected to keep the node flexible.
+        # `sub_basis` is meant to be a genuine-subspace basis; a bare short `ListBasis`
+        # is already full for its ambient, so completing one is a mistake. It is not
+        # hard-rejected here, to keep the node usable for the cases that do make sense.
         _require_basis(self.sub_basis, "CompleteBasis.sub_basis")
         _require_basis(self.complement, "CompleteBasis.complement")
         if not isinstance(self.reduce, Reduce):
@@ -391,12 +401,14 @@ class CompleteBasis:
 
 @dataclass(frozen=True)
 class BLam:
-    """The basis-level binder: the machinery that builds a basis, abstracted over a value, basis, or nat.
+    """The basis-level binder, abstracting the construction of a basis over an argument.
 
-    Domain ``σ`` (a :class:`~grassmann.core.kinds.Kind`) decides the instance:
-    a value (``SpaceSort``) ⇒ a **Frame**; a basis ⇒ a **basis function**; a nat ⇒ a
-    nat-parametric builder. ``body`` is the produced :class:`Basis`. ``term_var`` /
-    ``basis_var`` hold the bound handle when applicable.
+    The binder's domain ``σ``, a :class:`~grassmann.core.kinds.Kind`, decides what kind
+    of thing this is: a value domain, spelled as a ``SpaceSort``, makes it a frame — a
+    basis that varies with a runtime value; a basis domain makes it a basis function; and
+    a nat domain makes it a builder parametric in a dimension. ``body`` is the
+    :class:`Basis` produced, and ``term_var`` and ``basis_var`` hold the bound handle the
+    body refers to, whichever of the two applies.
     """
 
     binders: tuple[tuple[str, Kind], ...]
@@ -428,9 +440,12 @@ class BLam:
 
 @dataclass(frozen=True)
 class BApp:
-    """The basis produced by applying a basis function (a ``BLam``) to arguments.
+    """The basis produced by applying a basis function to its arguments.
 
-    Mirrors ``App``/``Eval`` at the basis level.
+    ``f`` is a :class:`BLam`, ``positions`` names the binder slots being filled, and
+    ``args`` supplies them — a term, a space, a nat, or another basis, matching whatever
+    the binder's domain is. It is the basis-level counterpart of
+    :class:`~grassmann.core.space.App` and :class:`~grassmann.core.term.Eval`.
     """
 
     f: Basis
@@ -550,7 +565,7 @@ def image_basis(
 
 def list_basis(*vectors: Term, backup: Basis | None = None,
                reduce: Reduce = Reduce.NONE) -> ListBasis:
-    """Build a basis from explicit ``vectors``."""
+    """Build a basis from the explicit ``vectors``, completed from ``backup`` if short."""
     return ListBasis(tuple(vectors), backup, reduce)
 
 

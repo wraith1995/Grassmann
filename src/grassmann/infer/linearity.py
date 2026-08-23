@@ -1,40 +1,50 @@
-"""Resource / usage accounting for the linear binder :class:`~grassmann.core.term.LLam`.
+"""The resource calculus that gives :class:`~grassmann.core.term.LLam` its linear discipline.
 
-The core (:mod:`grassmann.core.term`) ships a *structural* well-formedness guard for
-``LLam``: it walks the body and (a) rejects a linear var appearing in a dependence
-position (a ``Lam`` binder-domain annotation, or an explicit space/nat arg of an
-``NEval``), and (b) requires each linear var to occur *at least once*. That guard is
-coarse: "occurs at least once" is not linear discipline — a var used twice, or used in
-one additive branch but not another, slips through.
-
-This module replaces that coarse occurrence check with a real **resource calculus**: it
-computes, per linear-bound variable, how many times the variable is *consumed* along
-every evaluation path, and requires **exactly one** use of each linear var (the linear
-discipline ``⊸``). It keeps the structural dependence-position guard (still enforced by
-the core constructor) but makes the *counting* precise and multi-variable-aware.
+A linear binder ``λ⊸(x). e`` promises that ``e`` consumes each bound variable **exactly
+once**. This module decides that promise: it computes, per linear-bound variable, how many
+times the variable is consumed along every evaluation path of the body, and rejects the
+body unless that count is one. The core's own ``LLam`` constructor keeps a coarser
+structural guard alongside it — a linear var may not appear in a dependence position (a
+``Lam`` binder-domain annotation, or an explicit space/nat argument of an ``NEval``), and
+must occur at least once — but "occurs at least once" lets a var used twice, or used in
+one branch and not another, through. The counting here is what makes the discipline real.
 
 The two combinators
 -------------------
-A term tree has two flavors of node for resource purposes:
+Every node is one of two kinds, and the kind decides how its children's usage combines::
 
-- **Multiplicative** (``⊗``-like / "parallel"): the node's children all contribute to the
-  *same* path, so their usage counts **add**. ``OProd``/``OPlus`` stacks, ``Eval`` (the
-  map and every argument), ``Compose``, ``Scale``, ``Kron``, the inverses, etc.
-- **Additive** (``&``-like / a choice between branches): the branches are alternative
-  paths and must each consume **the same** resources. ``Sum`` is the one additive node:
-  ``Σ_σ sgn(σ)·(v_{σ0}⊗…)`` uses every ``vᵢ`` exactly once *in each summand*, so the
-  whole sum uses each ``vᵢ`` exactly once. We merge additive branches by requiring their
-  usage maps to agree (rather than summing them).
+    multiplicative (⊗-like)             additive (branches)
 
-``Zero`` is the unit that **consumes nothing**: ``Usage()`` (empty). This is what makes
-the requirement ``x ↦ x ⊕ 0`` typecheck — ``OPlus(x, 0)`` is multiplicative, so its
-usage is ``usage(x) + usage(0) = {x:1} + {} = {x:1}``: a single ordinary use of ``x``,
-not a misuse or double use.
+         node                                node
+        ╱  |  ╲                             ╱  |  ╲
+       a   b   c                           a   b   c
 
-Nested binders (``LLam``/``Lam``) bind their *own* fresh vars (each a distinct ``uid``), so a
-nested binder simply contributes the usage of *its body* w.r.t. the outer linear vars —
-the value it denotes captures the outer var, which is one consumption. We therefore treat
-binder bodies multiplicatively (a binder has a single body child).
+    counts add                          counts must agree
+    usage = usage(a) + usage(b)         usage = usage(a) = usage(b)
+                     + usage(c)                         = usage(c)
+
+A **multiplicative** node's children all lie on the *same* evaluation path, so their usage
+counts add: ``Eval`` (the map and every argument), ``Compose``, ``Scale``, ``Kron``,
+``OProdV``, the inverses, and every other node not named below. An **additive** node's
+children are alternative branches of one value, so each branch must consume the tracked
+variables identically and the node's usage is that shared count.
+
+Two nodes are additive. A ``Sum`` is additive because its summands are alternatives:
+``Σ_σ sgn(σ)·(v_{σ0}⊗…)`` uses every ``vᵢ`` exactly once *in each* summand, so the whole
+sum uses each ``vᵢ`` exactly once — this is precisely what lets the antisymmetrizer
+``Alt`` typecheck as a linear map. An ``OPlusV`` is additive because its slots are the
+parallel, independent components of ``⊕`` rather than a shared path: the diagonal
+``h ↦ h ⊕ h`` consumes ``h`` once, not twice.
+
+``Zero`` is the unit of the calculus: it consumes nothing, an empty :class:`Usage`. That
+is what makes ``x ↦ x ⊕ 0`` well formed — the ``Zero`` slot imposes no constraint on the
+other slots, so the usage is the single ordinary use of ``x``. Nonlinearity inside a slot
+is still caught: ``h ⊗ h`` is multiplicative within the slot, counts two, and fails the
+outer exactly-once check.
+
+A nested binder (``LLam`` or ``Lam``) binds its own vars, each with a fresh ``uid``, so it
+cannot shadow an outer linear var. The value it denotes captures the outer var once, so a
+binder contributes the usage of its single body child multiplicatively.
 """
 
 from __future__ import annotations
@@ -54,12 +64,16 @@ from grassmann.core.term import (
 
 
 class LinearityError(Exception):
-    """Raised when a ``LLam`` body violates the linear (exactly-once) discipline."""
+    """Raised when an ``LLam`` body consumes a linear variable other than exactly once."""
 
 
 @dataclass(frozen=True)
 class Usage:
-    """A multiset of consumptions of the tracked linear vars: ``uid -> count``."""
+    """How many times each tracked linear variable is consumed, keyed by ``uid``.
+
+    A multiset of consumptions. The two combinators of the calculus act on it: a
+    multiplicative node adds two usages, an additive node requires them to be equal.
+    """
 
     counts: Counter[int]
 
@@ -75,7 +89,7 @@ class Usage:
 
 
 def _mul(a: Usage, b: Usage) -> Usage:
-    """Multiplicative combine: counts add (children share one path)."""
+    """Combine two usages multiplicatively: the counts add, since both lie on one path."""
     out = Counter(a.counts)
     out.update(b.counts)
     return Usage(out)
@@ -89,11 +103,12 @@ def _mul_all(us: list[Usage]) -> Usage:
 
 
 def _add_merge(branches: list[Usage], names: dict[int, str]) -> Usage:
-    """Additive merge: every branch must consume the tracked vars identically.
+    """Combine branch usages additively, requiring every branch to agree.
 
-    Returns the (shared) usage of a single branch. A disagreement means a linear var is
-    used in one summand but not another (or a different number of times) — a linearity
-    violation, since ``v₁ + v₂`` must be linear in each tracked argument.
+    Returns the usage the branches share. A disagreement means a linear variable is
+    consumed in one branch and not another, or a different number of times, which breaks
+    linearity: ``v₁ + v₂`` must be linear in each tracked argument, so a variable used
+    once in ``v₁`` must be used once in ``v₂`` as well.
     """
     if not branches:
         return Usage.empty()
@@ -124,31 +139,31 @@ def _usage(node: object, tracked: set[int], names: dict[int, str]) -> Usage:
             return Usage.single(node.uid)
         return Usage.empty()
 
-    # A Sum is ADDITIVE: its summands are alternative branches that must each consume the tracked
-    # vars identically.
+    # A Sum is additive: its summands are alternative branches, each of which must consume
+    # the tracked vars identically.
     if isinstance(node, Sum):
         branches = [_usage(v, tracked, names) for v in node.vectors]
         return _add_merge(branches, names)
 
-    # A direct sum ``OPlusV`` is ALSO additive — its slots are PARALLEL, independent components of
-    # ``⊕``, not a shared multiplicative path.  So ``h ⊕ h`` (the direct-sum diagonal, e.g.
-    # ``d(x⊕x)``) consumes ``h`` ONCE, not twice, and ``h ⊕ 0`` (an injection, the derivative of a
-    # slot that is x-independent) is fine.  A ``Zero`` slot is the additive unit (no constraint);
-    # the non-zero slots must consume identically, so genuine nonlinearity in a slot (``h⊗h``, which
-    # is multiplicative inside the slot ⇒ count 2) is still rejected by the outer exactly-once check.
+    # A direct sum ``OPlusV`` is additive too: its slots are the parallel, independent
+    # components of ``⊕`` rather than one shared path. So the diagonal ``h ⊕ h`` (as ``d(x⊕x)``
+    # builds) consumes ``h`` once, and the injection ``h ⊕ 0`` — the derivative of a slot that
+    # does not depend on x — is well formed. A ``Zero`` slot is the additive unit and imposes no
+    # constraint; the remaining slots must agree.
     if isinstance(node, OPlusV):
         branches = [_usage(v, tracked, names) for v in node.vectors if not isinstance(v, Zero)]
         return _add_merge(branches, names)
 
-    # A nested LLam binds its OWN (fresh-uid) vars; the outer linear vars it mentions are
-    # captured once by the value it denotes. Recurse into the body multiplicatively.
+    # A nested LLam binds its own fresh-uid vars, so it cannot shadow an outer linear var; the
+    # outer vars it mentions are captured once by the value it denotes. Recurse into the body
+    # multiplicatively.
     if isinstance(node, LLam):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): binder cases else generic multiplicative recursion [approved 2026-07-03]
         return _usage(node.body, tracked, names)
 
-    # Everything else is MULTIPLICATIVE: every child Term contributes to the same path,
-    # so their usages add. (Embedded Spaces never consume a linear value — a tracked var
-    # appearing inside a Space annotation is a dependence-position violation already
-    # rejected by the core structural guard, so we do not count it here.)
+    # Everything else is multiplicative: every child Term contributes to the same path, so
+    # their usages add. Embedded Spaces never consume a linear value — a tracked var inside a
+    # Space annotation is a dependence-position violation the core's structural guard already
+    # rejects — so they are not counted here.
     return _mul_all([_usage(c, tracked, names) for c in _term_children(node)])
 
 
@@ -167,10 +182,11 @@ def _term_children(node: object) -> list[object]:
 
 
 def check_llam_resources(node: LLam) -> None:
-    """Enforce the exactly-once linear discipline for a single ``LLam``.
+    """Enforce the exactly-once discipline for the variables one ``LLam`` binds.
 
-    Each variable bound by ``node`` must be consumed **exactly once** along every path of
-    the body. Raises :class:`LinearityError` on under- or over-use.
+    Each variable bound by ``node`` must be consumed exactly once along every path of the
+    body, counted by the multiplicative/additive rules of this module. Raises
+    :class:`LinearityError` naming the variable on either under- or over-use.
     """
     tracked = {v.uid for v in node.vars}
     names = {v.uid: v.name for v in node.vars}
@@ -190,10 +206,10 @@ def check_llam_resources(node: LLam) -> None:
 
 
 def check_linearity(term: object) -> None:
-    """Recursively enforce the resource discipline on every ``LLam`` in ``term``.
+    """Enforce the resource discipline on every ``LLam`` anywhere in ``term``.
 
-    This is the inference-layer counterpart of the core's structural guard: it walks the
-    whole term and applies :func:`check_llam_resources` at each ``LLam`` it finds.
+    Walks the whole term and applies :func:`check_llam_resources` at each linear binder it
+    finds, so a violation nested inside an argument is caught as readily as one at the root.
     """
     if not is_term(term):
         return

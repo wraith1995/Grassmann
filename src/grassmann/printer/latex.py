@@ -118,6 +118,13 @@ def latex(node: object) -> str:
 
 
 def _render(node: object) -> tuple[str, int]:
+    """Render any core node, returning the LaTeX and the precedence it printed at.
+
+    The family is decided by the predicates rather than by class, so this is the one
+    place a node of any tower enters; each family renderer then does an exhaustive match
+    of its own. Anything unrecognized falls back to a monospaced repr rather than
+    failing, so a printer is never the reason a term cannot be inspected.
+    """
     if _s.is_space(node):
         return _render_space(node)
     if _s.is_dim(node):
@@ -235,7 +242,12 @@ def _render_term(e: _t.Term) -> tuple[str, int]:  # noqa: C901,PLR0911,PLR0912 -
 
 
 def _render_eval(f: _t.Term, pos: tuple[int, ...], args: tuple[_t.Term, ...]) -> tuple[str, int]:
-    """Special-case the metric maps for readability, else a generic application."""
+    """Render an application, spelling the metric maps in their own notation.
+
+    ``Inner`` applied to two arguments prints as the pairing ``⟨a, b⟩`` and the musical
+    maps as ``v^{♭}`` / ``v^{♯}``, since those forms are what a reader expects; anything
+    else falls through to the generic ``f(a, b)``.
+    """
     if isinstance(f, _t.Inner) and len(args) == 2:
         return rf"\langle {_sub(args[0], 0)}, {_sub(args[1], 0)}\rangle", Prec.ATOM
     if isinstance(f, (_t.Flat, _t.Inner)) and len(args) == 1:

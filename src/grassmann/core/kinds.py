@@ -55,12 +55,13 @@ STAR = Sort("*")  # the kind of types
 
 @dataclass(frozen=True)
 class SpaceSort:
-    """A value-domain sort: a binder ranges over the values of a space ``s``.
+    """A value-domain sort: the binder ranges over the values of a space ``s``.
 
-    ``space`` is a :class:`~grassmann.core.space.Space`; the annotation is kept as ``object`` to
-    avoid an import cycle (space.py does not import kinds), but it is **enforced** at construction
-    via a lazy ``is_space`` check — so a raw array / non-Space cannot slip into a ``Lam``/``BLam``
-    binder domain, where it would make the binder unhashable.
+    ``space`` holds a :class:`~grassmann.core.space.Space`. The annotation is widened to
+    ``object`` because ``space`` never imports ``kinds``, so naming the type here would
+    close an import cycle; construction enforces it instead with a lazy ``is_space``
+    check. That check is what keeps a raw array or other non-space out of a ``Lam`` or
+    ``BLam`` binder domain, where it would make the binder unhashable.
     """
 
     space: object
@@ -77,12 +78,12 @@ class SpaceSort:
 
 @dataclass(frozen=True)
 class Arrow:
-    """An arrow kind ``domain -> result``.
+    """An arrow kind ``domain -> result``, the kind of a space, type, or nat function.
 
-    ``domain`` is a :class:`Sort` / :class:`SpaceSort` (the kind of the argument);
-    ``result`` is any :class:`Kind` (allowing curried multi-argument arrows, e.g.
-    ``space -> space -> space``). Higher-order arrow *domains* (a function taking a
-    function) are deferred, so ``domain`` is never itself an ``Arrow``.
+    ``domain`` is the kind of the argument, a :class:`Sort` or a :class:`SpaceSort`.
+    ``result`` is any :class:`Kind`, so currying gives the multi-argument arrows —
+    ``space -> space -> space`` is a two-argument space function. The domain is never
+    itself an ``Arrow``: a function taking a function is refused at construction.
     """
 
     domain: Kind
@@ -122,9 +123,9 @@ def is_kind(k: object) -> bool:
 
 
 def arrow(*kinds: Kind) -> Kind:
-    """Right-associated curried arrow kind: ``arrow(a, b, c) == a -> (b -> c)``.
+    """Build the right-associated curried arrow ``arrow(a, b, c) == a -> (b -> c)``.
 
-    Requires at least two kinds (one domain + one result).
+    At least two kinds are required, one domain and one result.
     """
     if len(kinds) < 2:
         raise KindError(f"arrow needs at least a domain and a result, got {kinds!r}")
@@ -135,23 +136,23 @@ def arrow(*kinds: Kind) -> Kind:
 
 
 def space_value_sort(space: object) -> SpaceSort:
-    """Sort for a binder ranging over the *values* of a space ``s``."""
+    """Build the sort of a binder that ranges over the values of a space ``s``."""
     return SpaceSort(space)
 
 
-# Convenience named arrow kinds (documentation aliases).
+# The arrow kinds that come up often enough to have names.
 def space_to_space() -> Arrow:
-    """The arrow kind of a function from a space to a space, such as ``α ↦ α ⊗ α``."""
+    """Return the arrow kind ``space -> space``, classifying maps such as ``α ↦ α ⊗ α``."""
     return Arrow(SPACE, SPACE)
 
 
 def nat_to_space() -> Arrow:
-    """The arrow kind of a function from a nat to a space, such as ``n ↦ ⊕ⁿ ℝ``."""
+    """Return the arrow kind ``nat -> space``, classifying maps such as ``n ↦ ⊕ⁿ ℝ``."""
     return Arrow(NAT, SPACE)
 
 
 def space_to_star() -> Arrow:
-    """The arrow kind of a function from a space to a type, such as ``α ↦ (α → α)``."""
+    """Return the arrow kind ``space -> *``, classifying maps such as ``α ↦ (α → α)``."""
     return Arrow(SPACE, STAR)
 
 

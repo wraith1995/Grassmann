@@ -1,24 +1,33 @@
-"""The lowering substrate: basis selection and change of basis.
+"""The lowering boundary: where a coordinate-free term meets a basis and becomes arrays.
 
-This package is where coordinates are chosen. It holds the basis machinery the
-per-node representation rules build on as a term is lowered to a
-:mod:`polyarray` program: how a space picks its default basis and its
-candidates, how one basis is changed into another, and which candidate to prefer.
-The per-node rules themselves live in :mod:`grassmann.lower.represent`.
+Everything above this package is coordinate-free — no space in a term has a basis until
+lowering gives it one. This package is where that happens, and it is the only place in
+grassmann where a basis is realized::
 
-Public API:
+    a Space  ──space_basis──►  its default basis and the candidates
+                                      │
+                                    choose        scores them against the term
+                                      ▼
+                                 one basis
+                                      │
+                                  represent       walks the term, emitting Stmts
+                                      │
+                                     cob          converts between two bases of one space
+                                      ▼
+                            a polyarray.Program
 
-* :func:`space_basis` — ``space_basis(space) -> (default_basis, candidates)``. The
-  default is the standard basis orthonormal in the space's inner product (the
-  metric is the identity in coordinates); the candidates feed :func:`choose`.
-* :func:`cob` — ``cob(program, from_basis, to_basis) -> SymArray``, the
-  change-of-basis matrix, emitting numeric statements into a polyarray program.
-* :func:`choose` — the symbolic-aware basis-choice heuristic: score the
-  candidates and pick the one that minimizes the symbolic surface of the result.
+:func:`space_basis` answers what bases a space has: its default, the standard basis
+orthonormal in the space's own inner product, so the metric is the identity in
+coordinates, together with the alternatives worth weighing. :func:`choose` picks among
+them, preferring the basis that leaves the fewest symbolic cells in the result.
+:func:`cob` builds the change-of-basis matrix between two bases of the same space, which
+is the only conversion grassmann admits — two bases of *different* spaces are an error,
+never a silently inserted isomorphism. :func:`represent` drives all of it, and the
+per-node rules live with it in :mod:`grassmann.lower.represent`.
 
-Also re-exported: :func:`realize_basis` and :func:`realize_ffs_basis` (the
-subspace SVD/QR/GSVD seam), and :func:`default_basis`, :func:`candidate_bases`,
-and :func:`score_basis`.
+:func:`realize_ffs_basis` and :func:`realize_basis` are the seam beneath ``cob``: the
+point at which a fundamental subspace stops being a space and becomes concrete columns,
+produced by an SVD, a QR or a generalized SVD of the map that defines it.
 """
 
 from __future__ import annotations
