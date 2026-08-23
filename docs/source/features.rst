@@ -13,22 +13,16 @@ fast array code you can run or ship. Every claim on this page is checked by runn
 Coordinate-independent linear algebra
 -------------------------------------
 
-The operations you reach for are first-class and named after what they *mean*, not after
-the recipe that computes them. The adjoint is :func:`~grassmann.dagger` — not a
-hand-written transpose-and-conjugate whose exact form depends on which inner products are
-in play. Likewise :func:`~grassmann.solve`, :func:`~grassmann.pinv` and
-:func:`~grassmann.least_squares`, the trace, determinant and log-determinant, inner
-products and norms, the musical isomorphisms :func:`~grassmann.sharp` /
-:func:`~grassmann.flat`, and projection onto or embedding of a subspace.
+An operation in grassmann is named for what it means, and the recipe that computes it is
+worked out later. :func:`~grassmann.dagger` is *the* adjoint of a map: which
+transpose-and-conjugate that becomes depends on the inner products at both ends, and
+resolving it is the compiler's job rather than yours. The same holds of
+:func:`~grassmann.solve` and :func:`~grassmann.pinv`, of the trace and the determinant, of
+the musical isomorphisms :func:`~grassmann.sharp` and :func:`~grassmann.flat`, and of
+projection onto a subspace — :doc:`public_api` is the full surface.
 
-The four fundamental subspaces ``ker``, ``img``, ``coker``, ``coimg`` are *spaces* in
-their own right, so you can build further maps against them — that is what makes a
-tangent space expressible at all (see below).
-
-A term never mentions a basis, and *coordinate-independent* here is a property you can
-test rather than a slogan. Take two genuine vectors, express them in two different frames
-— one orthonormal, one skew, so their coordinate arrays differ — and ask for the same
-inner product:
+That is a claim about meaning, so it ought to be testable. Take two vectors of ``ℝ³``, and
+two frames for that space: the standard one, and a skew frame that is not orthonormal.
 
 .. doctest::
 
@@ -39,39 +33,80 @@ inner product:
    ...     a = np.zeros(n); a[i] = 1.0
    ...     return G.external(V, ExternalOp(f"e{i}", lambda a=a: a))
    >>> std = G.standard_basis(V)
-   >>> skew = G.list_basis(e(0), G.sum(e(0), e(1)), e(2))    # not orthonormal
-   >>> S = np.array([[1., 1., 0.], [0., 1., 0.], [0., 0., 1.]])   # its frame vectors
+   >>> skew = G.list_basis(e(0), G.sum(e(0), e(1)), e(2))       # not orthonormal
    >>> ku, kv = f"u_{u.node.uid}", f"v_{v.node.uid}"
+
+The two frames describe the same vectors with different numbers, and grassmann is what
+moves between them: compiling the bare term ``u`` out of one frame and into the other *is*
+the change of basis, so no arithmetic has to be done by hand to set the comparison up.
+
+.. doctest::
+
+   >>> into_skew = G.compile_in(u, {u: std}, target=skew)
+   >>> x, y = np.array([1., 2., 3.]), np.array([0., 1., -1.])
+   >>> xs = np.asarray(into_skew.run({ku: x})["result"], float)
+   >>> ys = np.asarray(into_skew.run({ku: y})["result"], float)
+   >>> xs.tolist(), ys.tolist()
+   ([-1.0, 2.0, 3.0], [-1.0, 1.0, -1.0])
+
+Now ask one term — ``G.dot(u, v)``, written once and never edited — for the inner product:
+first of the standard coordinates in the standard frame, then of the skew coordinates in
+the skew frame.
+
+.. doctest::
+
    >>> def inner_in(frame: G.Expr, cu: np.ndarray, cv: np.ndarray) -> float:
    ...     prog = G.compile_in(G.dot(u, v), {u: frame, v: frame})
    ...     return round(float(np.asarray(prog.run({ku: cu, kv: cv})["result"], float)), 6)
-   >>> x, y = np.array([1., 2., 3.]), np.array([0., 1., -1.])     # the two vectors
-   >>> inner_in(std, x, y), inner_in(skew, np.linalg.solve(S, x), np.linalg.solve(S, y))
+   >>> inner_in(std, x, y), inner_in(skew, xs, ys)
    (-1.0, -1.0)
 
-Different coordinates, different frame metric, same answer — because ``G.dot(u, v)`` names
-the inner product rather than an array expression that happens to compute it in one frame.
+Two programs, different numbers going in, different arithmetic inside, one answer — because
+the frame is not part of what ``G.dot(u, v)`` says. An array expression written against the
+standard frame would have returned something else for the skew one, and would have had no
+way to notice.
 
-Because every expression carries its type, a mismatch is a build-time error rather than a
-shape crash or a plausible wrong number. Dimensions are checked, and a space and its dual
-are never silently identified:
+Keeping coordinates out of the term is also what makes the type system worth having. Every
+expression carries its space, so a mismatch is a build-time error rather than a shape crash
+or, worse, a plausible wrong answer. Dimensions have to agree:
 
 .. doctest::
 
    >>> A, B = G.space("A", 2), G.space("B", 3)
-   >>> a, b = G.var("a", A), G.var("b", B)
-   >>> G.compile(G.var("f", A >> A)(b))                  # a map applied off its domain
+   >>> b = G.var("b", B)
+   >>> G.compile(G.var("f", A >> A)(b))              # a map applied off its domain
    Traceback (most recent call last):
        ...
    grassmann.infer.unify.UnifyError: ⊕ⁿ count mismatch: DimLit(3) ≢ DimLit(2)
+
+and a space is never quietly confused with its dual, though the two have equal dimension
+and identically shaped arrays. A covector applied to a vector is the dual pairing and
+compiles; asking the same two values to pair as though both were vectors does not:
+
+.. doctest::
+
    >>> nu = G.var("nu", G.dual(B))
-   >>> G.compile(nu(b)(b))                               # a scalar asked to eat a vector
+   >>> type(G.compile(nu(b))).__name__               # the dual pairing ⟨ν, b⟩
+   'Program'
+   >>> G.compile(G.dot(b, nu))
    Traceback (most recent call last):
        ...
-   grassmann.infer.unify.UnifyError: cannot unify Scalar() ~ Dual(?arg...)
+   grassmann.infer.unify.UnifyError: cannot unify Dual(...) ~ ...
 
-A space with a metric attached is likewise a genuinely different space, crossed into on
-purpose with :func:`~grassmann.remetric`.
+The refusal is deliberate down to the wording. Add a vector to a covector and the compiler
+names the isomorphism it is declining to apply on your behalf::
+
+    cob: bases of different spaces — no implicit conversion
+    (even a canonical ℝ≅ℝ* must be explicit)
+
+A metricized space behaves the same way: attaching an inner product with
+:func:`~grassmann.with_inner` yields a genuinely different space, and
+:func:`~grassmann.remetric` is how you cross into it on purpose.
+
+Finally, the four fundamental subspaces ``ker``, ``img``, ``coker`` and ``coimg`` are spaces
+in their own right rather than descriptions of a matrix, so a further map can be typed
+against them. That is not a nicety: it is what makes a tangent space expressible at all, as
+the section on dependent types below shows.
 
 Basis-driven compilation to array code
 --------------------------------------
