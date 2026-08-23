@@ -48,9 +48,9 @@ class SpaceAsType:
 
 @dataclass(frozen=True)
 class Pi:
-    """A function type ``Π(b:σ). τ``, binding ``b`` in the codomain ``τ``; its kind is ``*``.
+    """A dependent function type, binding a name in its codomain; its kind is ``*``.
 
-    ``binder`` is the bound name and ``domain`` is its sort ``σ`` — a
+    Written ``Π(b:σ). τ``: ``binder`` is the bound name and ``domain`` is its sort ``σ`` — a
     :class:`~grassmann.core.kinds.Sort` for a space, nat, or type argument, or a
     :class:`~grassmann.core.kinds.SpaceSort` when the argument is a value of a space.
     ``codomain`` is a :class:`Type` that may mention ``binder``, which is what makes the
@@ -141,7 +141,10 @@ def pi(binder: str, domain: Kind, codomain: object) -> Pi:
 
 
 def fn(s0: Space, s1: Space) -> Pi:
-    """Build the non-dependent function type ``s0 → s1``, namely ``Π(_ : s0). ⟦s1⟧``."""
+    """Build the non-dependent function type from ``s0`` to ``s1``.
+
+    That is ``Π(_ : s0). ⟦s1⟧`` — a :class:`Pi` whose codomain does not mention the binder.
+    """
     if not is_space(s0):
         raise TypeError_(f"fn: domain must be a Space, got {s0!r}")
     return Pi("_", SpaceSort(s0), as_type(s1))

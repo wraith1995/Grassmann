@@ -1,22 +1,26 @@
-Philosophy: Coordinate Free Linear Algebra Meets Programming Languages
+Philosophy
 ======================================================================
 
-Grassmann separates the mathematical object from the numerical recipe. You name abstract
+Rough, "Coordinate Free Linear Algebra Meets Programming Languages."
+
+In one direction: Grassmann separates the mathematical object from the numerical recipe. You name abstract
 spaces and write the algebra you mean — an adjoint, a projection onto an image, a
 pseudo-inverse, a wedge product — as typed terms, and the choice of coordinates is
 deferred to the very end.
 
-The title is meant in both directions. Grassmann brings the apparatus of programming
+In the other direction: Grassmann brings the apparatus of programming
 languages to linear algebra: a type system, binders, inference, rewriting, an IR, a
 compiler. And it insists that the linear algebra being treated is *linear algebra* —
 spaces, duals, maps, subspaces — rather than the arrays that eventually represent it.
+
+We now outline some corollaries to our philosophy.
 
 Linear algebra as a language, not an array library
 --------------------------------------------------
 
 Most of the work that puts linear algebra inside a programming language is really about
 **arrays**: shapes and their compatibility, memory layout, sparsity patterns, index
-notation and the fusion of index expressions. That work is valuable and grassmann depends
+notation and the fusion of index expressions. That work is valuable and Grassmann depends
 on it — it is what :mod:`polyarray` and the backends beneath it do. But an array is a
 *representation*, and a language built on arrays can only talk about representations.
 
@@ -135,8 +139,8 @@ basis, so every transform — differentiation, the pullback, simplification, nor
 operates on the mathematical object, and the same term can afterwards be compiled against
 different bases.
 
-A universal property is a basis waiting to happen
--------------------------------------------------
+A universal property indicates a natural family of bases
+--------------------------------------------------------
 
 Naming objects by their universal properties is not only tidier; it is what makes the
 compiler's job tractable. **A space that knows what it is knows which bases suit it.**
@@ -195,30 +199,3 @@ cross into explicitly. The isomorphisms ``ℝ ≅ ℝ*``, ``V ≅ V**``, and
 ``V ≅ WithInner(V, g)`` are real maps you write down, not coercions the language performs
 behind your back. An implicit coercion would be exactly the kind of convenience that
 converts a type system able to catch modelling errors into one that cannot.
-
-A linear map is a vector
-------------------------
-
-Because a space of linear maps ``V ⊸ W`` is itself a space — namely ``V* ⊗ W`` — a linear
-map is an element of a space, that is, a vector. The adjoint, the solve, the trace and the
-inner product are all vector operations, and the same machinery that moves a vector between
-bases moves a map between them. One tower of spaces, one tower of bases, and no separate
-special case for "the matrix ones".
-
-Symbolic where it pays
-----------------------
-
-Grassmann does not implement its own numerics. It lowers to :mod:`polyarray`, whose cells
-are exact rational functions, so an expression that is closed-form — a determinant, the
-inverse of a small symbolic map, a constant metric — is carried symbolically and simplified,
-while the rest becomes ordinary array work. This is the same principle as the basis choice,
-applied one level down: the compiler uses what it knows about the algebra to find an
-efficient representation rather than emitting a dense numerical transcription of the
-formula as written.
-
-Mathematics is the specification
---------------------------------
-
-The meaning of a construction is its mathematics, not the shape of any one implementation.
-A result that is numerically right with the wrong mathematical account is wrong; when the
-two disagree, the mathematics wins.
