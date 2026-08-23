@@ -6,11 +6,10 @@ this tutorial, we will develop exterior algebra from scratch in Grassmann,
 introducing features as needed. The exterior algebra ships with Grassmann, but
 here we develop it from first principles.
 
-This tutorial builds that world up one idea at a time in grassmann, and **checks
-every claim by compiling the expression to a program and running it**. You never
-have to take the algebra on faith — you can watch it compute. We work mostly in
-ordinary three-dimensional space ``ℝ³`` and let the dimension ``n`` and degree ``k``
-go general only at the end.
+Every claim below is checked by compiling the expression to a program and running
+it, so nothing has to be taken on faith. We work mostly in ordinary
+three-dimensional space ``ℝ³``, and let the dimension ``n`` and degree ``k`` go
+general only at the end.
 
 Getting set up
 --------------
@@ -54,14 +53,13 @@ To get our bearings on familiar ground, here is the ordinary dot product of two
 vectors of ``ℝ³``. A grassmann *variable* stands for an input, and ``run`` supplies
 its value by name.
 
-One thing is worth saying before the first number appears. A grassmann term names spaces
-and values; it never names a **basis**. But numbers only exist in coordinates, so a basis
-has to be chosen somewhere, and that somewhere is compilation. ``run`` and
-:func:`~grassmann.compile` choose for you; :func:`~grassmann.compile_in` lets you say
-which basis each variable and the result are written in. Until then the arrays below are
-coordinates in whatever basis the compiler picked — which for ``ℝⁿ`` is the standard one,
-so they read as you expect. We make that choice explicit later, once there is something
-interesting to choose between.
+One thing before the first number appears. A grassmann term names spaces and values, never
+a **basis**. Numbers only exist in coordinates, though, so a basis is chosen somewhere, and
+that somewhere is compilation. ``run`` and :func:`~grassmann.compile` choose one for you;
+:func:`~grassmann.compile_in` lets you say which basis each variable and the result are
+written in. The arrays below are coordinates in whatever basis the compiler picked, which
+for ``ℝⁿ`` is the standard one. We make the choice explicit later, once there is something
+to choose between.
 
 .. doctest::
 
@@ -70,9 +68,9 @@ interesting to choose between.
    >>> float(run(G.dot(u, v), u=np.array([1., 2., 3.]), v=np.array([0., 1., -1.])))
    -1.0
 
-Nothing surprising — ``1·0 + 2·1 + 3·(−1) = −1``. The point is the *shape* of the
-workflow: build an expression out of variables, then run it on data. Everything
-below is the same, with richer expressions.
+That is ``1·0 + 2·1 + 3·(−1) = −1``. What matters here is the shape of the workflow:
+build an expression out of variables, then run it on data. Everything below is the
+same with richer expressions.
 
 
 The alternator and the exterior algebra space
@@ -89,9 +87,9 @@ any permutation of their slots:
          = \operatorname{sgn}(\sigma)\, T_{1\,\ldots\,k}
        \ \text{ for all } \sigma \in S_{k} \,\bigr\}.
 
-That description is a condition to check rather than a thing to build, so the standard
-move is to exhibit the subspace as the image of a projector — the **alternator**, which
-averages over the symmetric group with a sign:
+That describes a condition to check rather than something to build, so the usual
+approach is to present the subspace as the image of a projector: the **alternator**,
+which averages over the symmetric group with a sign.
 
 .. math::
 
@@ -102,9 +100,9 @@ averages over the symmetric group with a sign:
    \qquad
    \Lambda^{k}(V) \;=\; \operatorname{Img}(\operatorname{Alt}),
 
-where :math:`P_{\sigma}` permutes the ``k`` tensor slots. The rest of this section is that
-definition, one clause at a time: the tensor power, then the permutation sum, then the
-image. Each clause is a single grassmann construction.
+where :math:`P_{\sigma}` permutes the ``k`` tensor slots. The rest of this section
+follows that definition one clause at a time — the tensor power, the permutation sum,
+the image — and each clause is a single grassmann construction.
 
 The tensor power
 ~~~~~~~~~~~~~~~~
@@ -124,13 +122,12 @@ or with the embedding's operator sugar, ``*``:
    >>> G.unparse(V * V * V)
    '(ℝ^3 ⊗ ℝ^3) ⊗ ℝ^3'
 
-These are **not** the same space, and grassmann will not pretend otherwise. The
-builder takes all three factors at once and gives the flat product; ``*`` is a
-binary operator, so it associates, and you get a product of a product. The core
-never silently reassociates a ``⊗`` — moving between the two spellings is the
-explicit reshape :func:`~grassmann.unlift`, which we will need when we build the
-wedge. Since the alternator wants all ``k`` slots on the same footing, we take the
-flat one:
+These are not the same space. The builder takes all three factors at once and gives
+the flat product, while ``*`` is a binary operator, so it associates and you get a
+product of a product. The core never reassociates a ``⊗`` on its own; moving between
+the two spellings is the explicit reshape :func:`~grassmann.unlift`, which we need
+when we build the wedge. The alternator wants all ``k`` slots on the same footing, so
+we take the flat one:
 
 .. doctest::
 
@@ -178,9 +175,8 @@ Inference reads off the space it lives in, with no annotation from us:
 The image
 ~~~~~~~~~
 
-The last clause of the definition is the one grassmann takes most literally. An image is a
-space, so :math:`\Lambda^{k}(V) = \operatorname{Img}(\operatorname{Alt})` is written
-exactly as it reads — a first-class space, not a shape:
+An image is a space, so :math:`\Lambda^{k}(V) = \operatorname{Img}(\operatorname{Alt})`
+is written as it reads:
 
 .. doctest::
 
@@ -194,10 +190,10 @@ exactly as it reads — a first-class space, not a shape:
    True
 
 The memo table is not an optimization. Two independently built ``Img(alt(V, 2))``
-nodes are only *alpha*-equivalent — their bound variables have different
-identities — and grassmann compares a subspace by the map that defines it. Building
+nodes are only alpha-equivalent, since their bound variables have different
+identities, and grassmann compares a subspace by the map that defines it. Building
 ``Λ²(V)`` twice would give two spaces that refuse to unify, so the same ``(V, k)``
-must return the identical node.
+has to return the identical node.
 
 Given a concrete space, we can ask for the dimensions. Here grassmann says
 something more careful than a number:
@@ -400,9 +396,9 @@ project onto :math:`\Lambda^{k+l}`:
 
 Every step is a core operation. :func:`~grassmann.embed.embed` and
 :func:`~grassmann.project` are the two directions of the subspace relation
-``Λᵏ ⊑ V⊗ᵏ``; ``A * B`` is the tensor product of two *values*; and
-:func:`~grassmann.unlift` is the explicit reassociation we owed from earlier —
-``(V⊗ᵏ)⊗(V⊗ˡ)`` and ``V⊗ᵏ⁺ˡ`` hold the same numbers, and the core makes you say so.
+``Λᵏ ⊑ V⊗ᵏ``, ``A * B`` is the tensor product of two values, and
+:func:`~grassmann.unlift` is the reassociation promised earlier: ``(V⊗ᵏ)⊗(V⊗ˡ)`` and
+``V⊗ᵏ⁺ˡ`` hold the same numbers, and the core makes you say which you mean.
 
 Two facts capture what "oriented" means, and you can read both straight off the
 numbers. First, **swapping the two vectors reverses the orientation**, which flips
@@ -424,10 +420,9 @@ The second result is the negative of the first, and the third is zero. Hold on t
 ``1.4142`` — it is ``√2``, and the inner-product section below says where the ``√2``
 comes from.
 
-``u ∧ v`` is no longer a vector. It is a **2-vector**, and its space is the
-:math:`\Lambda^{2}` we built out of the alternator — the wedge's codomain is not an
-afterthought, it is the thing the whole construction was for. ``wedge(V, a, b, k, l)``
-climbs the ladder of exterior powers, ``Λᵏ × Λˡ → Λᵏ⁺ˡ``.
+``u ∧ v`` is no longer a vector. It is a **2-vector**, living in the
+:math:`\Lambda^{2}` we built out of the alternator, and ``wedge(V, a, b, k, l)`` climbs
+the ladder of exterior powers, ``Λᵏ × Λˡ → Λᵏ⁺ˡ``.
 
 Earlier we asserted the dimension of each rung and got Pascal's triangle. With the wedge
 in hand we can instead *measure* it: wedge ``k`` generic vectors of ``ℝⁿ`` together and
@@ -450,9 +445,9 @@ The same Pascal's triangle the asserted-rank version promised — but *deduced* 
 an SVD of the alternator, from a term that was never told the answer.
 
 The sign rule generalizes: sliding a ``k``-vector past an ``l``-vector costs a sign
-:math:`(-1)^{kl}`. This **graded anticommutativity** holds in every dimension and
-degree — and it is a *consequence* of the alternator, not something we wrote down.
-Here it is checked by running both sides on random inputs and comparing:
+:math:`(-1)^{kl}`. This **graded anticommutativity** holds in every dimension and degree,
+and follows from the alternator rather than being stated anywhere. Checked by running both
+sides on random inputs:
 
 .. doctest::
 
@@ -519,11 +514,10 @@ Let us ask, on random vectors, and look at the ratio rather than assuming it is 
    >>> round(got / float(np.linalg.det(gram)), 10)
    2.0
 
-It is the Gram determinant, scaled by ``2 = 2!``. That factor is not a defect and not a
-convention we chose — it is what the *embedding* ``Λᵏ ⊑ V⊗ᵏ`` induces, because a
-``k``-vector's antisymmetrized tensor has ``k!`` equal-magnitude entries where the
-textbook orthonormal convention keeps one. The same ``k!`` will show up in the interior
-product below, for the same reason.
+It is the Gram determinant, scaled by ``2 = 2!``. The factor comes from the embedding
+``Λᵏ ⊑ V⊗ᵏ``: a ``k``-vector's antisymmetrized tensor has ``k!`` entries of equal
+magnitude where the textbook orthonormal convention keeps one. The same ``k!`` appears in
+the interior product below for the same reason.
 
 Bases make this concrete. The ``C(3,2) = 3`` basis 2-vectors ``eᵢ ∧ eⱼ`` should be
 mutually orthogonal and all the same length; here is their Gram matrix, computed by
@@ -541,15 +535,14 @@ running the pairing on every combination:
     [0. 2. 0.]
     [0. 0. 2.]]
 
-Orthogonal, as geometry demands, and each of squared length ``2``. So
-``|e₁ ∧ e₂| = √2 = 1.4142`` — which is the number the wedge section told you to hold
-on to. The ``1.4142`` was never arbitrary: it is the length of a unit square measured
-in the metric ``Λ²`` inherits, reported in an orthonormal basis for ``Λ²``.
+Orthogonal, and each of squared length ``2``, so ``|e₁ ∧ e₂| = √2 = 1.4142``. That is the
+number from the wedge section: the length of a unit square in the metric ``Λ²`` inherits,
+reported in an orthonormal basis for ``Λ²``.
 
 The interior product: contracting a k-vector
 --------------------------------------------
 
-The wedge raises degree. Its adjoint lowers it — and that is the whole definition. The
+The wedge raises degree and its adjoint lowers it, which is the whole definition. The
 **interior product** ``ι_v`` is characterised by
 
 .. math::
@@ -571,11 +564,10 @@ transcribed:
    ...     up = G.llam(Lkm1, lambda eta: wedge(V, v, eta, 1, k - 1))   # η ↦ v ∧ η
    ...     return G.dagger(up)(omega)
 
-No dual space appears, and no coordinates: ``ι_v`` eats an ordinary vector ``v ∈ V``
-and a ``k``-vector, and the metric does the contracting. On the basis 2-vectors it does
-what you would draw — feeding in a vector that lies in the plane leaves the
-perpendicular direction, and feeding in one that does not lie in the plane leaves
-nothing:
+No dual space appears and no coordinates: ``ι_v`` takes an ordinary vector ``v ∈ V`` and a
+``k``-vector, and the metric does the contracting. On the basis 2-vectors it does what the
+picture suggests. A vector lying in the plane leaves the perpendicular direction, and one
+that does not lie in the plane leaves nothing:
 
 .. doctest::
 
@@ -586,9 +578,8 @@ nothing:
    >>> show(interior(V, w2, x, 2), a=E[0], b=E[1], x=E[2])    # ι_{e₃}(e₁ ∧ e₂)
    [0.0, 0.0, 0.0]
 
-There is the ``2 = 2!`` again, from the metric ``Λ²`` inherits — the direction is
-``e₂``, exactly as the picture says. In general the contraction distributes over a
-wedge with alternating signs, the **Leibniz rule**
+The ``2 = 2!`` is the inherited metric again; the direction is ``e₂``. In general the
+contraction distributes over a wedge with alternating signs, the **Leibniz rule**
 
 .. math::
 
@@ -669,11 +660,10 @@ right orientation, is exactly the **cross product** ``u × v``:
    >>> np.cross(uu, vv).tolist()                                  # u × v
    [0.0, 0.0, 1.0]
 
-Both point straight up the third axis: ``⋆(u ∧ v)`` *is* the cross product, up to the
-fixed scale the induced metric imposes (``0.8165 = √2/√3``). Since we built ``⋆``
-*from* its defining identity, checking that identity is a real test of the construction
-rather than a tautology — the pairing, the lower and the pseudo-inverse all have to be
-the right ones. Across dimensions and degrees:
+Both point up the third axis: ``⋆(u ∧ v)`` is the cross product up to the scale the
+induced metric imposes (``0.8165 = √2/√3``). Since ``⋆`` was built from its defining
+identity, checking that identity tests the construction — the pairing, the lower and the
+pseudo-inverse all have to be right. Across dimensions and degrees:
 
 .. doctest::
 
@@ -693,12 +683,11 @@ the right ones. Across dimensions and degrees:
 Where the pseudo-inverse went
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-There is a :func:`~grassmann.pinv` sitting in the middle of that definition, and a
-pseudo-inverse is an SVD — one of the most expensive things in numerical linear algebra. It
-would be reasonable to worry that we have written something elegant and unusable.
+There is a :func:`~grassmann.pinv` in the middle of that definition, and a pseudo-inverse
+is an SVD. It would be fair to worry that we have written something unusable.
 
-We can simply look. A grassmann program renders to standalone numpy, so the question
-"what does this actually compute" has a literal answer you can read:
+We can look. A grassmann program renders to standalone numpy, so what it computes is
+readable:
 
 .. doctest::
 
@@ -711,8 +700,7 @@ We can simply look. A grassmann program renders to standalone numpy, so the ques
    >>> def linalg_calls(term: G.Expr) -> list[str]:
    ...     return sorted(set(re.findall(r"np\.linalg\.\w+", generated_source(term))))
 
-Applied to a pseudo-inverse of a map grassmann knows nothing about, we get exactly what
-we feared:
+On a pseudo-inverse of a map grassmann knows nothing about:
 
 .. doctest::
 
@@ -720,7 +708,7 @@ we feared:
    >>> linalg_calls(G.pinv(f)(y))
    ['np.linalg.pinv']
 
-Applied to the Hodge star — the very same ``G.pinv`` builder — we get nothing at all:
+On the Hodge star, built with the same ``G.pinv``:
 
 .. doctest::
 
@@ -730,23 +718,21 @@ Applied to the Hodge star — the very same ``G.pinv`` builder — we get nothin
    >>> src.count("np.einsum"), src.count("np.linalg")
    (5, 0)
 
-Five einsums and no linear algebra. The difference is not the operator, it is what the
-operand is made of. ``f`` is a variable: its matrix does not exist until run time, so
-its pseudo-inverse cannot either. The pairing ``M``, by contrast, is built from the
-alternator and the volume form, and once bases are chosen for ``Λᵏ`` and ``Λⁿ⁻ᵏ`` both
-of those are *constants* — so the compiler realizes ``M`` as a concrete matrix, inverts
-it once while compiling, and emits the result as a literal. You can see the inverted
-pairing sitting in the generated source as a constant:
+Five einsums and no linear algebra. The difference is the operand, not the operator.
+``f`` is a variable, so its matrix does not exist until run time and neither can its
+pseudo-inverse. The pairing ``M`` is built from the alternator and the volume form, and
+once bases are chosen for ``Λᵏ`` and ``Λⁿ⁻ᵏ`` both are constants, so the compiler builds
+``M`` as a concrete matrix, inverts it while compiling, and emits the result. The inverted
+pairing is in the generated source as a constant:
 
 .. doctest::
 
    >>> bool(re.search(r"0\.5773502691896258", src))     # 1/√3, folded at compile time
    True
 
-This is the payoff of separating the mathematical object from the numerical recipe. We
-were free to define ``⋆`` by the property that characterises it, in the most direct
-notation available, because choosing a basis is a *later* and separate decision — and
-it is at that point that ``M⁻¹`` stops being a pseudo-inverse and becomes a number.
+We were able to define ``⋆`` by the property that characterises it because choosing a
+basis is a later and separate decision, and it is at that point that ``M⁻¹`` stops being a
+pseudo-inverse and becomes a number.
 
 Forms, bases, and the tangent space
 -----------------------------------
@@ -868,9 +854,9 @@ pairing, with no metric involved:
    ...     {kJ: Jv, kv: np.array([1., 2.]), knu: np.array([3., 4.])})["result"], float))
    11.0
 
-``3·1 + 4·2 = 11``: the dual frame is *defined* to make the pairing that simple, whatever
-the chart does. Compare that with ``pair(tangent, ...)``, which had to work through
-``J Jᵀ``. Two different operations, kept apart by their spaces.
+``3·1 + 4·2 = 11``: the dual frame is defined to make the pairing that simple, whatever the
+chart does. Compare ``pair(tangent, ...)``, which had to work through ``J Jᵀ``. Two
+different operations, kept apart by their spaces.
 
 Forms on the surface
 ~~~~~~~~~~~~~~~~~~~~
@@ -892,9 +878,9 @@ independent 1-forms produces it:
    >>> out.size                                 # dim Λ²(T*) = C(2, 2)
    1
 
-The same ``wedge`` we defined for ``ℝ³``, over a space that is an image rather than a
-coordinate tuple, in a frame that varies with the point on the surface. Nothing in the
-definition knew the difference.
+The same ``wedge`` defined for ``ℝ³``, over a space that is an image rather than a
+coordinate tuple, in a frame that varies with the point on the surface. The definition did
+not have to know the difference.
 
 Calculus: the exterior derivative
 ---------------------------------
@@ -929,11 +915,11 @@ partial:
    ...     return G.sum(*[wedge(Vs, eform(j), G.diff(omega, x)(evec(j)), 1, k)
    ...                    for j in range(n)])
 
-This is the first place the ``V`` / ``V*`` distinction of the last section does real
-work. ``evec`` and ``eform`` are the *same numbers* declared into *different* spaces —
-the direction we differentiate along is a vector, the thing we wedge with is a covector
-— and it is ``G.external``'s space argument that keeps them apart. Write both as
-vectors and the term does not typecheck.
+This is where the ``V`` / ``V*`` distinction of the last section does real work. ``evec``
+and ``eform`` are the same numbers declared into different spaces: the direction we
+differentiate along is a vector, the thing we wedge with is a covector, and
+``G.external``'s space argument is what keeps them apart. Write both as vectors and the
+term does not typecheck.
 
 Start with a scalar field ``f`` (a 0-form). Its exterior derivative ``df`` is the
 **gradient**. For ``f = ½|x|²`` the gradient is ``x`` itself:
@@ -946,10 +932,9 @@ Start with a scalar field ``f`` (a 0-form). Its exterior derivative ``df`` is th
    >>> run(df, x=np.array([1., 2., 3.])).ravel()
    array([1., 2., 3.])
 
-The deepest fact about ``d`` is that **doing it twice gives zero**, ``d ∘ d = 0``
-(geometrically: the boundary of a boundary is empty). It falls out of the wedge's
-antisymmetry against the symmetry of mixed partials — neither of which we asserted. In
-every dimension:
+Doing it twice gives zero, ``d ∘ d = 0`` — geometrically, the boundary of a boundary is
+empty. It follows from the wedge's antisymmetry against the symmetry of mixed partials,
+neither of which we asserted. In every dimension:
 
 .. doctest::
 
@@ -1081,10 +1066,9 @@ signed volume ``det[u, v, w]`` (each up to the Hodge star's fixed scale):
    >>> bool(np.isclose(tp, np.sqrt(6) * np.linalg.det(np.array([uu, vv, ww]))))   # ⋆(u∧v∧w) = √6·det
    True
 
-Every one of those went through a basis — three of them, in fact, since ``♭``, ``⋆``
-and ``d`` each realize their operands somewhere. None of the expressions mentions one.
-That is the arrangement the whole tutorial has been demonstrating: the term says what
-the object is, the compiler decides what to compute it in.
+Each of those went through a basis — three of them, since ``♭``, ``⋆`` and ``d`` each
+realize their operands somewhere — and none of the expressions mentions one. The term says
+what the object is and the compiler decides what to compute it in.
 
 Pulling forms back along a map
 ------------------------------
@@ -1133,9 +1117,8 @@ you may differentiate before pulling back or after, and get the same 1-form. Tak
    >>> (Fm @ (zv @ Fm)).tolist()                              # f*(dg) = fᵀ(f z)
    [33.0, 114.0]
 
-Nothing had to be added to the language for this. ``f*`` is composition, ``d`` is
-:func:`~grassmann.diff` with a wedge, and the identity between them is a consequence of
-both, not an axiom either one needed.
+Nothing had to be added to the language for this: ``f*`` is composition, ``d`` is
+:func:`~grassmann.diff` with a wedge, and the identity between them follows from both.
 
 Moving a value between spaces
 -----------------------------
@@ -1165,14 +1148,14 @@ What ships with grassmann
 -------------------------
 
 Everything above was built out of core operations — ``llam``, ``lift``, ``img``,
-``embed``, ``project``, ``scale``, ``inner``, ``dagger``, ``flat``, ``pinv``, ``diff``
-— and nothing else. That was the point: exterior algebra is not a feature of
-grassmann, it is an *expressiveness test* the core passes.
+``embed``, ``project``, ``scale``, ``inner``, ``dagger``, ``flat``, ``pinv``, ``diff`` —
+and nothing else. Exterior algebra is not built into grassmann; it is written against the
+same surface you would use.
 
-Having passed it, the constructions ship. :mod:`grassmann.stdlib.exterior` is the same
-derivation, packaged, and it does the bookkeeping we did by hand — it memoizes the
-exterior powers, and it recovers the ambient ``V`` from its operands, so you do not
-thread the base space through every call:
+The constructions do ship, though. :mod:`grassmann.stdlib.exterior` is this derivation
+packaged, with the bookkeeping we did by hand taken care of: it memoizes the exterior
+powers and recovers the ambient ``V`` from its operands, so the base space does not have
+to be threaded through every call.
 
 .. doctest::
 
@@ -1185,15 +1168,13 @@ thread the base space through every call:
    >>> show(hodge_star(wedge(u, v, 1, 1), 2), u=uu, v=vv)
    [0.0, 0.0, 0.8165]
 
-Two differences from what we wrote are worth knowing. The stdlib's ``interior``
-contracts a *form* with a vector by ``embed → apply → project``, rather than the metric
-adjoint we used, so it carries no ``k!``; and ``exterior_power`` takes an optional
-``rank=`` to pin the dimension statically, which is the asserted-rank variant we tried
-out earlier. The manifold machinery of the last section is packaged too, as
+Two things differ from what we wrote. The stdlib's ``interior`` contracts a form with a
+vector by ``embed → apply → project`` rather than by the metric adjoint, so it carries no
+``k!``; and ``exterior_power`` takes an optional ``rank=`` that pins the dimension
+statically, the asserted-rank variant from earlier. The manifold machinery of the last section is packaged too, as
 :class:`~grassmann.syntax.geometry.Parameterization`, which wraps ``Img(J)`` /
 ``CoKer(J)`` and the image frame into a chart object.
 
-These are also on the top-level namespace as ``G.wedge``, ``G.alt``,
-``G.exterior_power`` and friends. Use them; just know there is nothing in them you have
-not now built yourself.
+They are also on the top-level namespace as ``G.wedge``, ``G.alt``, ``G.exterior_power``
+and so on. There is nothing in them you have not now built yourself.
 

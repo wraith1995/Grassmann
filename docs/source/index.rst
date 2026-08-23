@@ -4,7 +4,7 @@ Grassmann is a programming language, a lambda calculus like language, for coordi
 Grassmann's compiler takes two programs: a term, a vector (or non-linear map between vectors), and a basis (or non-linear map to a basis).
 Grassmann's compiler produces a subset of Python (Jax/PyTorch) that computes the given term in the given basis.
 Grassmann's compiler applies knowledge of the properties of bases and multi-linear algebra to find an efficient representation.
-Grassmann also ships with rewriting, automatic differnation, and utilities for the construction of usual tensor calculus constructions (exterior algebra, pullbacks).
+Grassmann also ships with rewriting, automatic differentiation, and utilities for the construction of usual tensor calculus constructions (exterior algebra, pullbacks).
 
 
 A simple example shows how changes of basis are appropriately inserted:
@@ -75,8 +75,8 @@ A simple example shows how changes of basis are appropriately inserted:
    :maxdepth: 2
    :caption: Narrative
 
-   features
    tutorial
+   features
    grammar
 
 .. toctree::

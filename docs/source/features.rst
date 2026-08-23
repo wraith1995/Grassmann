@@ -3,7 +3,7 @@ Features
 
 Grassmann lets you write linear and multilinear algebra the way you think about it —
 coordinate-free, typed, and close to the mathematics — and then compiles it to plain,
-fast array code you can run or ship.
+fast array code that you can run.
 
 .. doctest::
 
@@ -14,9 +14,9 @@ Coordinate-independent linear algebra
 -------------------------------------
 
 An operation in grassmann is named for what it means, and the recipe that computes it is
-worked out later. :func:`~grassmann.dagger` is *the* adjoint of a map: which
-transpose-and-conjugate that becomes depends on the inner products at both ends, and
-resolving it is the compiler's job rather than yours. The same holds of
+worked out later. :func:`~grassmann.dagger` is the adjoint of a map. Which
+transpose-and-conjugate that turns into depends on the inner products at both ends, and
+the compiler works that out. The same holds of
 :func:`~grassmann.solve` and :func:`~grassmann.pinv`, of the trace and the determinant, of
 the musical isomorphisms :func:`~grassmann.sharp` and :func:`~grassmann.flat`, and of
 projection onto a subspace — see :doc:`public_api` and :doc:`grammar` for more.
@@ -36,9 +36,9 @@ two bases for that space: the standard one, and a skew basis that is not orthono
    >>> skew = G.list_basis(e(0), G.sum(e(0), e(1)), e(2))       # not orthonormal
    >>> ku, kv = f"u_{u.node.uid}", f"v_{v.node.uid}"
 
-The two bases describe the same vectors with different numbers, and Grassmann manages the details:
-compiling the bare term ``u`` out of one basis and into the other *is*
-the change of basis, so no arithmetic has to be done by hand to set the comparison up.
+The two bases describe the same vectors with different numbers. Grassmann converts between
+them: compiling the bare term ``u`` out of one basis and into the other is the change of
+basis, so we do not have to work the coordinates out by hand.
 
 .. doctest::
 
@@ -61,10 +61,9 @@ the skew basis.
    >>> inner_in(std, x, y), inner_in(skew, xs, ys)
    (-1.0, -1.0)
 
-Two programs, different numbers going in, different arithmetic inside, one answer — because
-the basis is not part of what ``G.dot(u, v)`` says. An array expression written against the
-standard basis would have returned something else for the skew one, and would have had no
-way to notice.
+Two programs, different inputs, different arithmetic, the same answer, because the basis is
+not part of what ``G.dot(u, v)`` means. An array expression written for the standard basis
+would have given the wrong number for the skew one without any indication.
 
 Keeping coordinates out of the term is also what makes the type system worth having. Every
 expression carries its space, so a mismatch is a build-time error rather than a shape crash
@@ -93,8 +92,7 @@ compiles; asking the same two values to pair as though both were vectors does no
        ...
    grassmann.infer.unify.UnifyError: cannot unify Dual(...) ~ ...
 
-The refusal is deliberate down to the wording. Add a vector to a covector and the compiler
-names the isomorphism it is declining to apply on your behalf::
+Add a vector to a covector and the error names the isomorphism it is refusing to apply::
 
     cob: bases of different spaces — no implicit conversion
     (even a canonical ℝ≅ℝ* must be explicit)
@@ -113,14 +111,14 @@ an array program, which we know how to compile.
 explicit basis to each variable and to the result, inserting whatever change of basis is
 needed to keep them consistent.
 
-That separation is worth more than tidiness. A pseudo-inverse written in a term does not
-have to *be* a pseudo-inverse at run time: once bases are chosen, an operand that is
-constant becomes a concrete matrix, and its inverse is folded into a literal while
-compiling. The :doc:`tutorial` builds the Hodge star out of :func:`~grassmann.pinv` and
-then shows the emitted code contains no ``np.linalg`` call at all.
+Deferring the choice also means an operation can turn out to be cheaper than it looks. A
+pseudo-inverse in a term need not be a pseudo-inverse at run time: if its operand is
+constant once bases are fixed, the inverse is computed during compilation and emitted as a
+literal. The :doc:`tutorial` builds the Hodge star out of :func:`~grassmann.pinv` and shows
+that the generated code contains no ``np.linalg`` call.
 
-What comes out is a :class:`polyarray.Program`. Run it on arrays with ``prog.run(...)``,
-or emit it as standalone, dependency-light Python and paste that into your own code:
+Compiling gives a :class:`polyarray.Program`. Run it on arrays with ``prog.run(...)``, or
+render it to Python and paste that into your own code:
 
 .. doctest::
 
@@ -134,21 +132,15 @@ or emit it as standalone, dependency-light Python and paste that into your own c
    >>> sorted(set(re.findall(r"np\.[a-z_]+(?:\.[a-z_]+)?", src)))
    ['np.array', 'np.asarray', 'np.einsum', 'np.eye', 'np.stack']
 
-Nothing above the program ships with you: grassmann is a build-time front end that
-produces ordinary array code.
+Only the rendered program has to ship; grassmann runs at build time.
 
-Where the candidate bases come from, and which one wins
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Where the bases come from
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Naming objects by their universal properties is not only tidier; it is what tells the
-compiler where to look for coordinates. **A space that knows what it is knows which bases
-suit it.**
-
-Because the space tower is closed and each node carries a universal property, grassmann can
-*derive* the candidate coordinatizations rather than being handed one. The derivation
-mirrors the space structure onto the basis structure — a direct sum's basis is the sum of
-its summands' bases, a tensor product's is the product, a dual's is the dual — and a
-fundamental subspace contributes the bases adapted to the very map that defines it:
+You do not have to supply a basis, because a space usually already says enough to build
+one. A direct sum is coordinatized by the bases of its summands, a tensor product by the
+product of theirs, a dual by the dual basis. A subspace such as ``Img(f)`` is built from a
+map, so it can offer the bases that map gives it:
 
 .. doctest::
 
@@ -163,17 +155,13 @@ fundamental subspace contributes the bases adapted to the very map that defines 
    >>> candidates(G.img(J))
    ['ProjectedBasis', 'ImageBasis']
 
-The image of ``J`` offers two bases, and both come from ``J`` itself: the orthonormalized
-subspace basis, and the literal pushforward of the domain's basis along ``J``. Neither had
-to be supplied, because ``Img(J)`` says what it is.
+The image of ``J`` offers two: an orthonormalized basis of the subspace, and the images
+``J(b₁), …, J(bₙ)`` of a basis of the domain. Both are read off ``J``.
 
-Which of them to use is the interesting question, and the criterion is **how much of the
-term survives as a constant**.
-
-Take the wedge on a tangent plane. Let ``J`` be a chart's differential and
-``T = Img(J)`` the plane it spans; ``T`` moves as the chart does, so nothing about it is
-fixed in advance. Wedging two tangent vectors is an operation on that moving plane, and
-one might expect the chart to be all over the answer:
+When there is a choice, grassmann prefers the basis that leaves the most of the answer as
+plain numbers. Here is what that buys. Let ``J`` be the derivative of a chart, so
+``T = Img(J)`` is a tangent plane that tilts as the chart moves, and wedge two vectors of
+it:
 
 .. doctest::
 
@@ -187,9 +175,9 @@ one might expect the chart to be all over the answer:
    >>> src = pa.to_numpy_source(prog, func_name="w", op_renderers=op_renderers())
    >>> body = "\n".join(l for l in src.splitlines() if not l.strip().startswith("def "))
 
-It is not. The chart is declared as an input, because the space mentions it — and then it
-never appears in the arithmetic, which is two einsums against constant matrices and no
-numerical linear algebra whatsoever:
+``J`` is passed to the program, since the space is defined in terms of it, but it is not
+used in the computation. That is two contractions against fixed matrices, and no linear
+algebra:
 
 .. doctest::
 
@@ -198,73 +186,47 @@ numerical linear algebra whatsoever:
    >>> "np.linalg" in body, body.count("np.einsum")
    (False, 2)
 
-The constant it contracts against is the alternator, ``½(I − swap)``, exactly as it would
-be on a fixed ``ℝ²``:
+The fixed matrix is the alternator ``½(I − swap)``, the same one it would be on a flat
+``ℝ²``:
 
 .. doctest::
 
    >>> bool(re.search(r"0\.5, -0\.5", body))     # the ½(I − swap) pattern, as a literal
    True
 
-That is the whole argument in one example. The wedge is defined by antisymmetry, which is a
-statement about permuting slots and mentions no metric and no coordinates. Read in a basis
-pushed forward from the chart, its structure constants are therefore the *reference* ones —
-literals — and the chart cancels. Choose a basis with no relation to ``J`` and it would not:
-the same operation would arrive as an expression in the chart, recomputed at every point.
+The wedge is defined by swapping arguments and changing sign, which says nothing about
+lengths or angles or coordinates. Written in a basis carried over from the chart, its
+coefficients come out the same as on the flat space, and the chart drops out. In an
+unrelated basis it would not: the chart would show up in the formula and be recomputed at
+every point.
 
-So the preference is not aesthetic. Grassmann scores the candidate bases by how numeric the
-result becomes, and a basis aligned to the operator that defines the space wins by a wide
-margin, because there the projection onto the subspace is the identity. Absent any operator
-structure the inner-product-orthonormal basis wins instead, since it makes the metric the
-identity and so renders the inner product, the adjoint and the pseudo-inverse numeric too.
-The distinction between those two is exactly the distinction between the metric-free part of
-the algebra and the rest: the wedge and the alternator do not care which basis of the
-subspace you pick, while the Hodge star and the induced inner product very much do.
+Which basis wins depends on what the term does. A basis coming from the same map the space
+came from usually wins, because projecting into the subspace is then free. If there is no
+such map, the basis that makes the inner product the identity wins, because that also makes
+the adjoint and the pseudo-inverse numeric. The split follows the mathematics: the wedge
+does not care which basis of the subspace you use, while the Hodge star and the inner
+product do.
 
-Realizing such a basis is the one place numerical linear algebra actually enters — an SVD in
-general, a QR when the defining map is injective, a generalized SVD when a metric is in play
-— and the point of the scoring is to make that entrance as rare as possible.
+Building one of these bases is where an SVD or a QR can appear — an SVD in general, a QR
+when the map is injective, a generalized SVD when a metric is involved.
 
-The same mechanism explains an earlier surprise. A pseudo-inverse of a *constant* pairing —
-the wedge-into-volume map that defines the Hodge star — becomes, once bases are chosen, a
-concrete matrix whose inverse is folded to a literal while compiling, so the emitted code
-contains no pseudo-inverse at all. The :doc:`tutorial` shows that happening. Writing
-``pinv`` cost nothing because ``pinv`` named an operation rather than prescribing an
-algorithm, and the basis choice then discovered that the operation was constant.
-
-Two honest caveats. The choice is a local heuristic scored per space, not a global search
-over the whole term; and a basis adapted to an operator is only available when the term
-actually exposes that operator, which is one more reason the universal property belongs in
-the type rather than in a comment.
+The Hodge star from earlier is the same effect. Its pseudo-inverse is taken of a pairing
+that turns out to be constant once bases are fixed, so it is inverted during compilation
+and the emitted code has no pseudo-inverse in it.
 
 Compiles to a subset of Python + Numpy Compatible With PyTorch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The emitted vocabulary is deliberately small. Across gradients, pseudo-inverses, solves,
-traces, Kronecker products and determinants it stays inside ten names:
+Grassmann does not emit array code itself. It targets :mod:`polyarray`, a small array IR
+whose cells are exact rational functions, and polyarray is what renders a program to
+Python. That is the only backend grassmann knows about, and everything below this point
+is polyarray's business rather than grassmann's.
 
-.. doctest::
-
-   >>> vocabulary = set()
-   >>> for expr, decls in [("D(0.5*x'*A*x, x)", {"x": "R^n", "A": "R^n -> R^n"}),
-   ...                     ("pinv(A)*y", {"A": "R^n -> R^n", "y": "R^n"}),
-   ...                     ("A\\y", {"A": "R^n -> R^n", "y": "R^n"}),
-   ...                     ("kron(A, B)", {"A": "R^n -> R^n", "B": "R^n -> R^n"}),
-   ...                     ("log(det(inv(X)))", {"X": "R^n -> R^n"})]:
-   ...     text = pa.to_numpy_source(G.compile(build_problem(expr, decls=decls).primal),
-   ...                               func_name="f", op_renderers=op_renderers())
-   ...     vocabulary |= set(re.findall(r"np\.[a-z_]+(?:\.[a-z_]+)?", text))
-   >>> sorted(vocabulary)
-   ['np.array', 'np.asarray', 'np.einsum', 'np.eye', 'np.linalg.det', 'np.linalg.inv', 'np.linalg.pinv', 'np.log', 'np.prod', 'np.stack']
-
-Every one of those has a one-to-one counterpart in ``torch`` and in ``jax.numpy``, so the
-generated source ports by substituting the namespace.
-
-The shape of the code matters as much as the vocabulary. The functions that carry the
-mathematics are straight-line: a sequence of assignments, no loops, no branches, no
-mutation. Control flow appears in exactly one place — a generated ``vmap`` shim, emitted
-when a derivative has to be evaluated across a batch of seeds, which is the one construct
-torch and JAX already provide natively:
+What comes out is a flat sequence of assignments over numpy calls — contractions,
+reshapes, stacks, and a handful of ``np.linalg`` entries when a solve or a determinant is
+genuinely needed. There are no classes, no loops in the body of the computation, and no
+mutation. The one exception is a small ``vmap`` helper, emitted when a derivative has to be
+run across a batch of directions, and it does contain a loop:
 
 .. doctest::
 
@@ -277,12 +239,12 @@ torch and JAX already provide natively:
    ...  for fn in ast.parse(src).body if isinstance(fn, ast.FunctionDef)]
    [('_sub0', False), ('_vmap1', True), ('grad', False)]
 
-For running rather than porting, polyarray ships a torch backend:
-:func:`polyarray.torch_batch.batched_torch` lowers a ``Program`` through ``pyab`` and
-batches it with ``torch.vmap``, so batching stays an IR concept and torch is reached
-through one lowering path. ``torch`` and ``pyarraybackend`` are optional dependencies,
-imported lazily — the core stack never imports torch, and
-:func:`~polyarray.torch_batch.torch_available` reports whether the path is usable.
+Torch and JAX have all of that, including ``vmap``, so the generated source ports by
+changing the namespace. Polyarray also ships a torch backend if you would rather run than
+port: :func:`polyarray.torch_batch.batched_torch` lowers a program through ``pyab`` and
+batches it with ``torch.vmap``. Torch and ``pyarraybackend`` are optional imports, so the
+core stack never loads torch; :func:`~polyarray.torch_batch.torch_available` says whether
+the path works.
 
 Parametric polymorphism
 -----------------------
@@ -314,18 +276,26 @@ One term, instantiated and run at two different spaces:
    (ℝ^5)* ⊗ ℝ^5 [0. 2. 4. 6. 8.]
 
 :func:`~grassmann.spacefn` and :func:`~grassmann.typefn` are the space- and type-level
-shorthands, and :func:`~grassmann.bfn` abstracts over a *basis* — so a construction can be
-generic in the basis it will eventually be realized in.
+shorthands.
+
+There is a third thing to abstract over, and it is the one the previous section was about.
+:func:`~grassmann.bfn` binds a *basis* variable, so a construction can be written before
+the coordinates it will run in are known and applied to a basis later. Abstracting over a
+space and abstracting over a basis are the two halves of the same separation: the space
+says what the construction is for, the basis says what it will be computed in, and neither
+has to be fixed when the construction is written. It is also why one term can be compiled
+twice into different programs — :func:`~grassmann.compile_in` supplies the bases by hand
+where :func:`~grassmann.compile` picks them.
 
 Limited dependent types
 -----------------------
 
 Spaces may be indexed by terms. ``Img(f)``, ``Ker(f)``, ``CoKer(f)`` and ``CoImg(f)`` are
-spaces built from a *map*, which means the type of a value can depend on another value —
-enough dependency to express the constructions differential geometry needs, without the
-full proof burden of a dependently typed language.
+spaces built from a map, so the type of a value can depend on another value. That is
+enough to express the constructions differential geometry needs, and much less than a
+fully dependent language asks of you.
 
-This is what makes a tangent space a type rather than a convention. Let a chart's
+It is what lets a tangent space be a type. Let a chart's
 differential ``J = dφ`` be an injective map from the parameter domain into the ambient;
 the tangent space is its image, and the cotangent space is that image's dual:
 
@@ -343,7 +313,7 @@ the tangent space is its image, and the cotangent space is that image's dual:
 
 The dimension of such a space is the *rank* of its defining map, and grassmann does not
 guess ranks. Asserting injectivity, as above, pins it statically. Without an assertion the
-dimension is an honest runtime atom ``δ_f``, settled by an SVD when the term is lowered:
+dimension is a runtime quantity ``δ_f``, settled by an SVD when the term is lowered:
 
 .. doctest::
 
@@ -352,30 +322,29 @@ dimension is an honest runtime atom ``δ_f``, settled by an SVD when the term is
    >>> is_runtime_dim(dim_of(G.img(K).node))
    True
 
-The dependency is limited on purpose: dimensions are compared, never unified, and the
+The dependency is limited on purpose. Dimensions are compared, never solved for, and the
 facts a map carries (:func:`~grassmann.rank`, :func:`~grassmann.inj`,
-:func:`~grassmann.surj`, :func:`~grassmann.bij`) are assertions that refine a type rather
-than proofs the checker demands.
+:func:`~grassmann.surj`, :func:`~grassmann.bij`) are assertions that sharpen a type. The
+checker does not ask you to prove them.
 
 Transporting values between spaces
 ----------------------------------
 
-A great deal of practical linear algebra is carrying a value from one space to a related
-one: a reference element to a physical element, a subspace to its ambient, one summand of
-a direct sum to the whole. Grassmann separates the ways that can happen, because they are
-not the same operation.
+Much of practical linear algebra is carrying a value from one space to a related one: a
+reference element to a physical element, a subspace to its ambient, one summand of a direct
+sum to the whole. These are different operations and grassmann keeps them apart.
 
 :func:`~grassmann.pullback` moves a value by *structure* alone — it walks the source and
 target spaces in step, through ``⊗``, ``⊕``, ``Dual`` and the fundamental subspaces, and
 inserts whichever projection or embedding each position calls for. No map is involved.
-:func:`~grassmann.pushforward` carries a value *along a map* into that map's image, and
+:func:`~grassmann.pushforward` carries a value along a map into that map's image, and
 :func:`~grassmann.pull_along` comes back through the adjoint. Bases travel too:
 :func:`~grassmann.transport_basis` pushes a reference basis forward along a map, and
 :func:`~grassmann.transport_cobasis` carries the basis dual to it.
 
-The reference-element pattern of the finite element method is exactly this. Basis
-functions and quadrature are worked out once on a reference element; each physical element
-is reached through the element map, whose differential is an injective ``J``:
+The reference element of a finite element method works this way. Basis functions and
+quadrature are worked out once on the reference element, and each physical element is
+reached through the element map, whose differential is an injective ``J``:
 
 .. doctest::
 
@@ -386,10 +355,10 @@ is reached through the element map, whose differential is an injective ``J``:
    >>> G.unparse(G.infer.synth_space(physical.node))
    'J : (ℝ^2)* ⊗ ℝ^2 {inj} ⊢ Img(J)'
 
-The value now lives on the element's tangent space. What it *looks like* depends on which
-basis you read it in, and both readings are available. In the basis transported from the
-reference element the coordinates are the reference coordinates, unchanged; in the ambient
-standard basis they are the physical ones:
+The value now lives on the element's tangent space, and its coordinates depend on which
+basis you read it in. In the basis carried over from the reference element they are the
+reference coordinates, unchanged; in the ambient standard basis they are the physical
+ones:
 
 .. doctest::
 
@@ -404,11 +373,10 @@ standard basis they are the physical ones:
    >>> np.asarray(in_std.run(feed)["result"], float).tolist()
    [4.0, 6.0]
 
-The transported basis is not orthonormalized — it is literally ``J(b₁), …, J(bₙ)`` — which
-is what keeps the coordinates rational, since orthonormalizing would introduce square
-roots. Its dual travels with it, and the pairing is preserved exactly, so a functional
-assembled on the reference element evaluates on the physical one with no Jacobian factors
-written by hand:
+The transported basis is ``J(b₁), …, J(bₙ)`` and is not orthonormalized, which keeps the
+coordinates rational; orthonormalizing would bring in square roots. Its dual travels with
+it and the pairing is preserved, so a functional assembled on the reference element
+evaluates on the physical one without any Jacobian factors written by hand:
 
 .. doctest::
 
@@ -421,8 +389,8 @@ written by hand:
    >>> float(np.array([3., -1.]) @ np.array([1., 2.]))      # the reference pairing
    1.0
 
-The Jacobian never appears in the expression. It appears in the bases, which is where a
-change of element belongs.
+The Jacobian is in the bases rather than in the expression, which is where a change of
+element belongs.
 
 Built-in libraries for differential geometry
 --------------------------------------------
@@ -445,8 +413,8 @@ determinant fall out of them, coordinate-free and in any dimension:
    >>> bool(np.allclose(np.cross(star.ravel(), [0., 0., 1.]), 0.0))   # ⋆(u∧v) ∥ u×v
    True
 
-None of it is built into the core — the whole algebra is an *expressiveness test* the core
-passes. The :doc:`tutorial` derives every operator from scratch and checks each law by
+None of it is built into the core; the library is written against the same surface you
+would use. The :doc:`tutorial` derives every operator from scratch and checks each law by
 running it.
 
 Automatic covariant differentiation
@@ -454,8 +422,8 @@ Automatic covariant differentiation
 
 :func:`~grassmann.diff` differentiates a term with respect to one of its variables and
 returns *another term* — the derivative as a map, ready to be simplified, wedged, or
-lowered like anything else. When the value lives on a moving subspace, that derivative is
-automatically the **covariant** one, and nothing has to be said about a connection.
+lowered like anything else. When the value lives on a moving subspace, the derivative comes
+out covariant without a connection being supplied.
 
 We build the situation directly. A chart's differential is an injective map ``J`` from the
 parameter domain into the ambient, the tangent space is its image, and a tangent field
@@ -517,9 +485,9 @@ coordinates* — ``Dv`` is fed zeros — so anything left in the answer is the c
    >>> bool(np.allclose(got, np.einsum("abp,b->ap", d2(u0), vc), atol=1e-6))
    True
 
-The coordinates of ``v`` never changed and the derivative is not zero: the frame moved
-under it. Projecting that back onto the tangent space with the induced metric leaves the
-Christoffel symbols of the sphere, ``Γ¹₂₂ = −sin u₁ cos u₁`` and ``Γ²₁₂ = Γ²₂₁ = cot u₁``:
+The coordinates of ``v`` are constant and the derivative is still not zero, because the
+frame moved under it. Projecting back onto the tangent space with the induced metric leaves
+the Christoffel symbols of the sphere, ``Γ¹₂₂ = −sin u₁ cos u₁`` and ``Γ²₁₂ = Γ²₂₁ = cot u₁``:
 
 .. doctest::
 
@@ -532,19 +500,18 @@ Christoffel symbols of the sphere, ``Γ¹₂₂ = −sin u₁ cos u₁`` and ``�
    >>> bool(np.allclose(tangential, np.einsum("cab,b->ca", Gamma, vc).T, atol=1e-4))
    True
 
-We never wrote a Christoffel symbol. The connection is a consequence of ``v`` living in
-``Img(J)`` and ``J`` depending on the point, and :func:`~grassmann.diff` reads both off
-the types. The gauge names which frame the derivative is taken against — the subspace is
-fixed only up to an orthogonal transformation, and the derivative depends on that choice —
-with ``"immersion"`` selecting the pushforward frame used above.
+No Christoffel symbol was written anywhere. The connection follows from ``v`` living in
+``Img(J)`` and ``J`` depending on the point, both of which :func:`~grassmann.diff` reads
+off the types. The gauge says which frame the derivative is taken against, which matters
+because the subspace only fixes its frame up to an orthogonal transformation;
+``"immersion"`` selects the pushforward frame used here.
 
 Experimental: polymorphism in the dimension of a space
 ------------------------------------------------------
 
-The dimension ``n`` of a space ``ℝⁿ`` can be left symbolic and survive all the way
-through lowering. The compiled program then
-takes ``n`` from the shapes of its inputs at run time, so **one** program serves every
-size — no re-compilation, no unrolling, no hardcoded extent:
+The dimension ``n`` of a space ``ℝⁿ`` can be left symbolic and stay symbolic through
+lowering. The compiled program reads ``n`` off the shapes of its inputs, so one program
+serves every size, with no re-compilation and no unrolling:
 
 .. doctest::
 
@@ -562,19 +529,18 @@ size — no re-compilation, no unrolling, no hardcoded extent:
    3 (3,) True
    7 (7,) True
 
-The same source computed ``½(A + Aᵀ)x`` at both sizes, and was never told either one.
+The same source computed ``½(A + Aᵀ)x`` at both sizes without being told either one.
 
-The term language, and rewriting it (experimental)
+The term language, and rewriting it
 --------------------------------------------------
 
-Underneath the builders, a grassmann term is a typed lambda calculus, and the algebra's
-laws are rewrite rules over it, so a term can be reduced, simplified and normalized
-before any basis is chosen.
+A grassmann term is a typed lambda calculus, and the algebra's laws are rewrite rules over
+it, so a term can be reduced, simplified and normalized before any basis is chosen.
 
 Four binders
 ~~~~~~~~~~~~
 
-Underneath the builders, a grassmann term is a typed lambda calculus with four binders.
+There are four binders.
 :func:`~grassmann.llam` binds a **linear** variable — the ``⊸`` of linear logic;
 :func:`~grassmann.lam` binds a space or a type, which is where the parametric polymorphism
 comes from; :func:`~grassmann.bfn` binds a *basis*; and :func:`~grassmann.frame` binds a
@@ -595,8 +561,8 @@ the output is stable):
    >>> show_term(G.lam(G.Space, lambda t: G.llam(t, lambda z: z)))
    'Λ a:Space. λ x:a. x'
 
-Linearity is a resource calculus, not a naming convention
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Linearity is checked, not just named
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A linear binder must consume each of its variables **exactly once**, and
 :func:`~grassmann.infer.check_linearity` counts uses along every evaluation path to enforce
@@ -616,13 +582,11 @@ both factors of a ``⊗`` is used twice and rejected:
        ...
    grassmann.infer.linearity.LinearityError: linear variable ... is used 2 times; ...
 
-That additive rule is not a technicality. It is what lets the antisymmetrizer
-``Σ_σ sgn(σ)·(v_{σ(0)} ⊗ … )`` typecheck as a linear map, since each ``vᵢ`` is consumed
-once *within every summand*; the :doc:`tutorial` builds exactly that term. A language that
-merely called its binder linear would have nothing to say here, and would accept the terms
-that are not.
+The additive rule is what lets the antisymmetrizer ``Σ_σ sgn(σ)·(v_{σ(0)} ⊗ … )``
+typecheck as a linear map: each ``vᵢ`` is consumed once within every summand. The
+:doc:`tutorial` builds that term.
 
-Three strengths of rewriting
+Experimental: Rewriting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 :func:`~grassmann.beta` β-reduces applied binders and nothing else.
@@ -640,9 +604,9 @@ scalars to the front, and collecting like terms:
    >>> show_term(G.simplify(G.sum(G.scale(1.0, pp), G.zero(Vs))))
    'p : ℝ^3 ⊢ p'
 
-Every rule is an equality of the coordinate-free algebra, so a rewritten term lowers to
-the same numbers. The point of a normal form is that two expressions which are
-*algebraically* equal become *syntactically* equal, and can then simply be compared:
+Every rule is an equality of the coordinate-free algebra, so a rewritten term lowers to the
+same numbers. A normal form makes two algebraically equal expressions syntactically equal,
+so they can be compared:
 
 .. doctest::
 
@@ -654,15 +618,15 @@ the same numbers. The point of a normal form is that two expressions which are
    >>> term_key(left.node) == term_key(right.node)
    True
 
-The comparison is up to α-equivalence, so two terms differing only in bound-variable
-names are already equal.
+The comparison is up to α-equivalence, so terms differing only in bound-variable names are
+already equal.
 
 η through the Riesz representation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The most interesting rules are the ones that make a lambda *disappear* into the object it
-denotes. Differentiating gives you a linear map as a lambda; the opt-in ``RIESZ_SOP``
-preset folds a seed-linear lambda into the covector or linear map it represents:
+Some rules remove a lambda entirely, replacing it with the object it denotes.
+Differentiating produces a linear map written as a lambda, and the opt-in ``RIESZ_SOP``
+preset folds such a lambda into the covector or linear map it represents:
 
 .. doctest::
 
@@ -673,29 +637,5 @@ preset folds a seed-linear lambda into the covector or linear map it represents:
    >>> show_term(G.normal_form(deriv, RIESZ_SOP))
    'p : ℝ^3 ⊢ inner(ℝ^3)(p)'
 
-The binder is gone and what remains is the covector ``⟨p, ·⟩`` — the gradient, named
-rather than described.
-
-What "experimental" means here
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-:class:`~grassmann.transform.rewrite.SoPConfig` turns each rule group on or off, and the
-ladder from ``DEFAULT_SOP`` through ``AGGRESSIVE_SOP`` and ``RIESZ_SOP`` trades reach for
-caution. The default preset is value-*exact* and layout-identical: only the commutative
-``+`` is reordered. The rules above that — canonical ``⊗`` factor order, ``⊕`` component
-order, dissolving ``⊕`` into injections — are canonical only *up to isomorphism*, so they
-emit an explicit ``Permute`` correction to restore the layout exactly, and they are off by
-default.
-
-**Confluence is not assumed.** The engine runs the enabled rules to a fixpoint under a
-global step cap, so a non-confluent rule set raises
-:class:`~grassmann.transform.rewrite.RewriteError` rather than hanging. Rather than
-promising a unique normal form, :func:`~grassmann.transform.rewrite.is_normalized_sop`
-certifies exactly what the enabled groups were supposed to produce:
-
-.. doctest::
-
-   >>> from grassmann.transform.rewrite import is_normalized_sop
-   >>> is_normalized_sop(left.node)
-   True
-
+The binder is gone and what remains is the covector ``⟨p, ·⟩``: the gradient itself rather
+than a recipe for it.
