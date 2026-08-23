@@ -137,6 +137,106 @@ or emit it as standalone, dependency-light Python and paste that into your own c
 Nothing above the program ships with you: grassmann is a build-time front end that
 produces ordinary array code.
 
+Where the candidate bases come from, and which one wins
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Naming objects by their universal properties is not only tidier; it is what tells the
+compiler where to look for coordinates. **A space that knows what it is knows which bases
+suit it.**
+
+Because the space tower is closed and each node carries a universal property, grassmann can
+*derive* the candidate coordinatizations rather than being handed one. The derivation
+mirrors the space structure onto the basis structure — a direct sum's basis is the sum of
+its summands' bases, a tensor product's is the product, a dual's is the dual — and a
+fundamental subspace contributes the bases adapted to the very map that defines it:
+
+.. doctest::
+
+   >>> from grassmann.lower.space_basis import space_basis
+   >>> def candidates(space: G.Expr) -> list[str]:
+   ...     _default, cands = space_basis(space.node)
+   ...     return [type(b).__name__ for b in cands]
+   >>> A, B = G.space("A", 2), G.space("B", 3)
+   >>> candidates(G.osum(A, B)), candidates(G.tensor(A, B)), candidates(G.dual(A))
+   (['BasisSum'], ['BasisProd'], ['DualBasis'])
+   >>> J = G.var("J", G.space("U", 2) >> G.space("X", 4), props=G.inj)
+   >>> candidates(G.img(J))
+   ['ProjectedBasis', 'ImageBasis']
+
+The image of ``J`` offers two bases, and both come from ``J`` itself: the orthonormalized
+subspace basis, and the literal pushforward of the domain's basis along ``J``. Neither had
+to be supplied, because ``Img(J)`` says what it is.
+
+Which of them to use is the interesting question, and the criterion is **how much of the
+term survives as a constant**.
+
+Take the wedge on a tangent plane. Let ``J`` be a chart's differential and
+``T = Img(J)`` the plane it spans; ``T`` moves as the chart does, so nothing about it is
+fixed in advance. Wedging two tangent vectors is an operation on that moving plane, and
+one might expect the chart to be all over the answer:
+
+.. doctest::
+
+   >>> from grassmann.stdlib.exterior import wedge
+   >>> from grassmann.lower.numpy_renderers import op_renderers
+   >>> U, X = G.space("U", 2), G.space("X", 3)
+   >>> Jc = G.var("J", U >> X, props=G.inj)
+   >>> T = G.img(Jc)
+   >>> u, v = G.var("u", T), G.var("v", T)
+   >>> prog = G.compile(wedge(u, v, 1, 1))
+   >>> src = pa.to_numpy_source(prog, func_name="w", op_renderers=op_renderers())
+   >>> body = "\n".join(l for l in src.splitlines() if not l.strip().startswith("def "))
+
+It is not. The chart is declared as an input, because the space mentions it — and then it
+never appears in the arithmetic, which is two einsums against constant matrices and no
+numerical linear algebra whatsoever:
+
+.. doctest::
+
+   >>> bool(re.search(r"\bJ_\d", body))          # does the chart enter the computation?
+   False
+   >>> "np.linalg" in body, body.count("np.einsum")
+   (False, 2)
+
+The constant it contracts against is the alternator, ``½(I − swap)``, exactly as it would
+be on a fixed ``ℝ²``:
+
+.. doctest::
+
+   >>> bool(re.search(r"0\.5, -0\.5", body))     # the ½(I − swap) pattern, as a literal
+   True
+
+That is the whole argument in one example. The wedge is defined by antisymmetry, which is a
+statement about permuting slots and mentions no metric and no coordinates. Read in a basis
+pushed forward from the chart, its structure constants are therefore the *reference* ones —
+literals — and the chart cancels. Choose a basis with no relation to ``J`` and it would not:
+the same operation would arrive as an expression in the chart, recomputed at every point.
+
+So the preference is not aesthetic. Grassmann scores the candidate bases by how numeric the
+result becomes, and a basis aligned to the operator that defines the space wins by a wide
+margin, because there the projection onto the subspace is the identity. Absent any operator
+structure the inner-product-orthonormal basis wins instead, since it makes the metric the
+identity and so renders the inner product, the adjoint and the pseudo-inverse numeric too.
+The distinction between those two is exactly the distinction between the metric-free part of
+the algebra and the rest: the wedge and the alternator do not care which basis of the
+subspace you pick, while the Hodge star and the induced inner product very much do.
+
+Realizing such a basis is the one place numerical linear algebra actually enters — an SVD in
+general, a QR when the defining map is injective, a generalized SVD when a metric is in play
+— and the point of the scoring is to make that entrance as rare as possible.
+
+The same mechanism explains an earlier surprise. A pseudo-inverse of a *constant* pairing —
+the wedge-into-volume map that defines the Hodge star — becomes, once bases are chosen, a
+concrete matrix whose inverse is folded to a literal while compiling, so the emitted code
+contains no pseudo-inverse at all. The :doc:`tutorial` shows that happening. Writing
+``pinv`` cost nothing because ``pinv`` named an operation rather than prescribing an
+algorithm, and the basis choice then discovered that the operation was constant.
+
+Two honest caveats. The choice is a local heuristic scored per space, not a global search
+over the whole term; and a basis adapted to an operator is only available when the term
+actually exposes that operator, which is one more reason the universal property belongs in
+the type rather than in a comment.
+
 Compiles to a subset of Python + Numpy Compatible With PyTorch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -195,8 +295,8 @@ dependent function type:
 
    >>> from grassmann.infer import synth, synth_space
    >>> double = G.lam(G.Space, lambda s: G.llam(s, lambda x: G.scale(2.0, x)))
-   >>> G.unparse(double)
-   'Λ a0:Space. λ x1:a0. 2.0 · x1'
+   >>> re.sub(r"\b([ax])\d+\b", r"\1", G.unparse(double))   # bound names are counter-numbered
+   'Λ a:Space. λ x:a. 2.0 · x'
    >>> type(synth(double.node)).__name__               # a Π type, not a space
    'Pi'
 
@@ -464,20 +564,63 @@ size — no re-compilation, no unrolling, no hardcoded extent:
 
 The same source computed ``½(A + Aᵀ)x`` at both sizes, and was never told either one.
 
-Linear-algebra rewriting (experimental)
----------------------------------------
+The term language, and rewriting it (experimental)
+--------------------------------------------------
 
-The algebra's laws are rewrite rules over the term language, so a term can be reduced,
-simplified and normalized before any basis is chosen.
+Underneath the builders, a grassmann term is a typed lambda calculus, and the algebra's
+laws are rewrite rules over it, so a term can be reduced, simplified and normalized
+before any basis is chosen.
 
-Terms print in the notation they denote. Bound-variable numbering comes from a global
-counter, so the examples below normalize it to keep the output stable:
+Four binders
+~~~~~~~~~~~~
+
+Underneath the builders, a grassmann term is a typed lambda calculus with four binders.
+:func:`~grassmann.llam` binds a **linear** variable — the ``⊸`` of linear logic;
+:func:`~grassmann.lam` binds a space or a type, which is where the parametric polymorphism
+comes from; :func:`~grassmann.bfn` binds a *basis*; and :func:`~grassmann.frame` binds a
+*point*, giving a basis that varies over a space — a moving frame.
+:func:`~grassmann.lift` and :func:`~grassmann.unlift` uncurry and curry, fusing argument
+slots into one tensor input or splitting them apart.
+
+Terms print in the notation they denote (bound-variable numbering is normalized here so
+the output is stable):
 
 .. doctest::
 
    >>> def show_term(t: G.Expr) -> str:
    ...     return re.sub(r"\b([ax])\d+\b", r"\1", G.unparse(t))
    >>> Vs = G.space("V", 3)
+   >>> show_term(G.llam(Vs, lambda z: G.scale(2.0, z)))
+   'λ x:ℝ^3. 2.0 · x'
+   >>> show_term(G.lam(G.Space, lambda t: G.llam(t, lambda z: z)))
+   'Λ a:Space. λ x:a. x'
+
+Linearity is a resource calculus, not a naming convention
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A linear binder must consume each of its variables **exactly once**, and
+:func:`~grassmann.infer.check_linearity` counts uses along every evaluation path to enforce
+it. The counting distinguishes the two combinators of linear logic: multiplicative nodes
+(``⊗`` stacks, application, composition, scaling) *add* their children's usage, while the
+one additive node, ``Sum``, requires its branches to *agree*.
+
+So a variable used in both summands of a ``+`` is used once, and a variable appearing in
+both factors of a ``⊗`` is used twice and rejected:
+
+.. doctest::
+
+   >>> from grassmann.infer import check_linearity
+   >>> check_linearity(G.llam(Vs, lambda z: G.sum(z, z)).node)          # additive: fine
+   >>> check_linearity(G.llam(Vs, lambda z: G.tensor(z, z)).node)       # multiplicative
+   Traceback (most recent call last):
+       ...
+   grassmann.infer.linearity.LinearityError: linear variable ... is used 2 times; ...
+
+That additive rule is not a technicality. It is what lets the antisymmetrizer
+``Σ_σ sgn(σ)·(v_{σ(0)} ⊗ … )`` typecheck as a linear map, since each ``vᵢ`` is consumed
+once *within every summand*; the :doc:`tutorial` builds exactly that term. A language that
+merely called its binder linear would have nothing to say here, and would accept the terms
+that are not.
 
 Three strengths of rewriting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
