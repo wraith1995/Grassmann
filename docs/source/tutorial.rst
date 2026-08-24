@@ -1062,9 +1062,9 @@ Calculus: the exterior derivative
 The algebra at each point is done; the other way a form varies over space is in its own
 value — a **form field** — and that is what we differentiate. The **exterior derivative**
 ``d`` raises the degree of a form field by one, and it is the one operator that, in the right
-dimension, is the gradient, the curl, and the divergence all at once. We show it in flat
-coordinates, where the arithmetic is legible; it is the same operator over the moving frame
-above.
+dimension, is the gradient, the curl, and the divergence all at once. We build it in flat
+coordinates, where the arithmetic is legible, and then — the point of the last few sections —
+turn it loose on the curved surface, where it detects the varying geometry on its own.
 
 The derivative it is built on is the **total covariant derivative** :func:`~grassmann.diff`,
 which differentiates a term with respect to a variable and hands back a linear map: the map
@@ -1128,6 +1128,46 @@ neither of which we asserted. In every dimension:
    ...     return np.allclose(run(ddf, x=rng.standard_normal(n)), 0.0, atol=1e-9)
    >>> bool(all(d_squared_zero(n) for n in (2, 3, 4)))
    True
+
+**Back on the surface.** ``d`` earns the "over the moving frame" claim by taking a form that
+lives on the curved surface up a degree. Return to the paraboloid ``z = u² + v²``. Its metric
+was ``g = J Jᵀ``, and as a field over the ``(u, v)``-plane that is ``g = I + ∇h ⊗ ∇h`` for the
+height ``h(u, v) = u² + v²``. Lower the constant coordinate field ``∂ᵤ`` with it — the 1-form
+``ω = ♭_g(∂ᵤ) = g·∂ᵤ`` — and its coordinates ``(1 + 4u², 4uv)`` are exactly the first column of
+that ``g``, now varying from point to point (at ``(1, 1)`` they are the ``(5, 4)`` we read off
+the metric earlier):
+
+.. doctest::
+
+   >>> V2 = R(2)
+   >>> x = G.var("x", V2)
+   >>> e0 = basis_vec(V2, 0, 2)                      # the coordinate field ∂ᵤ
+   >>> grad_h = G.scale(2.0, x)                      # ∇h for the height h(u, v) = u² + v²
+   >>> omega = G.flat(V2)(e0 + G.scale(G.dot(grad_h, e0), grad_h))   # g·∂ᵤ, packaged as a covector
+   >>> show(omega, x=np.array([1., 1.]))             # (1 + 4u², 4uv) — the first column of g(1,1)
+   [5.0, 4.0]
+
+Differentiating that 1-form raises it to a 2-form on the surface. The surface is
+two-dimensional, so ``Λ²`` has a single component — the ``du ∧ dv`` coefficient — and once we
+divide out the unit area form's length ``|du ∧ dv| = √2`` (the same ``√2`` from the wedge
+section) the answer is a clean ``4v``:
+
+.. doctest::
+
+   >>> dw = exterior_derivative(omega, x, 1)         # a 2-form field on the surface
+   >>> def curl_coeff(u, v):                         # the du∧dv coefficient of dω
+   ...     return round(float(run(dw, x=np.array([u, v])).ravel()[0]) / 2.0 ** 0.5, 4)
+   >>> curl_coeff(0.0, 0.0)                          # at the pole, where g is momentarily I
+   0.0
+   >>> curl_coeff(1.0, 1.0), curl_coeff(0.0, 2.0)    # out on the bowl: dω = 4v · du∧dv
+   (4.0, 8.0)
+
+That nonzero ``dω`` is the whole section in one computation. On a flat plane the metric is
+constant, so ``ω = ♭(∂ᵤ)`` is a constant 1-form and ``dω`` vanishes identically. The
+paraboloid's metric *varies*, ``ω`` varies with it, and ``dω`` is the exact 2-form that
+variation produces — zero at the pole, where ``g`` is momentarily the identity, and growing
+outward. And ``exterior_derivative`` was never told there was a surface: it differentiated a
+covector field, and the geometry was already in the coordinates, put there by the frame.
 
 The codifferential
 ------------------
