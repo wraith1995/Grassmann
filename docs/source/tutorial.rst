@@ -6,10 +6,11 @@ this tutorial, we will develop exterior algebra from scratch in Grassmann,
 introducing features as needed. The exterior algebra ships with Grassmann, but
 here we develop it from first principles.
 
-Every claim below is checked by compiling the expression to a program and running
-it, so nothing has to be taken on faith. We work mostly in ordinary
-three-dimensional space ``ℝ³``, and let the dimension ``n`` and degree ``k`` go
-general only at the end.
+One theme is worth naming up front: grassmann expressions are **coordinate-free** —
+they never mention a basis — and a basis is chosen only at the boundary, when an
+expression is lowered to run. That choice is made *automatically* unless you take it
+over yourself. It is a convenience at first and a tool later, so we flag where it
+enters from the very first example on.
 
 Getting set up
 --------------
@@ -60,9 +61,26 @@ its value by name.
    >>> float(run(G.dot(u, v), u=np.array([1., 2., 3.]), v=np.array([0., 1., -1.])))
    -1.0
 
-That is ``1·0 + 2·1 + 3·(−1) = −1``. What matters here is the shape of the workflow:
-build an expression out of variables, then run it on data. Everything below is the
-same with richer expressions.
+That is ``1·0 + 2·1 + 3·(−1) = −1``. What matters here is the shape of the workflow —
+and it has a third step that just stayed invisible. You **build** an expression out of
+variables, **choose coordinates** for them, and **run** it on data; ``run`` and
+``compile`` quietly made that middle choice, coordinatizing each space in its *standard
+basis*. We can make the choice explicit with :func:`~grassmann.compile_in`, which pins a
+basis for every variable, and get the identical answer:
+
+.. doctest::
+
+   >>> prog = G.compile_in(G.dot(u, v), {u: G.standard_basis(V), v: G.standard_basis(V)})
+   >>> ku, kv = f"u_{u.node.uid}", f"v_{v.node.uid}"
+   >>> float(np.asarray(prog.run(
+   ...     {ku: np.array([1., 2., 3.]), kv: np.array([0., 1., -1.])})["result"], float))
+   -1.0
+
+Same number, because the standard basis is exactly what ``run`` had assumed. For most of
+this tutorial that automatic choice is the one we want, so we let ``run`` make it — but the
+basis is a genuine degree of freedom: feed the *same* vector's coordinates in a different
+basis and they change, while the invariant they encode does not. By the Hodge star it will
+be doing visible work. Everything below is this same workflow with richer expressions.
 
 
 The alternator and the exterior algebra space
