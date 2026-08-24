@@ -170,10 +170,13 @@ two-argument one that swaps its inputs before tensoring them:
    >>> G.unparse(synth_space(swap.node))
    '(ℝ^3)* ⊗ (ℝ^3)* ⊗ (ℝ^3 ⊗ ℝ^3)'
 
-Read that space with the rule from the tensor-power section, ``V* ⊗ W`` is the space of
-linear maps ``V → W``: two ``(ℝ^3)*`` slots on the left mean two separate vector
-*arguments*, and ``ℝ^3 ⊗ ℝ^3`` on the right is the result. So a ``k``-ary linear lambda is
-a **curried** map — it eats its ``k`` vectors one at a time, ``V × … × V ⊸ V⊗ᵏ``.
+Read that space by the rule that ``V* ⊗ W`` is the space of linear maps ``V → W`` — a dual
+factor is an argument slot, a plain factor is a result. So the two ``(ℝ^3)*`` slots on the
+left are two separate vector *arguments*, ``ℝ^3 ⊗ ℝ^3`` on the right is what they map to, and
+a ``k``-ary linear lambda is a **curried** map — it eats its ``k`` vectors one at a time,
+``V × … × V ⊸ V⊗ᵏ``. We will read every map's space this way from here on: for instance the
+endomorphism ``lift`` produces just below, ``(ℝ^3 ⊗ ℝ^3)* ⊗ (ℝ^3 ⊗ ℝ^3)``, is by the same rule
+a map from the two-tensor space ``ℝ^3 ⊗ ℝ^3`` to itself.
 
 That is a mismatch. The alternator is a projector on a single space, ``Alt : V⊗ᵏ ⊸ V⊗ᵏ`` —
 one ``k``-tensor in, one ``k``-tensor out — not a ``k``-argument function. We write the
@@ -240,8 +243,8 @@ Inference reads off the space it lives in, with no annotation from us:
    >>> G.unparse(synth_space(alt(V, 2).node))
    '(ℝ^3 ⊗ ℝ^3)* ⊗ (ℝ^3 ⊗ ℝ^3)'
 
-We can read this as the space of maps from two tensors, :math:`\mathbb{R}^{3}\otimes\mathbb{R}^{3}` to two tensors, :math:`\mathbb{R}^{3}\otimes\mathbb{R}^{3}`
-because :math:`V^{\star}\otimes W` is the space of linear maps from :math:`V` to :math:`W`.
+That is the ``V⊗² ⊸ V⊗²`` endomorphism ``lift`` was built to produce — a map from two tensors
+to two tensors, by the ``V* ⊗ W`` rule from the last section.
 
 The image
 ~~~~~~~~~
