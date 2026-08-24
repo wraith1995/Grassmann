@@ -520,6 +520,36 @@ Orthogonal, and each of squared length ``2``, so ``|e₁ ∧ e₂| = √2 = 1.41
 number from the wedge section: the length of a unit square in the metric ``Λ²`` inherits,
 reported in an orthonormal basis for ``Λ²``.
 
+All of those clean numbers rest on a choice we have not been naming. The inner product is
+a fixed geometric fact, but the *matrix* that represents it — the Gram matrix
+``⟨eᵢ, eⱼ⟩`` of the basis vectors — depends on the basis you write it in. The **standard
+basis is the special one that makes that matrix the identity**; that is exactly what
+:func:`~grassmann.standard_basis` returns, and why the dot product and the ``Λ²`` Gram came
+out so tidy. Here is a helper that reads the inner product's matrix in a given basis — we
+reuse it for the Hodge star later — and the same inner product in the standard basis versus
+a **stretched** basis where ``e₁`` is twice as long:
+
+.. doctest::
+
+   >>> def metric(S: G.Expr, basis_x: G.Expr) -> list:
+   ...     p, q = G.var("p", S), G.var("q", S)
+   ...     prog = G.compile_in(pair(S, p, q), {p: basis_x, q: basis_x})
+   ...     I, n = np.eye(dim(S)), dim(S)
+   ...     def entry(i: int, j: int) -> float:
+   ...         feed = {t.name: (I[i] if t.name.startswith("p") else I[j]) for t in prog.inputs}
+   ...         return float(np.asarray(prog.run(feed)["result"], float))
+   ...     return (np.round([[entry(i, j) for j in range(n)] for i in range(n)], 4) + 0.0).tolist()
+   >>> metric(V, G.standard_basis(V))                 # the standard basis: the identity
+   [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+   >>> stretched3 = G.list_basis(*[G.scale(2.0 if i == 0 else 1.0, basis_vec(V, i, 3))
+   ...                            for i in range(3)])
+   >>> metric(V, stretched3)                          # e₁ twice as long: no longer the identity
+   [[4.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+So "orthonormal" is a property of a *basis*, not of the space, and the clean numbers above
+are a feature of the standard basis rather than a law of nature. That matters most for the
+one operator built directly out of the inner product — the Hodge star, next.
+
 The interior product: contracting a k-vector
 --------------------------------------------
 
@@ -715,12 +745,10 @@ We were able to define ``⋆`` by the property that characterises it because cho
 basis is a later and separate decision, and it is at that point that ``M⁻¹`` stops being a
 pseudo-inverse and becomes a number.
 
-The plane, and where the basis shows through
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-In the plane the picture is even smaller. ``⋆`` sends ``Λ¹(ℝ²)`` back to ``Λ¹(ℝ²)``, so
-it is a ``2 × 2`` matrix — and it is a **quarter turn**. Reading its two columns, where
-it sends ``e₁`` and ``e₂``, in the standard basis:
+That decision — which basis — is where the Hodge star parts ways with everything else in
+this tour, and in the plane it is easy to watch. ``⋆`` sends ``Λ¹(ℝ²)`` back to
+``Λ¹(ℝ²)``, so it is a ``2 × 2`` matrix — a **quarter turn**. Reading its two columns,
+where it sends ``e₁`` and ``e₂``, in the standard basis:
 
 .. doctest::
 
@@ -750,23 +778,14 @@ expression again, but ask :func:`~grassmann.compile_in` to read the input in a
 The matrix changed — the lower entry doubled. This is not a change of coordinates being
 undone somewhere; the operator itself is reported differently, because ``⋆`` is built
 from the inner product, and the inner product is exactly what a stretched basis alters.
-The culprit is visible directly: the metric — the matrix of ``⟨·,·⟩`` on the basis
-vectors — is the identity in the standard basis and *not* the identity in the stretched
-one:
+The culprit is the ``metric`` we read earlier — the identity in the standard basis, and
+*not* the identity in the stretched one:
 
 .. doctest::
 
-   >>> yy = G.var("y", V2)
-   >>> def metric(basis_x: G.Expr) -> list:
-   ...     prog = G.compile_in(pair(V2, xx, yy), {xx: basis_x, yy: basis_x})
-   ...     def entry(a: int, b: int) -> float:
-   ...         feed = {i.name: (np.eye(2)[a] if i.name.startswith("x") else np.eye(2)[b])
-   ...                 for i in prog.inputs}
-   ...         return float(np.asarray(prog.run(feed)["result"], float))
-   ...     return (np.round([[entry(a, b) for b in range(2)] for a in range(2)], 4) + 0.0).tolist()
-   >>> metric(G.standard_basis(V2))
+   >>> metric(V2, G.standard_basis(V2))
    [[1.0, 0.0], [0.0, 1.0]]
-   >>> metric(stretched)
+   >>> metric(V2, stretched)
    [[4.0, 0.0], [0.0, 1.0]]
 
 Here is the contrast worth keeping. The wedge and the alternator are pure combinatorics
