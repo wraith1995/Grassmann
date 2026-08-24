@@ -547,7 +547,7 @@ Let us ask, on random vectors, and look at the ratio rather than assuming it is 
 It is the Gram determinant, scaled by ``2 = 2!``. The factor comes from the embedding
 ``Λᵏ ⊑ V⊗ᵏ``: a ``k``-vector's antisymmetrized tensor has ``k!`` entries of equal
 magnitude where the textbook orthonormal convention keeps one. The same ``k!`` appears in
-the interior product below for the same reason.
+the interior product later for the same reason.
 
 Bases make this concrete. The ``C(3,2) = 3`` basis 2-vectors ``eᵢ ∧ eⱼ`` should be
 mutually orthogonal and all the same length; here is their Gram matrix, computed by
@@ -599,65 +599,6 @@ So "orthonormal" is a property of a *basis*, not of the space, and the clean num
 are a feature of the standard basis rather than a law of nature. That matters most for the
 one operator built directly out of the inner product — the Hodge star, next.
 
-The interior product: contracting a k-vector
---------------------------------------------
-
-The wedge raises degree and its adjoint lowers it, which is the whole definition. The
-**interior product** ``ι_v`` is characterised by
-
-.. math::
-
-   \langle \iota_{v}\,\omega,\; \eta \rangle
-     \;=\; \langle \omega,\; v \wedge \eta \rangle
-   \qquad \text{for all } \eta \in \Lambda^{k-1}(V),
-
-so ``ι_v`` is the metric adjoint of the map ``η ↦ v ∧ η``. Grassmann has that adjoint
-as a primitive, :func:`~grassmann.dagger`, so the definition is the sentence above,
-transcribed:
-
-.. doctest::
-
-   >>> def interior(V: G.Expr, omega: G.Expr, v: G.Expr, k: int) -> G.Expr:
-   ...     if k == 1:                              # Λ⁰ = scalars: ι_v is the inner product
-   ...         return pair(V, v, omega)
-   ...     Lkm1 = ext_power(V, k - 1) if k - 1 > 1 else V
-   ...     up = G.llam(Lkm1, lambda eta: wedge(V, v, eta, 1, k - 1))   # η ↦ v ∧ η
-   ...     return G.dagger(up)(omega)
-
-A vector lying in the plane leaves the perpendicular direction, and one
-that does not lie in the plane leaves nothing:
-
-.. doctest::
-
-   >>> x = G.var("x", V)
-   >>> w2 = wedge(V, a, b_, 1, 1)
-   >>> show(interior(V, w2, x, 2), a=E[0], b=E[1], x=E[0])    # ι_{e₁}(e₁ ∧ e₂)
-   [0.0, 2.0, 0.0]
-   >>> show(interior(V, w2, x, 2), a=E[0], b=E[1], x=E[2])    # ι_{e₃}(e₁ ∧ e₂)
-   [0.0, 0.0, 0.0]
-
-The ``2 = 2!`` is the inherited metric again; the direction is ``e₂``. In general the
-contraction distributes over a wedge with alternating signs, the **Leibniz rule**
-
-.. math::
-
-   \iota_{v}(a \wedge b) \;=\; k!\,\bigl(
-       \langle a, v\rangle\, b \;-\; \langle b, v\rangle\, a \bigr),
-
-with the same ``k!`` carried by the induced metric. Checked by running:
-
-.. doctest::
-
-   >>> def contracts_by_leibniz(n: int) -> bool:
-   ...     V = R(n)
-   ...     a, b, v = G.var("a", V), G.var("b", V), G.var("v", V)
-   ...     av, bv, vv = (rng.standard_normal(n) for _ in range(3))
-   ...     lhs = run(interior(V, wedge(V, a, b, 1, 1), v, 2), a=av, b=bv, v=vv)
-   ...     rhs = factorial(2) * ((av @ vv) * bv - (bv @ vv) * av)
-   ...     return np.allclose(lhs.ravel(), rhs, atol=1e-8)
-   >>> bool(all(contracts_by_leibniz(n) for n in (3, 4)))
-   True
-
 The Hodge star: a k-vector and its complement
 ---------------------------------------------
 
@@ -665,8 +606,8 @@ There is a natural correspondence between ``Λᵏ`` and ``Λⁿ⁻ᵏ`` — the 
 ``⋆``. It sends a ``k``-vector to the ``(n−k)``-vector that is, in a precise sense, its
 orthogonal complement.
 
-As with the interior product, we build it from its defining property rather than from a
-coordinate formula. The star is pinned down by
+Like the wedge, we build it from a defining property rather than from a coordinate
+formula. The star is pinned down by
 
 .. math::
 
@@ -888,17 +829,99 @@ carries the metric with it: change the basis, change the metric, and ``⋆`` cha
 it. When the same ``k``-vector's ``⋆`` looks different in two compilations, that is not a
 bug — it is the inner product showing through.
 
-Forms, bases, and the tangent space
------------------------------------
+The interior product, and forms
+-------------------------------
 
-Two definitions before any code.
+The wedge raises degree; its adjoint lowers it, and that adjoint has a name. The
+**interior product** ``ι_v`` is characterised by
 
-A ``k``-**form** on ``V`` is a ``k``-vector of the *dual*: an element of
-:math:`\Lambda^{k}(V^{*})`. Where a ``k``-vector is an oriented piece of ``V``, a
-``k``-form is a measurement of such pieces, and the exterior algebra of ``V*`` is built by
-the same alternator over a different space.
+.. math::
 
-A **tangent space** is what a form is usually measuring. Let a chart
+   \langle \iota_{v}\,\omega,\; \eta \rangle
+     \;=\; \langle \omega,\; v \wedge \eta \rangle
+   \qquad \text{for all } \eta \in \Lambda^{k-1}(V),
+
+so ``ι_v`` is the metric adjoint of the map ``η ↦ v ∧ η``. Grassmann has that adjoint
+as a primitive, :func:`~grassmann.dagger`, so the definition is the sentence above,
+transcribed:
+
+.. doctest::
+
+   >>> def interior(V: G.Expr, omega: G.Expr, v: G.Expr, k: int) -> G.Expr:
+   ...     if k == 1:                              # Λ⁰ = scalars: ι_v is the inner product
+   ...         return pair(V, v, omega)
+   ...     Lkm1 = ext_power(V, k - 1) if k - 1 > 1 else V
+   ...     up = G.llam(Lkm1, lambda eta: wedge(V, v, eta, 1, k - 1))   # η ↦ v ∧ η
+   ...     return G.dagger(up)(omega)
+
+A vector lying in the plane leaves the perpendicular direction, and one
+that does not lie in the plane leaves nothing:
+
+.. doctest::
+
+   >>> x = G.var("x", V)
+   >>> w2 = wedge(V, a, b_, 1, 1)
+   >>> show(interior(V, w2, x, 2), a=E[0], b=E[1], x=E[0])    # ι_{e₁}(e₁ ∧ e₂)
+   [0.0, 2.0, 0.0]
+   >>> show(interior(V, w2, x, 2), a=E[0], b=E[1], x=E[2])    # ι_{e₃}(e₁ ∧ e₂)
+   [0.0, 0.0, 0.0]
+
+The ``2 = 2!`` is the inherited metric again; the direction is ``e₂``. In general the
+contraction distributes over a wedge with alternating signs, the **Leibniz rule**
+
+.. math::
+
+   \iota_{v}(a \wedge b) \;=\; k!\,\bigl(
+       \langle a, v\rangle\, b \;-\; \langle b, v\rangle\, a \bigr),
+
+with the same ``k!`` carried by the induced metric. Checked by running:
+
+.. doctest::
+
+   >>> def contracts_by_leibniz(n: int) -> bool:
+   ...     V = R(n)
+   ...     a, b, v = G.var("a", V), G.var("b", V), G.var("v", V)
+   ...     av, bv, vv = (rng.standard_normal(n) for _ in range(3))
+   ...     lhs = run(interior(V, wedge(V, a, b, 1, 1), v, 2), a=av, b=bv, v=vv)
+   ...     rhs = factorial(2) * ((av @ vv) * bv - (bv @ vv) * av)
+   ...     return np.allclose(lhs.ravel(), rhs, atol=1e-8)
+   >>> bool(all(contracts_by_leibniz(n) for n in (3, 4)))
+   True
+
+Look again at what ``ι_v`` does: it **feeds a vector into** a ``k``-vector and hands back a
+smaller one. Feeding vectors in is exactly what a **form** is for, and forms are the notion
+the rest of the tutorial is built on. So far a ``k``-vector has been a *thing* — an oriented
+length, area, or volume, an element of ``V``. Its dual is a ``k``-**form**: a *measurement*,
+something that eats ``k`` vectors and returns a number. A ``k``-form is the exterior algebra
+of the **dual** space, ``ext_power(G.dual(V), k)`` — the very same alternator, built over
+``V*`` instead of ``V`` — so every operator above (wedge, inner product, Hodge star,
+interior product) carries over to forms unchanged.
+
+For a 1-form the measurement is the most basic thing there is: feeding in a vector is the
+**dual pairing** ``ν(v)``, plain application, with no metric involved.
+
+.. doctest::
+
+   >>> nu = G.var("nu", G.dual(V))               # a 1-form: a measurement of vectors
+   >>> w = G.var("w", V)
+   >>> float(run(nu(w), nu=np.array([3., 4., 5.]), w=np.array([1., 2., 1.])))
+   16.0
+
+That ``3·1 + 4·2 + 5·1 = 16`` used ``♭`` nowhere — a form eats a vector directly. On
+``ℝⁿ`` with its standard metric the difference between a vector and a form is easy to miss,
+because ``♭`` identifies ``V`` with ``V*`` and their coordinates agree. It becomes visible
+the moment the space is not ``ℝⁿ`` — which is what the next section builds.
+
+Forms and vectors that vary with space
+--------------------------------------
+
+Everything so far lived at a single point of a fixed ``ℝⁿ``. Now let the space itself bend
+— a curved surface — so that both the vectors tangent to it and the forms that measure them
+**vary from point to point**. The plan is the one differential geometry always follows:
+build the **tangent** and **cotangent** spaces, take **wedges** of cotangents to get form
+fields, and then **differentiate** them.
+
+A **tangent space** is what a form measures. Let a chart
 :math:`\varphi : \mathbb{R}^{k} \to \mathbb{R}^{n}` trace a surface. What matters is not
 :math:`\varphi` but its differential :math:`J = d\varphi`, an injective linear map, and the
 tangent plane at a point is its image:
@@ -909,23 +932,10 @@ tangent plane at a point is its image:
    T^{*} \;=\; \operatorname{Img}(J)^{*}, \qquad
    g \;=\; J J^{\mathsf{T}},
 
-with ``g`` the metric ``T`` inherits from the ambient — the first fundamental form. A form
-field on the surface is then a form over ``T*`` that varies from point to point, and
-differentiating one is the subject of the section after this.
-
-Both definitions are already expressible: an image is a space, and a dual is a space. The
-rest of this section is those two lines written in grassmann.
-
-So far a ``k``-vector has been a *thing* — an area, a volume. Its dual is a
-``k``-**form**: a *measurement*, something that eats ``k`` vectors and returns a
-number. Nothing about the construction changes: forms are the exterior algebra of the
-**dual** space, ``ext_power(G.dual(V), k)``, built by the same alternator over a
-different ``V``. Every operator above applies to them unchanged.
-
-On ``ℝⁿ`` with its standard metric that distinction is easy to miss, because ``♭``
-identifies ``V`` with ``V*`` and the coordinates of a vector and its covector agree.
-The distinction becomes visible the moment the space is not ``ℝⁿ`` — and the honest
-way to get there is to build a tangent space.
+with ``g`` the metric ``T`` inherits from the ambient — the first fundamental form. Both the
+tangent space and its dual are already expressible, because an image is a space and a dual
+is a space; the rest of this section is those two lines written in grassmann, and then the
+calculus that differentiating a form field over them requires.
 
 Bases, and frames
 ~~~~~~~~~~~~~~~~~
@@ -948,9 +958,9 @@ distinction is worth making here.
 A tangent space, from an immersion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Let a chart ``φ : ℝ² → ℝ³`` trace a surface. What grassmann needs is not ``φ`` but its
-differential ``J = dφ``, an **injective** map from the parameter domain into the
-ambient. The tangent plane is then not a new primitive at all — it is the image of
+Take the surface concretely, with a chart ``φ : ℝ² → ℝ³``. As above, what grassmann needs
+is not ``φ`` but its differential ``J = dφ``, an **injective** map from the parameter domain
+into the ambient. The tangent plane is then not a new primitive at all — it is the image of
 that map, a fundamental subspace we already know how to name:
 
 .. doctest::
@@ -1037,24 +1047,27 @@ coordinate tuple, in a frame that varies with the point on the surface. The defi
 not have to know the difference.
 
 Calculus: the exterior derivative
----------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Everything so far was algebra at a single point. Now let a form *vary over space* — a
-**form field** — and differentiate it. The **exterior derivative** ``d`` raises the
-degree of a form field by one, and it is the one operator that, in the right dimension,
-is the gradient, the curl, and the divergence all at once.
+The algebra of the surface is done; now let a form *vary over it* — a **form field** — and
+differentiate. The **exterior derivative** ``d`` raises the degree of a form field by one,
+and it is the one operator that, in the right dimension, is the gradient, the curl, and the
+divergence all at once.
 
-It is the wedge and the derivative, combined:
+The derivative it is built on is the **total covariant derivative** :func:`~grassmann.diff`,
+which differentiates a term with respect to a variable and hands back a linear map: the map
+``∇ω`` that sends a direction to the field's rate of change along it, corrected so the
+comparison between neighbouring points is honest even when the space is curved. The exterior
+derivative is that covariant derivative **antisymmetrized**:
 
 .. math::
 
    d\omega \;=\; \sum_{j} e^{j} \wedge \partial_{j}\omega ,
+   \qquad \partial_{j}\omega \;=\; (\nabla\omega)(e_{j}) ,
 
-where :math:`\partial_{j}\omega` is the ordinary derivative of the field in the ``j``-th
-coordinate direction and :math:`e^{j}` is the ``j``-th coordinate 1-form. The derivative
-is :func:`~grassmann.diff`, which differentiates a term covariantly with respect to a
-variable and hands back a linear map; applying that map to :math:`e_{j}` picks out one
-partial:
+which evaluates ``∇ω`` along each coordinate direction ``eⱼ`` and wedges the result with the
+coordinate 1-form ``eʲ`` — and it is the wedge that supplies the antisymmetry. We name
+``∇ω`` once and reuse it across the directions:
 
 .. doctest::
 
@@ -1062,18 +1075,17 @@ partial:
    ...     V = G.Expr(x.node.space)
    ...     Vs, n = G.dual(V), dim(G.Expr(x.node.space))
    ...     L1 = ext_power(Vs, 1)
-   ...     evec = lambda j: basis_vec(V, j, n)                       # eⱼ ∈ V
+   ...     grad = G.diff(omega, x)                                   # ∇ω, the covariant derivative
    ...     eform = lambda j: G.project(basis_vec(Vs, j, n), L1)      # eʲ ∈ Λ¹(V*)
-   ...     if k == 0:                    # d of a scalar field is its differential
-   ...         return G.project(G.diff(omega, x), L1)
-   ...     return G.sum(*[wedge(Vs, eform(j), G.diff(omega, x)(evec(j)), 1, k)
+   ...     if k == 0:                    # a scalar field: ∇f is already its 1-form
+   ...         return G.project(grad, L1)
+   ...     return G.sum(*[wedge(Vs, eform(j), grad(basis_vec(V, j, n)), 1, k)   # antisymmetrize ∂ⱼω
    ...                    for j in range(n)])
 
-This is where the ``V`` / ``V*`` distinction of the last section does real work. ``evec``
-and ``eform`` are the same numbers declared into different spaces: the direction we
-differentiate along is a vector, the thing we wedge with is a covector, and
-``G.external``'s space argument is what keeps them apart. Write both as vectors and the
-term does not typecheck.
+This is where the ``V`` / ``V*`` distinction does real work. The direction we differentiate
+along, ``basis_vec(V, j, n)``, is a **vector**; the ``eform(j)`` we wedge with is the same
+numbers declared as a **covector**, and ``G.external``'s space argument is what keeps them
+apart. Write both as vectors and the term does not typecheck.
 
 Start with a scalar field ``f`` (a 0-form). Its exterior derivative ``df`` is the
 **gradient**. For ``f = ½|x|²`` the gradient is ``x`` itself:
