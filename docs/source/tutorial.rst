@@ -1418,30 +1418,6 @@ Nothing had to be added to the language for this: ``f*`` is composition and its 
 powers, ``d`` is :func:`~grassmann.diff` antisymmetrized, and the identity between them
 follows from both.
 
-Moving a value between spaces
------------------------------
-
-One last operator, of a different flavour. Not every transport needs a metric or a
-derivative — sometimes you just want to carry a value from one space into a related
-one. ``pullback(v, target)`` does exactly that, inserting whatever projection,
-embedding, or change of basis the relationship calls for. Projecting onto a summand of
-a direct sum keeps its coordinates and drops the rest; embedding into a larger space
-pads with zeros; and embedding then projecting is the identity on the subspace:
-
-.. doctest::
-
-   >>> A3, B2 = G.space("A", 3), G.space("B", 2)
-   >>> S = G.osum(A3, B2)                          # the direct sum A ⊕ B = ℝ⁵
-   >>> z = G.var("z", S)
-   >>> run(G.pullback(z, A3), z=np.array([1., 2., 3., 4., 5.])).ravel()      # project A⊕B → A
-   array([1., 2., 3.])
-   >>> p = G.var("p", A3)
-   >>> run(G.pullback(p, S), p=np.array([7., 8., 9.])).ravel()               # embed A → A⊕B (pad)
-   array([7., 8., 9., 0., 0.])
-   >>> bool(np.allclose(run(G.pullback(G.pullback(p, S), A3),
-   ...                      p=np.array([7., 8., 9.])).ravel(), [7., 8., 9.]))   # embed then project = id
-   True
-
 What ships with grassmann
 -------------------------
 
@@ -1469,9 +1445,7 @@ to be threaded through every call.
 Two things differ from what we wrote. The stdlib's ``interior`` contracts a form with a
 vector by ``embed → apply → project`` rather than by the metric adjoint, so it carries no
 ``k!``; and ``exterior_power`` takes an optional ``rank=`` that pins the dimension
-statically, the asserted-rank variant from earlier. The manifold machinery of the last section is packaged too, as
-:class:`~grassmann.syntax.geometry.Parameterization`, which wraps ``Img(J)`` /
-``CoKer(J)`` and the image frame into a chart object.
+statically, the asserted-rank variant from earlier.
 
 They are also on the top-level namespace as ``G.wedge``, ``G.alt``, ``G.exterior_power``
 and so on. There is nothing in them you have not now built yourself.
