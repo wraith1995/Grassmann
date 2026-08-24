@@ -18,15 +18,21 @@ Each is timed two ways, running only (compile / trace / warmup excluded), single
 
 ``ops`` is the number of statements in grassmann's Program; ``err`` is max |generated − reference|.
 
+Three groups: exterior algebra (wedge / Hodge / musical / inner), classic linear algebra
+(dot / outer / matvec / matmul / trace / dagger / det — obvious numpy one-liners as the
+reference; maps store (dom, cod), so f(x) = Aᵀx and f∘g = B@A), and immersed tangent spaces.
+
 Finding (float64 CPU, single thread): under **torch.compile** generated ≈ reference across the
-board — compiled gen/ref ≈ 0.7–1.1× on every operator except the 29-op ⋆(a∧b∧c) in ℝ⁴ (1.56×,
-the one that does not fully fuse). Inductor fuses grassmann's several steps into essentially the
-reference kernel, with no graph breaks and err ~1e-16, and on the tangent operators the compiled
-generated code is actually *faster* than the reference (which recomputes g = J Jᵀ each call).
-The op count only bites in **eager**, where each unfused ``einsum`` pays torch's per-op dispatch
-— so the overhead the numpy runtime showed is an eager-dispatch artifact, not the emitted math.
-(Eager is also a muddy comparison at high arity: a 4-operand reference ``einsum`` is itself slow
-eager, so e.g. ⟨a∧b,c∧d⟩ has the reference *slower* than generated there.)
+board — compiled gen/ref ≈ 0.8–1.2× on nearly every operator. Inductor fuses grassmann's several
+steps into essentially the reference kernel, with no graph breaks and err ~1e-16, and on the
+tangent operators the compiled generated code is even a touch faster than the reference (which
+recomputes g = J Jᵀ each call). The op count only bites in **eager**, where each unfused
+``einsum`` pays torch's per-op dispatch — so the overhead the numpy runtime showed is an
+eager-dispatch artifact, not the emitted math. Two caveats on the reference side: eager is muddy
+at high arity (a 4-operand reference ``einsum`` is itself slow eager, so e.g. ⟨a∧b,c∧d⟩ has the
+reference *slower* than generated), and torch.compile occasionally autotunes that same high-arity
+einsum to a much slower kernel (seen on ⋆(a∧b∧c) in ℝ⁴), which is reference-side variance rather
+than a grassmann win — read those rows with the eager column alongside.
 """
 from __future__ import annotations
 import time, warnings, itertools, math
@@ -70,13 +76,20 @@ def extract(prog, in_dims, out_dim):
         T[(slice(None), *idx)] = np.asarray(prog.run(feed)["result"], float).ravel()
     return T
 
-def time_pair(fgen, fref, targs):
-    """(eager gen, eager ref, compiled gen, compiled ref) µs, plus |gen−ref|."""
-    og = np.asarray(fgen(*targs)).ravel(); orf = np.asarray(fref(*targs)).ravel()
+def time_pair(fgen, fref, gargs, rargs=None):
+    """(eager gen, eager ref, compiled gen, compiled ref) µs, plus |gen−ref|.
+
+    ``fgen`` is called with ``gargs`` (grassmann's program-input order) and ``fref`` with
+    ``rargs`` (the reference's own order); passing each its natural order keeps torch.compile
+    from re-tracing an argument-reordering wrapper case after case.
+    """
+    if rargs is None:
+        rargs = gargs
+    og = np.asarray(fgen(*gargs)).ravel(); orf = np.asarray(fref(*rargs)).ravel()
     err = np.abs(og - orf).max()
-    ge = timeit(lambda: fgen(*targs)); re = timeit(lambda: fref(*targs))
+    ge = timeit(lambda: fgen(*gargs)); re = timeit(lambda: fref(*rargs))
     cgen, cref = torch.compile(fgen), torch.compile(fref)
-    gc = timeit(lambda: cgen(*targs)); rc = timeit(lambda: cref(*targs))
+    gc = timeit(lambda: cgen(*gargs)); rc = timeit(lambda: cref(*rargs))
     return ge, re, gc, rc, err
 
 # ------------------------------------------------------------------- constant-op cases
@@ -93,7 +106,7 @@ def const_cases():
             yield ("⋆(a∧b)", n, hodge_star(wedge(a, b, 1, 1), 2), [V, V])
             L2 = exterior_power(V, 2)
             yield ("⟨a∧b,c∧d⟩", n, pair(L2, wedge(a, b, 1, 1), wedge(c, d, 1, 1)), [V, V, V, V])
-        if n == 4:
+        if n >= 3:                                          # ⋆Λ³: scalar det[a,b,c] in ℝ³, a Λ¹ in ℝ⁴
             a, b, c = (G.var(s, V) for s in "abc")
             yield ("⋆(a∧b∧c)", n, hodge_star(wedge(wedge(a, b, 1, 1), c, 2, 1), 3), [V, V, V])
 
@@ -110,7 +123,7 @@ def run_const():
         Tt = torch.tensor(T); spec = einsum_spec(len(in_dims))
         fref = lambda *xs, Tt=Tt, spec=spec: torch.einsum(spec, Tt, *xs)
         fgen = gen_torch(prog)
-        targs = tuple(torch.as_tensor(vals[nm]) for nm in names)
+        targs = tuple(torch.as_tensor(vals[nm]) for nm in names)   # names == prog-input order
         ge, re, gc, rc, err = time_pair(fgen, fref, targs)
         rows.append((label, f"ℝ{n}", len(prog.statements), ge, re, gc, rc, err))
       except Exception as exc:
@@ -134,23 +147,55 @@ def run_tangent():
     for label, dU, dX, term_prog, vnames, ref_fn in tangent_cases():
       try:
         prog = pa.strip_asserts(term_prog)
-        Jm = rng.standard_normal((dU, dX))
-        vs = {nm: rng.standard_normal(dU) for nm in vnames}
-        vals = {"J": Jm, **vs}
-        targs = tuple(torch.as_tensor(vals[base(i.name)]) for i in prog.inputs)
+        vals = {"J": torch.as_tensor(rng.standard_normal((dU, dX)))}
+        vals.update({nm: torch.as_tensor(rng.standard_normal(dU)) for nm in vnames})
+        gargs = tuple(vals[base(i.name)] for i in prog.inputs)      # grassmann program order
+        rargs = (vals["J"], *[vals[nm] for nm in vnames])           # reference order: J, then vecs
         fgen = gen_torch(prog)
-        fref = lambda *a, ref_fn=ref_fn: torch.as_tensor(
-            np.atleast_1d(ref_fn(*[x.numpy() for x in a])))
-        # reorder ref args to (J, *vecs) regardless of program input order
-        jpos = [base(i.name) for i in prog.inputs]
-        def fref_ordered(*a, jpos=jpos, ref_fn=ref_fn):
-            d = {jpos[k]: a[k] for k in range(len(a))}
-            return ref_fn(d["J"], *[d[nm] for nm in vnames])
-        ge, re, gc, rc, err = time_pair(fgen, fref_ordered, targs)
-        out = np.asarray(fgen(*targs)).size
+        ge, re, gc, rc, err = time_pair(fgen, ref_fn, gargs, rargs)
         rows.append((label, f"ℝ{dU}↪ℝ{dX}", len(prog.statements), ge, re, gc, rc, err))
       except Exception as exc:
         print(f"  [skip] {label} ℝ{dU}↪ℝ{dX}: {type(exc).__name__}: {str(exc)[:80]}")
+    return rows
+
+# ------------------------------------------------------------------- classic-op cases
+# Ops with an obvious numpy one-liner, used as the reference directly (no extraction). Maps
+# are stored (dom, cod), so grassmann's Eval contracts the domain: f(x) = Aᵀx, f∘g = B@A.
+def named_cases():
+    for n in (2, 3, 4):
+        V = G.space(f"R{n}", n)
+        u, v, x = G.var("u", V), G.var("v", V), G.var("x", V)
+        f, g = G.var("f", V >> V), G.var("g", V >> V)
+        yield ("dot u·v", f"ℝ{n}", G.dot(u, v),
+               [("u", (n,)), ("v", (n,))], lambda u, v: (u * v).sum())
+        yield ("matvec Aᵀx", f"ℝ{n}", f(x),
+               [("f", (n, n)), ("x", (n,))], lambda A, x: A.t() @ x)
+        yield ("trace tr A", f"ℝ{n}", G.tr(f, 0, 1),
+               [("f", (n, n))], lambda A: A.diagonal().sum())
+        yield ("det A", f"ℝ{n}", G.det(f),
+               [("f", (n, n))], lambda A: torch.linalg.det(A))
+        if n == 3:
+            yield ("outer u⊗v", f"ℝ{n}", G.tensor(u, v),
+                   [("u", (n,)), ("v", (n,))], lambda u, v: torch.outer(u, v))
+            yield ("matmul B@A", f"ℝ{n}", f @ g,
+                   [("f", (n, n)), ("g", (n, n))], lambda A, B: B @ A)
+            yield ("dagger Aᵀ", f"ℝ{n}", G.dagger(f),
+                   [("f", (n, n))], lambda A: A.t())
+
+def run_named():
+    rows = []
+    for label, group, term, specs, ref_fn in named_cases():
+      try:
+        prog = pa.strip_asserts(G.compile(term))
+        order = [nm for nm, _ in specs]
+        ten = {nm: torch.as_tensor(rng.standard_normal(sh)) for nm, sh in specs}
+        gargs = tuple(ten[base(i.name)] for i in prog.inputs)       # grassmann program order
+        rargs = tuple(ten[nm] for nm in order)                      # declared / reference order
+        fgen = gen_torch(prog)
+        ge, re, gc, rc, err = time_pair(fgen, ref_fn, gargs, rargs)
+        rows.append((label, group, len(prog.statements), ge, re, gc, rc, err))
+      except Exception as exc:
+        print(f"  [skip] {label} {group}: {type(exc).__name__}: {str(exc)[:80]}")
     return rows
 
 def fmt(rows, first="space"):
@@ -163,7 +208,9 @@ def fmt(rows, first="space"):
               f"{gc/rc:8.2f}x {err:8.1e}")
 
 if __name__ == "__main__":
-    print("=== constant operators (standard basis) — pyab→torch vs reference torch ===")
+    print("=== exterior operators (standard basis) — pyab→torch vs reference torch ===")
     fmt(run_const())
+    print("\n=== classic linear-algebra operators (natural numpy reference) ===")
+    fmt(run_named())
     print("\n=== tangent-space operators (T = Img(J), J a run-time input) ===")
     fmt(run_tangent(), first="immersion")
