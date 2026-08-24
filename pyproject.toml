@@ -7,10 +7,16 @@ requires-python = ">=3.13"
 authors = [
     { name = "Thea Collin", email = "teoc@mit.edu" },
 ]
-# polyarray is the IW4 lowering target; the IW1 core datatypes do not import it
-# at runtime, but we declare the dependency now so the package graph is correct.
+license = { text = "MIT" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
 dependencies = [
-    "polyarray",
+    # polyarray is the lowering target — Grassmann compiles terms to polyarray Programs.
+    "polyarray @ git+https://github.com/wraith1995/polyarray.git",
 ]
 
 [project.optional-dependencies]
@@ -20,31 +26,23 @@ dev = [
     "pytest-timeout>=2.1",
     "mypy>=1.13",
 ]
-# chartlib is the modern geometry/manifold oracle used to cross-check Grassmann's
-# coordinate-free exterior algebra against an independent geometric setting
-# (charts, tangent frames, Jacobian volume). Test-only — never a runtime dep.
 test = [
     "pytest>=8.0",
     "pytest-xdist>=3.5",
     "pytest-timeout>=2.1",
-    "chartlib",
     # scipy.linalg.expm builds the closed-form geodesic frame Q(x)=expm((c·x)·A)·Q₀ used by
     # tests/test_diff_analytic.py as an EXACT (non-FD) reference for the gauge-aware FFS AD.
     "scipy>=1.10",
 ]
-# Both doc sites. Doc-only — never a runtime dep.
-#   - The Sphinx public reference under `docs/source` (`make -C docs html`, and
-#     `make -C docs doctest`, which runs the tutorial and fails if the API drifts).
-#     numpydoc renders the docstring sections, myst-parser the Markdown narrative
-#     pages, alabaster is the theme `docs/source/conf.py` names.
-#   - The per-node reference site (tools/gen_docs.py + mkdocs): `mkdocs build`,
-#     preview with `mkdocs serve`.
+# The Sphinx public reference under `docs/source` (`make -C docs html`, and
+# `make -C docs doctest`, which runs the tutorial and fails if the API drifts). numpydoc
+# renders the docstring sections, myst-parser the Markdown narrative pages, alabaster is the
+# theme `docs/source/conf.py` names. Doc-only — never a runtime dep.
 docs = [
     "sphinx>=8.0",
     "numpydoc>=1.8",
     "alabaster>=1.0",
     "myst-parser>=4.0",
-    "mkdocs-material>=9.5",
 ]
 
 [build-system]
@@ -57,9 +55,9 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.uv.sources]
-polyarray = { path = "../polyarray", editable = true }
-chartlib = { path = "../chartLib", editable = true }
+[project.urls]
+Homepage = "https://github.com/wraith1995/Grassmann"
+Repository = "https://github.com/wraith1995/Grassmann"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

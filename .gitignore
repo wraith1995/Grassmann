@@ -16,3 +16,6 @@ env/
 
 # MkDocs build output (regenerate with: mkdocs build)
 site/
+
+# Sphinx build output (regenerate with: make -C docs html)
+docs/build/
