@@ -116,8 +116,8 @@ or with the embedding's operator sugar, ``*``:
 These are not the same space. The builder takes all three factors at once and gives
 the flat product, while ``*`` is a binary operator, so it associates and you get a
 product of a product. The core never reassociates a ``⊗`` on its own (moving between
-the two spellings is the explicit reshape :func:`~grassmann.unlift`, which we need
-when we will use later). The alternator wants all ``k`` slots on the same footing, so
+the two spellings is an explicit reshape, :func:`~grassmann.unlift`, which we meet in
+the next section). The alternator wants all ``k`` slots on the same footing, so
 we take the flat one:
 
 .. doctest::
@@ -134,23 +134,72 @@ We can define this space as parametric over a variable unknown space ``V`` — a
    >>> G.unparse(tensor_power(A, 3))
    'V : Space ⊢ V ⊗ V ⊗ V'
 
+Writing linear functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Before the alternator, we need a way to *write down* a linear map by hand — because the
+alternator is one. The alternator sends a tensor to the signed average of its permuted
+copies, and to express "permute the slots" we have to name the slots and shuffle them.
+Grassmann's tool for that is the **linear lambda**, :func:`~grassmann.llam`: you give it
+the domain space and a Python function of one bound variable, and get back a term for the
+linear map that function describes. Give it *several* spaces and its Python function takes
+that many arguments, one bound variable per slot — a **multilinear** map. Here is a
+two-argument one that swaps its inputs before tensoring them:
+
+.. doctest::
+
+   >>> swap = G.llam(V, V, lambda u, w: G.tensor(w, u))    # (u, w) ↦ w ⊗ u
+   >>> G.unparse(synth_space(swap.node))
+   '(ℝ^3)* ⊗ (ℝ^3)* ⊗ (ℝ^3 ⊗ ℝ^3)'
+
+Read that space with the rule from the tensor-power section, ``V* ⊗ W`` is the space of
+linear maps ``V → W``: two ``(ℝ^3)*`` slots on the left mean two separate vector
+*arguments*, and ``ℝ^3 ⊗ ℝ^3`` on the right is the result. So a ``k``-ary linear lambda is
+a **curried** map — it eats its ``k`` vectors one at a time, ``V × … × V ⊸ V⊗ᵏ``.
+
+That is a mismatch. The alternator is a projector on a single space, ``Alt : V⊗ᵏ ⊸ V⊗ᵏ`` —
+one ``k``-tensor in, one ``k``-tensor out — not a ``k``-argument function. We write the
+permutation naturally as the curried lambda above, then convert it into the one-argument
+form. :func:`~grassmann.lift` does exactly that: it **uncurries** the map, fusing the
+argument slots you name into a single tensor input.
+
+.. doctest::
+
+   >>> lifted = G.lift(swap, [0, 1], 0)     # fuse argument slots 0,1 into one V⊗² input
+   >>> G.unparse(synth_space(lifted.node))
+   '(ℝ^3 ⊗ ℝ^3)* ⊗ (ℝ^3 ⊗ ℝ^3)'
+
+The two ``(ℝ^3)*`` slots have merged into one ``(ℝ^3 ⊗ ℝ^3)*``: the map now reads as
+``V⊗² ⊸ V⊗²``, a genuine endomorphism of the tensor power. Nothing was computed — fusing
+is pure index bookkeeping, a re-reading of the same coordinates, no numbers moved — which
+is why the alternator will compile to a single matrix rather than a nest of calls.
+
+Its inverse is :func:`~grassmann.unlift`, and it is equally free. It splits one fused slot
+back into the factors it is a product of; put the other way round, it flattens a nested
+tensor product, because — as we saw — the core never reassociates a ``⊗`` on its own. Take
+a value in the left-associated ``(V ⊗ V) ⊗ V`` and unlift its first slot:
+
+.. doctest::
+
+   >>> nested = G.var("t", (V * V) * V)
+   >>> G.unparse(synth_space(nested.node))
+   '(ℝ^3 ⊗ ℝ^3) ⊗ ℝ^3'
+   >>> G.unparse(synth_space(G.unlift(nested, [0, 1]).node))
+   'ℝ^3 ⊗ ℝ^3 ⊗ ℝ^3'
+
+The nested product has become the flat ``V⊗³``. We will reach for exactly this when we
+build the wedge, to flatten a ``Λᵏ ⊗ Λˡ`` into one ``V⊗ᵏ⁺ˡ`` before antisymmetrizing.
+
+With ``llam`` to write the permutation, ``lift`` to turn it into an endomorphism, and
+:func:`~grassmann.scale` to normalize, the alternator is a short definition.
+
 The permutation sum
 ~~~~~~~~~~~~~~~~~~~
 
-Now the alternator itself. We construct a Grassmann term that averages the permutations of tensors. We
-write it as a ``k``-ary **linear** lambda (:func:`~grassmann.llam`) that permutes its own bound variables, then fuse
-the ``k`` argument slots into one :math:`V^{\otimes k}` input with
-:func:`~grassmann.lift`, and normalize with :func:`~grassmann.scale`.
-
-.. admonition:: what ``lift`` does — an aside
-
-   A ``k``-ary linear lambda is a *curried* map: it takes ``k`` separate vector
-   arguments, ``V × … × V ⊸ V⊗ᵏ``. :func:`~grassmann.lift` **uncurries** it, fusing the
-   argument slots you name into a single tensor input, so the result is a map
-   ``V⊗ᵏ ⊸ V⊗ᵏ`` that takes one ``k``-tensor. Its inverse :func:`~grassmann.unlift`,
-   met in the wedge, splits a tensor input back into separate slots. Fusing is free —
-   no computation, only a re-reading of the same coordinates — which is why the
-   alternator compiles to a single matrix rather than a nest of calls.
+Now the alternator itself. We construct a Grassmann term that averages the permutations of
+tensors. We write it as a ``k``-ary linear lambda that permutes its own bound variables,
+fuse the ``k`` argument slots into one :math:`V^{\otimes k}` input with ``lift``, and
+normalize with ``scale``.
 
 .. doctest::
 
