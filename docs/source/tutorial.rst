@@ -1057,35 +1057,40 @@ divergence all at once.
 The derivative it is built on is the **total covariant derivative** :func:`~grassmann.diff`,
 which differentiates a term with respect to a variable and hands back a linear map: the map
 ``∇ω`` that sends a direction to the field's rate of change along it, corrected so the
-comparison between neighbouring points is honest even when the space is curved. The exterior
-derivative is that covariant derivative **antisymmetrized**:
+comparison between neighbouring points is honest even when the space is curved.
+Differentiating a ``k``-form field this way adds one covariant index — ``∇ω`` is a
+``(k+1)``-tensor — and the exterior derivative is that whole tensor **antisymmetrized**:
 
 .. math::
 
-   d\omega \;=\; \sum_{j} e^{j} \wedge \partial_{j}\omega ,
-   \qquad \partial_{j}\omega \;=\; (\nabla\omega)(e_{j}) ,
+   d\omega \;=\; (k+1)\,\operatorname{Alt}\bigl(\nabla\omega\bigr),
 
-which evaluates ``∇ω`` along each coordinate direction ``eⱼ`` and wedges the result with the
-coordinate 1-form ``eʲ`` — and it is the wedge that supplies the antisymmetry. We name
-``∇ω`` once and reuse it across the directions:
+the very same :math:`\operatorname{Alt}` we built at the start, now applied to the covariant
+derivative instead of to a product of vectors. To hand ``∇ω`` to ``Alt`` we first view the
+form as a plain tensor field — :func:`~grassmann.embed` it into ``(V*)⊗ᵏ`` so ``diff``
+returns a flat ``(V*)⊗ᵏ⁺¹`` — then antisymmetrize all ``k+1`` slots and land back in
+``Λᵏ⁺¹(V*)``:
 
 .. doctest::
 
    >>> def exterior_derivative(omega: G.Expr, x: G.Expr, k: int) -> G.Expr:
    ...     V = G.Expr(x.node.space)
-   ...     Vs, n = G.dual(V), dim(G.Expr(x.node.space))
+   ...     Vs = G.dual(V)
    ...     L1 = ext_power(Vs, 1)
-   ...     grad = G.diff(omega, x)                                   # ∇ω, the covariant derivative
-   ...     eform = lambda j: G.project(basis_vec(Vs, j, n), L1)      # eʲ ∈ Λ¹(V*)
-   ...     if k == 0:                    # a scalar field: ∇f is already its 1-form
-   ...         return G.project(grad, L1)
-   ...     return G.sum(*[wedge(Vs, eform(j), grad(basis_vec(V, j, n)), 1, k)   # antisymmetrize ∂ⱼω
-   ...                    for j in range(n)])
+   ...     if k == 0:                              # a scalar field: ∇f is already its 1-form
+   ...         return G.project(G.diff(omega, x), L1)
+   ...     flat = embed(omega, tensor_power(Vs, k))           # view ω as a plain (V*)⊗ᵏ field
+   ...     grad = G.unlift(G.diff(flat, x), [0, 1])           # ∇ω, flattened to (V*)⊗ᵏ⁺¹
+   ...     antisym = alt(Vs, k + 1).at([0])(grad)             # Alt over all k+1 slots
+   ...     return G.scale(k + 1, G.project(antisym, ext_power(Vs, k + 1)))
 
-This is where the ``V`` / ``V*`` distinction does real work. The direction we differentiate
-along, ``basis_vec(V, j, n)``, is a **vector**; the ``eform(j)`` we wedge with is the same
-numbers declared as a **covector**, and ``G.external``'s space argument is what keeps them
-apart. Write both as vectors and the term does not typecheck.
+Every piece is one we already have. ``diff`` is the covariant derivative; ``embed`` and
+``project`` are the two directions of the subspace relation ``Λᵏ ⊑ V⊗ᵏ``; ``unlift`` flattens
+the nested tensor ``diff`` hands back; and ``alt`` is the antisymmetrizer from the opening
+section. There is no coordinate loop and no hand-picked basis 1-forms — ``d`` is literally
+*the covariant derivative, antisymmetrized*. The ``V`` / ``V*`` bookkeeping is what makes that
+type-check: ``ω`` is a field of **covectors**, ``x`` is a **vector**, and ``diff`` adds
+exactly one ``V*`` index, so ``∇ω`` lands in ``(V*)⊗ᵏ⁺¹`` with no coordinate ever named.
 
 Start with a scalar field ``f`` (a 0-form). Its exterior derivative ``df`` is the
 **gradient**. For ``f = ½|x|²`` the gradient is ``x`` itself:
@@ -1261,9 +1266,45 @@ map to the scalars, so precomposing with ``f`` is the whole construction:
    >>> G.unparse(synth_space(pull_1form(fmap, Vp, om).node))
    '(ℝ^2)* ⊗ ℝ'
 
-The reason the pullback is worth naming is that it commutes with everything else. It
-respects the wedge, ``f*(α ∧ β) = f*α ∧ f*β``, and — the fact that makes differential
-forms work on manifolds — it commutes with the exterior derivative:
+For higher degree the same idea applies to every slot at once. Precomposing a 1-form with
+``f`` is the action of the **transpose** map ``fᵀ : W* → V*`` — metric-free, since it is
+composition and not an adjoint — and a ``k``-form is a ``k``-vector of ``W*``, so its
+pullback is the ``k``-th exterior power of ``fᵀ``, acting on each factor. We build ``fᵀ`` as
+the degree-1 pullback, take ``k`` copies of it with :func:`~grassmann.kron`, and land the
+result back in ``Λᵏ(V*)``:
+
+.. doctest::
+
+   >>> def pullback_form(f: G.Expr, U: G.Expr, W: G.Expr, omega: G.Expr, k: int) -> G.Expr:
+   ...     Ws, Us = G.dual(W), G.dual(U)
+   ...     if k == 0:
+   ...         return omega                                        # a 0-form is a scalar
+   ...     if k == 1:
+   ...         return G.project(G.llam(U, lambda z: omega(f(z))), ext_power(Us, 1))
+   ...     fT = G.llam(Ws, lambda nu: G.llam(U, lambda z: nu(f(z))))   # transpose fᵀ : W* → V*
+   ...     K = fT
+   ...     for _ in range(k - 1):                                  # fᵀ ⊗ … ⊗ fᵀ  (k copies)
+   ...         K = G.kron(K, fT)
+   ...     return G.project(K(embed(omega, tensor_power(Ws, k))), ext_power(Us, k))
+
+The reason the pullback is worth naming is that it commutes with everything else. It respects
+the wedge — ``f*(α ∧ β) = f*α ∧ f*β`` — which we can run for a pair of 1-forms on ``ℝ³``
+pulled back to ``ℝ²``, wedging before and after and comparing:
+
+.. doctest::
+
+   >>> al, be = G.var("al", G.dual(Wp)), G.var("be", G.dual(Wp))
+   >>> Fm = np.array([[1., 0., 2.], [0., 1., -1.]])
+   >>> alv, bev = np.array([1., 2., 0.]), np.array([0., 1., 3.])
+   >>> pull_then_wedge = wedge(G.dual(Vp), pullback_form(fmap, Vp, Wp, al, 1),
+   ...                         pullback_form(fmap, Vp, Wp, be, 1), 1, 1)
+   >>> wedge_then_pull = pullback_form(fmap, Vp, Wp, wedge(G.dual(Wp), al, be, 1, 1), 2)
+   >>> bool(np.allclose(run(pull_then_wedge, f=Fm, al=alv, be=bev),
+   ...                  run(wedge_then_pull, f=Fm, al=alv, be=bev)))
+   True
+
+And — the fact that makes differential forms work on manifolds — it commutes with the
+exterior derivative:
 
 .. math::
 
@@ -1283,8 +1324,9 @@ you may differentiate before pulling back or after, and get the same 1-form. Tak
    >>> (Fm @ (zv @ Fm)).tolist()                              # f*(dg) = fᵀ(f z)
    [33.0, 114.0]
 
-Nothing had to be added to the language for this: ``f*`` is composition, ``d`` is
-:func:`~grassmann.diff` with a wedge, and the identity between them follows from both.
+Nothing had to be added to the language for this: ``f*`` is composition and its exterior
+powers, ``d`` is :func:`~grassmann.diff` antisymmetrized, and the identity between them
+follows from both.
 
 Moving a value between spaces
 -----------------------------
