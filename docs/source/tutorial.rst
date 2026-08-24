@@ -1,7 +1,7 @@
-Tutorial: exterior algebra, gently
+Tutorial: exterior algebra
 ==================================
 
-Exterior algebra is the algebra of **oriented** lengths, areas, and volumes. In
+Exterior algebra is the algebra of oriented lengths, areas, and volumes. In
 this tutorial, we will develop exterior algebra from scratch in Grassmann,
 introducing features as needed. The exterior algebra ships with Grassmann, but
 here we develop it from first principles.
@@ -53,14 +53,6 @@ To get our bearings on familiar ground, here is the ordinary dot product of two
 vectors of ``ℝ³``. A grassmann *variable* stands for an input, and ``run`` supplies
 its value by name.
 
-One thing before the first number appears. A grassmann term names spaces and values, never
-a **basis**. Numbers only exist in coordinates, though, so a basis is chosen somewhere, and
-that somewhere is compilation. ``run`` and :func:`~grassmann.compile` choose one for you;
-:func:`~grassmann.compile_in` lets you say which basis each variable and the result are
-written in. The arrays below are coordinates in whatever basis the compiler picked, which
-for ``ℝⁿ`` is the standard one. We make the choice explicit later, once there is something
-to choose between.
-
 .. doctest::
 
    >>> V = R(3)
@@ -75,9 +67,9 @@ same with richer expressions.
 
 The alternator and the exterior algebra space
 ---------------------------------------------
-Here is the definition we are going to build. Fix a space ``V``. Inside the tensor power
+Here is the definition we are going to build in Grassmann. Fix a space ``V``. Inside the tensor power
 :math:`V^{\otimes k}` sits the subspace of tensors whose components pick up the sign of
-any permutation of their slots:
+any permutation of their order:
 
 .. math::
 
@@ -87,8 +79,7 @@ any permutation of their slots:
          = \operatorname{sgn}(\sigma)\, T_{1\,\ldots\,k}
        \ \text{ for all } \sigma \in S_{k} \,\bigr\}.
 
-That describes a condition to check rather than something to build, so the usual
-approach is to present the subspace as the image of a projector: the **alternator**,
+One approach is to present the subspace as the image of a projector: the **alternator**,
 which averages over the symmetric group with a sign.
 
 .. math::
@@ -124,9 +115,9 @@ or with the embedding's operator sugar, ``*``:
 
 These are not the same space. The builder takes all three factors at once and gives
 the flat product, while ``*`` is a binary operator, so it associates and you get a
-product of a product. The core never reassociates a ``⊗`` on its own; moving between
+product of a product. The core never reassociates a ``⊗`` on its own (moving between
 the two spellings is the explicit reshape :func:`~grassmann.unlift`, which we need
-when we build the wedge. The alternator wants all ``k`` slots on the same footing, so
+when we will use later). The alternator wants all ``k`` slots on the same footing, so
 we take the flat one:
 
 .. doctest::
@@ -135,7 +126,7 @@ we take the flat one:
    ...     return G.tensor(*[V] * k)
 
 We can define this space as parametric over a variable unknown space ``V`` — a
-*space variable*, which grassmann carries as an unknown throughout inference:
+*space variable*, which Grassmann carries as an unknown throughout:
 
 .. doctest::
 
@@ -146,10 +137,20 @@ We can define this space as parametric over a variable unknown space ``V`` — a
 The permutation sum
 ~~~~~~~~~~~~~~~~~~~
 
-Now the alternator itself. Only the symmetric group is Python; the map is grassmann. We
+Now the alternator itself. We construct a Grassmann term that averages the permutations of tensors. We
 write it as a ``k``-ary **linear** lambda (:func:`~grassmann.llam`) that permutes its own bound variables, then fuse
 the ``k`` argument slots into one :math:`V^{\otimes k}` input with
-:func:`~grassmann.lift`, and normalize with :func:`~grassmann.scale`:
+:func:`~grassmann.lift`, and normalize with :func:`~grassmann.scale`.
+
+.. admonition:: what ``lift`` does — an aside
+
+   A ``k``-ary linear lambda is a *curried* map: it takes ``k`` separate vector
+   arguments, ``V × … × V ⊸ V⊗ᵏ``. :func:`~grassmann.lift` **uncurries** it, fusing the
+   argument slots you name into a single tensor input, so the result is a map
+   ``V⊗ᵏ ⊸ V⊗ᵏ`` that takes one ``k``-tensor. Its inverse :func:`~grassmann.unlift`,
+   met in the wedge, splits a tensor input back into separate slots. Fusing is free —
+   no computation, only a re-reading of the same coordinates — which is why the
+   alternator compiles to a single matrix rather than a nest of calls.
 
 .. doctest::
 
@@ -172,11 +173,14 @@ Inference reads off the space it lives in, with no annotation from us:
    >>> G.unparse(synth_space(alt(V, 2).node))
    '(ℝ^3 ⊗ ℝ^3)* ⊗ (ℝ^3 ⊗ ℝ^3)'
 
+We can read this as the space of maps from two tensors, :math:`\mathbb{R}^{3}\otimes\mathbb{R}^{3}` to two tensors, :math:`\mathbb{R}^{3}\otimes\mathbb{R}^{3}`
+because :math:`V^{\star}\otimes W` is the space of linear maps from :math:`V` to :math:`W`.
+
 The image
 ~~~~~~~~~
 
 An image is a space, so :math:`\Lambda^{k}(V) = \operatorname{Img}(\operatorname{Alt})`
-is written as it reads:
+is written as it reads.
 
 .. doctest::
 
@@ -184,7 +188,7 @@ is written as it reads:
    >>> def ext_power(V: G.Expr, k: int) -> G.Expr:
    ...     key = (V.node, k)
    ...     if key not in _POWERS:                  # canonical: one node per (V, k)
-   ...         _POWERS[key] = G.img(alt(V, k))
+   ...         _POWERS[key] = G.img(alt(V, k))     # definition of Wedge space.
    ...     return _POWERS[key]
    >>> ext_power(V, 2) is ext_power(V, 2)
    True
@@ -258,11 +262,10 @@ the ``n`` axes — laid out as Pascal's triangle:
      - 1
 
 
-We keep the unasserted :func:`ext_power` as our working definition, though — its rank
-costs an SVD, but it is *derived* rather than promised, and once the wedge exists we
-can make it prove itself.
+We keep the unasserted and generic :func:`ext_power` as our definition, though — its rank
+costs an SVD, but it is *derived* rather than promised.
 
-We can also see the alternator as a higher order array by supplying an appropriate
+We can dig into this dimensional calculation; to do the SVD, we must see the alternator as an array/matrix by supplying an appropriate
 basis. In this case, we should define first a basis for say ``ℝ³``, ``k = 2`` (the
 standard one):
 
@@ -320,8 +323,8 @@ transpose. It is a projector, and its rank is the dimension we declined to guess
 
 We could have used a different basis for ``ℝ³`` — say by scaling a basis vector —
 and gotten the same result. A basis is built from explicit vectors with
-:func:`~grassmann.list_basis`; each vector is a constant of ``V``, which is where
-``G.external`` and ``ExternalOp`` earn their place:
+:func:`~grassmann.list_basis`; each vector is a constant of ``V``, which requires a builtin escape hatch for the general space
+``G.external`` and ``ExternalOp``:
 
 .. doctest::
 
@@ -336,7 +339,7 @@ and gotten the same result. A basis is built from explicit vectors with
    True
 
 And not only for a rescaling: the alternator's array is the same for *any* basis of
-``ℝ³``, provided the same one is used in both tensor factors. The reason is that
+``ℝ³``, provided the same one is used in all tensor factors. The concrete reason is that
 :math:`P_{\sigma}` commutes with :math:`S \otimes S` for every invertible ``S``, so
 the change of basis cancels itself.
 
@@ -398,7 +401,7 @@ Every step is a core operation. :func:`~grassmann.embed.embed` and
 :func:`~grassmann.project` are the two directions of the subspace relation
 ``Λᵏ ⊑ V⊗ᵏ``, ``A * B`` is the tensor product of two values, and
 :func:`~grassmann.unlift` is the reassociation promised earlier: ``(V⊗ᵏ)⊗(V⊗ˡ)`` and
-``V⊗ᵏ⁺ˡ`` hold the same numbers, and the core makes you say which you mean.
+``V⊗ᵏ⁺ˡ`` are isomorphic, and Grassmann makes you say which you mean.
 
 Two facts capture what "oriented" means, and you can read both straight off the
 numbers. First, **swapping the two vectors reverses the orientation**, which flips
@@ -424,30 +427,9 @@ comes from.
 :math:`\Lambda^{2}` we built out of the alternator, and ``wedge(V, a, b, k, l)`` climbs
 the ladder of exterior powers, ``Λᵏ × Λˡ → Λᵏ⁺ˡ``.
 
-Earlier we asserted the dimension of each rung and got Pascal's triangle. With the wedge
-in hand we can instead *measure* it: wedge ``k`` generic vectors of ``ℝⁿ`` together and
-look at how big the answer is.
-
-.. doctest::
-
-   >>> def measured_dim(n: int, k: int) -> int:
-   ...     V = R(n)
-   ...     xs = [G.var(f"x{i}", V) for i in range(k)]
-   ...     term = xs[0]
-   ...     for i in range(1, k):
-   ...         term = wedge(V, term, xs[i], i, 1)
-   ...     vals = {f"x{i}": rng.standard_normal(n) for i in range(k)}
-   ...     return run(term, **vals).size
-   >>> [[measured_dim(n, k) for k in range(1, n + 1)] for n in (1, 2, 3)]
-   [[1], [2, 1], [3, 3, 1]]
-
-The same Pascal's triangle the asserted-rank version promised — but *deduced* here, by
-an SVD of the alternator, from a term that was never told the answer.
-
 The sign rule generalizes: sliding a ``k``-vector past an ``l``-vector costs a sign
 :math:`(-1)^{kl}`. This **graded anticommutativity** holds in every dimension and degree,
-and follows from the alternator rather than being stated anywhere. Checked by running both
-sides on random inputs:
+and follows from the alternator rather than being stated anywhere. We can easily check this:
 
 .. doctest::
 
@@ -474,8 +456,7 @@ The inner product of ``V`` extends to each exterior power, and on decomposable
            b_{1} \wedge \cdots \wedge b_{k} \rangle
      \;=\; \det \bigl[\, \langle a_{i}, b_{j} \rangle \,\bigr]_{i,j=1}^{k}.
 
-For ``k = 2`` that is the squared area of a parallelogram when the two arguments agree,
-which is what makes it the right notion of length for an oriented area.
+For ``k = 2`` that is the squared area of a parallelogram when the two arguments agree.
 
 You can measure lengths and angles of ``k``-vectors, not just of ordinary vectors,
 and grassmann hands you that inner product for free. Nothing had to be supplied: the
@@ -521,7 +502,7 @@ the interior product below for the same reason.
 
 Bases make this concrete. The ``C(3,2) = 3`` basis 2-vectors ``eᵢ ∧ eⱼ`` should be
 mutually orthogonal and all the same length; here is their Gram matrix, computed by
-running the pairing on every combination:
+running the inner product on every combination:
 
 .. doctest::
 
@@ -558,15 +539,13 @@ transcribed:
 .. doctest::
 
    >>> def interior(V: G.Expr, omega: G.Expr, v: G.Expr, k: int) -> G.Expr:
-   ...     if k == 1:                              # Λ⁰ = scalars: ι_v is the pairing
+   ...     if k == 1:                              # Λ⁰ = scalars: ι_v is the inner product
    ...         return pair(V, v, omega)
    ...     Lkm1 = ext_power(V, k - 1) if k - 1 > 1 else V
    ...     up = G.llam(Lkm1, lambda eta: wedge(V, v, eta, 1, k - 1))   # η ↦ v ∧ η
    ...     return G.dagger(up)(omega)
 
-No dual space appears and no coordinates: ``ι_v`` takes an ordinary vector ``v ∈ V`` and a
-``k``-vector, and the metric does the contracting. On the basis 2-vectors it does what the
-picture suggests. A vector lying in the plane leaves the perpendicular direction, and one
+A vector lying in the plane leaves the perpendicular direction, and one
 that does not lie in the plane leaves nothing:
 
 .. doctest::
@@ -603,8 +582,7 @@ with the same ``k!`` carried by the induced metric. Checked by running:
 The Hodge star: a k-vector and its complement
 ---------------------------------------------
 
-Here the symmetry of Pascal's triangle pays off. Because ``Λᵏ`` and ``Λⁿ⁻ᵏ`` have the
-same size, there is a natural way to turn one into the other — the **Hodge star**
+There is a natural correspondence between ``Λᵏ`` and ``Λⁿ⁻ᵏ`` — the **Hodge star**
 ``⋆``. It sends a ``k``-vector to the ``(n−k)``-vector that is, in a precise sense, its
 orthogonal complement.
 
@@ -616,11 +594,11 @@ coordinate formula. The star is pinned down by
    \alpha \wedge \star\beta \;=\; \langle \alpha, \beta\rangle \; \mathrm{vol}
    \qquad \text{for all } \alpha \in \Lambda^{k}(V),
 
-so read it as follows: wedging into the volume form is a pairing
+so read it as follows: wedging into the volume form is a map
 :math:`M : \Lambda^{n-k} \to (\Lambda^{k})^{*}`, the metric lower :math:`\flat` turns
 :math:`\beta` into an element of :math:`(\Lambda^{k})^{*}`, and
 :math:`\star = M^{-1} \circ \flat`. Every one of those pieces is a grassmann primitive
-— :func:`~grassmann.llam` for the pairing, :func:`~grassmann.flat` for the lower, and
+— :func:`~grassmann.llam` for ``M``, :func:`~grassmann.flat` for the lower, and
 :func:`~grassmann.pinv` for the inverse of a square isomorphism.
 
 First the unit volume form, the wedge of the standard basis normalized to length one:
@@ -632,7 +610,10 @@ First the unit volume form, the wedge of the standard basis normalized to length
    ...     raw = G.project(G.tensor(*[basis_vec(V, i, n) for i in range(n)]), Ln)
    ...     return G.scale(G.reciprocal(G.sqrt(pair(Ln, raw, raw))), raw)
 
-and then the star itself:
+Note that like with our earlier dimension tests, we had to insert a basis into this definition via just writing it in terms.
+This makes sense because the Hodge start is defined up to a choice of volume form, which is choosen by a basis.
+
+With the volume form, we can define the Hodge star:
 
 .. doctest::
 
@@ -649,7 +630,7 @@ and then the star itself:
    ...         Lk, lambda a: pair(Ln, wedge(V, a, g, k, n - k), vol)))
    ...     return G.pinv(M)(G.flat(Lk)(om))
 
-In ``ℝ³`` this is an old friend. A 2-vector ``u ∧ v`` is the plane spanned by ``u`` and
+In ``ℝ³`` this is a known operation. A 2-vector ``u ∧ v`` is the plane spanned by ``u`` and
 ``v``; its complement is the line perpendicular to that plane — and that line, with the
 right orientation, is exactly the **cross product** ``u × v``:
 
@@ -662,7 +643,7 @@ right orientation, is exactly the **cross product** ``u × v``:
 
 Both point up the third axis: ``⋆(u ∧ v)`` is the cross product up to the scale the
 induced metric imposes (``0.8165 = √2/√3``). Since ``⋆`` was built from its defining
-identity, checking that identity tests the construction — the pairing, the lower and the
+identity, checking that identity tests the construction — the map ``M``, the lower, and the
 pseudo-inverse all have to be right. Across dimensions and degrees:
 
 .. doctest::
@@ -720,10 +701,10 @@ On the Hodge star, built with the same ``G.pinv``:
 
 Five einsums and no linear algebra. The difference is the operand, not the operator.
 ``f`` is a variable, so its matrix does not exist until run time and neither can its
-pseudo-inverse. The pairing ``M`` is built from the alternator and the volume form, and
+pseudo-inverse. The map ``M`` is built from the alternator and the volume form, and
 once bases are chosen for ``Λᵏ`` and ``Λⁿ⁻ᵏ`` both are constants, so the compiler builds
 ``M`` as a concrete matrix, inverts it while compiling, and emits the result. The inverted
-pairing is in the generated source as a constant:
+map ``M`` is in the generated source as a constant:
 
 .. doctest::
 
@@ -733,6 +714,68 @@ pairing is in the generated source as a constant:
 We were able to define ``⋆`` by the property that characterises it because choosing a
 basis is a later and separate decision, and it is at that point that ``M⁻¹`` stops being a
 pseudo-inverse and becomes a number.
+
+The plane, and where the basis shows through
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In the plane the picture is even smaller. ``⋆`` sends ``Λ¹(ℝ²)`` back to ``Λ¹(ℝ²)``, so
+it is a ``2 × 2`` matrix — and it is a **quarter turn**. Reading its two columns, where
+it sends ``e₁`` and ``e₂``, in the standard basis:
+
+.. doctest::
+
+   >>> V2 = R(2)
+   >>> xx = G.var("x", V2)
+   >>> star2 = hodge_star(V2, xx, 1)
+   >>> L1 = ext_power(V2, 1)
+   >>> def hodge_matrix(basis_x: G.Expr) -> list:
+   ...     prog = G.compile_in(star2, {xx: basis_x}, target=G.standard_basis(L1))
+   ...     cols = [np.asarray(prog.run({i.name: e for i in prog.inputs})["result"], float).ravel()
+   ...             for e in (np.array([1., 0.]), np.array([0., 1.]))]
+   ...     return (np.round(np.array(cols).T, 4) + 0.0).tolist()
+   >>> hodge_matrix(G.standard_basis(V2))
+   [[0.0, -0.7071], [0.7071, 0.0]]
+
+A rotation by 90° — scaled, as ever, by the induced metric. Now compile the *same*
+expression again, but ask :func:`~grassmann.compile_in` to read the input in a
+**stretched** basis, the one in which ``e₁`` is twice as long:
+
+.. doctest::
+
+   >>> stretched = G.list_basis(*[G.scale(2.0 if i == 0 else 1.0, basis_vec(V2, i, 2))
+   ...                            for i in range(2)])
+   >>> hodge_matrix(stretched)
+   [[0.0, -0.7071], [1.4142, 0.0]]
+
+The matrix changed — the lower entry doubled. This is not a change of coordinates being
+undone somewhere; the operator itself is reported differently, because ``⋆`` is built
+from the inner product, and the inner product is exactly what a stretched basis alters.
+The culprit is visible directly: the metric — the matrix of ``⟨·,·⟩`` on the basis
+vectors — is the identity in the standard basis and *not* the identity in the stretched
+one:
+
+.. doctest::
+
+   >>> yy = G.var("y", V2)
+   >>> def metric(basis_x: G.Expr) -> list:
+   ...     prog = G.compile_in(pair(V2, xx, yy), {xx: basis_x, yy: basis_x})
+   ...     def entry(a: int, b: int) -> float:
+   ...         feed = {i.name: (np.eye(2)[a] if i.name.startswith("x") else np.eye(2)[b])
+   ...                 for i in prog.inputs}
+   ...         return float(np.asarray(prog.run(feed)["result"], float))
+   ...     return (np.round([[entry(a, b) for b in range(2)] for a in range(2)], 4) + 0.0).tolist()
+   >>> metric(G.standard_basis(V2))
+   [[1.0, 0.0], [0.0, 1.0]]
+   >>> metric(stretched)
+   [[4.0, 0.0], [0.0, 1.0]]
+
+Here is the contrast worth keeping. The wedge and the alternator are pure combinatorics
+of the tensor slots — they never consult the inner product, so no metric enters their
+definition, and re-basing them is only the ordinary change of coordinates. The Hodge
+star is the one operator in this tour built *through* the inner product, so its matrix
+carries the metric with it: change the basis, change the metric, and ``⋆`` changes with
+it. When the same ``k``-vector's ``⋆`` looks different in two compilations, that is not a
+bug — it is the inner product showing through.
 
 Forms, bases, and the tangent space
 -----------------------------------
