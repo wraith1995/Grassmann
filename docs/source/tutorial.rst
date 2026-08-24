@@ -20,6 +20,7 @@ constants and permutations:
 
 .. doctest::
 
+   >>> import functools
    >>> import itertools
    >>> import math
    >>> from math import comb, factorial
@@ -254,20 +255,17 @@ is written as it reads.
 
 .. doctest::
 
-   >>> _POWERS: dict[object, G.Expr] = {}
-   >>> def ext_power(V: G.Expr, k: int) -> G.Expr:
-   ...     key = (V.node, k)
-   ...     if key not in _POWERS:                  # canonical: one node per (V, k)
-   ...         _POWERS[key] = G.img(alt(V, k))     # definition of Wedge space.
-   ...     return _POWERS[key]
+   >>> @functools.cache                            # one canonical node per (V, k)
+   ... def ext_power(V: G.Expr, k: int) -> G.Expr:
+   ...     return G.img(alt(V, k))                  # Λᵏ(V), the wedge space
    >>> ext_power(V, 2) is ext_power(V, 2)
    True
 
-The memo table is not an optimization. Two independently built ``Img(alt(V, 2))``
-nodes are only alpha-equivalent, since their bound variables have different
-identities, and grassmann compares a subspace by the map that defines it. Building
-``Λ²(V)`` twice would give two spaces that refuse to unify, so the same ``(V, k)``
-has to return the identical node.
+The cache is not an optimization. Two independently built ``Img(alt(V, 2))`` nodes are only
+alpha-equivalent, since their bound variables have different identities, and grassmann
+compares a subspace by the map that defines it. Building ``Λ²(V)`` twice would give two spaces
+that refuse to unify, so the same ``(V, k)`` has to return the identical node —
+:func:`functools.cache` guarantees exactly that, one stored node per argument pair.
 
 Given a concrete space, we can ask for the dimensions. Here grassmann says
 something more careful than a number:
@@ -616,14 +614,13 @@ a **stretched** basis where ``e₁`` is twice as long:
    >>> metric(V, stretched3)                          # e₁ twice as long: no longer the identity
    [[4.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
-So "orthonormal" is a property of a *basis*, not of the space, and the clean numbers above
-are a feature of the standard basis rather than a law of nature. That matters most for the
+Thus, the clean numbers from the prior example are a feature of the standard basis and the term rather than just the term. That matters most for the
 one operator built directly out of the inner product — the Hodge star, next.
 
 The Hodge star: a k-vector and its complement
 ---------------------------------------------
 
-There is a natural correspondence between ``Λᵏ`` and ``Λⁿ⁻ᵏ`` — the **Hodge star**
+There is a natural correspondence between ``Λᵏ`` and ``Λⁿ⁻ᵏ`` — the Hodge star
 ``⋆``. It sends a ``k``-vector to the ``(n−k)``-vector that is, in a precise sense, its
 orthogonal complement.
 
@@ -635,7 +632,7 @@ formula. The star is pinned down by
    \alpha \wedge \star\beta \;=\; \langle \alpha, \beta\rangle \; \mathrm{vol}
    \qquad \text{for all } \alpha \in \Lambda^{k}(V),
 
-where ``vol`` is the **unit volume form**: the wedge of the standard basis, ``e₁ ∧ … ∧ eₙ``,
+where ``vol`` is the unit volume form: the wedge of the standard basis, ``e₁ ∧ … ∧ eₙ``,
 normalized so ``⟨vol, vol⟩ = 1``. It is the one ingredient that needs a basis to name, and
 that is exactly why ``⋆`` depends on a basis where the wedge and alternator do not. We build
 ``vol`` by projecting the tensor of the basis vectors into ``Λⁿ`` and rescaling to unit
@@ -644,11 +641,10 @@ length with :func:`~grassmann.reciprocal` and :func:`~grassmann.sqrt`:
 .. doctest::
 
    >>> def unit_vol(V: G.Expr, n: int) -> G.Expr:
-   ...     Ln = ext_power(V, n)
-   ...     raw = G.project(G.tensor(*[basis_vec(V, i, n) for i in range(n)]), Ln)   # e₁∧…∧eₙ
-   ...     return G.scale(G.reciprocal(G.sqrt(pair(Ln, raw, raw))), raw)            # ⟨vol,vol⟩=1
+   ...     raw = G.project(G.tensor(*[basis_vec(V, i, n) for i in range(n)]), ext_power(V, n))  # e₁∧…∧eₙ
+   ...     return G.scale(G.reciprocal(G.sqrt(pair(ext_power(V, n), raw, raw))), raw)           # ⟨vol,vol⟩=1
 
-**The two easy degrees, by hand.** Before the general construction, the extreme degrees
+The two easy degrees, by hand. Before the general construction, the extreme degrees
 ``k = 0`` and ``k = n`` drop out of the defining identity with no machinery.
 
 At ``k = 0`` a ``0``-vector is a scalar ``c``, and there is a single scalar ``α = a`` to
@@ -673,50 +669,73 @@ side is ``a·vol ∧ ⋆ω = a·(⋆ω)·vol`` and the right is
    \star \omega \;=\; \langle \omega, \mathrm{vol}\rangle
    \qquad (\omega \in \Lambda^{n}).
 
-That reads off the coefficient of ``ω`` along the volume form — ``pair(Ln, ω, vol)``.
+That reads off the coefficient of ``ω`` along the volume form — ``pair(ext_power(V, n), ω, vol)``.
 
-**The general case, term by term.** For ``0 < k < n`` there is no shortcut, so we transcribe
+The general case, term by term. For ``0 < k < n`` there is no shortcut, so we transcribe
 the identity directly, and this is where the grassmann terms earn their keep. Read
 ``α ∧ ⋆β = ⟨α, β⟩·vol`` as saying that two elements of ``(Λᵏ)*`` — two covectors on
 ``Λᵏ`` — agree for every ``α``. Each side is one primitive.
 
-The **right side** ``α ↦ ⟨α, β⟩`` is the covector that ``β`` measures with: the metric
-*lower* of ``β``. Grassmann spells it :func:`~grassmann.flat` — ``G.flat(Lk)`` is the map
-``Λᵏ → (Λᵏ)*``, and ``G.flat(Lk)(β)`` is that covector.
+The right side ``α ↦ ⟨α, β⟩`` is the covector that ``β`` measures with: the metric
+*lower* of ``β``. Grassmann calls this the :func:`~grassmann.flat` — ``G.flat(ext_power(V, k))`` is the map
+``Λᵏ → (Λᵏ)*``, and ``G.flat(ext_power(V, k))(β)`` is that covector.
 
-The **left side**, for a fixed ``(n−k)``-vector ``γ``, is ``α ↦ ⟨α ∧ γ, vol⟩`` — again a
+The left side, for a fixed ``(n−k)``-vector ``γ``, is ``α ↦ ⟨α ∧ γ, vol⟩`` — again a
 covector on ``Λᵏ``. Letting ``γ`` vary makes a linear map ``M : Λⁿ⁻ᵏ → (Λᵏ)*``, and we write
-it with :func:`~grassmann.llam`, the *linear lambda*, **curried once**: the outer lambda binds
-``γ ∈ Λⁿ⁻ᵏ`` and returns an inner lambda that binds ``α ∈ Λᵏ`` and returns the scalar
-``⟨α ∧ γ, vol⟩``. A bilinear form *is* a linear map into a space of linear maps, and that
-nesting is how grassmann writes one; inside it sit two operators we already have —
-:func:`wedge` for ``α ∧ γ`` and ``pair`` for ``⟨·, vol⟩``.
+it with :func:`~grassmann.llam`, the *linear lambda*, curried once. It is worth building from
+the inside out. Fix ``ℝ³`` and ``k = 1`` (so ``n − k = 2``) and start with the inner map: for
+a bound ``γ ∈ Λ²`` it sends ``α ∈ Λ¹`` to the scalar ``⟨α ∧ γ, vol⟩``, a covector on ``Λ¹`` —
+:func:`wedge` for ``α ∧ γ`` and ``pair`` for ``⟨·, vol⟩``:
 
-The identity now says ``M(⋆β) = flat(β)``, so ``⋆β = M⁻¹(flat β)``. ``M`` is **square** —
-``Λⁿ⁻ᵏ`` and ``(Λᵏ)*`` both have dimension ``C(n, k)`` — and an isomorphism, so its inverse
-is :func:`~grassmann.pinv` (a pseudo-inverse, which on a square invertible map is the plain
-inverse). One wrinkle at ``k = 1``: an ordinary vector is an element of ``V``, whereas
-``Λ¹(V)`` is the wrapper ``Img(alt(V, 1))``, so we first :func:`~grassmann.project` the input
-into ``Λ¹`` for ``flat`` to accept it. Putting the three degrees together:
+.. doctest::
+
+   >>> vol = unit_vol(V, 3)
+   >>> wedge_into_vol = lambda g: G.llam(ext_power(V, 1),          # α ∈ Λ¹ ↦ ⟨α ∧ γ, vol⟩
+   ...     lambda a: pair(ext_power(V, 3), wedge(V, a, g, 1, 2), vol))
+
+Now let ``γ`` vary — wrap that inner map in an outer ``llam`` over ``Λ²``. The result ``M`` is
+a linear map whose *values* are themselves linear maps, which is exactly what a bilinear form
+is, and how grassmann writes one:
+
+.. doctest::
+
+   >>> M = G.llam(ext_power(V, 2), wedge_into_vol)                 # M : Λ² → (Λ¹)*
+
+The identity ``α ∧ ⋆β = ⟨α, β⟩·vol`` now reads ``M(⋆β) = ♭β``, so ``⋆β = M⁻¹(♭β)``. ``M`` is
+square — ``Λⁿ⁻ᵏ`` and ``(Λᵏ)*`` both have dimension ``C(n, k)`` — and an isomorphism, so its
+inverse is :func:`~grassmann.pinv` (a pseudo-inverse, which on a square invertible map is the
+plain inverse). With the built-up ``M`` in hand, ``⋆`` of a 1-vector is one line, and it lands
+where it should — ``⋆e₁`` in the ``e₂ ∧ e₃`` slot of ``Λ²``:
+
+.. doctest::
+
+   >>> beta = G.var("b", V)
+   >>> star = G.pinv(M)(G.flat(ext_power(V, 1))(G.project(beta, ext_power(V, 1))))
+   >>> show(star, b=np.array([1., 0., 0.]))                        # ⋆e₁
+   [0.0, 0.0, 0.5774]
+
+That ``project`` is a wrinkle worth naming: an ordinary vector is an element of ``V``, whereas
+``Λ¹(V)`` is the wrapper ``Img(alt(V, 1))``, so we push the input into ``Λ¹`` for ``flat`` to
+accept it. Folding the two easy degrees back in, the general star is the same three lines over
+an arbitrary ``(V, k)``:
 
 .. doctest::
 
    >>> def hodge_star(V: G.Expr, omega: G.Expr, k: int) -> G.Expr:
    ...     n = dim(V)
-   ...     Ln, vol = ext_power(V, n), unit_vol(V, n)
+   ...     vol = unit_vol(V, n)
    ...     if k == 0:                                  # ⋆c = c · vol
    ...         return G.scale(omega, vol)
    ...     if k == n:                                  # ⋆ω = ⟨ω, vol⟩, the top coefficient
-   ...         return pair(Ln, omega, vol)
-   ...     Lk, Lnk = ext_power(V, k), ext_power(V, n - k)
-   ...     om = G.project(omega, Lk) if k == 1 else omega     # a plain vector ↦ Λ¹
-   ...     M = G.llam(Lnk, lambda g: G.llam(                  # M : Λⁿ⁻ᵏ → (Λᵏ)*, γ ↦ (α ↦ ⟨α∧γ, vol⟩)
-   ...         Lk, lambda a: pair(Ln, wedge(V, a, g, k, n - k), vol)))
-   ...     return G.pinv(M)(G.flat(Lk)(om))                   # ⋆ω = M⁻¹(♭ω)
+   ...         return pair(ext_power(V, n), omega, vol)
+   ...     om = G.project(omega, ext_power(V, 1)) if k == 1 else omega    # a plain vector ↦ Λ¹
+   ...     M = G.llam(ext_power(V, n - k), lambda g: G.llam(              # γ ↦ (α ↦ ⟨α∧γ, vol⟩)
+   ...         ext_power(V, k), lambda a: pair(ext_power(V, n), wedge(V, a, g, k, n - k), vol)))
+   ...     return G.pinv(M)(G.flat(ext_power(V, k))(om))                  # ⋆ω = M⁻¹(♭ω)
 
 In ``ℝ³`` this is a known operation. A 2-vector ``u ∧ v`` is the plane spanned by ``u`` and
 ``v``; its complement is the line perpendicular to that plane — and that line, with the
-right orientation, is exactly the **cross product** ``u × v``:
+right orientation, is exactly the cross product ``u × v``:
 
 .. doctest::
 
@@ -734,13 +753,12 @@ pseudo-inverse all have to be right. Across dimensions and degrees:
 
    >>> def hodge_characterizes(n: int, k: int) -> bool:
    ...     V = R(n)
-   ...     Ln, Lk = ext_power(V, n), ext_power(V, k)
    ...     vol = unit_vol(V, n)
-   ...     al, be = G.var("al", Lk), G.var("be", Lk)
+   ...     al, be = G.var("al", ext_power(V, k)), G.var("be", ext_power(V, k))
    ...     av, bv = rng.standard_normal(comb(n, k)), rng.standard_normal(comb(n, k))
-   ...     lhs = run(pair(Ln, wedge(V, al, hodge_star(V, be, k), k, n - k), vol),
+   ...     lhs = run(pair(ext_power(V, n), wedge(V, al, hodge_star(V, be, k), k, n - k), vol),
    ...               al=av, be=bv)
-   ...     rhs = run(pair(Lk, al, be), al=av, be=bv)
+   ...     rhs = run(pair(ext_power(V, k), al, be), al=av, be=bv)
    ...     return np.allclose(lhs, rhs, atol=1e-7)
    >>> bool(all(hodge_characterizes(n, k) for n, k in [(2, 1), (3, 1), (3, 2)]))
    True
@@ -801,7 +819,7 @@ pseudo-inverse and becomes a number.
 
 That decision — which basis — is where the Hodge star parts ways with everything else in
 this tour, and in the plane it is easy to watch. ``⋆`` sends ``Λ¹(ℝ²)`` back to
-``Λ¹(ℝ²)``, so it is a ``2 × 2`` matrix — a **quarter turn**. Reading its two columns,
+``Λ¹(ℝ²)``, so it is a ``2 × 2`` matrix — a quarter turn. Reading its two columns,
 where it sends ``e₁`` and ``e₂``, in the standard basis:
 
 .. doctest::
@@ -820,7 +838,7 @@ where it sends ``e₁`` and ``e₂``, in the standard basis:
 
 A rotation by 90° — scaled, as ever, by the induced metric. Now compile the *same*
 expression again, but ask :func:`~grassmann.compile_in` to read the input in a
-**stretched** basis, the one in which ``e₁`` is twice as long:
+stretched basis, the one in which ``e₁`` is twice as long:
 
 .. doctest::
 
@@ -847,8 +865,7 @@ of the tensor slots — they never consult the inner product, so no metric enter
 definition, and re-basing them is only the ordinary change of coordinates. The Hodge
 star is the one operator in this tour built *through* the inner product, so its matrix
 carries the metric with it: change the basis, change the metric, and ``⋆`` changes with
-it. When the same ``k``-vector's ``⋆`` looks different in two compilations, that is not a
-bug — it is the inner product showing through.
+it. 
 
 The interior product, and forms
 -------------------------------
