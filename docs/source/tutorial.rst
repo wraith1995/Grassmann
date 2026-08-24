@@ -642,7 +642,7 @@ length with :func:`~grassmann.reciprocal` and :func:`~grassmann.sqrt`:
 
 At ``k = 0`` a ``0``-vector is a scalar ``c``, and there is a single scalar ``α = a`` to
 test against. Wedging by a scalar is multiplication and ``⟨a, c⟩ = a c``, so
-``a ∧ ⋆c = ⟨a, c⟩\,\mathrm{vol}`` reads ``a · ⋆c = a c · vol``, and dividing by ``a``:
+``a ∧ ⋆c = ⟨a, c⟩·vol`` reads ``a · ⋆c = a c · vol``, and dividing by ``a``:
 
 .. math::
 
@@ -653,9 +653,9 @@ test against. Wedging by a scalar is multiplication and ``⟨a, c⟩ = a c``, so
 
 At ``k = n`` the star runs the other way, ``Λⁿ → Λ⁰``. The top exterior power is
 one-dimensional, so both ``ω`` and the test vector ``α`` are multiples of ``vol``; write
-``ω = b\,\mathrm{vol}`` and ``α = a\,\mathrm{vol}`` and recall ``⟨vol, vol⟩ = 1``. The left
-side is ``a\,\mathrm{vol} ∧ ⋆ω = a\,(⋆ω)\,\mathrm{vol}`` and the right is
-``⟨α, ω⟩\,\mathrm{vol} = a b\,\mathrm{vol}``, so ``⋆ω = b``:
+``ω = b·vol`` and ``α = a·vol`` and recall ``⟨vol, vol⟩ = 1``. The left
+side is ``a·vol ∧ ⋆ω = a·(⋆ω)·vol`` and the right is
+``⟨α, ω⟩·vol = a b·vol``, so ``⋆ω = b``:
 
 .. math::
 
@@ -666,7 +666,7 @@ That reads off the coefficient of ``ω`` along the volume form — ``pair(Ln, ω
 
 **The general case, term by term.** For ``0 < k < n`` there is no shortcut, so we transcribe
 the identity directly, and this is where the grassmann terms earn their keep. Read
-``α ∧ ⋆β = ⟨α, β⟩\,\mathrm{vol}`` as saying that two elements of ``(Λᵏ)*`` — two covectors on
+``α ∧ ⋆β = ⟨α, β⟩·vol`` as saying that two elements of ``(Λᵏ)*`` — two covectors on
 ``Λᵏ`` — agree for every ``α``. Each side is one primitive.
 
 The **right side** ``α ↦ ⟨α, β⟩`` is the covector that ``β`` measures with: the metric
