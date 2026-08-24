@@ -624,41 +624,84 @@ coordinate formula. The star is pinned down by
    \alpha \wedge \star\beta \;=\; \langle \alpha, \beta\rangle \; \mathrm{vol}
    \qquad \text{for all } \alpha \in \Lambda^{k}(V),
 
-so read it as follows: wedging into the volume form is a map
-:math:`M : \Lambda^{n-k} \to (\Lambda^{k})^{*}`, the metric lower :math:`\flat` turns
-:math:`\beta` into an element of :math:`(\Lambda^{k})^{*}`, and
-:math:`\star = M^{-1} \circ \flat`. Every one of those pieces is a grassmann primitive
-— :func:`~grassmann.llam` for ``M``, :func:`~grassmann.flat` for the lower, and
-:func:`~grassmann.pinv` for the inverse of a square isomorphism.
-
-First the unit volume form, the wedge of the standard basis normalized to length one:
+where ``vol`` is the **unit volume form**: the wedge of the standard basis, ``e₁ ∧ … ∧ eₙ``,
+normalized so ``⟨vol, vol⟩ = 1``. It is the one ingredient that needs a basis to name, and
+that is exactly why ``⋆`` depends on a basis where the wedge and alternator do not. We build
+``vol`` by projecting the tensor of the basis vectors into ``Λⁿ`` and rescaling to unit
+length with :func:`~grassmann.reciprocal` and :func:`~grassmann.sqrt`:
 
 .. doctest::
 
    >>> def unit_vol(V: G.Expr, n: int) -> G.Expr:
    ...     Ln = ext_power(V, n)
-   ...     raw = G.project(G.tensor(*[basis_vec(V, i, n) for i in range(n)]), Ln)
-   ...     return G.scale(G.reciprocal(G.sqrt(pair(Ln, raw, raw))), raw)
+   ...     raw = G.project(G.tensor(*[basis_vec(V, i, n) for i in range(n)]), Ln)   # e₁∧…∧eₙ
+   ...     return G.scale(G.reciprocal(G.sqrt(pair(Ln, raw, raw))), raw)            # ⟨vol,vol⟩=1
 
-Note that like with our earlier dimension tests, we had to insert a basis into this definition via just writing it in terms.
-This makes sense because the Hodge start is defined up to a choice of volume form, which is choosen by a basis.
+**The two easy degrees, by hand.** Before the general construction, the extreme degrees
+``k = 0`` and ``k = n`` drop out of the defining identity with no machinery.
 
-With the volume form, we can define the Hodge star:
+At ``k = 0`` a ``0``-vector is a scalar ``c``, and there is a single scalar ``α = a`` to
+test against. Wedging by a scalar is multiplication and ``⟨a, c⟩ = a c``, so
+``a ∧ ⋆c = ⟨a, c⟩\,\mathrm{vol}`` reads ``a · ⋆c = a c · vol``, and dividing by ``a``:
+
+.. math::
+
+   \star c \;=\; c \; \mathrm{vol}.
+
+⋆ of a scalar is that scalar's worth of volume — a single term, the volume form scaled by
+``c``, ``G.scale(c, vol)`` (:func:`~grassmann.scale`).
+
+At ``k = n`` the star runs the other way, ``Λⁿ → Λ⁰``. The top exterior power is
+one-dimensional, so both ``ω`` and the test vector ``α`` are multiples of ``vol``; write
+``ω = b\,\mathrm{vol}`` and ``α = a\,\mathrm{vol}`` and recall ``⟨vol, vol⟩ = 1``. The left
+side is ``a\,\mathrm{vol} ∧ ⋆ω = a\,(⋆ω)\,\mathrm{vol}`` and the right is
+``⟨α, ω⟩\,\mathrm{vol} = a b\,\mathrm{vol}``, so ``⋆ω = b``:
+
+.. math::
+
+   \star \omega \;=\; \langle \omega, \mathrm{vol}\rangle
+   \qquad (\omega \in \Lambda^{n}).
+
+That reads off the coefficient of ``ω`` along the volume form — ``pair(Ln, ω, vol)``.
+
+**The general case, term by term.** For ``0 < k < n`` there is no shortcut, so we transcribe
+the identity directly, and this is where the grassmann terms earn their keep. Read
+``α ∧ ⋆β = ⟨α, β⟩\,\mathrm{vol}`` as saying that two elements of ``(Λᵏ)*`` — two covectors on
+``Λᵏ`` — agree for every ``α``. Each side is one primitive.
+
+The **right side** ``α ↦ ⟨α, β⟩`` is the covector that ``β`` measures with: the metric
+*lower* of ``β``. Grassmann spells it :func:`~grassmann.flat` — ``G.flat(Lk)`` is the map
+``Λᵏ → (Λᵏ)*``, and ``G.flat(Lk)(β)`` is that covector.
+
+The **left side**, for a fixed ``(n−k)``-vector ``γ``, is ``α ↦ ⟨α ∧ γ, vol⟩`` — again a
+covector on ``Λᵏ``. Letting ``γ`` vary makes a linear map ``M : Λⁿ⁻ᵏ → (Λᵏ)*``, and we write
+it with :func:`~grassmann.llam`, the *linear lambda*, **curried once**: the outer lambda binds
+``γ ∈ Λⁿ⁻ᵏ`` and returns an inner lambda that binds ``α ∈ Λᵏ`` and returns the scalar
+``⟨α ∧ γ, vol⟩``. A bilinear form *is* a linear map into a space of linear maps, and that
+nesting is how grassmann writes one; inside it sit two operators we already have —
+:func:`wedge` for ``α ∧ γ`` and ``pair`` for ``⟨·, vol⟩``.
+
+The identity now says ``M(⋆β) = flat(β)``, so ``⋆β = M⁻¹(flat β)``. ``M`` is **square** —
+``Λⁿ⁻ᵏ`` and ``(Λᵏ)*`` both have dimension ``C(n, k)`` — and an isomorphism, so its inverse
+is :func:`~grassmann.pinv` (a pseudo-inverse, which on a square invertible map is the plain
+inverse). One wrinkle at ``k = 1``: an ordinary vector is an element of ``V``, whereas
+``Λ¹(V)`` is the wrapper ``Img(alt(V, 1))``, so we first :func:`~grassmann.project` the input
+into ``Λ¹`` for ``flat`` to accept it. Putting the three degrees together:
 
 .. doctest::
 
    >>> def hodge_star(V: G.Expr, omega: G.Expr, k: int) -> G.Expr:
    ...     n = dim(V)
    ...     Ln, vol = ext_power(V, n), unit_vol(V, n)
-   ...     if k == 0:                       # ⋆c = c · vol
+   ...     if k == 0:                                  # ⋆c = c · vol
    ...         return G.scale(omega, vol)
-   ...     if k == n:                       # ⋆ of the top form is its coefficient
+   ...     if k == n:                                  # ⋆ω = ⟨ω, vol⟩, the top coefficient
    ...         return pair(Ln, omega, vol)
    ...     Lk, Lnk = ext_power(V, k), ext_power(V, n - k)
-   ...     om = G.project(omega, Lk) if k == 1 else omega
-   ...     M = G.llam(Lnk, lambda g: G.llam(
+   ...     om = G.project(omega, Lk) if k == 1 else omega     # a plain vector ↦ Λ¹
+   ...     M = G.llam(Lnk, lambda g: G.llam(                  # M : Λⁿ⁻ᵏ → (Λᵏ)*, γ ↦ (α ↦ ⟨α∧γ, vol⟩)
    ...         Lk, lambda a: pair(Ln, wedge(V, a, g, k, n - k), vol)))
-   ...     return G.pinv(M)(G.flat(Lk)(om))
+   ...     return G.pinv(M)(G.flat(Lk)(om))                   # ⋆ω = M⁻¹(♭ω)
 
 In ``ℝ³`` this is a known operation. A 2-vector ``u ∧ v`` is the plane spanned by ``u`` and
 ``v``; its complement is the line perpendicular to that plane — and that line, with the
