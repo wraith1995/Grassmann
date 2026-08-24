@@ -2,7 +2,7 @@ grassmann
 =========
 Grassmann is a programming language, a lambda calculus like language, for coordinate free multi-linear algebra.
 Grassmann's compiler takes two programs: a term, a vector (or non-linear map between vectors), and a basis (or non-linear map to a basis).
-Grassmann's compiler produces a subset of Python (Jax/PyTorch) that computes the given term in the given basis.
+Grassmann's compiler produces a standalone subset of Python (NumPy, or PyTorch via polyarray) that computes the given term in the given basis.
 Grassmann's compiler applies knowledge of the properties of bases and multi-linear algebra to find an efficient representation.
 Grassmann also ships with rewriting, automatic differentiation, and utilities for the construction of the usual tensor calculus constructions (exterior algebra, pullbacks).
 
