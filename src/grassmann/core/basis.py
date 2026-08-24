@@ -20,7 +20,7 @@ built the same way the space is::
 
 Two bases coordinatize an image differently and deliberately.
 :class:`ImageBasis` takes the literal pushforward columns ``f(s₁), …, f(sₙ)`` —
-the basis chartlib transports along ``f`` — and does not orthonormalize them.
+the transported (pushforward) frame along ``f`` — and does not orthonormalize them.
 :class:`ProjectedBasis` gives the orthonormalized basis of a chosen subspace
 instead; orthonormalization is always explicit here, never implicit.
 
@@ -240,7 +240,7 @@ class ImageBasis:
 
     Given a map ``f`` and a basis ``s`` of its domain, this coordinatizes ``Img(f)`` by
     the vectors ``f(s₁), …, f(sₙ)`` themselves, read in the codomain basis ``target`` —
-    the basis chartlib transports along ``f``. ``source`` defaults to the standard basis
+    the transported (pushforward) frame along ``f``. ``source`` defaults to the standard basis
     of ``dom f`` when left as ``None``, giving the literal columns ``f(eᵢ)``, and
     ``target`` likewise defaults to the standard basis of ``cod f``.
 

@@ -3047,7 +3047,7 @@ def _rep_eval(
     if _rational_lane():
         # RATIONAL lane: contract INLINE as per-cell symbolic RF, so the result is a closed-form
         # polynomial in the program inputs (no residual bulk `EinsumStmtOp`). This is what lets a
-        # derivative-DOF contraction (e.g. a normal derivative `∇u·n`) inline over the cell vertices, so oracle's
+        # derivative-DOF contraction (e.g. a normal derivative `∇u·n`) inline over the cell vertices, so a consumer's
         # sparsity mask can detect structural zeros with `is_zero`. np.einsum runs on object cells.
         cells = [np.asarray(op.cells) for op in operands]
         res = np.asarray(np.einsum(spec, *cells))
@@ -4444,8 +4444,8 @@ def _rep_project(
         ortho = False          # `Q₀` in endpoint coords is NOT `PᵀP = I`; take the matched-dual arm
         # TAG the result with the ENDPOINT-ful subspace basis, not the endpoint-free
         # `default_basis(sub)`.  Both name the same subspace, but only this one says which ambient
-        # coordinates the basis was read in — and it is the basis a transported consumer (pointwise's
-        # requested `ProjectedBasis(alt, "image", ~Img⊗~Img, …)`) actually asks for, so the result
+        # coordinates the basis was read in — and it is the basis a transported consumer's
+        # requested `ProjectedBasis(alt, "image", ~Img⊗~Img, …)` actually asks for, so the result
         # lands ON the target and `_match_result` becomes a no-op instead of a cob back through the
         # canonical basis.  Tagging it endpoint-free here would be the same dishonesty the `LLam`
         # epilogue guards against: a basis the array is not in.
@@ -5582,7 +5582,7 @@ def _rep_llam_vmap(
             continue
         # A caller-SUPPLIED basis is a kernel argument identified by NAME — never a Var, so it must
         # be matched BEFORE the ``_var_name`` uid parse below: a supplied name may itself end in
-        # ``_<digits>`` (e.g. pointwise's per-chart ``frame_c1_0``), which that parse would read as
+        # ``_<digits>`` (e.g. a per-chart supplied name ``frame_c1_0``), which that parse would read as
         # ``uid = 0`` and silently feed the operand of the var with that uid instead of the basis.
         if _supplied_frame_shape(ctx, spec.name) is not None:
             shared_arrays.append(_declare_supplied_frame(ctx, spec.name))
@@ -5908,7 +5908,7 @@ def _compose_operand_targets(
     already going to land in: a ``basis_env`` PIN on ``f`` outranks ``default_basis``, because
     ``_rep_var`` honors the pin regardless of what we ask for.  Asking for the default against a
     pinned ``f`` guarantees the honesty check FAILS and the whole steer is discarded — which is
-    exactly what used to happen to pointwise's pinned ``u`` in the trace DOF.
+    exactly what used to happen to a consumer's pinned ``u`` in the trace DOF.
     """
     if want is None:
         return None
@@ -6211,7 +6211,7 @@ def _endpoint_subspace_cols(
     coordinates, but none of ``T`` — which for an ``Img(J)`` endpoint is where the QR radical lives.
 
     The endpoints are NOT read off the space: an ``Img(alt₂)`` arrives with ``source``/``target`` both
-    ``None`` (pointwise declares them on the requested BASIS, not on the space).  They do not need to
+    ``None`` (a consumer declares them on the requested BASIS, not on the space).  They do not need to
     be — ``alt`` is an ENDOMORPHISM of the tensor square, so ``want_basis``, the ambient basis the
     operand is already in, serves as BOTH endpoints.  That is the whole point: realize the basis in
     the basis the consumer already has, rather than dragging the consumer to the basis's basis.
@@ -7086,7 +7086,7 @@ class _QrColsOp:
         """Pyab op-carried lowering.
 
         Sign-fixed reduced-QR orthonormal columns ``Q·s`` with ``s = sign(diag R)`` (0 → +1) (twin of the
-        ``_qr_cols`` numpy renderer / :meth:`__call__`; mirrors chartlib's ``QrSignFixOp`` hook but returns
+        ``_qr_cols`` numpy renderer / :meth:`__call__`; mirrors the transported-frame sign-fix convention but returns
         only ``Q``).  ``torch.vmap`` batches the plain 2-D QR.
         """
         c = low.core
@@ -7851,10 +7851,10 @@ def _realize_image_covariant(
     # docstring above is explicit that `cols = T·Q₀` — the TRANSPORTED basis — is precisely the
     # affine-equivariance that P(T)=I needs (the non-transported per-cell basis breaks every traced
     # k ≥ 2 lane).  Dropping `T` leaves a basis that is CONSTANT and wrong: it certifies 100% under
-    # `partial_eval_numeric` (which checks constancy, never correctness), keeps
-    # polyarray/grassmann/pointwise/chartLib green, and breaks `P(T)=I` for every r ≥ 2 lane.  r = 1
-    # is immune because it has no proper-face weights, so `T` is trivial there.  Guarded by
-    # `oracle/tests/test_pt_identity_rapid.py`.
+    # `partial_eval_numeric` (which checks constancy, never correctness), passes every numeric
+    # constancy check, and breaks `P(T)=I` for every r ≥ 2 lane.  r = 1
+    # is immune because it has no proper-face weights, so `T` is trivial there.  Guarded by a
+    # downstream affine-invariance regression test.
     [f_cd_fast] = ctx.prog.emit_stmt(
         pa.TransposeOp(), [f_rep.array],
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],

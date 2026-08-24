@@ -822,7 +822,7 @@ class _QrSignConventionOp:
         """Lower this op into pyab expressions, computing ``(Q·s, s[:, None]·R)``.
 
         The sign vector is ``s = sign(diag R)`` with a zero read as ``+1``, exactly as in
-        :meth:`__call__`. It differs from chartlib's own sign fix only in taking ``(Q, R)`` as
+        :meth:`__call__`. It differs from the usual sign-fixed QR only in taking ``(Q, R)`` as
         given rather than factorizing.
         """
         c = low.core

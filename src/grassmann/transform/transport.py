@@ -29,9 +29,8 @@ injective ``f`` a **rational** function of ``f``, since orthonormalization is wh
 and is never materialized. :func:`assert_rational` checks the property directly, which is
 what separates this transport from a per-cell L²-orthonormalization.
 
-The transported reference basis is the grassmann-side object behind chartlib's
-``sample(..., mode="transport")``: it is :func:`transport_basis` of the reference basis
-along the chart immersion, and chartlib realizes it numerically.
+The transported reference basis is :func:`transport_basis` of the reference basis along the
+chart immersion; it is realized numerically only at the lowering boundary.
 """
 from __future__ import annotations
 

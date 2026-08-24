@@ -148,7 +148,7 @@ class _DCtx:
 # Derivative-input provenance + enumeration.
 #
 # A ``deps[uid] = None`` tracer differentiates into a fresh symbolic derivative-MAP input
-# ``∂ⁿsource/∂xⁿ : X ⊸ …`` (a Program input pointwise samples).  These two registries give the
+# ``∂ⁿsource/∂xⁿ : X ⊸ …`` (a Program input a consumer samples).  These two registries give the
 # inputs structured provenance — (base tracer var, derivative order) — so a caller can read off
 # EXACTLY which derivatives a (possibly multiply-differentiated) term references, by var identity
 # rather than by parsing the ``d_…`` name.  They also DEDUPE: the derivative of a given source
