@@ -958,101 +958,113 @@ distinction is worth making here.
 A tangent space, from an immersion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Take the surface concretely, with a chart ``φ : ℝ² → ℝ³``. As above, what grassmann needs
-is not ``φ`` but its differential ``J = dφ``, an **injective** map from the parameter domain
-into the ambient. The tangent plane is then not a new primitive at all — it is the image of
-that map, a fundamental subspace we already know how to name:
+Take the surface concretely, and take a **curved** one so that something actually varies:
+the paraboloid ``φ(u, v) = (u, v, u² + v²)``. What grassmann needs is not ``φ`` but its
+differential ``J = dφ``, an **injective** map from the parameter plane into the ambient — and
+the whole point is that ``J`` is *not one matrix*. At the point ``(u, v)`` it is
+
+.. math::
+
+   d\varphi\big|_{(u,v)} \;=\;
+   \begin{pmatrix} 1 & 0 & 2u \\ 0 & 1 & 2v \end{pmatrix},
+
+a different linear map at every point, which is exactly why the tangent plane needs a *frame*
+and not a fixed basis. The tangent space itself is no new primitive: it is the image of that
+map, and the frame is the pushforward of the chart's basis — the columns of ``J``, which
+:func:`~grassmann.image_basis` builds and which therefore turn as the point moves:
 
 .. doctest::
 
    >>> U, X = R(2), R(3)                        # chart domain, ambient
-   >>> J = G.var("J", U >> X, props=G.inj)      # J = dφ, injective
+   >>> J = G.var("J", U >> X, props=G.inj)      # J = dφ, injective — filled in per point
    >>> tangent = G.img(J)                       # T = Img(J) ⊂ ℝ³
    >>> cotangent = G.dual(tangent)              # T*
-   >>> dim(tangent), dim(cotangent)
-   (2, 2)
+   >>> tframe = G.image_basis(J)                # the frame: columns of dφ, so it turns with p
+   >>> G.unparse(tframe), (dim(tangent), dim(cotangent))
+   ('J : (ℝ^2)* ⊗ ℝ^3 {inj} ⊢ ibasis(J)', (2, 2))
+   >>> def dphi(u, v):                          # dφ|_(u,v): the frame realized at the point
+   ...     return np.array([[1., 0., 2*u], [0., 1., 2*v]])
 
-The tangent space is coordinatized by the pushforward of the chart's own basis — the
-columns of the Jacobian, which is what ``G.image_basis`` builds. This is a frame in the
-sense just defined, not a fixed basis: it is built from ``J``, so it turns as the chart
-does.
-
-.. doctest::
-
-   >>> tframe = G.image_basis(J)
-   >>> G.unparse(tframe)
-   'J : (ℝ^2)* ⊗ ℝ^3 {inj} ⊢ ibasis(J)'
-
-Now the point of all this. We never supplied a metric for the tangent space, and yet
-``pair`` works on it — the inner product is induced by the way ``T`` sits inside
-``ℝ³``. Ask for it component by component in the tangent frame, on a sheared chart:
+We never supplied a metric for ``T``, yet ``pair`` works on it — the inner product is induced
+by the way ``T`` sits inside ``ℝ³``. Read it out in the tangent frame, and — the part that
+was missing before — read it at **two different points** of the surface:
 
 .. doctest::
 
    >>> v, w = G.var("v", tangent), G.var("w", tangent)
-   >>> kJ = f"J_{J.node.uid}"
-   >>> kv, kw = f"v_{v.node.uid}", f"w_{w.node.uid}"
-   >>> prog = G.compile_in(pair(tangent, v, w), {v: tframe, w: tframe})
-   >>> Jv = np.array([[2., 0., 0.], [1., 1., 0.]])          # a sheared chart
-   >>> metric = np.array([[float(np.asarray(prog.run(
-   ...     {kJ: Jv, kv: np.eye(2)[i], kw: np.eye(2)[j]})["result"], float))
-   ...     for j in range(2)] for i in range(2)])
-   >>> print(np.round(metric, 4) + 0.0)
-   [[4. 2.]
-    [2. 2.]]
-   >>> bool(np.allclose(metric, Jv @ Jv.T))     # the first fundamental form
-   True
+   >>> kJ, kv, kw = f"J_{J.node.uid}", f"v_{v.node.uid}", f"w_{w.node.uid}"
+   >>> gprog = G.compile_in(pair(tangent, v, w), {v: tframe, w: tframe})
+   >>> def metric_at(u, v):                     # the first fundamental form g = J Jᵀ at (u, v)
+   ...     e = np.eye(2)
+   ...     return (np.round([[float(np.asarray(gprog.run(
+   ...         {kJ: dphi(u, v), kv: e[i], kw: e[j]})["result"], float))
+   ...         for j in range(2)] for i in range(2)], 4) + 0.0).tolist()
+   >>> metric_at(0.0, 0.0)                       # at the pole: flat, g = I
+   [[1.0, 0.0], [0.0, 1.0]]
+   >>> metric_at(1.0, 1.0)                       # out on the bowl: sheared and stretched
+   [[5.0, 4.0], [4.0, 5.0]]
 
-That is the **first fundamental form** ``J Jᵀ``, and we did not write it down — it fell
-out of ``Img(J)`` carrying the ambient metric through the immersion. In this frame the
-metric is emphatically not the identity, which is precisely why ``T`` and ``T*`` are
-now different spaces with different coordinates. A covector eats a vector by the dual
-pairing, with no metric involved:
+That is the **first fundamental form** ``g = J Jᵀ``, and we never wrote it down — it fell out
+of ``Img(J)`` carrying the ambient metric through the immersion. The two matrices are the
+section in one image: the *same* term ``pair(tangent, v, w)`` returns the identity at the pole
+and a sheared, stretched metric further out. The geometry varies with the point, and the frame
+is what carries the variation.
+
+The metric-free operations, by contrast, do **not** vary. A covector eats a vector by the dual
+pairing, and the dual frame is built to make that ``3·1 + 4·2 = 11`` wherever you stand on the
+surface:
 
 .. doctest::
 
-   >>> nu = G.var("nu", cotangent)
-   >>> knu = f"nu_{nu.node.uid}"
-   >>> pairing = G.compile_in(nu(v), {v: tframe, nu: G.dual(tframe)})
-   >>> float(np.asarray(pairing.run(
-   ...     {kJ: Jv, kv: np.array([1., 2.]), knu: np.array([3., 4.])})["result"], float))
-   11.0
+   >>> nu = G.var("nu", cotangent); knu = f"nu_{nu.node.uid}"
+   >>> pprog = G.compile_in(nu(v), {v: tframe, nu: G.dual(tframe)})
+   >>> def pairing_at(u, v):
+   ...     return round(float(np.asarray(pprog.run(
+   ...         {kJ: dphi(u, v), kv: np.array([1., 2.]), knu: np.array([3., 4.])})["result"], float)), 4)
+   >>> pairing_at(0.0, 0.0), pairing_at(1.0, 1.0)
+   (11.0, 11.0)
 
-``3·1 + 4·2 = 11``: the dual frame is defined to make the pairing that simple, whatever the
-chart does. Compare ``pair(tangent, ...)``, which had to work through ``J Jᵀ``. Two
-different operations, kept apart by their spaces.
+Same number at both points: the pairing is frame-covariant, needing no metric. It is the same
+split the Hodge star drew — operators built *through* the inner product move with the frame,
+the metric-free ones stand still — except that here the frame is moving of its own accord.
 
 Forms on the surface
 ~~~~~~~~~~~~~~~~~~~~
 
-With a cotangent space in hand, the whole algebra transfers with no new code — the
-``k``-forms of the surface are ``ext_power(cotangent, k)``, and a 2-form is an area
-measurement on the tangent plane. Since the tangent plane is two-dimensional,
-``C(2,2) = 1``: there is exactly one area form up to scale, and the wedge of two
-independent 1-forms produces it:
+The whole exterior algebra transfers with no new code, and the object that shows why it was
+worth the trouble is the ``2``-**vector**: the area of a patch of the surface. The unit
+coordinate parallelogram is ``e₁ ∧ e₂`` in the tangent frame, and its size is the area
+``√det g`` — which the metrics above already fix at ``√1 = 1`` at the pole and ``√9 = 3`` out
+on the bowl. We read it straight off the wedge and the induced ``Λ²`` metric, at both points:
 
 .. doctest::
 
-   >>> al, be = G.var("al", cotangent), G.var("be", cotangent)
-   >>> ka, kb = f"al_{al.node.uid}", f"be_{be.node.uid}"
-   >>> area = G.compile_in(wedge(cotangent, al, be, 1, 1),
-   ...                     {al: G.dual(tframe), be: G.dual(tframe)})
-   >>> out = np.asarray(area.run(
-   ...     {kJ: Jv, ka: np.array([1., 0.]), kb: np.array([0., 1.])})["result"], float)
-   >>> out.size                                 # dim Λ²(T*) = C(2, 2)
-   1
+   >>> L2 = ext_power(tangent, 2)
+   >>> area = wedge(tangent, v, w, 1, 1)                    # e₁ ∧ e₂: the area 2-vector
+   >>> aprog = G.compile_in(pair(L2, area, area), {v: tframe, w: tframe})
+   >>> def patch_area(u, v):
+   ...     sq = float(np.asarray(aprog.run(
+   ...         {kJ: dphi(u, v), kv: np.array([1., 0.]), kw: np.array([0., 1.])})["result"], float))
+   ...     return round((sq / 2.0) ** 0.5, 4)               # |e₁∧e₂|² = 2·det g  (the 2! again)
+   >>> patch_area(0.0, 0.0), patch_area(1.0, 1.0)
+   (1.0, 3.0)
 
-The same ``wedge`` defined for ``ℝ³``, over a space that is an image rather than a
-coordinate tuple, in a frame that varies with the point on the surface. The definition did
-not have to know the difference.
+The same ``wedge`` we defined for flat ``ℝ³``, now over a space that is an image rather than a
+coordinate tuple, in a frame that turns with the point — and the area it reports **triples**
+between the two points, because the surface has stretched underneath it. Nothing in ``wedge``
+was told any of this: the ``2! = 2`` in ``|e₁∧e₂|² = 2·det g`` is the induced-``Λᵏ``-metric
+factor from the earlier section, not something the surface added. All the geometry lives in
+``J``, and every operator reads it off the frame.
 
 Calculus: the exterior derivative
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The algebra of the surface is done; now let a form *vary over it* — a **form field** — and
-differentiate. The **exterior derivative** ``d`` raises the degree of a form field by one,
-and it is the one operator that, in the right dimension, is the gradient, the curl, and the
-divergence all at once.
+The algebra at each point is done; the other way a form varies over space is in its own
+value — a **form field** — and that is what we differentiate. The **exterior derivative**
+``d`` raises the degree of a form field by one, and it is the one operator that, in the right
+dimension, is the gradient, the curl, and the divergence all at once. We show it in flat
+coordinates, where the arithmetic is legible; it is the same operator over the moving frame
+above.
 
 The derivative it is built on is the **total covariant derivative** :func:`~grassmann.diff`,
 which differentiates a term with respect to a variable and hands back a linear map: the map
