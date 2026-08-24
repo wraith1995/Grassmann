@@ -408,42 +408,38 @@ def hodge_star(omega: Expr, k: int) -> Expr:
 def exterior_derivative(omega: Expr, x: Expr, k: int) -> Expr:
     """Take the exterior derivative of the ``k``-form field ``omega`` at the point ``x``.
 
-    ``d`` raises the degree, ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` with ``Ωᵏ = Λᵏ(V*)``, and is built
-    from the coordinate formula ``dω = Σⱼ eʲ ∧ ∂ⱼω``. Each summand pairs one partial
-    derivative with one dual basis 1-form:
+    ``d`` raises the degree, ``dω : Ωᵏ(V) → Ωᵏ⁺¹(V)`` with ``Ωᵏ = Λᵏ(V*)``, and is the
+    total covariant derivative, antisymmetrized::
 
-    - ``∂ⱼω = ∂ω/∂xⱼ`` is :func:`grassmann.transform.diff.diff` of ``ω`` in ``x``, applied
-      to the ``j``-th standard basis vector ``eⱼ ∈ V``;
-    - ``eʲ ∈ Λ¹(V*)`` is the ``j``-th standard dual basis 1-form, a constant.
+        dω = (k+1) · Alt(∇ω).
 
-    A ``0``-form is a scalar field and has no wedge to take, so that case reduces to the
-    differential ``df = Σⱼ (∂ⱼf) · eʲ``, a clean 1-form. The construction is coordinate-free
-    up to the standard orientation of ``V``, and nilpotent: ``d ∘ d = 0``.
+    :func:`grassmann.transform.diff.diff` differentiates ``ω`` in ``x`` and adds one
+    covariant index, so ``∇ω`` is a ``(k+1)``-tensor over ``V*``; the same :func:`alt` that
+    defines every exterior power then antisymmetrizes all ``k+1`` slots, and the result lands
+    in ``Λᵏ⁺¹(V*)``. No basis 1-forms are named — this is the coordinate-free antisymmetric
+    derivative, not the coordinate sum ``Σⱼ eʲ ∧ ∂ⱼω`` (an equal but basis-bound spelling).
+
+    Two reshapes make ``∇ω`` fit ``alt``. First ``ω`` is embedded into its ambient
+    ``(V*)⊗ᵏ`` so it differentiates as a plain tensor field rather than a wrapped ``Img(alt)``
+    value; then the nested ``V* ⊗ (V*)⊗ᵏ`` that ``diff`` returns is reassociated by
+    :func:`grassmann.embed.unlift` into the flat ``(V*)⊗ᵏ⁺¹`` the single-slot antisymmetrizer
+    expects — the same explicit reassociation the wedge uses.
+
+    A ``0``-form is a scalar field with no slots to antisymmetrize, so that case reduces to
+    the differential ``df``, a clean 1-form. Nilpotent: ``d ∘ d = 0``.
     """
-    import numpy as np
-
-    from grassmann.lower.represent import ExternalOp
-    from grassmann.lower._dims import dim_of
     V = Expr(x.node.space) if isinstance(x, Expr) else Expr(x.space)
     Vstar = G.dual(V)
-    n = dim_of(V.node)
     L1 = exterior_power(Vstar, 1)
-
-    def evec(j: int) -> Expr:                   # eⱼ ∈ V  (to take the j-th partial)
-        a = np.zeros(n); a[j] = 1.0
-        return G.external(V, ExternalOp(f"_e{j}", (lambda a=a: a)))
-
-    def eform(j: int) -> Expr:                  # eʲ ∈ Λ¹(V*)  (the dual basis 1-form)
-        a = np.zeros(n); a[j] = 1.0
-        return G.project(G.external(Vstar, ExternalOp(f"_ef{j}", (lambda a=a: a))), L1)
 
     if k == 0:                                  # d of a 0-form = its differential, a clean 1-form
         return G.project(G.diff(omega, x), L1)
 
-    def partial(j: int) -> Expr:
-        return G.diff(omega, x)(evec(j))        # ∂ω/∂xⱼ ∈ Λᵏ(V*)
-
-    return G.sum(*[wedge(eform(j), partial(j), 1, k) for j in range(n)])
+    flat = G.embed(omega, tensor_power(Vstar, k))     # view ω as a plain (V*)⊗ᵏ field
+    grad = G.unlift(G.diff(flat, x), [0, 1])          # ∇ω, reassociated to a flat (V*)⊗ᵏ⁺¹
+    antisym = alt(Vstar, k + 1).at([0])(grad)         # antisymmetrize all k+1 slots ⇒ (V*)⊗ᵏ⁺¹
+    result = G.scale(k + 1, G.project(antisym, exterior_power(Vstar, k + 1)))  # ⇒ Λᵏ⁺¹(V*)
+    return result.with_note(base_space=Vstar, exterior_k=k + 1)
 
 
 def _base_space_of_exterior(a: Expr, k: int) -> Expr:
