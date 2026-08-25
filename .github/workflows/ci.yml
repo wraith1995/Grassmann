@@ -27,7 +27,7 @@ jobs:
       - name: Install
         run: pip install -e ".[test]"
       - name: Run tests
-        run: pytest -n auto -q
+        run: pytest -n auto -q -m "not network"   # skip live-service tests (matrixcalculus.org)
 
   docs:
     runs-on: ubuntu-latest
