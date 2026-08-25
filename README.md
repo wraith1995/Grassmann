@@ -1,31 +1,32 @@
 # Grassmann
 
 A small, typed **programming language for coordinate-free linear and multilinear algebra** —
-a lambda-calculus over abstract spaces — embedded in Python and compiled to array code.
+a lambda-calculus over abstract Hilbert spaces — embedded in Python and compiled to array code.
 
-Its compiler takes two things: a **term** (a vector, or a linear or non-linear map between
-vectors) and a **basis** (or a map to a basis), and produces a standalone subset of Python
+Its compiler takes two things: a **term** (a vector, or a non-linear map between
+vector spaces) and a **basis** (or a map to a basis), and produces a standalone subset of Python
 that computes the term in that basis. It knows the properties of bases and multilinear
 algebra, so it inserts changes of basis where they are needed and folds away the ones that
 are not, arriving at an efficient representation. It also ships rewriting and simplification,
 automatic differentiation, and a derived exterior algebra and calculus (wedge, Hodge star,
 interior product, the exterior derivative, pullbacks).
 
-You write the mathematics — abstract spaces, duals, `⊕`/`⊗`, linear maps, the four
+The core idea is that you write the mathematics — abstract spaces, duals, `⊕`/`⊗`, linear maps, the four
 fundamental subspaces (`Ker` / `Img` / `CoKer` / `CoImg`), inner products, adjoints,
-pseudo-inverses — and never coordinates. Grassmann infers the types, chooses a basis only at
+pseudo-inverses — and never coordinates. Grassmann infers the types, chooses (or consumes) a basis only at
 the very end, and lowers the whole expression to a
 [polyarray](https://github.com/wraith1995/polyarray) `Program` you run on NumPy arrays (or
-PyTorch, via polyarray) or emit as standalone, dependency-light source.
+PyTorch, via polyarray) or emit as standalone source.
+
+
+Grassmann is the subject of active research that we hope to publish soon. We are interested in work
+at the intersection of scientific computing, numerical analysis,  computer graphics, computer algebra, and programming languages.
 
 ## Install
 
 ```sh
 pip install git+https://github.com/wraith1995/Grassmann.git
 ```
-
-Grassmann depends on [polyarray](https://github.com/wraith1995/polyarray), which the command
-above pulls in automatically.
 
 ## Quickstart
 
@@ -48,21 +49,19 @@ prog.run(feed)                                    # → {'result': array([2., 3.
 ```
 
 Read `x`'s coordinates in a *different* basis of `V` and recompile: the generated program now
-opens with a change of basis you never wrote. That basis-awareness is the point — and the
-tutorial builds the whole exterior algebra on top of it.
+opens with a change of basis you never wrote. 
 
 ## What it gives you
 
 - **Coordinate-free by construction.** A basis is a choice made at the lowering boundary, not
   something you thread through your code; `compile_in(term, inputs={var: basis}, target=basis)`
   pins bases explicitly when you want to, and the compiler inserts the changes of basis.
-- **The four fundamental subspaces as first-class spaces**, plus adjoints (`dagger`), solves,
-  pseudo-inverses, the musical isomorphisms, trace / determinant, and change of basis.
+- **Programming language features**, a lambda calculus supporting polymorphism and limited dependent types,
+   allowing the expression of linear algebra in a non-linear context.
 - **Rewriting and simplification** — beta reduction, a normal form, sum-of-products.
-- **Automatic differentiation** — a total covariant derivative (`diff`), forward mode.
-- **Exterior algebra and calculus in the standard library** — wedge, Hodge star, interior
-  product, the exterior derivative, and pullbacks — *derived from the core*, not built into it.
-- **Dimension-generic:** a term can lower over a runtime dimension.
+- **Fields and Automatic differentiation** — a total covariant derivative (`diff`) operating on a first order subset of the language,
+- **Exterior algebra in the standard library** — wedge, Hodge star, interior
+  product, the exterior derivative, and pullbacks — *derived from the core language.* 
 - **Compiles to a `polyarray.Program`:** run it on NumPy, run it on PyTorch through polyarray,
   or emit standalone Python with `polyarray.numpy_source.to_numpy_source(prog)` and inline it
   into your own code. Grassmann is a build-time front end that produces ordinary array code —
@@ -70,9 +69,9 @@ tutorial builds the whole exterior algebra on top of it.
 
 ## Documentation
 
-The Sphinx docs are a landing example, a **tutorial** that develops exterior algebra and
-calculus from first principles (every example is run and checked), a **grammar** reference, a
-**feature** tour, and the **API reference**:
+There is a **tutorial** that develops exterior algebra and
+calculus from first principles, a **grammar** reference, a
+**feature** tour, and an **API reference**:
 
 ```sh
 cd docs && make html      # → docs/build/html/index.html
