@@ -110,7 +110,7 @@ class Expr:
     # -- optional annotation facility ----------------------------------
 
     def with_note(self, **kw: object) -> Expr:
-        """Return a handle over the SAME node carrying the given side annotations.
+        """Return a handle over the same node carrying the given side annotations.
 
         Notes are optional metadata that never affect equality/hashing (an annotated and
         an un-annotated handle over the same node compare equal). Existing notes are
@@ -339,7 +339,7 @@ class Expr:
 
 
 class _SolveHandle:
-    """``f.solve`` is the Solve MAP; ``f.solve(v)`` is the applied SolveApply."""
+    """``f.solve`` is the Solve map; ``f.solve(v)`` is the applied SolveApply."""
 
     __slots__ = ("_f",)
 
@@ -367,7 +367,7 @@ class _SolveHandle:
 
 
 class _PinvHandle:
-    """``f.pinv`` is the Pinv MAP; ``f.pinv(v)`` is the applied PinvApply."""
+    """``f.pinv`` is the Pinv map; ``f.pinv(v)`` is the applied PinvApply."""
 
     __slots__ = ("_f",)
 

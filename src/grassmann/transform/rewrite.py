@@ -1046,7 +1046,7 @@ def _factor_llam_body(node: Term, dvar: Var) -> Term | None:
 
 
 def rule_eta_advanced(node: Term) -> Term | None:
-    """**Advanced η-reduction** (covector / linear-map folding) — make a derivative look like the map it *is*.
+    """Advanced η-reduction: fold a seed-linear derivative into the covector or linear map it denotes.
 
     Collapse a single-seed linear lambda ``λδ. body``, whose body is a covector or
     linear-map expression in δ, into the lambda-free term it denotes:

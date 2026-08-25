@@ -6,7 +6,7 @@ nonlinear or dependent function::
 
     Type  τ ::= ⟦ Space ⟧                a space as a type (vectors and linear maps)
               | Π(b:σ). τ                a function type; its kind is *
-              | App(g, positions, args…)  the type produced by applying a type function
+              | TypeApp(g, positions, args…)  the type produced by applying a type function
 
 Linear maps are spaces: ``s₀ ⊸ s₁`` is the space ``s₀* ⊗ s₁``, so the only
 non-space types are the Π-types, and an ordinary function type ``s₀ → s₁`` is

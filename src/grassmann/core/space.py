@@ -607,7 +607,7 @@ def svar(name: str) -> SVar:
 
 
 def dual(s: Space) -> Dual:
-    """Build the dual space ``~s``."""
+    """Build the dual space ``s*``."""
     return Dual(s)
 
 
@@ -798,9 +798,9 @@ def space_app(g: Term, positions: tuple[int, ...], *args: Space | Dim | Term) ->
     return App(g, tuple(positions), tuple(args))
 
 
-# Sugar: linear-map space  s0 ⊸ s1  ≡  ~s0 ⊗ s1.
+# Sugar: linear-map space  s0 ⊸ s1  ≡  s0* ⊗ s1.
 def linear_map_space(s0: Space, s1: Space) -> OProd:
-    """Build the space of linear maps ``s0 → s1``, namely ``~s0 ⊗ s1``."""
+    """Build the space of linear maps ``s0 → s1``, namely ``s0* ⊗ s1``."""
     return oprod(dual(s0), s1)
 
 

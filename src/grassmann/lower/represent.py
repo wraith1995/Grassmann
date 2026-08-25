@@ -2105,7 +2105,7 @@ def _norm_space(s: S.Space) -> S.Space:
 
 
 def _space_of_basis(ctx: _Ctx, b: B.Basis) -> S.Space | None:
-    """Give the space ``b`` is a basis **of** — the guard for a cob, which relates two bases of one space.
+    """Give the space ``b`` is a basis of — the guard for a cob, which relates two bases of one space.
 
     A ``ListBasis`` is always a full basis of its *ambient* (its vectors' space), so it returns that ambient.
     ``None`` only when undeterminable: an abstract ``BVar``/``BLam``/ ``BApp``, or a ``ListBasis`` over
@@ -2605,7 +2605,7 @@ def _map_is_injective(f: object) -> bool:
 def _cob_from_list(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     """From ``ListBasis`` — a basis given by literal term columns.
 
-    It has **no** cheaper structural cob to any target: its columns are arbitrary numbers, so realize them and
+    It has no cheaper structural cob to any target: its columns are arbitrary numbers, so realize them and
     compose via the standard basis (``cob(std→to)`` is still specialized to ``to``'s structure in
     :func:`_inverse_cols`).  The ``to`` cases are spelled out to record that none is special.
     """
@@ -2647,9 +2647,9 @@ def _cob_from_complete(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
 
 
 def _cob_via_standard(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
-    """Build the fallback cob — **route through the standard basis**.
+    """Build the fallback cob by routing through the standard basis.
 
-    Realizing a basis is exactly its cob **to** the standard basis (its vectors as columns in
+    Realizing a basis is exactly its cob to the standard basis (its vectors as columns in
     standard coords), so ``cob(A → B) = cob(std → B) · cob(A → std)`` with ``cob(std → B) =
     (realize B)⁻¹``.  That inverse is specialized to ``B``'s structure (see :func:`_inverse_cols`):
     a transpose when ``B`` is standard-orthonormal, an exact inverse when ``B`` is square, and a
@@ -7119,7 +7119,7 @@ def _assert_contract_axes_runtime(
     Each axis length is computed at run time via ``_AxisLenOp``; the assert compares the
     two ints so a run-time size mismatch raises with a provenance message.  Emitted at
     **every** ``Eval``/``Compose``/``Trace`` contraction — for *static* axes this is
-    belt-and-suspenders runtime validation **in addition to** the caller's lowering-time
+    belt-and-suspenders runtime validation in addition to the caller's lowering-time
     static check; for δ-sized (dynamic) axes the static check can't see, it is
     the only guard.
     """

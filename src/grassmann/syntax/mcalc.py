@@ -652,7 +652,7 @@ class _UF:
         na, nb = self.names.get(ra), self.names.get(rb)
         fa, fb = self.fixed.get(ra), self.fixed.get(rb)
         if fa is not None and fb is not None:
-            # two fixed (geometry/declared) spaces: OK iff the SAME space (labels may differ)
+            # two fixed (geometry/declared) spaces: OK iff the same space (labels may differ)
             if _node(fa) != _node(fb):
                 raise McalcBuildError(
                     f"space mismatch: {na!r} and {nb!r} are forced equal by the expression "
@@ -689,7 +689,7 @@ class _TN:
     # the thunks below are always called with no arguments; their parameters exist only to
     # capture loop/branch values by default, hence ``Callable[..., Expr]``.
     emit: Callable[..., Expr]       # () -> Expr  (vector/scalar/map; for "cov", the Riesz u)
-    sp: int = -1                    # vec/cov: space slot (cov: current DOMAIN slot)
+    sp: int = -1                    # vec/cov: space slot (cov: current domain slot)
     src: int = -1                   # mat: domain slot
     tgt: int = -1                   # mat: codomain slot
     usp: int = -1                   # cov: the Riesz vector's own slot
@@ -928,7 +928,7 @@ class _Builder:
             tn = _TN("mat", (lambda mkm=mkm, cache=cache: cache.setdefault("v", mkm())),
                      src=s, tgt=t, var_name=name)
         elif head in ("tangent", "cotangent", "normal", "conormal", "T", "CT"):
-            # a variable on a parameterization's geometry space (a FIXED space, not a slot).
+            # a variable on a parameterization's geometry space (a fixed space, not a slot).
             # T/CT are the preferred surface names for tangent/cotangent.
             head = {"T": "tangent", "CT": "cotangent"}.get(head, head)
             if not dimnames:
@@ -1257,7 +1257,7 @@ class _Builder:
         if h == "D":                     # total (covariant) derivative  D(f, x) = ∂f/∂x
             (fn, xv) = args if len(args) == 2 else (None, None)
             if fn is None or getattr(xv, "var_name", None) is None:
-                # x must be a bare VARIABLE (a tensor) — never a function (you can't differentiate
+                # x must be a bare variable (a tensor) — never a function (you can't differentiate
                 # with respect to a map / non-linear function).
                 raise self.err("D(f, x) needs an expression f and a tensor variable x "
                                "(differentiate w.r.t. any vector/matrix/tensor — not a function)")
@@ -1759,7 +1759,7 @@ def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
     tn = b.infer(parse_ast(expr))
     primal = tn.emit()
     if wrt is not None and params and wrt in params:
-        # covariant derivative ALONG the manifold: wrt is a parameterization (its point).
+        # covariant derivative along the manifold: wrt is a parameterization (its point).
         par = params[wrt]
         x = par.point("x")
         marks: dict = {}

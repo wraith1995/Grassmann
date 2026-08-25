@@ -125,7 +125,7 @@ class Zero:
 
 @dataclass(frozen=True)
 class Identity:
-    """The identity map on a space ``s`` (a value in ``~s ⊗ s``)."""
+    """The identity map on a space ``s`` (a value in ``s* ⊗ s``)."""
 
     space: Space
 
