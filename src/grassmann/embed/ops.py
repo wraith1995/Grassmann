@@ -49,7 +49,7 @@ def _classify(node: object) -> str:
 
 
 def _callee_is_neval(node: object) -> bool:
-    """Decide ``Eval`` vs ``NEval`` for ``f(...)`` by the callee's INFERRED type.
+    """Decide ``Eval`` vs ``NEval`` for ``f(...)`` by the callee's inferred type.
 
     A value or linear map synthesizes to a ``Space`` ⇒ ``Eval`` (linear contraction); a
     ``Π`` / dependent function (a non-``Space`` synth result — a ``Type`` or arrow ``Kind``)
@@ -88,9 +88,9 @@ class Expr:
     def __init__(self, node: object, tower: str | None = None, note: object = None) -> None:
         object.__setattr__(self, "node", node)
         object.__setattr__(self, "tower", tower if tower is not None else _classify(node))
-        # OPTIONAL, non-invasive metadata: a dict of side annotations (e.g. the base
+        # Optional, non-invasive metadata: a dict of side annotations (e.g. the base
         # space ``V`` of an exterior power, recorded so the stdlib need not re-derive it).
-        # Deliberately EXCLUDED from ``__eq__``/``__hash__`` below — a note never changes a
+        # Deliberately excluded from ``__eq__``/``__hash__`` below — a note never changes a
         # term's identity, so annotating is observationally transparent.
         object.__setattr__(self, "note", dict(note) if note else None)
 
@@ -101,7 +101,7 @@ class Expr:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Expr):
-            return self.node == other.node  # note is intentionally NOT part of identity
+            return self.node == other.node  # note is intentionally not part of identity
         return NotImplemented
 
     def __hash__(self) -> int:
@@ -138,7 +138,7 @@ class Expr:
             return wrap(_b.dual_basis(self.node))
         raise EmbedError("`~` (Dual) applies only to spaces and bases")
 
-    # a * b : ⊗ OProd (space / vector / basis), level-poly. A Python NUMBER scalar-SCALES a vector.
+    # a * b : ⊗ OProd (space / vector / basis), level-poly. A Python number scalar-scales a vector.
     def __mul__(self, other: object) -> Expr:
         if isinstance(other, (int, float)) and self.tower == TERM:
             return wrap(_t.scale(float(other), self.node))     # scalar · vector
@@ -146,11 +146,11 @@ class Expr:
         if self.tower == SPACE and o.tower == SPACE:
             return wrap(_s.oprod(self.node, o.node))
         if self.tower == TERM and o.tower == TERM:
-            # A SCALAR-valued Term operand makes `*` scalar MULTIPLICATION (`Scale`, which takes a
-            # scalar-valued Term), NOT a genuine ⊗. The ⊗-unit convention gives a
+            # A scalar-valued Term operand makes `*` scalar multiplication (`Scale`, which takes a
+            # scalar-valued Term), not a genuine ⊗. The ⊗-unit convention gives a
             # `Scalar` factor its own array axis, so `OProdV((q: Scalar, u))` lives in `R ⊗ W` —
-            # one axis MORE than `W` — and `q()*u() + w()` would be a space mismatch. The unit
-            # iso `R ⊗ W ≅ W` is applied HERE, at the creation site (the consumer that makes a
+            # one axis more than `W` — and `q()*u() + w()` would be a space mismatch. The unit
+            # iso `R ⊗ W ≅ W` is applied here, at the creation site (the consumer that makes a
             # scalar factor deals with it); a genuine `R ⊗ W` tensor is still available
             # explicitly via `G.tensor`/`oprod_v`.
             from grassmann.infer.synth import synth_space
@@ -179,7 +179,7 @@ class Expr:
             return wrap(_b.basis_sum(self.node, o.node))
         raise EmbedError(f"`&` (⊕) needs same-tower operands, got {self.tower}/{o.tower}")
 
-    # a + b : Sum (vectors). A Python NUMBER promotes to a scalar literal `_t.lit`.
+    # a + b : Sum (vectors). A Python number promotes to a scalar literal `_t.lit`.
     def __add__(self, other: object) -> Expr:
         if self.tower == TERM and isinstance(other, (int, float)):
             return wrap(_t.sum_(self.node, _t.lit(float(other))))

@@ -137,12 +137,12 @@ class SoPConfig:
     order_otimes: bool = False   # canonical ⊗ factor order — up to iso; emits a Permute 𝒞
     order_oplus: bool = False    # canonical ⊕ component order — up to iso; heavier 𝒞
     dissolve_oplus: bool = False  # dissolve ⊕ into a sum of injections (⊕ disappears; + outermost)
-    canon_scalars: bool = False  # canonicalize scalar PRODUCTS (commutative ·); partial rational NF
+    canon_scalars: bool = False  # canonicalize scalar products (commutative ·); partial rational NF
     canon_binders: bool = True   # α-canonicalize bound vars (α-variant terms → identical NF)
     eta_advanced: bool = False   # fold a seed-linear λ into its covector/map (Riesz/adjoint η)
 
 
-# The default preset: the conservative, value-EXACT end of the ladder — only the commutative
+# The default preset: the conservative, value-exact end of the ladder — only the commutative
 # `+` is reordered, so every rewrite is layout-identical (no `𝒞` correction is ever emitted).
 DEFAULT_SOP = SoPConfig()
 
@@ -373,12 +373,12 @@ def _rename_dimvar(node: object, old: str, new: str) -> object:
 
 
 def alpha_canon(term: Term) -> Term:
-    """α-canonicalize bound variables so two α-equivalent terms map to the **identical** term.
+    """α-canonicalize bound variables so two α-equivalent terms map to the identical term.
 
     The basis of an α-invariant :func:`term_key` and of :func:`is_normalized_sop`'s binder check.
 
-    Covers BOTH binders fully: ``LLam.vars`` and ``Lam.term_vars`` are renamed to ``%k`` (with a
-    canonical negative ``uid``); a ``Lam``'s binder **names** are canonicalized too — a value
+    Covers both binders fully: ``LLam.vars`` and ``Lam.term_vars`` are renamed to ``%k`` (with a
+    canonical negative ``uid``); a ``Lam``'s binder names are canonicalized too — a value
     (``SpaceSort``) binder's name follows its term var, and a ``SPACE``/``NAT`` binder's name is
     renamed throughout the body's ``SVar``/``DimVar`` references. Free variables (non-negative
     ``uid`` values) are untouched and never collide. Idempotent.
@@ -465,7 +465,7 @@ def normalize_space(s: Space) -> Space:
 
     - ``⊗`` factors and ``⊕`` components are sorted by canonical key (symmetric-monoidal: two
       spaces are iso iff their normal forms are equal), recursing through ``Dual``/``WithInner``;
-    - any **term** a space embeds (``Ker``/``Img``/``CoKer``/``CoImg`` map, ``WithInner`` metric,
+    - any term a space embeds (``Ker``/``Img``/``CoKer``/``CoImg`` map, ``WithInner`` metric,
       ``App`` args) is normalized with :func:`sum_of_products`, so space equality is decided
       modulo term normalization.
 
@@ -871,7 +871,7 @@ def rule_eta(node: Term) -> Term | None:
     """η-reduce ``λ⊸(x₀,…,xₙ₋₁). f(x₀,…,xₙ₋₁) → f`` — the inverse of β.
 
     Fires when ``f`` does not mention the bound vars and applies them at slots ``0..n-1`` in
-    order. **Sound** because an ``LLam`` lowers identically to the stored map it expands (the
+    order. Sound because an ``LLam`` lowers identically to the stored map it expands (the
     FFS re-orientation). Collapses an η-expanded map back to the map itself.
     """
     match node:
@@ -946,7 +946,7 @@ def _hadamard_split(t: External, uid: int) -> tuple[Term, Term | None]:
 def _flatten_compose(t: Term) -> list[Term]:
     """Flatten a binary ``Compose(f, (0,), (g,))`` chain into its factor list.
 
-    Descends BOTH sides (composition is associative, so left- and right-nested spellings both
+    Descends both sides (composition is associative, so left- and right-nested spellings both
     flatten): ``A∘B∘C`` → ``[A, B, C]``. A non-Compose, or a multi-slot ``Compose``, is a
     single factor.
     """
@@ -1165,7 +1165,7 @@ def rule_dagger_push(node: Term) -> Term | None:
     ``+``/``Scale`` by :func:`dist_unary`.
 
     Not done for ``Solve``/``Pinv``: ``Solve``'s argument must be a ``bij``-asserted *var* (it
-    can never be a ``Compose``/``Kron``), and ``Pinv`` does **not** distribute over composition
+    can never be a ``Compose``/``Kron``), and ``Pinv`` does not distribute over composition
     (the pseudo-inverse of a product is not the product of pseudo-inverses).
     """
     match node:
@@ -1211,7 +1211,7 @@ def rule_inverse_compose(node: Term) -> Term | None:
 
     The property guards read the operand ``Var``'s asserted ``MapProps``; a pseudo-inverse only
     cancels in the direction its rank condition guarantees (verified). The ``Eval``-applies-
-    transpose convention does **not** intrude here — these are stored-matrix map identities.
+    transpose convention does not intrude here — these are stored-matrix map identities.
     Direction: toward ``Identity``.
     """
     from grassmann.infer.properties import is_bijective, is_injective, is_surjective
@@ -1507,9 +1507,9 @@ def dist_kron(node: Term) -> Term | None:
 # ---------------------------------------------------------------------------
 # Contraction-push: localize Eval/Compose into the ⊗ factor it acts on.
 #
-# An `Eval`/`Compose` on `OProdV(g₀,…,gₘ)` indexes ONE slot per value-factor (slot i ↔ gᵢ
+# An `Eval`/`Compose` on `OProdV(g₀,…,gₘ)` indexes one slot per value-factor (slot i ↔ gᵢ
 # as a whole). For the term to type-check, a contracted slot must be a single Dual factor —
-# so an Eval'd factor is always fully consumed to a SCALAR (the `x(c)·y` rule), and a
+# so an Eval'd factor is always fully consumed to a scalar (the `x(c)·y` rule), and a
 # Compose'd factor stays a covector. No flattened-arity bookkeeping is needed.
 # ---------------------------------------------------------------------------
 

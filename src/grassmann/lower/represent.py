@@ -1173,7 +1173,7 @@ def _ffs_dim_is_type_static(space: S.Space) -> bool:
     """Report whether the FFS space's subspace dimension is known STATICALLY FROM THE TYPE.
 
     ``True`` for a type-static FFS dim — the injective ``QrOp`` image, ``dim Img = |dom|`` —
-    whose input is a plain static array with no rank AssertOp (byte-identical, unchanged).
+    whose input is a plain static array with no rank AssertOp.
     ``False`` when ``dim_of`` raises (a generic ``Img``/``Ker`` whose rank is not derivable
     from the type): such a space is static ONLY because its basis operator folded to a
     build-time constant, and takes the static-rank-with-static-dim-assert path.
@@ -1190,14 +1190,12 @@ def _make_static_ffs_input(
 ) -> pa.SymArray:
     """Allocate a build-time-constant FFS-typed Var as a STATIC-rank Program input.
 
-    The basis operator FOLDED to a build-time constant, so the subspace rank is statically
-    known and the input is NOT a dynamic bulk one (Option B).
+    The basis operator folds to a build-time constant, so the subspace rank is statically
+    known and the input is a plain static array rather than a dynamic bulk one.
 
-    The dynamic C4 rank-consistency assert is replaced by a **static-dim** ``AssertOp``: the
-    runtime-bound input's subspace axis must equal the folded rank ``r`` (= the realized
-    basis's static column count).  The sibling-agreement assert is preserved (shared with the
-    dynamic path).  The correct thing is for input dims to be asserted to be these static
-    ones.
+    A static-dimension ``AssertOp`` guards it: the runtime-bound input's subspace axis must
+    equal the folded rank ``r`` — the realized constant basis's static column count. The
+    sibling-agreement assert is shared with the dynamic path.
     """
     name = _var_name(e)
     arr = _make_input(ctx, name, shape, note=f"var:{e.name}")
@@ -1289,7 +1287,7 @@ def _rep_external(
             f"represent: External.data must be an ExternalOp to lower, got {data!r}"
         )
     # The kernel's basis contract: STANDARD forces the operands to standard coords (a
-    # numeric cob; identity for scalar/standard operands ⇒ byte-identical to before) and labels the
+    # numeric cob; identity for scalar/standard operands) and labels the
     # result standard honestly; EQUIVARIANT *commutes with cob*, so it applies in the arriving basis
     # and carries that basis through — and a concrete/STD target can be PUSHED into the operands
     # (build them in `want`, the elementwise result is born in `want`, no post-cob).
@@ -1658,10 +1656,10 @@ def _rep_eval_operands(
 ) -> tuple[Rep, list[Rep]]:
     """Lower ``f`` and ``args`` for an ``Eval``, building a metric ``f`` in the operands' basis.
 
-    Ordinary (non-metric) ``f`` is lowered FIRST exactly as before — byte-identical.  A
-    **metric** ``f`` (``Inner``/``Flat``/``Sharp``) whose operands sit in a non-orthonormal
-    ``ImageBasis`` is lowered AFTER the args, in their active basis, so the metric and the
-    operands are basis-consistent at the contraction (the immersed-Gram seam).
+    Ordinary (non-metric) ``f`` is lowered first, ahead of its args.  A metric ``f``
+    (``Inner``/``Flat``/``Sharp``) whose operands sit in a non-orthonormal ``ImageBasis`` is
+    lowered after the args, in their active basis, so the metric and the operands are
+    basis-consistent at the contraction (the immersed-Gram seam).
     """
     metric_kind = _metric_node_kind(f)
     if metric_kind is not None:
@@ -1720,7 +1718,7 @@ def _operand_metric_basis(arg_reps: list[Rep]) -> B.Basis | None:
     non-orthonormal ``ImageBasis`` (immersed Gram ≠ I) AND an orthonormal-but-NON-STANDARD basis
     (Gram = I, yet ≠ ``default`` — building in default while the operand stays in that basis tagged
     the result ``default`` while its coords lived in the operand basis: silent-wrong).  Returns
-    ``None`` only when the operand is genuinely the default basis (build in default, byte-identical).
+    ``None`` only when the operand is genuinely the default basis, so the metric builds in default.
     """
     # Compare bases STRUCTURALLY (``_basis_eq``), not via a hash-set: a basis is never required
     # to be hashable anywhere else in the seam, and an embedded-array term metric would not be.
@@ -1738,15 +1736,15 @@ def _reconcile_metric_operands(ctx: _Ctx, arg_reps: list[Rep]) -> list[Rep]:
     """Auto-reconcile a metric ``Eval``'s operands to a single basis.
 
     A metric ``Eval`` (``dot``/``Flat``/``Sharp`` application) builds its Gram in the
-    operands' *shared* basis.  When the operands are pinned to **different** bases
-    there is no shared basis — the raw contraction would silently build the Gram in one basis
-    while the other operand's coords live elsewhere (``aᵀ·G·b`` with mismatched ``a``/``b``, or
-    the identity metric when one side defaults).  Rather than reject, we **change-of-basis**
-    every later operand into the first operand's basis (FFS-aware), so the metric is
-    built once in a genuinely shared basis.  Fires whenever the operands DISAGREE — immersed OR
-    merely a non-standard-orthonormal vs default (the old immersed-only gate wrongly skipped the
-    latter: two different orthonormal bases are NOT a shared identity metric).  Consistent /
-    all-default pins return early ⇒ byte-identical.
+    operands' shared basis.  When the operands are pinned to different bases there is no shared
+    basis — the raw contraction would silently build the Gram in one basis while the other
+    operand's coords live elsewhere (``aᵀ·G·b`` with mismatched ``a``/``b``, or the identity
+    metric when one side defaults).  Rather than reject, it changes basis on every later operand
+    into the first operand's basis (FFS-aware), so the metric is built once in a genuinely shared
+    basis.  This fires whenever the operands disagree — immersed, or merely a
+    non-standard-orthonormal basis against the default, since two different orthonormal bases are
+    not a shared identity metric.  Consistent or all-default pins return early without
+    reconciling.
     """
     if len(arg_reps) < 2:
         return arg_reps
@@ -1883,8 +1881,8 @@ def _redeclare_ffs_leaves(basis: B.Basis, declared: dict[int, B.Basis]) -> B.Bas
     """``basis`` with each FFS leaf swapped to the basis ``declared`` names for the SAME map.
 
     Both bases are bases of the same ``Img(f)``, so the swap is basis-LEGAL; it changes only which
-    of them the value is born in.  ``None`` when nothing was declared for any leaf (⇒ the caller
-    keeps ``AUTO`` and the historical path runs byte-identically).
+    of them the value is born in.  ``None`` when nothing was declared for any leaf, so the caller
+    keeps ``AUTO``.
     """
     changed = False
 
@@ -1925,9 +1923,9 @@ def _arg_declared_target(
 ) -> B.TargetBasis | B.Basis:
     """Choose the target to realize an ``Eval`` argument at.
 
-    Its own default basis with each FFS leaf swapped to the basis the requested target DECLARES for that map.
-    ``AUTO`` when nothing is declared, when the arg is PINNED (a pin outranks a caller's request), or when its
-    space has no static default — every such case is the historical behaviour, byte-identical.
+    Its own default basis with each FFS leaf swapped to the basis the requested target declares
+    for that map.  ``AUTO`` when nothing is declared, when the arg is pinned (a pin outranks a
+    caller's request), or when its space has no static default.
     """
     if not declared:
         return B.AUTO
@@ -1950,8 +1948,9 @@ def _reconcile_pairing(
     contracted slot and operand are mutually dual.  When they are NOT (an ``ImageBasis`` vs an
     orthonormal, OR an orthonormal-but-NON-STANDARD basis whose Gram=I yet whose dual ≠ ``default``),
     change the operand into the slot's dual-partner basis so the raw contraction is the right pairing.
-    Fires whenever the two are not pairing-consistent — a default/already-dual pair is consistent, so
-    that path stays byte-identical; a non-standard pair (immersed OR rotated-orthonormal) reconciles.
+    Fires whenever the two are not pairing-consistent; a default or already-dual pair is consistent
+    and passes through untouched, while a non-standard pair (immersed or rotated-orthonormal)
+    reconciles.
     """
     if slot_basis is None or _basis_pairing_consistent(slot_basis, op_rep.basis):
         return op_rep
@@ -1990,8 +1989,9 @@ def _reconcile_compose_g(ctx: _Ctx, slot_basis: B.Basis | None, g_rep: Rep) -> R
     ``g``'s codomain feeds f's slot ``pos``; the two must be mutually dual for the raw contraction to
     be the correct natural pairing.  When they are NOT (inconsistent FFS bases OR an orthonormal-but-
     NON-STANDARD codomain whose Gram=I yet dual ≠ ``default``), cob ``g``'s codomain axis into f's slot
-    dual-partner basis.  Fires whenever they are not pairing-consistent (a default/already-dual pair is
-    consistent ⇒ byte-identical); the cob targets axis 1 specifically, so a multi-axis ``g`` is fine.
+    dual-partner basis.  Fires whenever they are not pairing-consistent; a default or already-dual
+    pair is consistent and passes through.  The cob targets axis 1 specifically, so a multi-axis
+    ``g`` is fine.
     """
     if slot_basis is None:
         return g_rep
@@ -2512,7 +2512,7 @@ def _cob_from_image(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
     ``f`` is injective / the source is not over-determined (``k = δ``) — only then does
     :func:`_cob_via_standard` compose them with a plain ``InvOp`` (a non-injective /
     over-determined-source ``ImageBasis`` is ``k > δ`` ⇒ rectangular ⇒ pseudo-inverse).  No
-    realize-ambient + QR factor (the old ``_same_map_ffs_cob`` special case is gone).  But for the
+    realize-ambient or QR factor enters this route.  But for the
     canonical *metric-free* ``ProjectedBasis(f,"image")`` ``to`` of the SAME map, the to-side
     in-space realize is exactly ``I`` (``U_dᵀ·U_d``), so the standard route wastes an ``InvOp(I)``
     plus a compose; the cob is just the ImageBasis's own in-space ``R`` (``U_dᵀ·J``).  Return that
@@ -2854,7 +2854,7 @@ def _identity_like(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     id(f))`` δ atom, sourced from the **memoized** metric-free FFS realization's column axis
     — so a dynamic-rank FFS basis sizes its δ×δ eye from the already-emitted
     SVD/QR ``cols`` rather than re-running the full in-space immersion+einsum that
-    ``realize_basis_cols`` would (purely fewer emitted stmts; the static path is unchanged).
+    ``realize_basis_cols`` would, emitting purely fewer statements.
     """
     stripped = _strip_variance(basis)
     if _is_ffs_basis(stripped):
@@ -2941,7 +2941,7 @@ def _rep_eval(
     # basis-consistent (a non-orthonormal ``ImageBasis`` ⇒ the immersed Gram, not identity).
     # We therefore lower the args FIRST, read their basis, and lower the metric ``f`` in it.
     # Scoped strictly to a metric ``f`` with a non-orthonormal operand basis — every other
-    # ``Eval`` keeps the f-first order and is byte-identical.
+    # ``Eval`` keeps the f-first order.
     space = _synth(e)
     # (push-down) Steer f's slots so the Eval is born directly in ``want`` (no result cob):
     # surviving slots ← ``want``'s components, contracted slots ← dual(arg basis) (natural pairing).
@@ -3110,8 +3110,8 @@ def _fuse_arg_to_slot(
     A map produced by ``alt``/``Lift``/``Kron`` has a single fused input slot of dim ``nᵏ``;
     a value of ``V⊗ᵏ`` arrives over ``k`` separate axes. When the slot dim equals the
     product of the arg's *space* axes (and doesn't already match its leading axis), reshape
-    those axes into one fused axis (the free/basis axes are untouched). No-op otherwise, so
-    the ordinary ``Eval`` path is byte-identical.
+    those axes into one fused axis (the free/basis axes are untouched). No-op otherwise, leaving
+    the ordinary ``Eval`` path unaffected.
     """
     fshape = _shape_of(f_arr)
     ashape = _shape_of(arg_rep.array)
@@ -3265,8 +3265,8 @@ def _unfuse_eval_result(ctx: _Ctx, rep: Rep) -> Rep:
     the array, its basis (``_result_basis_from_factors`` already 2-factor) and its space all
     agree — the value then composes downstream as a genuine multi-factor map.
 
-    No-op (byte-identical) when the array's space axes already match ``_shape_of_space`` — the
-    ordinary ``Eval`` path is untouched.  Bails on any dynamic/FFS axis (non-``int`` dims) or a
+    No-op when the array's space axes already match ``_shape_of_space``, so the ordinary ``Eval``
+    path is untouched.  Bails on any dynamic/FFS axis (non-``int`` dims) or a
     total-size mismatch, so only a genuine static fused↔unfused reshape is performed.
     """
     try:
@@ -3806,7 +3806,7 @@ def _rep_pinv(
         # GSVD branch — build the metric in the OPERAND's per-slot bases (mirroring ``_rep_dagger``),
         # so ``M_V``/``M_W`` stay consistent with the coordinates ``f`` arrives in for a non-default
         # operand pin.  The dom slot is covariant (a ``DualBasis``) ⇒ build its metric in the primal
-        # (``_peel_one_dual``); the cod slot is used as-is.  ``None`` slots ⇒ default (byte-identical).
+        # (``_peel_one_dual``); the cod slot is used as-is.  ``None`` slots ⇒ default basis.
         f_rep = _rep(f, ctx)
         dom_slot, cod_slot = _map_slot_bases(f_rep.basis)
         out = _gsvd_pinv_map(
@@ -3898,10 +3898,10 @@ def _rep_corestrict(
     if not ortho:
         # The `Pᵀ`-as-inverse pattern again: the
         # einsum below reads `f`'s columns in the image basis as `fᵀ·P`, i.e. `(Pᵀ·f)ᵀ`, which
-        # are coordinates in `img_basis` only for an ORTHONORMAL `P`.  Not rewritten here (out
-        # of the basis-realization arc's scope) — but a non-orthonormal image basis must BAIL
-        # LOUDLY rather than return `fᵀ·P` mislabelled as image-basis coordinates.  The fix
-        # when a consumer needs it is the same matched dual `_rep_project` now emits.
+        # are coordinates in `img_basis` only for an ORTHONORMAL `P`.  A non-orthonormal image
+        # basis must BAIL LOUDLY rather than return `fᵀ·P` mislabelled as image-basis
+        # coordinates; a consumer that needs it would supply the matched dual `pinv(P)` that
+        # `_rep_project` emits.
         raise RepresentError(
             "represent: corestrict reads f in the image frame as fᵀ·P, which requires an "
             f"ORTHONORMAL image frame; the realization of {img!r} is not orthonormal "
@@ -3957,7 +3957,7 @@ def _fused_matvec(
     factor, ``Scalar`` factors included), while the map's dom/cod axes are FUSED. So a
     multi-axis value is reshaped (bulk-preserving) onto the map's dom axis before contracting,
     and the rank-1 result is unfused to the result space's canonical shape. A rank-1 value with
-    a rank-1 result space takes exactly the historical single-einsum path (byte-identical).
+    a rank-1 result space takes a single einsum directly, with no reshape on either side.
     Dynamic (``DimAtom``) axes are left alone — they were never fusable here.
     """
     vshape = _shape_of(v_arr)
@@ -4098,7 +4098,7 @@ def _gsvd_pinv_map(
     ``dom_basis``/``cod_basis`` are the operand's active per-slot bases (the dom slot's *primal*
     and the cod slot): the metrics ``M_V``/``M_W`` are built in THOSE bases so they stay
     consistent with the coordinates ``f_arr`` arrives in (a non-default operand pin), exactly as
-    ``_rep_dagger``'s metric path does.  ``None`` ⇒ the default basis (byte-identical to before).
+    ``_rep_dagger``'s metric path does.  ``None`` ⇒ the default basis.
     """
     n_dom, n_cod = _static_dim(dom), _static_dim(cod)
     m_v = _metric_matrix(ctx, dom, n_dom, note="pinv:metric(dom)", basis=dom_basis)
@@ -4139,7 +4139,7 @@ def _rep_dagger(
         f† = G_cod · fᵀ · G_dom⁻¹ .
 
     In the orthonormal default basis both metrics are the identity, so this collapses to a
-    plain transpose (the symbolic-minimizing win) — that fast path is kept **byte-identical**.
+    plain transpose, the symbolic-minimizing fast path.
     A non-orthonormal endpoint (an ``ImageBasis`` slot, whose Gram is ``JᵀJ`` ≠ I) routes
     through the metric formula so the adjoint identity stays basis-invariant.
     """
@@ -4154,8 +4154,8 @@ def _rep_dagger(
     # The HONEST f† basis (both paths): covariant dom slot ``dual(cod)`` + contravariant cod slot
     # ``dom-primal``.  Tagging this (NOT ``default_basis``) is load-bearing: the fast-path transpose
     # of an orthonormal-but-NON-STANDARD operand is numerically right in *that* basis, not in std, so
-    # the STD/MATCH epilogue must see the operand basis to cob it (byte-identical for a default
-    # operand, where this folds to ``default_basis(space)``).
+    # the STD/MATCH epilogue must see the operand basis to cob it (for a default operand this
+    # folds to ``default_basis(space)``).
     if dom_slot is not None and cod_slot is not None:
         result_basis = B.basis_prod(B.dual_basis(cod_slot), _peel_one_dual(dom_slot))
     else:
@@ -4273,8 +4273,8 @@ def _rep_inner(
 def _inner_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
     """Basis of the ``Inner(s)`` map (an element of ``s*⊗s*``) for active operand ``basis``.
 
-    With no active basis (orthonormal default) this is exactly ``default_basis(map_space)``
-    — byte-identical to before.  When the operands sit in a non-orthonormal ``basis`` over
+    With no active basis (orthonormal default) this is exactly ``default_basis(map_space)``.
+    When the operands sit in a non-orthonormal ``basis`` over
     ``s``, the two covariant slots are ``DualBasis(basis)`` so a partial contraction's
     surviving slot keeps the operand-consistent basis (``_result_basis_from_factors``).
     """
@@ -4293,7 +4293,7 @@ def _rep_flat(
     carries the same dual per-slot basis: in an immersed operand ``basis`` the surviving slot
     of a partial contraction stays ``DualBasis(basis)`` (so a ``sharp(flat(v))``
     chain genuinely re-enters the immersed metric instead of silently falling to identity).
-    Orthonormal default (``basis is None``) ⇒ ``default_basis`` — byte-identical.
+    Orthonormal default (``basis is None``) ⇒ ``default_basis``.
     """
     map_space = _synth(e)
     build_basis, steered = basis, False
@@ -4328,7 +4328,7 @@ def _rep_sharp(
     (``_metric_matrix(dual)`` already returns ``(JᵀJ)⁻¹`` — building ``G_s`` in the primal and
     inverting avoids a double inverse) and with the explicit-``WithInner`` metric.  The result
     ``s⊗s`` map is tagged with the primal per-slot basis so the produced vector re-enters the
-    immersed metric correctly.  Orthonormal default ⇒ byte-identical.
+    immersed metric correctly.  For the orthonormal default the tag folds to ``default_basis``.
     """
     # NB: NOT steered like Inner/Flat. Sharp is the INVERSE metric (a (2,0) tensor); its components
     # in a target basis are an inverse-transposed transform that the `basis=` hook (which builds the
@@ -4357,7 +4357,7 @@ def _sharp_map_basis(map_space: S.Space, basis: B.Basis | None) -> B.Basis:
 
     ``basis`` is the covector operand's (dual) basis; the map's two slots live in the primal
     ``s`` (peel one dual), so the produced vector and a partial contraction's surviving slot
-    carry the primal operand basis.  ``basis is None`` ⇒ ``default_basis`` (byte-identical).
+    carry the primal operand basis.  ``basis is None`` ⇒ ``default_basis``.
     """
     if basis is None or not isinstance(map_space, S.OProd):
         return default_basis(map_space)
@@ -4908,7 +4908,7 @@ def _rep_kron(
     # Why it matters: forcing both operands to STD is an INTERMEDIATE BASIS CHOICE.  For an ``Img(J)``
     # endpoint, STD is the orthonormal ``ProjectedBasis``, so the operands pay a ``QrOp`` round trip
     # whose factor is a RADICAL — values stay right (the cobs are exact inverses) but the exact-fold
-    # lane can no longer certify the entry constant and degrades to probes.  Keeping the operands in
+    # lane cannot certify the entry constant and degrades to probes.  Keeping the operands in
     # the basis they naturally land in removes it.
     #
     # SAFETY: honesty is not assumed, it is CHECKED.  ``_kron_result_basis`` returns ``None`` on any
@@ -4965,14 +4965,13 @@ def _binder_basis_from_body(body: T.Term, v: T.Var, ctx: _Ctx) -> B.Basis | None
 
     * only a ``Var`` map with a ``basis_env`` pin counts (anything else has no declared opinion);
     * the pin must split into the map's factors and the slot must be in range;
-    * **ambiguity yields ``None``** — several use sites that disagree mean there is no single
+    * ambiguity yields ``None`` — several use sites that disagree mean there is no single
       cob-free choice, so keep ``AUTO`` and let the existing machinery cob;
-    * ``None`` is always safe: it is exactly the pre- behaviour.
+    * ``None`` is always safe: it leaves the binder at ``AUTO``.
 
     Correctness does not rest on this being a *good* choice — the ``LLam`` epilogue tags the result
     from ``binding_bases`` whatever they are, and ``_match_result`` cobs to the caller's target.  A
-    poor guess costs a cob; it cannot change a value.  (Which is why it is safe to keep this in
-    while its downstream blocker — NOTE #5 — is still open; see the caller's ⚠ note.)
+    poor guess costs a cob; it cannot change a value.
     """
     found: list[B.Basis] = []
 
@@ -5016,8 +5015,8 @@ def _kron_operand_targets(
 
     The result's two FUSED axes are tagged ``DualBasis(BasisProd((a₀, a₁)))`` (domain) and
     ``BasisProd((b₀, b₁))`` (codomain), so operand ``f`` wants ``BasisProd((DualBasis(a₀), b₀))``
-    and ``g`` wants ``BasisProd((DualBasis(a₁), b₁))``.  Returns ``(AUTO, AUTO)`` — today's
-    behaviour, and always correct — for ``STD``/``AUTO`` or any shape that does not split exactly.
+    and ``g`` wants ``BasisProd((DualBasis(a₁), b₁))``.  Returns ``(AUTO, AUTO)``, always correct,
+    for ``STD``/``AUTO`` or any shape that does not split exactly.
     """
     auto: tuple[B.TargetBasis | B.Basis, B.TargetBasis | B.Basis] = (B.AUTO, B.AUTO)
     if not isinstance(target, B.Basis):
@@ -5295,7 +5294,7 @@ def _rep_llam_eye(
     e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    """``LLam`` via the materialized-``eye`` free-axis lowering (the default, see ``_rep_llam``).
+    """``LLam`` via the materialized-``eye`` free-axis lowering (the ``eye`` mode, see ``_rep_llam``).
 
     Each linear var is bound to the standard basis of its space as a Program input; the
     body (linear in the vars) is lowered once, yielding the full matrix/tensor of shape
@@ -5377,7 +5376,7 @@ def _nested_vmap(
 ) -> Callable[..., np.ndarray]:
     """Build a callable batching ``sub`` over ONE axis per bound var, APPENDED after the body cod axes.
 
-    Mirrors the historical ``eye`` einsum (Path B): that lowering (``ab,ai->bi``) lands
+    Mirrors the ``eye`` einsum's layout: ``ab,ai->bi`` lands
     the body's codomain axes FIRST and the var (basis-index) axes LAST, so the map tensor is laid
     out ``(*cod, n_0, n_1, …)``.  ``pa.vmap`` stacks at ``out_axes``; for a single var we append
     at ``n_cod``.  Since ``pa.vmap`` requires a *Program* body (it reads ``body.inputs``), it cannot
@@ -5428,13 +5427,13 @@ def _rep_llam_vmap(
     e: T.LLam, vars_: tuple[T.Var, ...], body: T.Term, ctx: _Ctx,
     target: B.TargetBasis | B.Basis = B.AUTO,
 ) -> Rep:
-    """``LLam`` via the "compile-for-each-j" sub-Program + ``vmap`` lowering (Path B).
+    """``LLam`` via the "compile-for-each-j" sub-Program + ``vmap`` lowering.
 
     The body is lowered ONCE as a sub-Program whose bound vars are RANK-1 inputs (the basis-index
     is a genuine input, not a free axis).  ``vmap`` then feeds ``eye`` and slices the j-th basis
     vector ``eⱼ`` per iteration: each slice is an honest rank-1 ``eval`` (no entanglement), and the
     slices stack into the map tensor.  The result is tagged HONESTLY from the body's actual basis,
-    so a non-default/non-orthonormal body no longer raises.
+    so a non-default or non-orthonormal body is represented rather than refused.
     """
     space = _synth(e)
     bound_uids = {v.uid for v in vars_}
@@ -5462,8 +5461,8 @@ def _rep_llam_vmap(
     #    binder binds in its PRIMAL — then ``out_basis`` below already IS ``target`` and
     #    ``_match_result`` is a no-op.  ``_resolve_target`` yields ``None`` for AUTO/STD and for a
     #    concrete basis that is not genuinely a basis of THIS space, and ``_basis_factors`` yields
-    #    ``None`` on any arity mismatch — every such case falls back to the historical ``AUTO``
-    #    choice, byte-identically.  A ``basis_env`` PIN still wins inside ``_rep_var``: the user
+    #    ``None`` on any arity mismatch — every such case falls back to the ``AUTO``
+    #    choice.  A ``basis_env`` PIN still wins inside ``_rep_var``: the user
     #    fixing an input's basis outranks a caller's request.
     #    ⚠ Take the primal STRUCTURALLY — only a literal ``DualBasis(x)`` domain factor steers, and it
     #    steers to exactly ``x``.  Then ``dual_basis(x)`` reproduces the requested factor on the nose.
@@ -5487,14 +5486,11 @@ def _rep_llam_vmap(
     #    a requested target, and `None` (no use site, ambiguous use sites, unpinned consumer) keeps
     #    `AUTO`.
     #
-    #    This refinement does NOT yet pay off, and is a small REGRESSION on the k ≥ 2 Λᵏ lane
-    #    (78 → 90 statements on one such lane; k = 1 unchanged, since there the requested target
-    #    already supplies the binder basis and this never fires).  The better binder basis propagates
-    #    up CORRECTLY and is then thrown away by `_rep_project` / `_rep_embed`, which must coerce their
-    #    operand to `default_basis` because `_subspace_cols` hands them `P` in std ambient coords — so
-    #    it buys one extra `ffs-basis:*` cob block per axis and keeps nothing.  KEPT DELIBERATELY: the
-    #    choice is right and the blocker is downstream — it will pay off once the realization seam can
-    #    deliver a basis in a DECLARED basis.
+    #    The better binder basis propagates up correctly but is then discarded by `_rep_project` /
+    #    `_rep_embed`, which coerce their operand to `default_basis` because `_subspace_cols` hands
+    #    them `P` in std ambient coords — so on the k ≥ 2 Λᵏ lane it buys one extra `ffs-basis:*` cob
+    #    block per axis and saves nothing (k = 1 never fires here, since there the requested target
+    #    already supplies the binder basis).
     for i, v in enumerate(vars_):
         if binder_targets[i] is B.AUTO and v.uid not in ctx.basis_env:
             inferred = _binder_basis_from_body(body, v, ctx)
@@ -5697,11 +5693,9 @@ def _rep_lam(
 ) -> Rep:
     """``Lam([bᵢ:σᵢ]. e)`` — body-polymorphic binder.
 
-    For the substrate a ``Lam`` over value/space domains is lowered by
-    binding its term-vars as Program inputs and representing the body, so the binder's
-    arguments become the Program's inputs (the pullback pattern). The
-    basis-polymorphic sub-Program packaging is deferred; the current lowering handles the
-    common fully-traced case directly.
+    A ``Lam`` over value/space domains is lowered by binding its term-vars as Program inputs and
+    representing the body, so the binder's arguments become the Program's inputs (the pullback
+    pattern). It handles the fully-traced case, where the body is a Term.
     """
     body = e.body
     if not T.is_term(body):
@@ -5816,7 +5810,7 @@ def _result_basis_from_factors(
 # WITHOUT changing the basis each axis lives in.  Their result must therefore be tagged with
 # the basis the coordinates are genuinely in (derived from the operand bases), so the target
 # epilogue (``_std_result``/``_match_result``) and ``_rep``'s safety-net cob convert correctly.
-# Under ``AUTO`` the tag is never read for a cob, so AUTO stays byte-identical.
+# Under ``AUTO`` the tag is never read for a cob.
 # ---------------------------------------------------------------------------
 
 
@@ -5907,8 +5901,8 @@ def _compose_operand_targets(
     (``_basis_eq(f_rep.basis, f_target)``) before trusting the steer.  So prefer the basis ``f`` is
     already going to land in: a ``basis_env`` PIN on ``f`` outranks ``default_basis``, because
     ``_rep_var`` honors the pin regardless of what we ask for.  Asking for the default against a
-    pinned ``f`` guarantees the honesty check FAILS and the whole steer is discarded — which is
-    exactly what used to happen to a consumer's pinned ``u`` in the trace DOF.
+    pinned ``f`` guarantees the honesty check FAILS and the whole steer is discarded, dropping a
+    consumer's pinned ``u`` in the trace DOF.
     """
     if want is None:
         return None
@@ -6216,7 +6210,7 @@ def _endpoint_subspace_cols(
     operand is already in, serves as BOTH endpoints.  That is the whole point: realize the basis in
     the basis the consumer already has, rather than dragging the consumer to the basis's basis.
 
-    ``None`` (⇒ caller keeps the ambient path, unchanged) unless every condition holds: the space is
+    ``None`` (⇒ the caller keeps the ambient path) unless every condition holds: the space is
     an ``Img``; its map is an endomorphism (``dom == cod``, so one ambient basis is honest for both
     endpoints); the covariant realization ran and published ``endpoint_cols``; and its
     ``endpoint_basis`` is exactly ``want_basis``.
@@ -6358,7 +6352,7 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     coords — here the canonical *metric-free* ``ProjectedBasis`` ``U_d`` of ``(which, f)``.
     The result is ``pinv(U_d)·immersion(basis)`` — the coordinates of the immersion's columns
     in ``U_d``, which reduce to ``U_dᵀ·immersion(basis)`` exactly when ``U_dᵀU_d = I`` (the
-    historical single-einsum path, taken whenever the realization proves it): an ``r×k``
+    single-einsum path, taken whenever the realization proves it): an ``r×k``
     (the ``U_d`` column count) and ``k`` is the immersion's column count (metric-free
     ``ProjectedBasis`` ⇒ ``I``; metric ``ProjectedBasis`` ⇒ the reorthonormalization
     ``U_dᵀ·U_g``; ``ImageBasis`` ⇒ the ``R`` factor where ``J = U_d·R``).
@@ -6382,8 +6376,7 @@ def _realize_ffs_in_space(ctx: _Ctx, basis: B.Basis) -> pa.SymArray:
     # BASIS HONESTY (the second `Uᵀ`-as-inverse site): `U_dᵀ·imm` are the immersion's
     # coordinates in `U_d` only when `U_dᵀU_d = I`.  The general map is the matched dual
     # `pinv(U_d)·imm`.  Exploit orthonormality where the realization PROVES it (the single-einsum
-    # path — every basis this site sees is the metric-free QR/SVD one, so this is byte-identical),
-    # else emit the pinv.
+    # path — every basis this site sees is the metric-free QR/SVD one), else emit the pinv.
     if ffs_cols_orthonormal(u_d_real):
         [out] = ctx.prog.emit_stmt(
             pa.EinsumStmtOp("nr,nk->rk"), [u_d, imm],
@@ -6525,8 +6518,8 @@ def _count_dim_array(ctx: _Ctx, count: object) -> pa.SymArray:
 
     A static count emits a const; a symbolic :class:`~grassmann.core.space.Dim` is resolved
     from the program's :class:`~polyarray.SymbolEnv` (the dynamic-rank ``DimAtom``) via an
-    :class:`~polyarray.AxisLen`-style read.  Only the static path is exercised today; the
-    symbolic-count path raises a clear error rather than silently mis-sizing.
+    :class:`~polyarray.AxisLen`-style read.  The static path is the one exercised; a symbolic
+    count raises a clear error rather than silently mis-sizing.
     """
     n = _try_count_int(count)
     if n is not None:
@@ -6843,9 +6836,9 @@ def _assert_complete_square(ctx: _Ctx, hstack: pa.SymArray) -> None:
 def _peel_orthonormal_metric(inner: B.Basis) -> tuple[object | None, int]:
     """Peel ``Dual``/``Primal`` wrappers off an inner basis to find the carried metric.
 
-    For an ``OrthonormalBasis``'s inner basis (audit Fix 5).
+    Used on an ``OrthonormalBasis``'s inner basis.
 
-    Each ``DualBasis``/``PrimalBasis`` layer toggles the **variance parity**; a
+    Each ``DualBasis``/``PrimalBasis`` layer toggles the variance parity; a
     ``WithInnerBasis`` captures its metric term ``g``.  Returns ``(g_or_None, parity)`` where
     ``parity`` is the number of dual/primal layers mod 2.  When a metric is carried, ODD parity
     means the basis lives in a **dual** space ⇒ its effective inner product is the *dual metric*
@@ -6884,9 +6877,7 @@ def _peel_orthonormal_metric(inner: B.Basis) -> tuple[object | None, int]:
 
 
 def _realize_orthonormal(ctx: _Ctx, inner: B.Basis) -> pa.SymArray:
-    """Realize ``OrthonormalBasis(inner)`` — orthonormalize ``inner``'s columns w.r.t.
-
-    its *effective* metric (audit Fix 5).
+    """Realize ``OrthonormalBasis(inner)`` by orthonormalizing its columns against the effective metric.
 
     The columns are ``realize_basis_cols(inner)`` (already in the possibly-dual coords).  Peeling
     ``Dual``/``Primal`` finds any carried ``WithInnerBasis`` metric ``g``: with NO metric we do a
@@ -6911,8 +6902,7 @@ def _effective_metric_matrix(
 ) -> pa.SymArray:
     """Build the metric matrix in which an ``OrthonormalBasis`` is orthonormal.
 
-    ``G`` (EVEN parity) or the dual metric ``G⁻¹`` (ODD parity — the basis lives in a dual space) (audit Fix
-    5).
+    ``G`` (EVEN parity) or the dual metric ``G⁻¹`` (ODD parity — the basis lives in a dual space).
     """
     g = _metric_matrix_of(ctx, metric, n if isinstance(n, int) else 0)
     if parity == 0:
@@ -7366,9 +7356,8 @@ def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
       ``ORTHONORMALIZE`` ⇒ an arbitrary basis, Gram ``CᵀC`` ≠ I).
 
     The genuinely orthonormal bases (standard / ``ProjectedBasis``/``Q`` / ``WithInnerBasis`` /
-    a ``reduce=ORTHONORMALIZE`` list) keep the identity fast path, so the orthonormal-default
-    lowering is byte-identical (``basis is None`` ⇒ False).  Dual / metric-wrapped spellings
-    inherit from their inner basis.
+    a ``reduce=ORTHONORMALIZE`` list) keep the identity fast path (``basis is None`` ⇒ False).
+    Dual / metric-wrapped spellings inherit from their inner basis.
     """
     match basis:
         case B.ImageBasis():
@@ -7378,7 +7367,7 @@ def _is_immersed_metric_basis(basis: B.Basis | None) -> bool:
         case B.DualBasis(inner) | B.PrimalBasis(inner) | B.WithInnerBasis(inner, _):
             return _is_immersed_metric_basis(inner)
         case None:
-            return False  # orthonormal-default lowering stays byte-identical
+            return False  # orthonormal-default lowering keeps the identity fast path
         case (B.ScalarBasis() | B.ProjectedBasis() | B.OrthonormalBasis() | B.BVar()
               | B.BLam() | B.BApp()):
             return False  # genuinely orthonormal / abstract ⇒ identity fast path
@@ -7564,8 +7553,8 @@ def _shape_of_space_dyn(
 ) -> tuple[int | pa.DimAtom, ...]:
     """``_shape_of_space`` with the bulk/``DimAtom`` lane threaded for FFS spaces.
 
-    Identical to :func:`_shape_of_space` on every statically-sized space (so the static
-    path is byte-identical). For an FFS-dimensioned space (``Img``/``Ker``/``CoImg``/
+    Identical to :func:`_shape_of_space` on every statically-sized space. For an
+    FFS-dimensioned space (``Img``/``Ker``/``CoImg``/
     ``CoKer``) it realizes the defining map's SVD/QR and sizes the axis by the **rank**:
     a static ``rank = |dom|`` for an *injective* image (``QrOp``), else the runtime
     ``DimAtom δ_f``. Polyarray gates on a dynamic shape, so a node
@@ -7645,7 +7634,7 @@ def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
     symbolic.
     """
     try:
-        return _static_dim(space)                        # static fast path (byte-identical)
+        return _static_dim(space)                        # static fast path
     except RepresentError:
         pass
     match space:
@@ -7677,13 +7666,12 @@ def _dyn_dim(space: S.Space, ctx: _Ctx) -> int | pa.DimAtom:
 def _realize_ffs_for_space(ctx: _Ctx, space: S.Space) -> FfsRealization:
     """Realize the FFS basis of an ``Img``/``Ker``/``CoImg``/``CoKer`` space.
 
-    D2: memoized per ``(which, id(f))`` on the context so a factorization requested by
+    Memoized per ``(which, id(f))`` on the context so a factorization requested by
     multiple consumers (a Var's δ shape, the rank-consistency AssertOp, every
     Project/Embed of that FFS) emits the SvdOp/QrOp/GSvdOp — and its ``_rep(f)`` +
-    (cod,dom) transpose prelude — **exactly once**, returning the cached
-    :class:`FfsRealization` thereafter.  The numbers are unchanged (the cached outputs are
-    the very same Stmt outputs the first call produced); only the redundant *recomputation*
-    is removed.
+    (cod,dom) transpose prelude — exactly once, returning the cached
+    :class:`FfsRealization` thereafter.  Every consumer sees the very same Stmt outputs, so
+    the memo shares one factorization rather than recomputing it.
     """
     match space:
         case S.Img() | S.Ker() | S.CoImg() | S.CoKer():
@@ -7717,7 +7705,7 @@ def _realize_ffs_by_which(
     **orthonormal w.r.t. those bases' inner products**: each is turned into the
     metric ``G = (B·Bᵀ)⁻¹`` (in which ``B`` is orthonormal) and fed to the GSVD seam, so the
     realized columns stay in the standard ambient basis (cob composes).  Both ``None`` ⇒ the
-    plain SVD/QR (byte-identical).
+    plain SVD/QR.
     """
     norm = "img" if which == "image" else which
     if norm == "img" and source is not None and target is not None:
@@ -7767,8 +7755,8 @@ def _realize_ffs_by_which(
     # cob between. `Project(v, Img(J))` is silent-wrong under a pinned `J` for exactly this reason.
     #
     # Scope: this is the METRIC-FREE / single-endpoint path. An `img` request carrying BOTH
-    # endpoints routes above to `_realize_image_covariant`, which already coerces — so this does NOT
-    # change the σ face case (bit-identical there).
+    # endpoints routes above to `_realize_image_covariant`, which already coerces — so the σ face
+    # case is unaffected.
     f_rep = _coerce_rep_basis(ctx, f_rep, note="ffs-by-which:f-to-default")
     [f_cd] = ctx.prog.emit_stmt(
         pa.TransposeOp(), [f_rep.array],
@@ -7811,15 +7799,15 @@ def _realize_image_covariant(
 
     Correct for ANY ``f``: with ``G_tgt = (T·Tᵀ)⁻¹`` and ``T`` square-invertible,
     ``(T·Q)ᵀ·G_tgt·(T·Q) = QᵀQ = I`` — the returned basis is orthonormal w.r.t. the
-    target basis's inner product and spans ``Img f`` (the Stage-B contract), delivered in
+    target basis's inner product and spans ``Img f``, delivered in
     STANDARD ambient coordinates (the seam's output contract — every ``.cols`` consumer
     is untouched).  The point of the strategy: when ``f`` is NATURAL w.r.t. the endpoint
     transport (the exterior ``alt`` under the transported ⊗ᵏ bases — ``alt∘g⊗ᵏ =
     g⊗ᵏ∘alt``), ``A₀`` is the CONSTANT reference matrix, so ``Q₀`` is reference-constant
     and ``cols`` is an affine-EQUIVARIANT (transported) basis — the k ≥ 2 metric-free
-    readout / P(T) = I requirement.  The old strategy (std-coordinates GSVD against the
-    endpoint Gram) is correct-metric but algorithm-basis per cell — NOT equivariant —
-    which broke every traced k ≥ 2 lane.  Side benefit: the factorization runs on ``A₀``
+    readout / P(T) = I requirement.  A std-coordinates GSVD against the endpoint Gram would be
+    correct-metric but algorithm-basis per cell — NOT equivariant — breaking every traced
+    k ≥ 2 lane.  Side benefit: the factorization runs on ``A₀``
     (constant for the natural case ⇒ build-time-foldable; no symbolic SVD in the
     symbolic lane — the cell dependence rides the two rational endpoint cobs).
 
@@ -8175,7 +8163,7 @@ class _OpaqueOp:  # audit: ok LOWER-PYAB-HOLE,LOWER-NUMPY-HOLE — foreign escap
     Lowers an :class:`~grassmann.core.term.OpaqueApply`: the kernel ``fn`` is a black-box
     ``dom``-array → ``cod``-array callable.  Unlike :class:`_ExternalOp` (elementwise, shape-
     preserving), the kernel may change shape — the out-shape is fixed by the codomain in
-    :func:`_rep_opaque`.  A numpy_renderer rule will be needed to codegen this op later.
+    :func:`_rep_opaque`.  It has no numpy renderer, so it runs only through the interpreter.
     """
 
     name: str
@@ -8484,10 +8472,10 @@ def numpy_op_renderers() -> dict:
     their renderers would be supplied, keyed by op class name and passed as
     ``op_renderers=grassmann.lower.numpy_op_renderers()``.
 
-    Every op this once carried is now a polyarray builtin with a builtin renderer, and
-    ``_render_op`` consults the type-keyed builtin table before any caller-supplied name table,
-    so an entry here for one of them could not fire in any case. The empty mapping is therefore
-    the honest answer, and the seam stays open for a front-end op that needs it.
+    Grassmann's front-end data and shape ops are all polyarray builtins with builtin renderers,
+    and ``_render_op`` consults the type-keyed builtin table before any caller-supplied name
+    table, so an entry here could not fire in any case. The empty mapping is therefore the honest
+    answer, and the seam stays open for a front-end op that needs it.
 
     The ops grassmann does still render — the foreign scalar operators and the basis realization
     ops — live in :mod:`grassmann.lower.numpy_renderers` and are supplied by

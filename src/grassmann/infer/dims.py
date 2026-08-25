@@ -416,8 +416,9 @@ def is_runtime_dim(d: object) -> bool:
         case DimMod():
             return is_runtime_dim(d.term) or is_runtime_dim(d.modulus)
         case DimLit() | DimVar() | DimOf():
-            # No runtime atom: literals and static-opaque generators. A future Dim node
-            # that CAN carry one must be classified here explicitly (assert_never below).
+            # No runtime atom: literals and static-opaque generators. Any Dim node that can
+            # carry one must be classified here explicitly rather than falling through
+            # (see the assert_never below).
             return False
         case _ as unreachable:
             assert_never(unreachable)

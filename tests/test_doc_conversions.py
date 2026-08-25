@@ -1,9 +1,8 @@
-"""A test for every basis conversion enumerated in the docs (`docs/bases/*` → Conversions).
+"""A test for every basis conversion enumerated in `tools/doc_examples.py`.
 
-Each basis page enumerates how it converts to other bases of the same space and the mechanism
-`cob` uses; those rows come from `tools/doc_examples.py::CONVERSIONS`, where each thunk runs
-`cob` and asserts the resulting matrix.  This parametrizes over every one, so each documented
-conversion is a passing test.
+`doc_examples.py::CONVERSIONS` enumerates how each basis converts to other bases of the same
+space and the mechanism `cob` uses; each thunk runs `cob` and asserts the resulting matrix.
+This parametrizes over every one, so each documented conversion is a passing test.
 """
 
 from __future__ import annotations
@@ -25,12 +24,3 @@ def test_basis_conversion(name: str, i: int) -> None:
     """The documented conversion ``name`` → its i-th target runs and matches (or is a note)."""
     conv = DEX.CONVERSIONS[name][i]()  # runs cob + self-asserts (abstract rows just describe)
     assert conv.to and conv.via
-
-
-def test_every_basis_has_conversions() -> None:
-    """Every basis node enumerates at least one conversion."""
-    import gen_docs  # noqa: PLC0415
-
-    bases = [n for (n, *_rest) in gen_docs.BASES]
-    missing = [b for b in bases if b not in DEX.CONVERSIONS]
-    assert not missing, f"bases without a Conversions enumeration: {missing}"

@@ -308,8 +308,7 @@ def free_vars(expression: str) -> list[str]:
 def default_decls(expression: str) -> dict[str, str]:
     """Give ``{name: "scalar"|"vector"|"matrix"}`` for each free variable.
 
-    The kind of each name follows the naming convention (:func:`default_type`) — a
-    reasonable default type for each free variable.
+    The kind of each name follows the naming convention (:func:`default_type`).
     """
     return {n: default_type(n) for n in free_vars(expression)}
 
@@ -319,7 +318,7 @@ def default_decls(expression: str) -> dict[str, str]:
 # ===========================================================================
 #
 # matrixcalculus's `*` and `'` are *overloaded*: `*` is scalar-mul / mat-vec / mat-mat,
-# and `'` is dual / transpose, resolved by operand ORDER (scalar/vector/matrix). We mirror
+# and `'` is dual / transpose, resolved by operand order (scalar/vector/matrix). We mirror
 # that with a small **kind** lattice over the abstract spaces, plus a union-find that
 # unifies the (otherwise fresh) space of each variable as the expression constrains it
 # (`A*x` ⟹ src(A) = space(x); `x+y` ⟹ space(x) = space(y)).
@@ -489,7 +488,7 @@ def _resolve_space(s: str, env: dict, params: dict | None = None) -> Expr:
 
 def _num_jacobian(fn: Callable[[np.ndarray], object], x: object,
                   h: float = 1e-5) -> np.ndarray:
-    """Central-difference Jacobian of a numeric kernel ``fn`` at ``x`` — shape (cod, dom)."""
+    """Give the central-difference Jacobian of a numeric kernel ``fn`` at ``x``, shaped ``(cod, dom)``."""
     import numpy as np
     x = np.asarray(x, float)
     n = x.size
@@ -687,7 +686,7 @@ class _TN:
     """
 
     kind: str                       # "scalar" | "vec" | "cov" | "mat"
-    # the thunks below are always CALLED with no arguments; their parameters exist only to
+    # the thunks below are always called with no arguments; their parameters exist only to
     # capture loop/branch values by default, hence ``Callable[..., Expr]``.
     emit: Callable[..., Expr]       # () -> Expr  (vector/scalar/map; for "cov", the Riesz u)
     sp: int = -1                    # vec/cov: space slot (cov: current DOMAIN slot)
@@ -1267,7 +1266,7 @@ class _Builder:
                 s = self.uf.fresh(); self.uf.set_fixed(s, space, lab); return s
 
             def _space_slot(tn: _TN, lab: str) -> int:
-                # the slot carrying a value's FULL space, across kinds (so ∂f/∂x can range over any
+                # the slot carrying a value's full space, across kinds (so ∂f/∂x can range over any
                 # tensor x and land in any tensor f): scalar→ℝ, vec→its slot, cov→V*, mat→V⊸W.
                 if tn.kind == "scalar":
                     return _slot(_G.R, "R")
@@ -1784,7 +1783,8 @@ def _build(expr: str, decls: dict[str, str] | None, wrt: str | None,
 def _simplify_safe(expr: Expr) -> Expr:
     """Run the rewrite simplifier on a derivative for a cleaner result.
 
-    Fall back to the raw term if simplification fails (it must remain value-equivalent + lowerable).
+    Fall back to the raw term if simplification fails, since the result must stay
+    value-equivalent and lowerable.
     """
     try:
         return _G.simplify(expr)

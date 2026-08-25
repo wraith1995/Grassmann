@@ -7,7 +7,7 @@ printer parenthesizes on the same principles but from its own table,
 :mod:`grassmann.printer.precedence`, since a printer with no parser to match has no
 reason to be constrained by this one.
 
-How the operators are allocated:
+The operators fall into a few kinds:
 
 - **Infix** binary operators carry a *binding power* (higher binds tighter). All are
   left-associative. They are deliberately **sort-polymorphic**: ``⊗`` is ``OProd`` on

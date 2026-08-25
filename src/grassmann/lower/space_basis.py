@@ -92,9 +92,9 @@ def default_basis(space: S.Space) -> B.Basis:
             # default = g-orthonormal (metric becomes identity in these coords).
             return B.with_inner_basis(default_basis(s), g)
         case S.Img(f, src, tgt):
-            # The natural basis of the range is the ORTHONORMAL (Q/SVD-U) range basis —
+            # The natural basis of the range is the orthonormal (Q/SVD-U) range basis —
             # ``ProjectedBasis(f, "image")`` (the immersed side).  ``ImageBasis(f)`` is the
-            # separate LITERAL map-application basis (raw ``f(eᵢ)`` columns), offered only
+            # separate literal map-application basis (raw ``f(eᵢ)`` columns), offered only
             # as a candidate.
             return B.projected_basis(f, "image", _maybe(src), _maybe(tgt))
         case S.Ker(f, src, tgt):
@@ -148,7 +148,7 @@ def map_basis(space: S.Space, choice: Callable[[S.Space], B.Basis | None]) -> B.
         case S.WithInner(s, g):
             return B.with_inner_basis(map_basis(s, choice), g)
         case S.Img() | S.Ker() | S.CoImg() | S.CoKer() | S.Scalar() | S.SVar() | S.App() | S.SpaceMeta():
-            # FFS nodes are LEAVES for the tower walk (their internals are the map's business);
+            # FFS nodes are leaves for the tower walk (their internals are the map's business);
             # Scalar/SVar take the standard default; App/SpaceMeta raise there, loudly.
             return default_basis(space)
         case _ as unreachable:
@@ -342,7 +342,7 @@ class FfsRealization:
     transpose ``Pᵀ`` reads coordinates only for an orthonormal frame, and the general case needs
     the matched dual ``pinv(P)``.
     """
-    # The upper-triangular ``R`` of the injective QR, ``J = Q·R``, kept because it IS the change
+    # The upper-triangular ``R`` of the injective QR, ``J = Q·R``, kept because it is the change
     # of basis between the two bases of the same image: the literal ``ImageBasis`` columns are
     # ``J`` and the orthonormal ``ProjectedBasis`` columns are ``Q``, so converting between them
     # costs one matrix already in hand rather than realizing both and pseudo-inverting.  Absent
@@ -621,9 +621,9 @@ def _const_ffs_from_svd(
     else:                                                        # coimg / ker: right factor V = Vhᵀ
         v = vh.T
         cols = v[:, :r] if which == "coimg" else v[:, r:]
-    # The SLICE fixes the SUBSPACE; the slice's own columns do not fix a basis (they are arbitrary
+    # The slice fixes the subspace; the slice's own columns do not fix a basis (they are arbitrary
     # inside a degenerate singular subspace). Re-derive the basis canonically from that subspace so
-    # one subspace has ONE basis everywhere — see `_canonical_subspace_basis`.
+    # one subspace has one basis everywhere — see `_canonical_subspace_basis`.
     cols = _canonical_subspace_basis(np.ascontiguousarray(cols))
     return FfsRealization(cols=pa.SymArray(np.ascontiguousarray(cols)),
                           rank=None, rank_dim=None, op=op)
@@ -669,7 +669,7 @@ def _fold_constant_ffs(
         binding[inp.name] = np.zeros(shape)
     m0 = np.asarray(evaluate_cone(program, f_matrix, binding), dtype=float)
     u, sv, vh = np.linalg.svd(m0, full_matrices=True)
-    # Numeric rank with numpy's ``matrix_rank`` rule — IDENTICAL to ``SvdOp``'s default
+    # Numeric rank with numpy's ``matrix_rank`` rule — identical to ``SvdOp``'s default
     # (``rcond=None``) tolerance, so the folded constant equals what the runtime SVD path
     # (``_realize_via_svd``) would slice for this same ``M``.
     tol = float(sv.max()) * max(m0.shape) * float(np.finfo(float).eps) if sv.size else 0.0
@@ -868,7 +868,7 @@ def _realize_via_svd(
         note=f"ffs-basis:SvdOp({label})",
     )
     svd_idx = len(program.statements) - 1
-    # For the image and coimage the subspace dimension IS the rank, so the canonical atom is the
+    # For the image and coimage the subspace dimension is the rank, so the canonical atom is the
     # rank atom: reuse the caller's if one was given, which is what makes the metric-free SVD and
     # the metric GSVD of this map share one axis, and otherwise mint it from this rank output.
     # For the kernel and cokernel the rank atom is internal and the subspace dimension is the

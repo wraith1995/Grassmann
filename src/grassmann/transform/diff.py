@@ -147,11 +147,11 @@ class _DCtx:
 # ===========================================================================
 # Derivative-input provenance + enumeration.
 #
-# A ``deps[uid] = None`` tracer differentiates into a fresh symbolic derivative-MAP input
+# A ``deps[uid] = None`` tracer differentiates into a fresh symbolic derivative-map input
 # ``∂ⁿsource/∂xⁿ : X ⊸ …`` (a Program input a consumer samples).  These two registries give the
 # inputs structured provenance — (base tracer var, derivative order) — so a caller can read off
-# EXACTLY which derivatives a (possibly multiply-differentiated) term references, by var identity
-# rather than by parsing the ``d_…`` name.  They also DEDUPE: the derivative of a given source
+# exactly which derivatives a (possibly multiply-differentiated) term references, by var identity
+# rather than by parsing the ``d_…`` name.  They also deduplicate: the derivative of a given source
 # w.r.t. a given ``x`` is allocated once and reused across repeated/nested ``diff`` calls, so the
 # enumerated requirement set is a true set (no duplicate input per (source, order)).
 _DERIV_INPUTS: dict[int, DerivInput] = {}            # deriv-var.uid -> provenance record
@@ -343,7 +343,7 @@ def diff(e: Term, x: Var, deps: dict[int, Term | None] | None = None) -> Term:
 
 
 # ===========================================================================
-# Directional derivative — De[h], a VALUE in space(e), linear in h.
+# Directional derivative — De[h], a value in space(e), linear in h.
 # ===========================================================================
 
 
@@ -358,7 +358,7 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             # Musical maps of a *constant* space are constant. But if the operator's space is a
             # ``WithInner(s, g)`` whose metric ``g`` depends on x, the operator itself varies — its
             # derivative is nonzero (e.g. ``d⟨a,b⟩_g = aᵀ(∂g)b``).  The covariant correction only
-            # intercepts ``Remetric`` sections, NOT a bare Inner/Flat/Sharp, so returning Zero here
+            # intercepts ``Remetric`` sections, not a bare Inner/Flat/Sharp, so returning Zero here
             # would be silent-wrong; raise loudly instead (wrap the section in ``Remetric`` for the
             # connection, or differentiate the explicit ``WithInner``-metric form).
             if _xdep_metric_space(e.space, ctx):
@@ -376,7 +376,7 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
             return _sum([_dd(v, ctx) for v in vs], e, ctx)
         case OPlusV(vs):
             # d(⊕ᵢ vᵢ)[h] = ⊕ᵢ dvᵢ[h].  When every component is x-independent the whole
-            # direct sum is, so collapse to the zero VALUE in space(e) — otherwise the caller
+            # direct sum is, so collapse to the zero value in space(e) — otherwise the caller
             # wraps an OPlusV-of-Zeros in an LLam over an unused seed (an invalid linear map).
             # Mirrors the all-zero collapse of the Sum / OProdV arms via _zero / _sum.
             ds = tuple(_dd(v, ctx) for v in vs)
@@ -437,7 +437,7 @@ def _dd(e: Term, ctx: _DCtx) -> Term:
         case TuplePermute():
             raise DiffError("diff: no derivative rule for TuplePermute")
         case Corestrict():
-            # ``Corestrict(f) : dom(f) ⊸ Img(f)`` has a MOVING codomain: perturbing ``f``
+            # ``Corestrict(f) : dom(f) ⊸ Img(f)`` has a moving codomain: perturbing ``f``
             # moves the subspace ``Img(f)`` itself, so the difference quotient does not live
             # in a fixed space and there is no linear-map derivative to hand back.  Refuse
             # loudly (differentiate the ambient ``f`` and corestrict afterwards instead).
@@ -472,7 +472,7 @@ def _dd_var(e: Var, ctx: _DCtx) -> Term:
     if e.uid in _QR_FRAME_VARS:
         # A self-differentiating QR-frame tower element: its derivative is the next
         # tower var, applied to the seed — ``dQₙ = Eval(Qₙ₊₁, (0,), (h,))``.  Recursing through this
-        # rule (``diff`` of ``Eval(Qₙ₊₁, h)`` hits ``Qₙ₊₁`` again) gives ARBITRARY differentiation
+        # rule (``diff`` of ``Eval(Qₙ₊₁, h)`` hits ``Qₙ₊₁`` again) gives arbitrary differentiation
         # order from a single registry.
         return Eval(_qr_next(e, ctx), (0,), (ctx.h,))
     return Zero(e.space)  # x-independent variable
@@ -490,7 +490,7 @@ def _dd_external(e: External, ctx: _DCtx) -> Term:
     args = e.args
     sp = e.space
 
-    # An argument-less External is a CONSTANT (e.g. a basis/volume-form vector inside a Hodge
+    # An argument-less External is a constant (e.g. a basis/volume-form vector inside a Hodge
     # star) ⇒ its derivative is zero.
     if not args:
         return Zero(sp)
@@ -840,8 +840,8 @@ def _qr_dQ(Q: np.ndarray, R: np.ndarray, dJm: np.ndarray) -> np.ndarray:
 def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
     """Get-or-create the opaque realization frame ``Q₀`` of the moving FFS subspace ``sub``.
 
-    Keyed by ``(J.uid, kind)`` for defining map ``J`` — ``Img(J)`` and ``Ker(J)`` of the SAME ``J``
-    get SEPARATE frames.  ``Q₀`` lives in the grassmann frame-map space ``coords ⊸ ambient`` (stored
+    Keyed by ``(J.uid, kind)`` for defining map ``J`` — ``Img(J)`` and ``Ker(J)`` of the same ``J``
+    get separate frames.  ``Q₀`` lives in the grassmann frame-map space ``coords ⊸ ambient`` (stored
     ``(δ, ambient_dim)``); it is registered in ``_QR_FRAME_VARS`` so it is self-differentiating —
     ``_dd(Q₀)`` grows the tower ``Q₁ = ∂Q/∂x, …`` on demand.
 
@@ -861,7 +861,7 @@ def _qr_gauge_vars(J: Term, sub: Space, kind: str, ctx: _DCtx) -> Var:
             # width is |dom(J)|.
             frame_space = synth_space(J)
         else:
-            # NON-injective Img realizes in the SVD frame U[:,:rank] (dim = rank < dom), exactly like
+            # A non-injective Img realizes in the SVD frame U[:,:rank] (dim = rank < dom), exactly like
             # the other three FFS kinds — route it through the same subspace-coord path (coords = sub).
             frame_space = oprod(dual(sub), _ffs_ambient(kind, J))  # coords = the moving subspace
         n = next(_counter)
@@ -917,9 +917,9 @@ def _nth_deriv_tensor(
 def ffs_gauge_feed(
     sub_or_J: Space | Term, J_deriv_tower: Sequence[Var] | Var, feed: dict
 ) -> dict:
-    """Build the numeric values of the auto-created opaque gauge TOWER of a moving FFS subspace.
+    """Build the numeric values of the auto-created opaque gauge tower of a moving FFS subspace.
 
-    This is the default ``qr`` gauge.  Fills the ENTIRE realized frame tower
+    This is the default ``qr`` gauge.  Fills the entire realized frame tower
     ``Q₀ = Q, Q₁ = ∂Q/∂x, …`` to whatever depth ``diff`` grew it — so arbitrary-order FFS AD
     lowers.
 
@@ -955,8 +955,8 @@ def ffs_gauge_feed(
     if len(Jtower) < 2:
         raise DiffError("ffs_gauge_feed: supply at least J's first derivative DJ")
     nX = Jtower[1].shape[0]
-    # PIN the frame slice width at the base immersion's numeric rank.  A moving non-full-rank subspace
-    # (non-injective Img) reconstructs OFF its rank-r manifold at finite δ, so the per-δ numeric rank
+    # Pin the frame slice width at the base immersion's numeric rank.  A moving non-full-rank subspace
+    # (non-injective Img) reconstructs off its rank-r manifold at finite δ, so the per-δ numeric rank
     # would jump and the slice width with it — fixing it here keeps the δ-dimension constant across the
     # nested FD steps so the ∂ⁿQ tower has a stable shape.
     base_rank = int(np.linalg.matrix_rank(Jval.T))
@@ -988,7 +988,7 @@ def ffs_gauge_feed(
                 f"ffs_gauge_feed: tower needs ∂^{order}Q but only {depth} J-derivative(s) supplied; "
                 f"mark J→DJ→…→D^{order}J in the nested diffs and pass them all"
             )
-        # shape (|X|,)*order + (δ, ambient) — already the FLAT tower layout, so it
+        # shape (|X|,)*order + (δ, ambient) — already the flat tower layout, so it
         # goes in unreshaped; order 0 is the bare frame (δ, ambient).
         out[f"{var.name}_{var.uid}"] = _nth_deriv_tensor(Q_at, x0, order)
         nxt = _QR_NEXT.get(var.uid)
@@ -1031,7 +1031,7 @@ def _gauge_frame(J: Term, dJ: Term, sub: Space, kind: str, ctx: _DCtx) -> tuple[
             f"subspace realizes in an SVD frame — use the default qr gauge (ffs_gauge_feed)"
         )
     if gauge in ("immersion", "polar") and kind == "img" and not is_injective(J):
-        # The closed immersion/polar frames assume an INJECTIVE immersion (Q = J or J·G^{-1/2}, full
+        # The closed immersion/polar frames assume an injective immersion (Q = J or J·G^{-1/2}, full
         # column rank).  For a non-injective J, Img(J) realizes in the SVD frame U[:,:rank] — these
         # closed forms have no valid frame there.  Use the default qr gauge (ffs_gauge_feed).
         raise DiffError(
@@ -1139,7 +1139,7 @@ def _dd_logdet_kernel(f: Term, ctx: _DCtx) -> Term | None:
         return None
     # Jacobi's formula ``d det = det·tr(f⁻¹ df)`` presupposes ``f`` invertible — det/logdet are only
     # differentiable at an invertible point.  ``f`` (the operand) need not be a ``bij``-asserted
-    # ``Var`` (e.g. a ``Sum``), so ASSERT bijectivity for the ``Solve``; otherwise the derivative
+    # ``Var`` (e.g. a ``Sum``), so assert bijectivity for the ``Solve``; otherwise the derivative
     # fails to type-check with "Solve requires bij".
     from grassmann.core.props import MapProps
     from grassmann.infer.synth import synth_space
@@ -1261,7 +1261,7 @@ def _dd_sqrt(e: Sqrt, ctx: _DCtx) -> Term:
     v = cod
     s = e  # Sqrt(e.f) : V ⊸ V
     # The value lowers sqrt(sym(f)) (``_SqrtSpdOp`` symmetrizes), so the honest derivative sees the
-    # SYMMETRIC part of df — the antisymmetric part doesn't move sqrt(sym(f)).  No-op for the
+    # symmetric part of df — the antisymmetric part doesn't move sqrt(sym(f)).  No-op for the
     # immersed-metric use (``f = JᵀJ`` ⇒ df = dJᵀJ + JᵀdJ already symmetric); guards the rest.
     df_sym = Scale(0.5, Sum((df, Dagger(df))))
     s_dual = Compose(Flat(v), (0,), (Compose(s, (0,), (Sharp(v),)),))  # V* ⊸ V*, S on covectors
@@ -1365,7 +1365,7 @@ def _dd_neval_lam(e: NEval, lam: Lam, positions: tuple[int, ...], args: tuple, c
     arg_at_slot = dict(zip(positions, args, strict=True))
     if any(v.uid == ctx.x.uid for v in slot_to_var.values()):
         raise DiffError("diff: the differentiation variable is bound by a Lam in the term")
-    # Directional derivative of each argument (in the OUTER context — args are outer terms).
+    # Directional derivative of each argument (in the outer context — args are outer terms).
     darg: dict[int, Term] = {}
     for slot, yk in slot_to_var.items():
         if slot not in arg_at_slot:

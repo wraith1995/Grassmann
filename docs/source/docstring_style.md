@@ -41,8 +41,9 @@ are the template.
    space, dual, direct sum, tensor, map, term, basis, adjoint, image, kernel,
    inner product, pseudo-inverse, lowering. Reduce a motivating idea to the
    algebraic object it actually is. Name a neighbouring layer only where it is
-   genuinely the seam: `polyarray` is the lowering target, and `chartlib` is the
-   geometry consumer — say so when that is the point, not otherwise.
+   genuinely the seam — `polyarray` is the lowering target, so say so when that is
+   the point, not otherwise — and describe a consumer by what it does, not by its
+   name.
 
 9. **Keep the real contracts, and the terse register.** Exact facts stay — that
    an adjoint needs both inner products, that a corestriction is defined only for
@@ -88,8 +89,8 @@ state the meaning directly and add the contrast only once it teaches something:
 """The basis of literal pushforward columns ``f(sᵢ)`` of a map's image.
 
 Given a map ``f`` and a basis ``s`` of its domain, this coordinatizes
-``Img(f)`` by the vectors ``f(s₁), …, f(sₙ)`` themselves — the frame
-chartlib transports along ``f``. It is not orthonormalized; when an
+``Img(f)`` by the vectors ``f(s₁), …, f(sₙ)`` themselves — the transported
+(pushforward) frame along ``f``. It is not orthonormalized; when an
 orthonormal frame for the image is wanted,
 :class:`ProjectedBasis` supplies it instead. …
 """

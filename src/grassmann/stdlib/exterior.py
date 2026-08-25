@@ -257,7 +257,7 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
     A = G.embed(a, tensor_power(V, k))  # Λᵏ ⊑ V⊗ᵏ
     B = G.embed(b, tensor_power(V, l))  # Λˡ ⊑ V⊗ˡ
 
-    AB = A * B  # nested (V⊗ᵏ) ⊗ (V⊗ˡ)  (the core does NOT flatten ⊗)
+    AB = A * B  # nested (V⊗ᵏ) ⊗ (V⊗ˡ)  (the core does not flatten ⊗)
     AB_flat = G.unlift(AB, [0, 1])  # explicit reassociation ⇒ flat V⊗^{k+l} (reshape)
 
     Alt_kl = alt(V, k + l)  # the single-slot antisymmetrizer V⊗^{k+l} ⊸ V⊗^{k+l}

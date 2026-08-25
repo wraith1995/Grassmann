@@ -52,7 +52,7 @@ _OPS = sorted(
     reverse=True,
 )
 _OP_SET = set(_OPS)
-# single-codepoint glyphs that may NOT appear inside an identifier
+# single-codepoint glyphs that may not appear inside an identifier
 _RESERVED_CHARS = {o for o in _OP_SET if len(o) == 1}
 _ATOM_OPS = {G.SCALAR, G.OPLUS_BOT, G.SCALAR_BASIS}
 

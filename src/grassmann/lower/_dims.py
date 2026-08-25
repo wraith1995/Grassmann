@@ -61,7 +61,7 @@ def dim_of(space: S.Space) -> int:
         case S.WithInner(s, _):
             return dim_of(s)
         case S.Img() | S.CoImg() | S.Ker() | S.CoKer():
-            # FFS dims are runtime ranks UNLESS the defining map's asserted props
+            # FFS dims are runtime ranks unless the defining map's asserted props
             # (inj/surj/bij, rank/dim_img/dim_ker) pin a static rank; when they
             # don't, the substrate sizes these with a polyarray DimAtom (dynamic axis).
             return _ffs_dim(space)
@@ -228,7 +228,7 @@ def basis_dim(b: B.Basis) -> int:
         case B.BasisRep(count, inner):
             return _dim_int(count) * basis_dim(inner)
         case B.ListBasis(vectors, backup, reduce):
-            # A ``ListBasis`` is ALWAYS a full basis of its AMBIENT (the vectors' space): its
+            # A ``ListBasis`` is always a full basis of its ambient (the vectors' space): its
             # dim is the ambient dim (static when the ambient is static).  An explicit backup
             # also gives the ambient.  Only when the ambient is genuinely undeterminable
             # (abstract vectors, no backup) do we fall back to a runtime/length size.

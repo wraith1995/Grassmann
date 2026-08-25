@@ -14,8 +14,8 @@ full op table):
 * ``\circ`` compose, ``\otimes`` tensor, ``\oplus`` direct sum, ``\cdot`` scalar/scale,
   ``\odot`` Hadamard;
 * ``f^{\dagger}`` adjoint, ``f^{-1}`` inverse (Solve), ``f^{+}`` pseudo-inverse (Pinv) —
-  the three are kept *distinct* superscripts (more faithful than collapsing pinv onto the
-  dagger), ``s^{*}`` dual space;
+  the three are kept distinct superscripts, more faithful than collapsing pinv onto the
+  dagger, ``s^{*}`` dual space;
 * ``\mathbb{R}`` for ``Scalar`` (and ``\mathbb{R}^{n}`` for the grounded ``⊕ⁿ ℝ``),
   ``\ker`` / ``\operatorname{im}`` / ``\operatorname{coker}`` / ``\operatorname{coim}``
   for the FFS;
@@ -263,7 +263,7 @@ def _render_app(f: object, pos: tuple[int, ...], args: tuple[object, ...]) -> st
     """``f(a, b)`` — generic (linear or dependent) application.
 
     Non-default contraction slots are surfaced as a subscript on the callee so the
-    rendering stays faithful to *which* slots receive the arguments.
+    rendering stays faithful to which slots receive the arguments.
     """
     callee = _sub(f, Prec.POSTFIX)
     if not _default_positions(pos, len(args)):
@@ -273,7 +273,7 @@ def _render_app(f: object, pos: tuple[int, ...], args: tuple[object, ...]) -> st
 
 
 def _render_compose(f: _t.Term, pos: tuple[int, ...], gs: tuple[_t.Term, ...]) -> tuple[str, int]:
-    # The subscript on ``∘`` names WHICH argument slot(s) of ``f`` the operand feeds — shown
+    # The subscript on ``∘`` names which argument slot(s) of ``f`` the operand feeds — shown
     # always (including the default single-slot ``∘₀``) so the rendering is unambiguous.
     if len(gs) == 1:
         op = BINOPS["compose"]

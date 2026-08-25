@@ -505,7 +505,7 @@ class SolveApply:
 
 @dataclass(frozen=True)
 class PinvApply:
-    """The pseudo-inverse of a map applied to a vector, ``f†·v``."""
+    """The pseudo-inverse of a map applied to a vector, ``f⁺·v``."""
 
     f: Term
     v: Term
@@ -1226,7 +1226,7 @@ def solve(f: Term) -> Solve:
 
 
 def pinv(f: Term) -> Pinv:
-    """Build the Moore–Penrose pseudo-inverse map ``f†``."""
+    """Build the Moore–Penrose pseudo-inverse map ``f⁺``."""
     return Pinv(f)
 
 
@@ -1246,7 +1246,7 @@ def solve_apply(f: Term, v: Term) -> SolveApply:
 
 
 def pinv_apply(f: Term, v: Term) -> PinvApply:
-    """Build the applied pseudo-inverse ``f†·v``."""
+    """Build the applied pseudo-inverse ``f⁺·v``."""
     return PinvApply(f, v)
 
 

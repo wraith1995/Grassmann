@@ -149,7 +149,7 @@ def _is_operator_basis_of(candidate: B.Basis, op: object) -> bool:
     """Report whether ``candidate`` is a structure basis of the map ``op`` itself.
 
     Only an ``ImageBasis`` or a ``ProjectedBasis`` carries a defining map, and it counts here
-    only when that map is ``op``: a basis of some *other* operator buys none of the structure
+    only when that map is ``op``: a basis of some other operator buys none of the structure
     the bonus is paying for.
     """
     match candidate:
@@ -165,7 +165,7 @@ def _rational_frame_lane() -> bool:
     """Report whether the rational (literal) basis lane is active for this lowering.
 
     The scorer's preference for a rational basis is opt-in, and the switch is the same one that
-    makes the frame's *realization* rational: ``represent(literal_frames=True)`` or the
+    makes the frame's realization rational: ``represent(literal_frames=True)`` or the
     :func:`~grassmann.lower.represent.literal_ffs_bases` context. It is off by default, so the
     orthonormal default ordinarily wins unopposed. The import is deferred to the call to keep
     :mod:`represent` and :mod:`choose` from importing each other at module load.

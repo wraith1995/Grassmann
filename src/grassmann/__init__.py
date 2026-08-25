@@ -23,7 +23,7 @@ Everything hangs off a single import::
 points chaining embed → infer → represent → run.
 
 Note: ``embed`` names both the subpackage and the movement builder; ``G.embed`` is the
-**subpackage** (so ``import grassmann.embed`` keeps working) — the movement builder is
+subpackage (so ``import grassmann.embed`` keeps working) — the movement builder is
 :func:`grassmann.embed.embed`, while every other movement op (``G.project``,
 ``G.assert_``, …) is on ``G`` directly.
 

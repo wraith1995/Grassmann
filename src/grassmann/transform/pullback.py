@@ -77,7 +77,7 @@ class PullbackError(Exception):
 # recursion could not handle, return a map term, or ``None`` to decline.
 LeafPrimitives = Callable[[Space, Space], Term | None]
 
-# A caller-supplied leaf SELF-map, keyed on one space (see :func:`endomorphism_map`).
+# A caller-supplied leaf self-map, keyed on one space (see :func:`endomorphism_map`).
 SelfPrimitives = Callable[[Space], Term | None]
 
 
@@ -145,7 +145,7 @@ def _pb(v: Term, source: Space, target: Space, primitives: LeafPrimitives | None
     if isinstance(S, OPlus) and isinstance(T, OPlus) and len(S.spaces) == len(T.spaces):
         return _pb_oplus(v, S, T, primitives)
     if isinstance(S, Dual) and isinstance(T, Dual):  # audit: ok EX-ISINSTANCE-LADDER — bail-default (§0): exploit structure else _pb_fallback [approved 2026-07-03]
-        # a covector transports CONTRAVARIANTLY: precompose with the reversed PRIMAL map (`Compose` = the
+        # a covector transports contravariantly: precompose with the reversed primal map (`Compose` = the
         # metric-free adjoint action). The primal FFS leaf's map comes from `primitives` (the chart inclusion).
         inner = transport_map(T.space, S.space, primitives=primitives)
         return Compose(v, (0,), (inner,))
@@ -222,7 +222,7 @@ def _pb_fallback(v: Term, S: Space, T: Space) -> Term:
 
 # ---------------------------------------------------------------------------
 # Primitive (dom, cod) transport maps — for the ⊗ (Kron) and Dual (precompose) cases,
-# and exposed for reuse. Built ONLY from Eval-compatible primitive map nodes.
+# and exposed for reuse. Built only from Eval-compatible primitive map nodes.
 # ---------------------------------------------------------------------------
 
 
@@ -247,12 +247,12 @@ def transport_map(
         case _ if S == T:
             return Identity(S)
         case (Dual(sd), Dual(td)):
-            # A covector-factor map (a `⊗`/`Λᵏ` factor) is the metric-free TRANSPOSE of the
+            # A covector-factor map (a `⊗`/`Λᵏ` factor) is the metric-free transpose of the
             # reversed primal map f = td⊸sd:  f* : Dual(sd) ⊸ Dual(td),  (f*ω)(x) = ω(f x).
-            # NOT `dagger` — the metric adjoint types PRIMAL (`B⊸A`), so `Eval(dagger(f), ω)`
+            # This is not `dagger`: the metric adjoint types primal (`B⊸A`), so `Eval(dagger(f), ω)`
             # pairs a covector against a primal slot (a UnifyError), and a
-            # metric may not enter a metric-free trace at all. The transpose is DEFINED in
-            # the calculus: λω. ω∘f — an `LLam`/`Compose`, no new node; `Eval(LLam,·)`
+            # metric may not enter a metric-free trace at all. The transpose is defined in
+            # the calculus as λω. ω∘f — an `LLam`/`Compose`, no new node; `Eval(LLam,·)`
             # β-reduces to the same `Compose` the value-level Dual branch above builds.
             f = transport_map(td, sd, primitives=primitives)
             return _transpose_map(f, sd, td)
@@ -309,7 +309,7 @@ def endomorphism_map(space: Space, *, primitives: SelfPrimitives) -> Term:
       corestriction maps ``Img`` itself determines — :func:`_ffs_immersion`). Sound exactly
       when the ambient action maps the image into itself, which holds for the functorial
       actions this serves (an antisymmetrizer commutes with ``f⊗ᵏ``, so ``Λᵏ`` images are
-      invariant); a caller whose ambient action does NOT preserve the image must supply the
+      invariant); a caller whose ambient action does not preserve the image must supply the
       ``Img`` leaf directly.
     - ``Scalar`` → ``Identity``; ``WithInner`` strips (represent consults no metric here).
 
@@ -325,7 +325,7 @@ def endomorphism_map(space: Space, *, primitives: SelfPrimitives) -> Term:
     from grassmann.core.space import Scalar as _ScalarSpace
     from grassmann.core.term import chain
 
-    # Consult `primitives` on the space AS STORED (before any expansion) — the caller keys its
+    # Consult `primitives` on the space as stored (before any expansion) — the caller keys its
     # leaves off the same tree this recursion walks, and eagerly normalizing first would rewrite
     # an `OPlusRep` ground (`S.base`) into `OPlus` before the callback could ever match it.
     p = primitives(space)
@@ -338,7 +338,7 @@ def endomorphism_map(space: Space, *, primitives: SelfPrimitives) -> Term:
                 f"endomorphism_map: space {S!r} is not fully determined; realize it first"
             )
         case OPlusRep(count=DimLit() as n, space=summand):
-            # Expand ONE level, keeping the summand as stored so nested primitives still match.
+            # Expand one level, keeping the summand as stored so nested primitives still match.
             return endomorphism_map(oplus(*([summand] * n.value)), primitives=primitives)
         case OPlusRep():
             raise PullbackError(
@@ -369,8 +369,8 @@ def endomorphism_map(space: Space, *, primitives: SelfPrimitives) -> Term:
             embed = _ffs_immersion(S, ambient)
             if project is not None and embed is not None:
                 return chain(project, inner, embed)       # inj defining map: exact corestriction
-            # A PROJECTOR image (e.g. an exterior power's `Img(Alt)`): no corestriction, so
-            # conjugate with the VALUE-level Embed/Project (the `_pb_ffs` mechanism) inside an
+            # A projector image (e.g. an exterior power's `Img(Alt)`): no corestriction, so
+            # conjugate with the value-level Embed/Project (the `_pb_ffs` mechanism) inside an
             # `LLam` — Eval-able like the Dual arm's transpose.
             from grassmann.core.term import LLam, var as _var
 
@@ -423,21 +423,21 @@ def _ffs_immersion(S: Space, T: Space) -> Term | None:
     from grassmann.core.space import Img
     from grassmann.core.term import Corestrict, Pinv, chain
 
-    # DIRECTION MATTERS — `transport_map(S, T)` promises a map whose CODOMAIN IS `T`. `f ∘ f⁺` has
-    # codomain `cod(f)` (the ambient) in BOTH directions; used as the map into an `Img(f)` it
-    # typechecks loosely, since `Img(f) ⊆ cod(f)`, but the transported value then carries AMBIENT
-    # coordinates instead of the image's own. A consumer that reads coordinates OFF the result — the
-    # metric-free k-form integrate lane sums output COORDINATES against reference weights — silently
-    # gets `edim` of them where the image has `rank(f)`. The corestriction fixes the type AND the
+    # Direction matters: `transport_map(S, T)` promises a map whose codomain is `T`. `f ∘ f⁺` has
+    # codomain `cod(f)` (the ambient) in both directions; used as the map into an `Img(f)` it
+    # typechecks loosely, since `Img(f) ⊆ cod(f)`, but the transported value then carries ambient
+    # coordinates instead of the image's own. A consumer that reads coordinates off the result — the
+    # metric-free k-form integrate lane sums output coordinates against reference weights — silently
+    # gets `edim` of them where the image has `rank(f)`. The corestriction fixes the type and the
     # coordinates in one move.
     if isinstance(T, Img) and _normalize(_img_ambient(T)) == _normalize(S):
         if not _corestrictable(T.f):
             return None
-        return chain(Corestrict(T.f), Pinv(T.f))    # PROJECT `cod(f) ⊸ Img(f)`, image's own coords
+        return chain(Corestrict(T.f), Pinv(T.f))    # project `cod(f) ⊸ Img(f)`, image's own coords
     if isinstance(S, Img) and _normalize(_img_ambient(S)) == _normalize(T):
         if not _corestrictable(S.f):
             return None
-        return chain(S.f, Pinv(Corestrict(S.f)))    # EMBED  `Img(f) ⊸ cod(f)`
+        return chain(S.f, Pinv(Corestrict(S.f)))    # embed  `Img(f) ⊸ cod(f)`
     return None
 
 

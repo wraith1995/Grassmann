@@ -665,7 +665,7 @@ def _synth_corestrict(e: Corestrict, ctx: Ctx) -> Space:
 
 
 def _synth_sqrt(e: Sqrt, ctx: Ctx) -> Space:
-    # The operator square root is an endomorphism of the SAME (square) space (V ⊸ V).
+    # The operator square root is an endomorphism of the same (square) space (V ⊸ V).
     dom, cod = _map_dom_cod_resolved(e.f, ctx)
     if dom != cod:
         raise InferError("Sqrt requires a square endomorphism (V ⊸ V)")
@@ -703,7 +703,7 @@ def _synth_project(e: Project, ctx: Ctx) -> Space:
     if e.space is None:
         # Target subspace omitted. A subspace is not unique, so we cannot solve the
         # target by unification in the ⇒ direction; return a fresh metavar (to be solved
-        # by the ⇐ check direction) and DEFER the ``target ⊑ s`` obligation, validated
+        # by the ⇐ check direction) and defer the ``target ⊑ s`` obligation, validated
         # once the metavar is resolved (see ``_check_subspace_obligations``).
         target = fresh_meta("proj")
         ctx.subspace_obligations.append((target, s, e.vector))
@@ -778,15 +778,15 @@ def _synth_remetric(e: Remetric, ctx: Ctx) -> Space:
 def _spliced_oprod(*parts: Space) -> Space:
     """``Kron``'s endpoint spelling: :func:`grassmann.core.space.spliced_oprod`.
 
-    A ``kron`` CHAIN nests its endpoints — ``kron(f, kron(g, h))`` has domain
-    ``oprod(a0, oprod(a1, a2))`` — while ``tensor_power(V, k)`` builds the same space FLAT.  The
+    A ``kron`` chain nests its endpoints — ``kron(f, kron(g, h))`` has domain
+    ``oprod(a0, oprod(a1, a2))`` — while ``tensor_power(V, k)`` builds the same space flat.  The
     two meet wherever a Λᵏ ambient is unified against an antisymmetrizer's domain, and ``unify``
     refuses to identify two ⊗ layouts, so ``Kron``'s endpoints are spliced to the flat spelling
     here.  (At ``k = 2`` a chain has no nesting to disagree about; from ``k = 3`` up it does.)
 
-    Splicing the ENDPOINTS is layout-neutral, which is why it is done here rather than in
-    ``oprod`` itself: the nesting sits INSIDE the ``Dual(dom)`` / ``cod`` factor of the map space
-    ``_synth_kron`` returns, and ``_shape_of_space`` counts that factor as ONE axis whatever its
+    Splicing the endpoints is layout-neutral, which is why it is done here rather than in
+    ``oprod`` itself: the nesting sits inside the ``Dual(dom)`` / ``cod`` factor of the map space
+    ``_synth_kron`` returns, and ``_shape_of_space`` counts that factor as one axis whatever its
     interior, so the map keeps its ``(dom, cod)`` matrix shape either way.
 
     Parameters
