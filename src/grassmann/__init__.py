@@ -97,6 +97,8 @@ from .embed import (
     sharp,
     sharp_of,
     flat_of,
+    proj_of,
+    const,
     simplify,
     solve,
     space,
@@ -287,6 +289,8 @@ __all__ = [
     "sharp",
     "sharp_of",
     "flat_of",
+    "proj_of",
+    "const",
     # movement / coercion / reshape
     "project",
     "embed",

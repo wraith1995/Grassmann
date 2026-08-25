@@ -32,6 +32,7 @@
       coker
       complete
       compose
+      const
       corestrict
       dagger
       det
@@ -43,6 +44,7 @@
       embed
       external
       flat
+      flat_of
       fn
       frame
       id
@@ -67,6 +69,7 @@
       parse
       pinv
       proj
+      proj_of
       project
       projected_basis
       pull_along
@@ -76,6 +79,7 @@
       remetric
       scale
       sharp
+      sharp_of
       simplify
       solve
       space

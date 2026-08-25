@@ -28,7 +28,6 @@ constants and permutations:
    >>> import grassmann as G
    >>> from grassmann.embed import embed
    >>> from grassmann.infer import dim_of, is_runtime_dim, synth_space
-   >>> from grassmann.lower.represent import ExternalOp
 
 And five small conveniences we reuse throughout. ``R(n)`` names the space ``ℝⁿ``;
 ``run`` compiles a grassmann expression and evaluates it on numbers; ``show`` does
@@ -391,14 +390,14 @@ transpose. It is a projector, and its rank is the dimension we declined to guess
 
 We could have used a different basis for ``ℝ³`` — say by scaling a basis vector —
 and gotten the same result. A basis is built from explicit vectors with
-:func:`~grassmann.list_basis`; each vector is a constant of ``V``, which requires a builtin escape hatch for the general space
-``G.external`` and ``ExternalOp``:
+:func:`~grassmann.list_basis`; each vector is a constant of ``V``, built from its coordinates
+with :func:`~grassmann.const`:
 
 .. doctest::
 
    >>> def basis_vec(S: G.Expr, i: int, n: int) -> G.Expr:
    ...     a = np.zeros(n); a[i] = 1.0
-   ...     return G.external(S, ExternalOp(f"e{i}", lambda a=a: a))
+   ...     return G.const(S, a)
    >>> scaled = G.list_basis(*[G.scale(2.0 if i == 0 else 1.0, basis_vec(V, i, 3))
    ...                         for i in range(3)])     # e₁ ↦ 2e₁, the others fixed
    >>> bs = G.tensor(scaled, scaled)

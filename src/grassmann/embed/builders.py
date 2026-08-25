@@ -310,6 +310,23 @@ def lit(r: float) -> Expr:
     return wrap(_t.lit(r))
 
 
+def const(s: object, values: object) -> Expr:
+    """Build a constant value of space ``s`` from concrete coordinates ``values``.
+
+    The value-level counterpart of feeding an array to :func:`run`: a fixed array, coordinatized
+    in ``s``'s standard basis, baked into the term. Unlike a :func:`var` it consumes no input and
+    lowers to the literal array, so it stands in for a known vector (a basis vector, a fixed
+    frame direction) without an input to feed. ``values`` is anything :func:`numpy.asarray`
+    accepts; :func:`lit` is the ``Scalar`` special case.
+    """
+    import numpy as np
+
+    from grassmann.lower.represent import ExternalOp
+
+    arr = np.asarray(values, dtype=float)
+    return external(s, ExternalOp("const", lambda arr=arr: arr))
+
+
 def scale(r: object, v: object) -> Expr:
     """Scale the vector ``v`` by ``r``, leaving it in its own space.
 
@@ -573,6 +590,15 @@ def sharp_of(x: object) -> Expr:
 def flat_of(x: object) -> Expr:
     """Lower the vector value ``x`` (in some ``V``) to the covector in ``V*`` its metric pairs it with."""
     return flat(_space_of_value(x))(x)
+
+
+def proj_of(x: object, i: int) -> Expr:
+    """Read the ``i``-th component of a direct-sum value ``x`` (in some ``⊕(sₖ)``) back out.
+
+    The value-level :func:`proj`: the sum space is read off ``x`` itself, so a consumer with a
+    value in a direct sum takes a summand without naming the space.
+    """
+    return proj(_space_of_value(x), i)(x)
 
 
 # ===========================================================================
