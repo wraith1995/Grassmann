@@ -37,6 +37,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
+pytest.importorskip("chartlib")  # cross-check against chartlib; skips where it is not installed
+
 from chartlib.geometry import Geometry
 from chartlib.geometry_iso import GeometricIso, volume_det_jacobian
 from chartlib.interpreters import NumpyInterpreter

@@ -698,7 +698,7 @@ def _struct_frame():
     fr = C.frame(x, C.list_basis(x))
     _ck(isinstance(fr, C.Frame) and fr.var is x)
     return Example(
-        "A basis that VARIES with a runtime value `x` (the moving/pointwise frame). Basis-tower "
+        "A basis that varies with a runtime value `x` (the moving/pointwise frame). Basis-tower "
         "machinery — consumed through the basis tower, not lowered as a value.",
         "frame(x, list_basis(x))",
         facts=[("binding var", "x : V"),

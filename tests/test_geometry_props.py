@@ -25,6 +25,9 @@ from itertools import combinations
 
 import numpy as np
 import pytest
+
+pytest.importorskip("chartlib")  # cross-check against chartlib; skips where it is not installed
+
 from chartlib.geometry import Geometry
 from chartlib.geometry_iso import volume_det_jacobian
 from chartlib.interpreters import NumpyInterpreter

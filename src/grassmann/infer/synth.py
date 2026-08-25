@@ -199,7 +199,7 @@ def _check_subspace_obligations(ctx: Ctx) -> None:
         if ctx.store.has_unsolved(resolved):
             raise InferError(
                 f"project: target subspace of {vector!r} was omitted and could not be "
-                f"inferred (no expected space flowed in); annotate it explicitly (B1)"
+                f"inferred (no expected space flowed in); annotate it explicitly"
             )
         parent = ctx.store.resolve(parent)
         if not is_subspace(resolved, parent):

@@ -515,7 +515,7 @@ def test_propagated_literal_frames_drops_the_qr_radical() -> None:
     fk = {f"J_{J.node.uid}": Jv, f"v_{v.node.uid}": vv}
     c_off = np.asarray(p_off.run(fk)["result"], float).ravel()
     c_on = np.asarray(p_on.run(fk)["result"], float).ravel()
-    from chartlib.covariant import qr_sign_fix
+    qr_sign_fix = pytest.importorskip("chartlib.covariant").qr_sign_fix  # skip w/o chartlib
     Q, _ = qr_sign_fix(Jv.T)
     np.testing.assert_allclose(Q @ c_off, amb_off, atol=1e-9)   # orthonormal-coords reconstruction
     np.testing.assert_allclose(A @ c_on, amb_off, atol=1e-9)    # ImageBasis-coords reconstruction
