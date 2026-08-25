@@ -337,7 +337,7 @@ def represent(
     # pre-realize every free input var that carries a symbolic ``DimVar('n')``, so its
     # canonical runtime atom and its input array both exist before any node needs an ℝⁿ shape (e.g.
     # a standalone metric in an η-reduced derivative sizes ``np.eye(n)`` off that input). Only
-    # DimVar-carrying vars are touched, so a fully-static term lowers byte-identically.
+    # DimVar-carrying vars are touched, so a fully-static term passes through untouched.
     for v in _free_term_vars(term):
         try:
             vs = _synth(v)
@@ -405,7 +405,7 @@ def basis_cols_program(
 
     # (mirrors `represent`): pre-realize every free input var of ``f`` that carries a
     # symbolic ``DimVar('n')``, so its canonical runtime atom + input array exist before the
-    # realization needs an ℝⁿ shape.  A fully-static basis map is untouched (byte-identical).
+    # realization needs an ℝⁿ shape.  A fully-static basis map passes through untouched.
     for v in _free_term_vars(f):
         try:
             vs = _synth(v)
@@ -1091,7 +1091,7 @@ def _rep_var(e: T.Var, ctx: _Ctx, target: B.TargetBasis | B.Basis = B.AUTO) -> R
         # bulk one), and its runtime-bound subspace axis is guarded by a static-dim AssertOp
         # (input dims are asserted to be these static ones) — the replacement for the
         # dynamic rank-consistency assert.  A type-static FFS dim (the injective ``QrOp``
-        # image, ``dim Img = |dom|``) keeps the plain static path below, byte-identical.
+        # image, ``dim Img = |dom|``) takes the plain static path below.
         if is_ffs(space) and not _ffs_dim_is_type_static(space):
             arr = _make_static_ffs_input(ctx, e, space, shape)
         else:
@@ -1514,8 +1514,8 @@ def _rep_oplus(
     else:
         # `_ConcatOp` flattens every summand and produces Σ|sᵢ| = _shape_of_space(⊕) directly, so
         # declare the length as a fresh runtime atom sourced from this concat and let _bind_output
-        # size it from the realized array.  Reading one summand axis (the old path) both crashed on
-        # a 0-d Scalar (no axis 0) and undercounted a multi-axis ⊗-typed summand (n for ℝⁿ⊗ℝⁿ, not
+        # size it from the realized array.  A single summand axis is not a reliable length: a 0-d
+        # Scalar has no axis 0, and a multi-axis ⊗-typed summand undercounts (n for ℝⁿ⊗ℝⁿ, not
         # n²); self-sizing from the produced concat is right for every summand shape.
         _sum = pa.DimAtom(name="oplus-len", source=("stmt", len(ctx.prog.statements), 0))
     [out] = ctx.prog.emit_stmt(
@@ -1586,8 +1586,9 @@ def _rep_oprod(
         # (``⊗(sᵢ) → (|s₀|, …)``), so an ``OProdV`` and a bare ``Var`` of the same space realize
         # to the same shape.  A factor that itself realizes multi-axis — a nested tensor, most
         # easily produced by a unit ``Scalar`` factor (``R3⊗𝟙``) — is fused to its flattened dim;
-        # a 0-axis ``Scalar`` factor still owns a unit axis.  (Without this, a ``V⊗𝟙`` factor kept
-        # its inner unit axis and the value lowered to a higher rank than its space's shape.)
+        # a 0-axis ``Scalar`` factor still owns a unit axis.  Fusing to the flattened dim keeps the
+        # value's rank equal to its space's shape; a ``V⊗𝟙`` factor otherwise carries its inner
+        # unit axis and lowers to a higher rank than its space's shape.
         factor_axes = ashape[:n_space]
         if n_space == 0:
             if isinstance(_synth(v), S.Scalar):
@@ -6944,7 +6945,7 @@ def _realize_image_basis(
     """
     dom, cod = map_domain_codomain(f)
     f_rep = _rep(f, ctx)  # operator matrix, stored (|dom|,|cod|)
-    # Honesty (seam fix): the columns below are formed as f_cd·S with S in the
+    # Honesty: the columns below are formed as f_cd·S with S in the
     # dom-standard basis, so f's matrix must be in the (dom,cod) default slot bases — an
     # AUTO-realized composite operand (e.g. `alt` over an FFS-built domain) may arrive in
     # a non-default basis and would silently mislabel every column.
@@ -7842,7 +7843,7 @@ def _realize_image_covariant(
     # `partial_eval_numeric` (which checks constancy, never correctness), passes every numeric
     # constancy check, and breaks `P(T)=I` for every r ≥ 2 lane.  r = 1
     # is immune because it has no proper-face weights, so `T` is trivial there.  Guarded by a
-    # downstream affine-invariance regression test.
+    # downstream affine-invariance test.
     [f_cd_fast] = ctx.prog.emit_stmt(
         pa.TransposeOp(), [f_rep.array],
         [pa.OutSpec("f_cod_dom", _transpose_shape(_shape_of(f_rep.array)))],
