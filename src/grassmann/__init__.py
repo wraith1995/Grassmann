@@ -95,6 +95,8 @@ from .embed import (
     scalar_basis,
     scale,
     sharp,
+    sharp_of,
+    flat_of,
     simplify,
     solve,
     space,
@@ -283,6 +285,8 @@ __all__ = [
     "inner",
     "flat",
     "sharp",
+    "sharp_of",
+    "flat_of",
     # movement / coercion / reshape
     "project",
     "embed",

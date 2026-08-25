@@ -535,6 +535,46 @@ def sharp(s: object) -> Expr:
     return wrap(_t.sharp(_space(s)))
 
 
+def _primal_space(s: object) -> object:
+    """Recover the primal space ``V`` of a covector space ``V*``; any other space has no primal."""
+    from typing import assert_never
+
+    n = _space(s)
+    match n:
+        case _s.Dual(inner):
+            return inner
+        case (_s.Scalar() | _s.SVar() | _s.OPlus() | _s.OProd() | _s.OPlusRep() | _s.Ker()
+              | _s.Img() | _s.CoKer() | _s.CoImg() | _s.WithInner() | _s.App() | _s.SpaceMeta()):
+            raise EmbedError(f"expected a covector space V*, got {n!r}")
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _space_of_value(x: object) -> object:
+    """Recover the space of a value: its own ``.space`` when it carries one, else synthesized."""
+    node = _node(x)
+    sp = getattr(node, "space", None)
+    if sp is not None and _s.is_space(sp):
+        return sp
+    from grassmann.infer import synth_space
+
+    return synth_space(node)
+
+
+def sharp_of(x: object) -> Expr:
+    """Raise the covector value ``x`` (in some ``V*``) to the vector in ``V`` its metric pairs it with.
+
+    The musical ♯ applied to a value: the space is read off ``x`` itself, never supplied by the
+    caller. On an ambient euclidean ``V`` (identity metric) the components are unchanged.
+    """
+    return sharp(_primal_space(_space_of_value(x)))(x)
+
+
+def flat_of(x: object) -> Expr:
+    """Lower the vector value ``x`` (in some ``V``) to the covector in ``V*`` its metric pairs it with."""
+    return flat(_space_of_value(x))(x)
+
+
 # ===========================================================================
 # Movement / coercion / reshape.
 # ===========================================================================
