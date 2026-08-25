@@ -1,0 +1,6 @@
+# grassmann audit allowlist — entries here are MAINTAINER-APPROVED exemptions.
+# Format:  RULE-ID  <glob over "repo/relative/path.py">   # reason
+# An agent may PROPOSE an entry in its report; only the maintainer adds it.
+#
+# Example:
+# EX-WILDCARD  grassmann/src/grassmann/syntax/unparse.py   # printer fallback reviewed 2026-07-03

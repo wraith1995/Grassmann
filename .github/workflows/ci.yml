@@ -7,6 +7,16 @@ on:
     branches: [main]
 
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Exhaustive-dispatch / lowering audit
+        run: python audit/run.py --min-severity ERROR   # pure-stdlib, no install needed
+
   test:
     runs-on: ubuntu-latest
     steps:

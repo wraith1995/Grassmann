@@ -2,10 +2,15 @@
 
 PYTHON ?= python
 
-.PHONY: test lint lint-docs
+.PHONY: test lint lint-docs audit
 
 test:
 	$(PYTHON) -m pytest tests -q
+
+# Exhaustive-dispatch / lowering audit: fails on any unapproved ERROR over the closed sum
+# types (Space/Term/Basis/Dim). Pure stdlib, no install needed. See audit/README.md.
+audit:
+	$(PYTHON) audit/run.py --min-severity ERROR
 
 # Docstring + annotation gate (config in pyproject.toml): ruff's D/ANN rules
 # under the numpy convention, then numpydoc's consistency checks. Both must be
