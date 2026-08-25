@@ -27,7 +27,9 @@ jobs:
       - name: Install
         run: pip install -e ".[test]"
       - name: Run tests
-        run: pytest -n auto -q -m "not network"   # skip live-service tests (matrixcalculus.org)
+        # Skip live-service tests; raise the per-test timeout for CI's slower cores — the strict
+        # 300s blow-up guard in pyproject stays the local default, overridden here for CI only.
+        run: pytest -n auto -q -m "not network" --timeout=900
 
   docs:
     runs-on: ubuntu-latest
