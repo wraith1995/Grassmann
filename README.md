@@ -1,5 +1,11 @@
 # Grassmann
 
+[![CI](https://github.com/wraith1995/Grassmann/actions/workflows/ci.yml/badge.svg)](https://github.com/wraith1995/Grassmann/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-github%20pages-blue)](https://wraith1995.github.io/Grassmann/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 A small, typed **programming language for coordinate-free linear and multilinear algebra** —
 a lambda-calculus over abstract Hilbert spaces — embedded in Python and compiled to array code.
 
