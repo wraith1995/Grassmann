@@ -48,7 +48,7 @@ from grassmann.core.kinds import SpaceSort as _SpaceSort
 from grassmann.infer import map_domain_codomain, synth_space
 from grassmann.infer.properties import map_props
 
-from ._dims import DynamicDim, _dim_int, basis_dim, dim_of
+from ._dims import DynamicDim, _dim_int, basis_dim, dim_of, suppress_immersion_fill
 from .choose import choose
 from .provenance import LowerProv
 from .space_basis import (
@@ -938,9 +938,15 @@ def _ffs_dim_is_type_static(space: S.Space) -> bool:
     ``False`` when ``dim_of`` raises (a generic ``Img``/``Ker`` whose rank is not derivable
     from the type): such a space is static ONLY because its frame operator folded to a
     build-time constant, and takes the static-rank-with-static-dim-assert path.
+
+    The immersion dim-fill is SUPPRESSED here on purpose: this predicate must observe the
+    TYPE-ONLY staticness (an injective immersion whose rank is filled by assertion is NOT
+    type-static — it keeps the folded-constant / runtime-rank classification), so the fill
+    never perturbs the path selection.
     """
     try:
-        _static_dim(space)
+        with suppress_immersion_fill():
+            _static_dim(space)
         return True
     except RepresentError:
         return False

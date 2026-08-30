@@ -14,14 +14,128 @@ inference); it suffices for the substrate's static numeric tests and for sizing 
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import os
+from collections.abc import Iterator
 from typing import assert_never
 
 from grassmann.core import basis as B
 from grassmann.core import space as S
+from grassmann.core import term as T
 
 
 class DynamicDim(Exception):
     """Raised when a space/basis dimension is not a static ``int`` (a runtime ``δ_f``)."""
+
+
+# When set, the immersion dim-fill is SUPPRESSED even under the env gate — used by callers that
+# must observe the PRE-immersion (type-only) staticness of a dim (e.g. the represent path-selection
+# ``_ffs_dim_is_type_static``, which keys on whether the dim is derivable from the TYPE alone, and
+# must be unchanged by the immersion assertion).
+_IMMERSION_FILL_SUPPRESSED: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "grassmann_immersion_fill_suppressed", default=False
+)
+
+
+@contextlib.contextmanager
+def suppress_immersion_fill() -> Iterator[None]:
+    """Within this scope, ``dim_of`` ignores the immersion fill (reports the type-only dim)."""
+    tok = _IMMERSION_FILL_SUPPRESSED.set(True)
+    try:
+        yield
+    finally:
+        _IMMERSION_FILL_SUPPRESSED.reset(tok)
+
+
+def _immersion_dim_enabled() -> bool:
+    """Report whether the sound immersion FFS dim-fill is active (``GRASSMANN_FFS_IMMERSION_DIM``).
+
+    Default OFF — this module is byte-identical when the flag is unset.  When ON (and not locally
+    suppressed), an ``Img(f)``/``CoImg(f)`` whose defining map ``f`` is SOUNDLY injective (full
+    COLUMN rank, established structurally by :func:`_map_is_injective_sound`) is sized
+    ``|Img f| = rank(f) = |dom f|`` instead of taking the runtime-rank path.  Injectivity is
+    NEVER assumed for a composite merely because it mentions an injective sub-map (a ``Dual`` /
+    rank-reducing ``LLam`` drops rank); the predicate is conservative and bails otherwise.
+    """
+    return (
+        os.environ.get("GRASSMANN_FFS_IMMERSION_DIM") in ("1", "true", "True")
+        and not _IMMERSION_FILL_SUPPRESSED.get()
+    )
+
+
+def _map_is_injective_sound(f: T.Term, _depth: int = 0) -> bool:
+    """Report whether the map term ``f`` is SOUNDLY injective (full column rank).
+
+    Conservative by construction: returns ``True`` ONLY for constructors that provably PRESERVE
+    or ESTABLISH injectivity, else ``False``.  A wrong ``False`` merely forgoes a static-dim
+    optimization (the caller bails to the runtime-rank path); a wrong ``True`` would corrupt a
+    realized frame, so the bias is hard toward ``False``.
+
+    Sound rules:
+      * ``Var`` — injective iff it carries the asserted ``inj`` prop (props live on vars only).
+      * ``Scale(c, g)`` — nonzero scaling is a bijection ⇒ ``inj(g)``.
+      * ``Lift``/``InvLift`` — a pure index reshape (curry/uncurry) is bijective ⇒ ``inj(vector)``.
+      * ``Permute``/``TuplePermute`` — a factor/component reorder is bijective ⇒ ``inj(vector)``.
+      * ``LLam([x]. body)`` — injective when the map is the IDENTITY, i.e. ``body`` is the bound
+        var up to single-factor tensor/sum wrappers (each an iso); see :func:`_body_is_bound_var_iso`.
+      * ``Corestrict`` — ``f~ : dom(f) ⊸ Img(f)`` is injective by construction (1st iso thm).
+    Everything else is NOT known injective and bails.  Crucially this does NOT propagate ``inj``
+    from an inner map var through an ``LLam``/``Dual`` (the FEEC rank-deficient case).
+    """
+    if _depth > 64:
+        return False
+    match f:
+        case T.Var(_name, _space, props, _uid):
+            return props is not None and props.inj
+        case T.Scale(scalar, vector):
+            return isinstance(scalar, (int, float)) and scalar != 0 and _map_is_injective_sound(vector, _depth + 1)
+        case T.Lift(vector, _fused, _k) | T.InvLift(vector, _fused, _k):
+            return _map_is_injective_sound(vector, _depth + 1)
+        case T.Permute(vector, _perm) | T.TuplePermute(vector, _perm):
+            return _map_is_injective_sound(vector, _depth + 1)
+        case T.LLam(vs, body):
+            return len(vs) == 1 and _body_is_bound_var_iso(body, vs[0].uid)
+        case T.Corestrict(_f):
+            return True
+        case (T.External() | T.Zero() | T.Identity() | T.Lit() | T.Sum() | T.OPlusV()
+              | T.OProdV() | T.Eval() | T.NEval() | T.Compose() | T.Trace() | T.Det()
+              | T.LogDet() | T.OpaqueApply() | T.Solve() | T.Pinv() | T.Sqrt()
+              | T.SolveApply() | T.PinvApply() | T.Dagger() | T.Inner() | T.Flat()
+              | T.Sharp() | T.Project() | T.Embed() | T.Assert() | T.TupleEmbed()
+              | T.TupleProject() | T.Remetric() | T.Kron() | T.Lam() | T.Frame()):
+            return False
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _body_is_bound_var_iso(t: T.Term, uid: int, _depth: int = 0) -> bool:
+    """Report whether term ``t`` denotes the bound var ``uid`` up to single-factor iso wrappers.
+
+    An ``LLam([x]. t)`` is the identity map (hence bijective) exactly when ``t`` is ``x`` itself,
+    possibly wrapped in constructors that are isomorphisms on a single operand: ``Scale(1, ·)``,
+    a one-summand ``Sum``, or a one-factor ``OProdV``/``OPlusV`` (tensor/direct-sum of a single
+    component).  Anything else is not the identity and bails to ``False``.
+    """
+    if _depth > 64:
+        return False
+    match t:
+        case T.Var(_name, _space, _props, vuid):
+            return vuid == uid
+        case T.Scale(scalar, vector):
+            return scalar == 1 and _body_is_bound_var_iso(vector, uid, _depth + 1)
+        case T.Sum(vectors) | T.OProdV(vectors) | T.OPlusV(vectors):
+            return len(vectors) == 1 and _body_is_bound_var_iso(vectors[0], uid, _depth + 1)
+        case (T.External() | T.Zero() | T.Identity() | T.Lit() | T.Eval() | T.NEval()
+              | T.Compose() | T.Trace() | T.Det() | T.LogDet() | T.OpaqueApply()
+              | T.Solve() | T.Pinv() | T.Corestrict() | T.Sqrt() | T.SolveApply()
+              | T.PinvApply() | T.Dagger() | T.Inner() | T.Flat() | T.Sharp()
+              | T.Project() | T.Embed() | T.Assert() | T.TupleEmbed() | T.TupleProject()
+              | T.Remetric() | T.Lift() | T.InvLift() | T.Permute() | T.TuplePermute()
+              | T.Kron() | T.LLam() | T.Lam() | T.Frame()):
+            return False
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def dim_of(space: S.Space) -> int:
@@ -64,16 +178,34 @@ def _ffs_dim(space: S.Img | S.Ker | S.CoImg | S.CoKer) -> int:
     ``surj`` (``rank = |cod|``), or ``bij`` (``rank = |dom| = |cod|``).
     """
     dom, cod = _ffs_endpoints(space)
-    rank = _static_rank(space, dom, cod)
     match space:
         case S.Img() | S.CoImg():
-            return rank
+            # |Img| = |CoImg| = rank.  When ``f`` is a SOUNDLY-injective map (full column rank)
+            # its rank = |dom|; the gated fill supplies that where ``_static_rank`` has no
+            # asserted rank, else bails to the runtime-rank path (the general lowering).
+            return _rank_or_immersion(space, dom, cod)
         case S.Ker():
-            return dim_of(dom) - rank
+            return dim_of(dom) - _static_rank(space, dom, cod)
         case S.CoKer():
-            return dim_of(cod) - rank
+            return dim_of(cod) - _static_rank(space, dom, cod)
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def _rank_or_immersion(space: S.Img | S.CoImg, dom: S.Space, cod: S.Space) -> int:
+    """Rank of an ``Img``/``CoImg`` map: its asserted static rank, else the SOUND immersion fill.
+
+    ``rank(f) = |dom f|`` holds exactly when ``f`` is injective (full COLUMN rank).  When
+    ``_static_rank`` pins no static rank AND ``f`` is soundly injective (:func:`_map_is_injective_sound`)
+    the gate fills ``rank = |dom|``; otherwise it re-raises so the caller keeps the runtime-rank
+    (SVD) path.  Never assumes injectivity for a composite that merely mentions an injective sub-map.
+    """
+    try:
+        return _static_rank(space, dom, cod)
+    except DynamicDim:
+        if _immersion_dim_enabled() and _map_is_injective_sound(space.f):
+            return dim_of(dom)
+        raise
 
 
 def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
@@ -94,6 +226,19 @@ def _ffs_endpoints(space: S.Space) -> tuple[S.Space, S.Space]:
         dom = src if src is not None else split[0]
         cod = tgt if tgt is not None else split[1]
         return dom, cod
+    # A composite geometry map (``Scale∘Lift∘LLam``) caches no static ``.space`` for
+    # ``split_map_space`` to read; under the immersion gate, and only for a soundly-injective
+    # ``f``, recover its endpoints by synthesizing the map space (the general decoder).
+    if _immersion_dim_enabled() and f is not None and _map_is_injective_sound(f):
+        from grassmann.infer.synth import map_domain_codomain
+        dom_c: S.Space | None = None
+        cod_c: S.Space | None = None
+        try:
+            dom_c, cod_c = map_domain_codomain(f)
+        except Exception:  # noqa: BLE001 — undecodable f ⇒ keep the runtime-dim contract (raise below)
+            dom_c = cod_c = None
+        if dom_c is not None and cod_c is not None:
+            return (src if src is not None else dom_c, tgt if tgt is not None else cod_c)
     raise DynamicDim(f"FFS space {space!r} has no resolvable source/target")
 
 
