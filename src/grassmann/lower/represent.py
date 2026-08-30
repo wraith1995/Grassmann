@@ -239,6 +239,7 @@ def represent(
     basis_env: dict[int, B.Basis] | None = None,
     target: B.TargetBasis | B.Basis = B.AUTO,
     supplied_frames: dict[tuple[str, int], tuple[str, int, int]] | None = None,
+    supplied_cob: dict[int, tuple[str, int, int]] | None = None,
     literal_frames: bool = False,
 ) -> pa.Program:
     """Lower a typed core ``term`` to a :class:`polyarray.Program`.
@@ -268,6 +269,11 @@ def represent(
     re-factorization to an input reference).  ``None`` (the default) ⇒ no supplied frames ⇒
     byte-identical to the historical lowering.
 
+    ``supplied_cob`` (optional) is the cob twin of ``supplied_frames``: ``id(f) -> (input_name,
+    n_rows, n_cols)`` for a map ``f`` whose dual change-of-basis ``R⁻ᵀ`` (of ``J = Q·R``) the caller
+    already computed.  For a keyed ``id(f)``, ``_dual_pair_cob`` realizes that cob as a DECLARED
+    Program INPUT instead of emitting ``InvTransposeOp``.  ``None`` ⇒ byte-identical.
+
     ``literal_frames`` (optional) PROPAGATES the exact/rational FFS-frame lane for the whole
     lowering — the argument form of the :func:`literal_ffs_frames` context (and the
     ``GRASSMANN_FFS_FRAME=literal`` env escape hatch it subsumes).  When ``True``: (i) an
@@ -286,10 +292,10 @@ def represent(
     if literal_frames:
         with literal_ffs_frames(True):
             return represent(term, basis_env=basis_env, target=target,
-                             supplied_frames=supplied_frames)
+                             supplied_frames=supplied_frames, supplied_cob=supplied_cob)
     prog = pa.Program("represent", budget=_lowering_budget())
     ctx = _Ctx(prog=prog, basis_env=basis_env or {}, inputs={},
-               supplied_frames=supplied_frames or {})
+               supplied_frames=supplied_frames or {}, supplied_cob=supplied_cob or {})
 
     # pre-REALIZE every free input var that carries a symbolic ``DimVar('n')``, so its
     # canonical runtime atom AND its input array both exist before any node needs an ℝⁿ shape (e.g.
@@ -550,6 +556,18 @@ class _Ctx:
     # (like ``basis_env``), keyed on the SAME ``(which, id(f))`` normalization the memo uses
     # (``"image"`` → ``"img"``).  Empty by default ⇒ the lowering is byte-identical.
     supplied_frames: dict[tuple[str, int], tuple[str, int, int]] = field(default_factory=dict)
+    # A caller-supplied DUAL-COB table: ``id(f) -> (input_name, n_rows, n_cols)`` for a map ``f``
+    # whose dual change-of-basis ``(cob ImageBasis(f)→ProjectedBasis(f))⁻ᵀ`` — the ``R⁻ᵀ`` of the
+    # sign-fixed QR ``J = Q·R`` — the caller has already computed.  When ``id(f)`` is present,
+    # ``_dual_pair_cob`` realizes that cob as a DECLARED Program INPUT named ``input_name`` instead
+    # of emitting ``_basis_cob_rec`` + ``InvTransposeOp`` — the cob twin of ``supplied_frames`` (same
+    # "geometry becomes a kernel argument" design).  A plate element's ``Σ`` is compiled per
+    # DOF-species into separate ``represent`` calls, each re-deriving the SAME ``R⁻ᵀ`` from the same
+    # cell Jacobian; supplying it collapses those to one shared input (savo grafts same-named inputs).
+    # Read-only, shared by reference across sub-``_Ctx`` (like ``supplied_frames``/``basis_env``);
+    # empty by default ⇒ byte-identical.  Keyed on ``id(f)`` — valid WITHIN one call (to match a
+    # producer offer to its realization); cross-call sharing rides the stable ``input_name``.
+    supplied_cob: dict[int, tuple[str, int, int]] = field(default_factory=dict)
     # Canonical per-``(which, id(f))`` subspace-dimension ``DimAtom``.
     # The dynamic FFS dimension of a map ``f`` is metric-INDEPENDENT (the rank, or its
     # complement for ker/coker), so the metric-free SVD and the metric GSVD of one
@@ -2098,10 +2116,23 @@ def _dual_pair_cob(ctx: _Ctx, inner_from: B.Basis, inner_to: B.Basis) -> pa.SymA
     When BOTH inner bases are standard-orthonormal the inner cob is orthogonal (``Q_toᵀ·Q_from``), so its
     inverse-transpose IS itself — return it directly, skipping the ``InvOp``+transpose.
     """
-    m = _basis_cob_rec(ctx, inner_from, inner_to)
     if _is_standard_orthonormal(inner_from) and _is_standard_orthonormal(inner_to):
-        return m
-    return _inv_transpose(ctx.prog, m)
+        # both orthonormal ⇒ the inner cob is itself orthogonal ⇒ its inverse-transpose IS itself;
+        # a supplied ``R⁻ᵀ`` would be WRONG here (there is no ``R`` to invert), so never supply on
+        # this arm — take it exactly as before.
+        return _basis_cob_rec(ctx, inner_from, inner_to)
+    # non-orthonormal ⇒ the cob is ``R⁻ᵀ`` of ``J = Q·R`` (emitted below as cob + ``InvTransposeOp``).
+    # SUPPLIED-COB short-circuit: if the caller pre-computed that ``R⁻ᵀ`` for this map ``f``, declare
+    # it as a Program input instead of re-deriving it (the cob twin of the ``supplied_frames`` frame
+    # short-circuit).  Metric-free by construction on this arm — a metricized covector basis routes
+    # to ``_cob_via_standard`` and never reaches here — matching the frame supply's metric-free guard.
+    if ctx.supplied_cob:
+        f = _dual_pair_supplied_map(inner_from, inner_to)
+        if f is not None and id(f) in ctx.supplied_cob:
+            cols = _declare_supplied_cob(ctx, ctx.supplied_cob[id(f)][0])
+            if cols is not None:
+                return cols
+    return _inv_transpose(ctx.prog, _basis_cob_rec(ctx, inner_from, inner_to))
 
 
 def _cob_from_primal(ctx: _Ctx, frm: B.Basis, to: B.Basis) -> pa.SymArray:
@@ -3258,7 +3289,7 @@ def _build_lam_subprogram(
     input_uids = {v.uid for v in sub_inputs}
     sub_env = {k: val for k, val in parent.basis_env.items() if k not in input_uids}
     sub_ctx = _Ctx(prog=sub, basis_env=sub_env, inputs={},
-                   supplied_frames=parent.supplied_frames)
+                   supplied_frames=parent.supplied_frames, supplied_cob=parent.supplied_cob)
     # Force each sub-input to be allocated as a sub-Program input, in the declared order
     # (so the parent's operand list lines up positionally with sub.inputs).
     in_bases = [_rep_var(v, sub_ctx).basis for v in sub_inputs]
@@ -5063,7 +5094,7 @@ def _rep_llam_vmap(
     # 1. Build the body sub-Program (mirror ``_build_lam_subprogram``'s structure).
     sub = pa.Program("llam_body", budget=_lowering_budget())
     sub_ctx = _Ctx(prog=sub, basis_env=ctx.basis_env, inputs={},
-                   supplied_frames=ctx.supplied_frames)
+                   supplied_frames=ctx.supplied_frames, supplied_cob=ctx.supplied_cob)
     # 2. Inputs IN ORDER: the bound vars FIRST (each a rank-1 input in its binding basis), then the
     #    body's free vars.  Lowering the body may ALSO pull in extra inputs (e.g. the abstract
     #    vectors of a pinned ``ListBasis`` frame), which appear AFTER in ``sub.inputs`` order.
@@ -7647,6 +7678,38 @@ def _declare_supplied_frame(ctx: _Ctx, name: str) -> pa.SymArray | None:
     for supplied_name, nrow, ncol in ctx.supplied_frames.values():
         if supplied_name == name:
             return _make_input(ctx, name, (nrow, ncol), note=f"ffs-supplied:{name}")
+    return None
+
+
+def _dual_pair_supplied_map(inner_from: B.Basis, inner_to: B.Basis) -> T.Term | None:
+    """The shared map ``f`` of a dual-pair cob eligible for the supplied-cob short-circuit.
+
+    A dual cob is a candidate ONLY for the exact ``ImageBasis(f)`` (raw, from-side) →
+    ``ProjectedBasis(f)`` (orthonormal, to-side) pairing of ONE map ``f`` — the ``J = Q·R`` pair
+    whose cob is ``R``, so ``_dual_pair_cob`` emits ``R⁻ᵀ``.  Any other pairing (both raw, both
+    orthonormal, different maps) has a different cob the supplied ``R⁻ᵀ`` would not equal, so return
+    ``None`` and let the standard path run — the "specialization is optimization; the bail is always
+    correct" invariant.
+    """
+    if not isinstance(inner_from, B.ImageBasis) or not isinstance(inner_to, B.ProjectedBasis):
+        return None
+    f = inner_from.f
+    return f if inner_to.f is f else None
+
+
+def _declare_supplied_cob(ctx: _Ctx, name: str) -> pa.SymArray | None:
+    """Declare a caller-SUPPLIED dual cob (``supplied_cob``) as an input of ``ctx``'s program.
+
+    The cob twin of :func:`_declare_supplied_frame` — idempotent, and any lowering level may declare
+    the same named input (the by-name fallback free vars use).  ``None`` when ``name`` is not one of
+    the supplied cobs.
+    """
+    existing = ctx.prog.input_arrays.get(name)
+    if existing is not None:
+        return existing
+    for supplied_name, nrow, ncol in ctx.supplied_cob.values():
+        if supplied_name == name:
+            return _make_input(ctx, name, (nrow, ncol), note=f"cob-supplied:{name}")
     return None
 
 
