@@ -1,0 +1,82 @@
+% Code listings for the operator micro-benchmark (tab:operator-benchmarks).
+% Generated from benchmarks/paper_bench.py (grassmann 3b81164, polyarray e231fa4).
+% Shorthand: sqrt/stack/combinations = math.sqrt / torch.stack / itertools.combinations.
+
+\begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize,
+  caption={Reference implementations. Inputs carry a leading batch axis; each form
+  includes \GLang{}'s normalization constant.}, label={lst:bench-refs}]
+def dot(x, y):
+    return (x * y).sum(-1)
+
+def minors(a, b, pairs):        # a_i b_j - a_j b_i for each (i, j)
+    i, j = (list(t) for t in zip(*pairs))
+    return a[..., i] * b[..., j] - a[..., j] * b[..., i]
+
+def triples(a, b, c, rows):     # det[a,b,c] on coordinates (i,j,k)
+    return stack([dot(a[..., [i, j, k]],
+                      minors(b, c, [(j, k), (k, i), (i, j)]))
+                  for i, j, k in rows], -1)
+
+CROSS = [(1, 2), (2, 0), (0, 1)]
+PAIRS = lambda n: list(combinations(range(n), 2))
+
+wedge_R2   = lambda a, b: sqrt(2) * minors(a, b, [(0, 1)])
+star1_R2   = lambda x: stack([-x[..., 1], x[..., 0]], -1) / sqrt(2)
+wedge_R3   = lambda a, b: sqrt(2) * minors(a, b, [(0, 1), (0, 2), (1, 2)])
+star1_R3   = lambda x: stack([x[..., 2], -x[..., 1], x[..., 0]], -1) / sqrt(3)
+star_ab_R3 = lambda a, b: sqrt(2/3) * minors(a, b, CROSS)
+triple_R3  = lambda a, b, c: sqrt(6) * dot(a, minors(b, c, CROSS))
+wedge_R4   = lambda a, b: sqrt(2) * minors(a, b, PAIRS(4))
+star1_R4   = lambda x: stack([-x[..., 3], x[..., 2],
+                              -x[..., 1], x[..., 0]], -1) / 2
+star_ab_R4 = lambda a, b: minors(a, b, [(2, 3), (3, 1), (1, 2),
+                                        (0, 3), (2, 0), (0, 1)]) / sqrt(3)
+triple_R4  = lambda a, b, c: sqrt(3/2) * triples(a, b, c,
+                 [(2, 1, 3), (0, 2, 3), (1, 0, 3), (0, 1, 2)])
+
+# <a^b, c^d>: pairing of Lambda^2 coordinates, and the Lagrange identity
+gram_coords = lambda a, b, c, d: 2 * dot(minors(a, b, PAIRS(a.shape[-1])),
+                                         minors(c, d, PAIRS(a.shape[-1])))
+gram        = lambda a, b, c, d: 2 * (dot(a, c) * dot(b, d)
+                                      - dot(a, d) * dot(b, c))
+\end{lstlisting}
+
+\begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize,
+  caption={The inner product of two bivectors written two ways in \GLang{}: by pairing
+  $\Lambda^2$ coordinates, and by Cauchy--Binet,
+  $\langle u_1 \wedge \dots \wedge u_k, v_1 \wedge \dots \wedge v_k\rangle
+   = k!\,\det[\langle u_i, v_j\rangle]$.}, label={lst:bench-cauchy-binet}]
+V = G.space("R3", 3)
+a, b, c, d = (G.var(s, V) for s in "abcd")
+
+# Lambda^2 coordinates
+coords = G.inner(exterior_power(V, 2)).at([0, 1])(wedge(a, b, 1, 1),
+                                                  wedge(c, d, 1, 1))
+
+# Cauchy-Binet: k! det of the Gram matrix of inner products on V
+def inner_of_wedges(V, us, vs):
+    pair = G.inner(V).at([0, 1])
+    gram = [[pair(u, v) for v in vs] for u in us]
+    det = sum(sign(p) * prod(gram[i][p[i]] for i in range(len(us)))
+              for p in perms(len(us)))
+    return factorial(len(us)) * det
+
+cb = inner_of_wedges(V, [a, b], [c, d])
+\end{lstlisting}
+
+\begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize,
+  caption={\GLang{}-generated code. Top: $\star(a \wedge b)$ in $\mathbb{R}^3$, the cross
+  product, emitted over index arrays. Bottom: the Cauchy--Binet form of
+  $\langle a \wedge b, c \wedge d\rangle$ in $\mathbb{R}^3$; the four inner products are
+  kept as intermediate values rather than multiplied out.}, label={lst:bench-gen}]
+def f(a, b):
+    return 0.816496581*(a[..., [1, 2, 0]] * b[..., [2, 0, 1]]
+                        - a[..., [2, 0, 1]] * b[..., [1, 2, 0]])
+
+def f(b, d, a, c):
+    s0 = b[..., 0]*d[..., 0] + b[..., 1]*d[..., 1] + b[..., 2]*d[..., 2]
+    s1 = a[..., 0]*c[..., 0] + a[..., 1]*c[..., 1] + a[..., 2]*c[..., 2]
+    s2 = b[..., 0]*c[..., 0] + b[..., 1]*c[..., 1] + b[..., 2]*c[..., 2]
+    s3 = d[..., 0]*a[..., 0] + d[..., 1]*a[..., 1] + d[..., 2]*a[..., 2]
+    return 2*(s0*s1 - s2*s3)
+\end{lstlisting}
