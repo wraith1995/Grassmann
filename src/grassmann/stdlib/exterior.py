@@ -27,7 +27,7 @@ import math
 import grassmann.embed as G
 from grassmann.embed.ops import Expr
 
-__all__ = ["alt", "exterior_power", "tensor_power", "wedge", "hodge_star", "perms", "sign"]
+__all__ = ["alt", "exterior_power", "hodge_star", "inner_of_wedges", "perms", "sign", "tensor_power", "wedge"]
 
 
 # ===========================================================================
