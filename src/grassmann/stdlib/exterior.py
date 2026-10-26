@@ -272,6 +272,32 @@ def wedge(a: Expr, b: Expr, k: int, l: int) -> Expr:  # noqa: E741 - l matches t
     return result.with_note(base_space=V, exterior_k=k + l)
 
 
+def inner_of_wedges(V: Expr, us: list[Expr], vs: list[Expr]) -> Expr:
+    """Pair two decomposable k-vectors, ``⟨u₁∧…∧u_k, v₁∧…∧v_k⟩``, by Cauchy–Binet, ``k!·det[⟨uᵢ, vⱼ⟩]``.
+
+    :func:`wedge` of vectors iterates to ``u₁∧…∧u_k = Σ_σ sgn(σ)·u_σ(1)⊗…⊗u_σ(k)`` (each step
+    scales ``Alt`` by ``C(k+l, k)``), and ``Λᵏ(V)`` carries the inner product inherited from
+    ``V⊗ᵏ``, under which ``⟨⊗uᵢ, ⊗vᵢ⟩ = Πᵢ⟨uᵢ, vᵢ⟩``.  Hence
+    ``⟨∧u, ∧v⟩ = Σ_{σ,τ} sgn(σ)sgn(τ) Πᵢ⟨u_σ(i), v_τ(i)⟩ = k!·det[⟨uᵢ, vⱼ⟩]``: the same value
+    as pairing the wedges in Λᵏ coordinates, computed from k² inner products on ``V`` instead of
+    C(n, k)-dimensional coordinates.  The determinant is the Leibniz sum over ``Sₖ``.
+    """
+    k = len(us)
+    if k < 1 or len(vs) != k:
+        raise ValueError(f"inner_of_wedges: need k ≥ 1 vectors on each side, got {len(us)} and {len(vs)}")
+    pair = G.inner(V).at([0, 1])
+    gram = [[pair(u, v) for v in vs] for u in us]
+    det: Expr | None = None
+    for p in perms(k):
+        term = gram[0][p[0]]
+        for i in range(1, k):
+            term = term * gram[i][p[i]]
+        term = term if sign(p) > 0 else -1 * term
+        det = term if det is None else det + term
+    assert det is not None
+    return math.factorial(k) * det
+
+
 def interior(omega: Expr, v: Expr, k: int) -> Expr:  # noqa: E741
     """Contract the ``k``-form ``ω`` with the vector ``v`` in its first slot — the interior product.
 

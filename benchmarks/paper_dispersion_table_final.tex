@@ -1,0 +1,31 @@
+  \begin{table}[t]
+    \centering
+    \caption{Runtime dispersion for \cref{tab:operator-benchmarks}: mean $\pm$ standard
+      deviation of ns per cell over all 180 timed runs (6 fresh processes $\times$ 30 runs of
+      100 calls each), batch of $2^{16}$ cells, single-threaded, CPU Inductor.}
+    \label{tab:operator-dispersion}
+    \scriptsize
+    \setlength{\tabcolsep}{3.5pt}
+    \renewcommand{\arraystretch}{1.12}
+    \setlength{\arrayrulewidth}{0.4pt}
+    \begin{tabular}{|l|l|r|r|}
+      \hline
+      Operator & Space & \multicolumn{2}{c|}{Time (ns), mean $\pm$ sd} \\
+      & & Gen. & Ref. \\
+      \hline
+      $a \wedge b$ & $\mathbb{R}^{2}$ & $0.87 \pm 0.04$ & $0.86 \pm 0.03$ \\ \hline
+      $\star|_{\Lambda^{1}}$ & $\mathbb{R}^{2}$ & $0.72 \pm 0.05$ & $1.69 \pm 0.04$ \\ \hline
+      $a \wedge b$ & $\mathbb{R}^{3}$ & $1.35 \pm 0.22$ & $1.39 \pm 0.26$ \\ \hline
+      $\star|_{\Lambda^{1}}$ & $\mathbb{R}^{3}$ & $0.94 \pm 0.10$ & $2.82 \pm 0.10$ \\ \hline
+      $\star(a \wedge b)$ & $\mathbb{R}^{3}$ & $1.57 \pm 0.06$ & $1.58 \pm 0.10$ \\ \hline
+      $\langle a \wedge b,c \wedge d\rangle$ & $\mathbb{R}^{3}$ & $2.16 \pm 0.06$ & $2.21 \pm 0.10$ \\ \hline
+      $\langle a \wedge b,c \wedge d\rangle$ (C--B) & $\mathbb{R}^{3}$ & $2.16 \pm 0.06$ & $2.19 \pm 0.09$ \\ \hline
+      $\star(a \wedge b \wedge c)$ & $\mathbb{R}^{3}$ & $1.63 \pm 0.10$ & $1.62 \pm 0.10$ \\ \hline
+      $a \wedge b$ & $\mathbb{R}^{4}$ & $2.66 \pm 0.11$ & $2.63 \pm 0.08$ \\ \hline
+      $\star|_{\Lambda^{1}}$ & $\mathbb{R}^{4}$ & $1.02 \pm 0.11$ & $4.85 \pm 0.24$ \\ \hline
+      $\star(a \wedge b)$ & $\mathbb{R}^{4}$ & $2.38 \pm 0.08$ & $2.46 \pm 0.07$ \\ \hline
+      $\langle a \wedge b,c \wedge d\rangle$ & $\mathbb{R}^{4}$ & $4.42 \pm 0.23$ & $4.40 \pm 0.17$ \\ \hline
+      $\langle a \wedge b,c \wedge d\rangle$ (C--B) & $\mathbb{R}^{4}$ & $3.57 \pm 0.21$ & $3.60 \pm 0.11$ \\ \hline
+      $\star(a \wedge b \wedge c)$ & $\mathbb{R}^{4}$ & $4.67 \pm 0.10$ & $5.58 \pm 0.21$ \\ \hline
+    \end{tabular}
+  \end{table}
